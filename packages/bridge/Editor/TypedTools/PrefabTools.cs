@@ -40,8 +40,17 @@ namespace UnityOpenMcpBridge.TypedTools
                 parentGo = TypedTargets.FindByPath(parentPath);
                 if (parentGo == null)
                     return ToolDispatchResult.Fail("parent_not_found",
-                        $"Parent GameObject not found at '{parentPath}'.");
+                        $"Parent GameObject not found at path '{parentPath}'.");
             }
+
+            // feedback-01-08-glm §6 — optional explicit target scene for the
+            // instance root. InstantiatePrefab lands in the active scene; route
+            // it into the requested scene when supplied (a parent_path in
+            // another scene already routes via SetParent, so this only matters
+            // for root instances).
+            var targetScene = SceneTargeting.ResolveTargetScene(body, out var sceneError);
+            if (sceneError != null)
+                return ToolDispatchResult.Fail("scene_not_found", sceneError);
 
             GameObject instance;
             try
@@ -57,7 +66,10 @@ namespace UnityOpenMcpBridge.TypedTools
             }
 
             if (!string.IsNullOrEmpty(name)) instance.name = name;
-            if (parentGo != null) instance.transform.SetParent(parentGo.transform, false);
+            if (parentGo != null)
+                instance.transform.SetParent(parentGo.transform, false);
+            else
+                SceneTargeting.MoveToSceneIfDifferent(instance, targetScene);
 
             var t = instance.transform;
             t.SetPositionAndRotation(position, Quaternion.Euler(rotation));

@@ -1,9 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using UnityOpenMcpBridge.ObjectRefs;
+using UnityOpenMcpBridge.TypedTools;
 using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEditor.SceneManagement;
 
 namespace UnityOpenMcpBridge.MetaTools
 {
@@ -92,7 +96,6 @@ namespace UnityOpenMcpBridge.MetaTools
 
             var args = JsonBody.ParseArgsArray(body, "args");
             var parameters = method.GetParameters();
-            var invokeArgs = ConvertArgs(args, parameters);
 
             object target = null;
             if (!isStatic)
@@ -125,6 +128,11 @@ namespace UnityOpenMcpBridge.MetaTools
 
             try
             {
+                // feedback-01-08-glm §2 — arg conversion now resolves Object/
+                // Scene/Vector selectors and throws precise messages on a miss.
+                // Keep it inside the try so those surface as invocation_error
+                // (not an uncaught dispatch crash).
+                var invokeArgs = ConvertArgs(args, parameters);
                 var result = method.Invoke(target, invokeArgs);
                 var output = OutputSerializer.Serialize(result, BuildSerializeOptions(body));
                 return ToolDispatchResult.Ok(output);
@@ -302,15 +310,54 @@ namespace UnityOpenMcpBridge.MetaTools
                 return null;
             }
 
-            // Object handle resolution: when the target type is or derives from
-            // UnityEngine.Object and the arg looks like a handle JSON, resolve it.
-            if (typeof(UnityEngine.Object).IsAssignableFrom(targetType)
-                && ObjectHandle.LooksLikeHandle(value))
+            // feedback-01-08-glm §2 — UnityEngine.Object parameters. Previously
+            // only handle JSON containing an "objectId" key was resolved (the
+            // ObjectHandle.LooksLikeHandle predicate); a bare integer id (parsed
+            // by ReadJsonValue as `long`) or a selector like {"path":...} /
+            // {"instance_id":N} fell through to `return value;` and
+            // method.Invoke rejected it ("Object of type 'System.Int64' cannot
+            // be converted to type 'UnityEngine.GameObject'"). ResolveJson
+            // already handles bare integers, {"objectId":N}, and the
+            // {"instance_id"/"object_id"/"path"/"name"/...} selector aliases,
+            // so route every Object-typed arg through it.
+            if (typeof(UnityEngine.Object).IsAssignableFrom(targetType))
             {
-                var resolved = ObjectHandle.ResolveJson(value.ToString(), out var error);
-                if (resolved != null)
-                    return resolved;
+                // Bare integer id (long from ReadJsonValue, or int/double) →
+                // resolve via the instance-id path directly.
+                if (value is long ll)
+                {
+                    var byId = InstanceId.ToObject(ll);
+                    if (byId != null) return byId;
+                    throw new ArgumentException(
+                        $"No live UnityEngine.Object found for instance id {ll}. Instance IDs change " +
+                        "on domain reload; re-acquire the object and retry.");
+                }
+                if (value is int ii)
+                {
+                    var byId = InstanceId.ToObject(ii);
+                    if (byId != null) return byId;
+                    throw new ArgumentException(
+                        $"No live UnityEngine.Object found for instance id {ii}. Instance IDs change " +
+                        "on domain reload; re-acquire the object and retry.");
+                }
+                // Any JSON-object string (handle with objectId, or a {"path":..}
+                // / {"name":..} / {"instance_id":N} selector) → resolve via the
+                // shared handle resolver that backs the instance target.
+                if (value is string sv && sv.TrimStart().StartsWith("{"))
+                {
+                    var resolved = ObjectHandle.ResolveJson(sv, out var error);
+                    if (resolved != null) return resolved;
+                    throw new ArgumentException(error ?? $"Could not resolve object handle: {sv}");
+                }
             }
+
+            // feedback-01-08-glm §2 — Scene struct parameter. Unity's
+            // SceneManager.SetActiveScene(Scene) / MoveGameObjectToScene(GO,
+            // Scene) take a Scene as a POSITIONAL arg, which method.Invoke
+            // cannot reconstruct from a JSON scalar. Accept a scene selector
+            // and resolve it against the loaded scenes.
+            if (targetType == typeof(Scene))
+                return ResolveSceneArg(value);
 
             if (targetType == typeof(string))
                 return value is string s ? s : value.ToString();
@@ -335,7 +382,131 @@ namespace UnityOpenMcpBridge.MetaTools
             if (targetType.IsEnum)
                 return Enum.Parse(targetType, value.ToString(), true);
 
+            // Vector / Color / Quaternion — mirror ReflectionScriptsObjectsTools
+            // so invoke_method can drive APIs taking these structs (e.g. physics
+            // helpers). Accept both [x,y,z] and {"x":..} forms via the shared
+            // MaterialTools.ParseFloatArray parser.
+            var vecColor = TryConvertVectorColor(value, targetType);
+            if (vecColor.success) return vecColor.value;
+
+            // Terminal fallback: IConvertible scalar conversion so a long/double
+            // arg reaches an IConvertible target without leaking through to the
+            // raw-value return (which method.Invoke would reject).
+            if (typeof(IConvertible).IsAssignableFrom(targetType))
+                return Convert.ChangeType(value, targetType, CultureInfo.InvariantCulture);
+
             return value;
+        }
+
+        /// <summary>
+        /// Resolve a <see cref="Scene"/> argument from a selector. Accepts a
+        /// scene path/name/object form: <c>{"path":"..."}</c>,
+        /// <c>{"scene_path":"..."}</c>, <c>{"scene_name":"..."}</c>,
+        /// <c>{"name":"..."}</c>, or a bare string path/name. Throws a clear
+        /// ArgumentException (surfaced as invocation_error) when the scene is
+        /// not loaded — exactly the static APIs (SetActiveScene /
+        /// MoveGameObjectToScene) the field report was blocked on.
+        /// </summary>
+        private static scene ResolveSceneArg(object value)
+        {
+            string path = null;
+            string name = null;
+            if (value is string raw)
+            {
+                var trimmed = raw.Trim();
+                if (trimmed.StartsWith("{"))
+                {
+                    path = JsonBody.GetString(trimmed, "path")
+                        ?? JsonBody.GetString(trimmed, "scene_path")
+                        ?? JsonBody.GetString(trimmed, "scenePath");
+                    name = JsonBody.GetString(trimmed, "scene_name")
+                        ?? JsonBody.GetString(trimmed, "sceneName")
+                        ?? JsonBody.GetString(trimmed, "name");
+                }
+                else
+                {
+                    // Bare string: treat as a path if it contains '/', else a name.
+                    if (trimmed.IndexOf('/') >= 0) path = trimmed;
+                    else name = trimmed;
+                }
+            }
+            else if (value is long || value is int || value is double)
+            {
+                // A numeric Scene arg has no meaningful mapping; surface a clear
+                // error rather than a default(Scene) silently.
+                throw new ArgumentException(
+                    $"Scene argument must be a scene path/name selector ({{\"path\":\"...\"}} or " +
+                    $"{{\"scene_name\":\"...\"}}); got a numeric value '{value}'.");
+            }
+
+            if (!string.IsNullOrEmpty(path))
+            {
+                var sceneByPath = EditorSceneManager.GetSceneByPath(path);
+                if (sceneByPath.IsValid() && sceneByPath.isLoaded)
+                    return sceneByPath;
+            }
+            if (!string.IsNullOrEmpty(name))
+            {
+                for (int i = 0; i < SceneManager.sceneCount; i++)
+                {
+                    var s = SceneManager.GetSceneAt(i);
+                    if (s.isLoaded && s.name == name)
+                        return s;
+                }
+            }
+
+            var described = !string.IsNullOrEmpty(path) ? $"path '{path}'"
+                : !string.IsNullOrEmpty(name) ? $"name '{name}'"
+                : "<empty>";
+            throw new ArgumentException(
+                $"Scene {described} is not loaded. Load it first via unity_open_mcp_scene_open " +
+                "(OpenSceneMode.Additive) so it can be passed as a Scene argument.");
+        }
+
+        private static (bool success, object value) TryConvertVectorColor(object value, Type targetType)
+        {
+            if (targetType != typeof(Vector2) && targetType != typeof(Vector3)
+                && targetType != typeof(Vector4) && targetType != typeof(Color)
+                && targetType != typeof(Quaternion))
+                return (false, null);
+
+            // ParseFloatArray accepts both "[x,y,z]" and "{x:..,y:..}" string
+            // forms. ReadJsonValue returns raw substrings for those, so a vector
+            // arg arrives here as a string; numbers/doubles are not vectors.
+            string raw = value as string;
+            if (raw == null && (value is long || value is double || value is bool))
+                return (false, null);
+            if (raw == null) raw = value.ToString();
+
+            var p = MaterialTools.ParseFloatArray(raw);
+            if (p == null)
+                throw new FormatException($"{targetType.Name} value must be [x,y(,z(,w))] or {{x:..}}; got '{raw}'.");
+
+            if (targetType == typeof(Vector2))
+            {
+                if (p.Length < 2) throw new FormatException("Vector2 value must be [x,y].");
+                return (true, new Vector2(p[0], p[1]));
+            }
+            if (targetType == typeof(Vector3))
+            {
+                if (p.Length < 3) throw new FormatException("Vector3 value must be [x,y,z].");
+                return (true, new Vector3(p[0], p[1], p[2]));
+            }
+            if (targetType == typeof(Vector4))
+            {
+                if (p.Length < 4) throw new FormatException("Vector4 value must be [x,y,z,w].");
+                return (true, new Vector4(p[0], p[1], p[2], p[3]));
+            }
+            if (targetType == typeof(Color))
+            {
+                if (p.Length < 3) throw new FormatException("Color value must be [r,g,b] or [r,g,b,a].");
+                float a = p.Length >= 4 ? p[3] : 1f;
+                return (true, new Color(p[0], p[1], p[2], a));
+            }
+            // Quaternion
+            if (p.Length >= 4) return (true, new Quaternion(p[0], p[1], p[2], p[3]));
+            if (p.Length >= 3) return (true, Quaternion.Euler(p[0], p[1], p[2]));
+            throw new FormatException("Quaternion value must be [x,y,z,w] or euler [x,y,z].");
         }
     }
 }

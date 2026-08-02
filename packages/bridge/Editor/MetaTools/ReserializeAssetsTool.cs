@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 
 namespace UnityOpenMcpBridge.MetaTools
 {
@@ -54,7 +55,64 @@ namespace UnityOpenMcpBridge.MetaTools
                     $"AssetDatabase.ForceReserializeAssets threw: {e.Message}");
             }
 
-            return ToolDispatchResult.Ok(BuildResult(normalized, includeMeta));
+            // feedback-01-08-glm §9 — when a reserialized path is a .unity that
+            // is currently OPEN in the Hierarchy, the on-disk YAML was just
+            // rewritten but the editor's in-memory hierarchy was NOT touched, so
+            // memory and disk now disagree. Mark those opened scenes dirty so
+            // the editor's dirty flag reflects the disk rewrite (and the agent's
+            // next editor_status / dirtyScenes read tells it a reload is needed),
+            // and report which opened scenes were touched.
+            var touchedOpenScenes = MarkOpenedScenesForReserializedUnity(normalized);
+
+            return ToolDispatchResult.Ok(BuildResult(normalized, includeMeta, touchedOpenScenes));
+        }
+
+        // For each reserialized .unity path that is currently open in the
+        // Hierarchy, mark the matching opened scene dirty (so the editor's
+        // memory-vs-disk flag reflects the disk rewrite). Returns the list of
+        // opened scene paths that were touched, for the response.
+        private static System.Collections.Generic.List<string> MarkOpenedScenesForReserializedUnity(
+            System.Collections.Generic.List<string> reserializedPaths)
+        {
+            var touched = new System.Collections.Generic.List<string>();
+            bool anyUnity = false;
+            foreach (var p in reserializedPaths)
+            {
+                if (p.EndsWith(".unity", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    anyUnity = true;
+                    break;
+                }
+            }
+            if (!anyUnity) return touched;
+
+            var scenes = UnityEngine.SceneManagement.SceneManager.sceneCount;
+            for (int i = 0; i < scenes; i++)
+            {
+                var s = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
+                if (!s.isLoaded) continue;
+                foreach (var p in reserializedPaths)
+                {
+                    if (!p.EndsWith(".unity", System.StringComparison.OrdinalIgnoreCase)) continue;
+                    if (ScenePathMatches(s.path, p))
+                    {
+                        EditorSceneManager.MarkSceneDirty(s);
+                        touched.Add(s.path);
+                        break;
+                    }
+                }
+            }
+            return touched;
+        }
+
+        // Compare a scene's runtime path (e.g. "Assets/Scenes/Main.unity") to a
+        // reserialized asset path, tolerating backslash + leading-slash diffs.
+        private static bool ScenePathMatches(string scenePath, string assetPath)
+        {
+            if (string.IsNullOrEmpty(scenePath) || string.IsNullOrEmpty(assetPath)) return false;
+            var a = scenePath.Replace('\\', '/').TrimStart('/');
+            var b = assetPath.Replace('\\', '/').TrimStart('/');
+            return string.Equals(a, b, System.StringComparison.OrdinalIgnoreCase);
         }
 
         // Maps the user-facing include_meta flag to Unity's ForceReserializeAssetsOptions.
@@ -199,7 +257,8 @@ namespace UnityOpenMcpBridge.MetaTools
             }
         }
 
-        private static string BuildResult(System.Collections.Generic.List<string> paths, bool includeMeta)
+        private static string BuildResult(System.Collections.Generic.List<string> paths, bool includeMeta,
+            System.Collections.Generic.List<string> touchedOpenScenes)
         {
             var sb = new StringBuilder(256 + paths.Count * 64);
             sb.Append("{\"reserialized\":[");
@@ -211,6 +270,20 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append("],\"totalCount\":").Append(paths.Count);
             sb.Append(",\"wholeProject\":false");
             sb.Append(",\"includeMeta\":").Append(includeMeta ? "true" : "false");
+            // feedback-01-08-glm §9 — which opened scenes had their disk YAML
+            // rewritten (and were therefore marked dirty) so the agent knows a
+            // reload is needed to sync memory with the reserialized disk state.
+            sb.Append(",\"touchedOpenScenes\":[");
+            if (touchedOpenScenes != null)
+            {
+                for (int i = 0; i < touchedOpenScenes.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(Esc(touchedOpenScenes[i])).Append('"');
+                }
+            }
+            sb.Append(']');
+            sb.Append(',').Append(SceneDirtyState.BuildDirtyScenesJson());
             sb.Append('}');
             return sb.ToString();
         }

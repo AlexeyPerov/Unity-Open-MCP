@@ -13,6 +13,7 @@ import {
   resolveEditorLogPath,
   readLogTail,
   detectStaleLog,
+  detectStaleAssembly,
   DEFAULT_LOG_TAIL_BYTES,
 } from "./unity-log.js";
 
@@ -421,4 +422,65 @@ test("detectStaleLog bounds newerFiles at 5 entries", () => {
   const result = detectStaleLog(logPath, cited, project);
   assert.equal(result.staleLogSuspected, true);
   assert.ok(result.newerFiles.length <= 5, "newerFiles must be bounded");
+});
+
+// ---------------------------------------------------------------------------
+// detectStaleAssembly — feedback-01-08-glm §5b. Distinct from stale-log: this
+// signals that the BUILT assembly predates the latest C# source, so a
+// no_errors_found signal cannot be trusted until the assembly is rebuilt.
+// ---------------------------------------------------------------------------
+
+test("detectStaleAssembly flags staleness when a source .cs is newer than the newest DLL", () => {
+  // Real scenario: the newest DLL was built at t=1000, but the agent edited
+  // Assets/Scripts/Foo.cs at t=2000 (after a Refresh that no-op'd). The running
+  // assembly is stale; a no_errors_found signal would be misleading.
+  const project = mkdtempSync(join(tmpdir(), "proj-"));
+  mkdirSync(join(project, "Library", "ScriptAssemblies"), { recursive: true });
+  mkdirSync(join(project, "Assets", "Scripts"), { recursive: true });
+  writeFileSync(join(project, "Library", "ScriptAssemblies", "Assembly-CSharp.dll"), "dll");
+  writeFileSync(join(project, "Library", "ScriptAssemblies", "Game.dll"), "dll");
+  setMtime(join(project, "Library", "ScriptAssemblies", "Assembly-CSharp.dll"), 1000);
+  setMtime(join(project, "Library", "ScriptAssemblies", "Game.dll"), 1000);
+  const src = join(project, "Assets", "Scripts", "Foo.cs");
+  writeFileSync(src, "namespace Fixed {}");
+  setMtime(src, 2000);
+
+  const result = detectStaleAssembly(project);
+  assert.equal(result.staleAssembly, true);
+  assert.ok((result.newerSources ?? []).length >= 1);
+  assert.ok(result.hint.length > 0, "stale assembly must carry a recovery hint");
+  assert.ok(result.dllMtimeMs !== undefined);
+});
+
+test("detectStaleAssembly returns not-stale when every source is older than the newest DLL", () => {
+  // Newest DLL built at t=2000 AFTER the last source edit at t=1000 → a fresh
+  // compile just wrote the DLL; the healthy signal is trustworthy.
+  const project = mkdtempSync(join(tmpdir(), "proj-"));
+  mkdirSync(join(project, "Library", "ScriptAssemblies"), { recursive: true });
+  mkdirSync(join(project, "Assets", "Scripts"), { recursive: true });
+  writeFileSync(join(project, "Library", "ScriptAssemblies", "Game.dll"), "dll");
+  setMtime(join(project, "Library", "ScriptAssemblies", "Game.dll"), 2000);
+  const src = join(project, "Assets", "Scripts", "Foo.cs");
+  writeFileSync(src, "x");
+  setMtime(src, 1000);
+
+  const result = detectStaleAssembly(project);
+  assert.equal(result.staleAssembly, false);
+  assert.deepEqual(result.newerSources, []);
+});
+
+test("detectStaleAssembly returns not-stale when Library/ScriptAssemblies is absent", () => {
+  // No DLLs built yet — cannot judge staleness, so do not flag it (avoids a
+  // false positive on a project that has never compiled).
+  const project = mkdtempSync(join(tmpdir(), "proj-"));
+  mkdirSync(join(project, "Assets", "Scripts"), { recursive: true });
+  writeFileSync(join(project, "Assets", "Scripts", "Foo.cs"), "x");
+
+  const result = detectStaleAssembly(project);
+  assert.equal(result.staleAssembly, false);
+});
+
+test("detectStaleAssembly returns not-stale when no project root is supplied", () => {
+  assert.equal(detectStaleAssembly(null).staleAssembly, false);
+  assert.equal(detectStaleAssembly(undefined).staleAssembly, false);
 });

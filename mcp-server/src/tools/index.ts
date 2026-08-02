@@ -112,6 +112,7 @@ import { reimportPackage } from "./reimport-package.js";
 import { packageGetInfo } from "./package-get-info.js";
 import { packageGetDependencies } from "./package-get-dependencies.js";
 import { packageCheck } from "./package-check.js";
+import { recompileScripts } from "./recompile-scripts.js";
 // M16 Plan 5 — typed console / editor state / selection / undo / tags / layers.
 import { consoleClear } from "./console-clear.js";
 import { consoleLog } from "./console-log.js";
@@ -646,6 +647,8 @@ export const M16_PLAN4_TOOLS: Tool[] = [
   packageGetInfo,
   packageGetDependencies,
   packageCheck,
+  // feedback-01-08-glm §5 — deterministic project-wide recompile primitive.
+  recompileScripts,
 ];
 
 // M16 Plan 5 — Console + editor state / selection / undo / tags / layers typed

@@ -17,7 +17,8 @@
 //
 // No runtime deps beyond node built-ins (mcp-server/AGENTS.md).
 
-import { existsSync, openSync, readSync, fstatSync, closeSync, statSync } from "node:fs";
+import { existsSync, openSync, readSync, fstatSync, closeSync, statSync, readdirSync } from "node:fs";
+import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -410,5 +411,124 @@ export function detectStaleLog(
       "longer apply). Force a genuine recompile before trusting these errors: " +
       "call unity_open_mcp_reimport_package on the affected local package, or " +
       "unity_open_mcp_compile_check to spawn a fresh headless recompile.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// feedback-01-08-glm §5b — stale-ASSEMBLY detection (distinct from stale-log).
+//
+// The staleLog heuristic compares source-file mtimes against Editor.log's mtime
+// and only runs when there are errors to cite. The field report's deeper
+// complaint is that read_compile_errors reports `no_errors_found` against a
+// STALE assembly: after a C# edit, AssetDatabase.Refresh no-op'd, the DLL was
+// never rebuilt, and the log carries no fresh CSxxxx — so the agent believes
+// the code is healthy when the running assembly predates the fix.
+//
+// Mitigation: compare the newest Library/ScriptAssemblies/*.dll mtime against
+// every Assets/**/*.cs source mtime. If ANY source is newer than the newest
+// DLL, the running assembly is stale and the healthy signal cannot be trusted.
+// This runs unconditionally (even on no_errors_found), bounded by a source-scan
+// cap so a huge project does not stall the read.
+// ---------------------------------------------------------------------------
+
+export interface StaleAssemblyResult {
+  /** True when at least one source .cs is newer than the newest built DLL. */
+  staleAssembly: boolean;
+  /** Newest Library/ScriptAssemblies/*.dll mtime in epoch ms, when readable. */
+  dllMtimeMs?: number;
+  /** Project-relative source files newer than the newest DLL (bounded). */
+  newerSources: string[];
+  /** One-line agent-facing recovery hint. Empty when not stale. */
+  hint: string;
+}
+
+/** Cap on the number of newer sources reported (evidence, not a roster). */
+const MAX_NEWER_SOURCES = 5;
+/** Cap on how many .cs files to stat before giving up the scan. A project that
+ *  exceeds this likely has a fresh DLL anyway (compile times track source
+ *  count); the cap protects pathological trees from stalling the read. */
+const MAX_CS_SCAN = 4000;
+
+/**
+ * Decide whether the built assembly set under `<project>/Library/ScriptAssemblies`
+ * is stale relative to the on-disk C# sources under `<project>/Assets`.
+ *
+ * Conservative: flags staleness only when ALL of:
+ *   - the ScriptAssemblies dir exists and holds at least one .dll,
+ *   - at least one C# source under Assets is strictly newer than the newest
+ *     .dll mtime.
+ * Never throws; returns a clean "not stale" on any resolution failure.
+ */
+export function detectStaleAssembly(projectRoot: string | null | undefined): StaleAssemblyResult {
+  const empty: StaleAssemblyResult = { staleAssembly: false, newerSources: [], hint: "" };
+  if (!projectRoot) return empty;
+
+  const dllDir = join(projectRoot, "Library", "ScriptAssemblies");
+  let dllMtimeMs: number | undefined;
+  try {
+    if (!existsSync(dllDir)) return empty;
+    let newest = 0;
+    for (const entry of readdirSync(dllDir)) {
+      if (!entry.endsWith(".dll")) continue;
+      const m = statSync(join(dllDir, entry)).mtimeMs;
+      if (m > newest) newest = m;
+    }
+    if (newest === 0) return empty; // no DLLs built yet
+    dllMtimeMs = newest;
+  } catch {
+    return empty;
+  }
+
+  // Scan Assets/ for .cs sources newer than the newest DLL. Walk top-down,
+  // skipping Library/Temp/obj etc. (Assets/ has none of those, but be safe).
+  const newerSources: string[] = [];
+  let scanned = 0;
+  const visit = (dir: string): void => {
+    if (newerSources.length >= MAX_NEWER_SOURCES || scanned >= MAX_CS_SCAN) return;
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      if (newerSources.length >= MAX_NEWER_SOURCES || scanned >= MAX_CS_SCAN) return;
+      const full = join(dir, ent.name);
+      if (ent.isDirectory()) {
+        visit(full);
+      } else if (ent.isFile() && ent.name.endsWith(".cs")) {
+        scanned++;
+        try {
+          const m = statSync(full).mtimeMs;
+          if (m > (dllMtimeMs as number)) {
+            const rel = full.slice((projectRoot as string).length).replace(/^[\\/]+/, "");
+            newerSources.push(rel);
+          }
+        } catch {
+          /* file vanished mid-scan */
+        }
+      }
+    }
+  };
+  try {
+    visit(join(projectRoot, "Assets"));
+  } catch {
+    return empty;
+  }
+
+  if (newerSources.length === 0) {
+    return { staleAssembly: false, dllMtimeMs, newerSources: [], hint: "" };
+  }
+  return {
+    staleAssembly: true,
+    dllMtimeMs,
+    newerSources,
+    hint:
+      "The built assembly appears stale — at least one Assets/**/*.cs source is " +
+      "newer than the newest Library/ScriptAssemblies/*.dll (Unity's incremental " +
+      "compiler likely no-op'd a recompile, so the running assembly predates the " +
+      "latest source). Do NOT trust a no_errors_found signal until the assembly is " +
+      "rebuilt: call unity_open_mcp_recompile_scripts to force a deterministic " +
+      "recompile, then re-read compile errors.",
   };
 }

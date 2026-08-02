@@ -69,6 +69,24 @@ namespace UnityOpenMcpBridge.MetaTools
             if (!File.Exists(codeAnalysisPath) || !File.Exists(codeAnalysisCSharpPath))
                 return false;
 
+            // feedback-01-08-glm §1 — Unity 6000.0.x ships the Roslyn compiler
+            // assemblies under DotNetSdkRoslyn as ReadyToRun (R2R) composite
+            // images that the editor's Mono runtime cannot load
+            // ("Invalid Image: …/Microsoft.CodeAnalysis.dll", "Could not load
+            // image … due to Invalid data directory 3"). Detect such images
+            // from their PE header BEFORE attempting a LoadFrom, so an
+            // unloadable candidate is skipped cleanly with a precise error
+            // instead of the generic "Roslyn init failed" (and without wasting
+            // the deps-load loop that silently swallows every R2R failure).
+            if (IsReadyToRunImage(codeAnalysisPath))
+            {
+                LastInitError = $"Roslyn candidate '{roslynDir}' ships ReadyToRun (R2R) images " +
+                    "the editor's Mono runtime cannot load (Microsoft.CodeAnalysis.dll). Skipping; " +
+                    "the Mono-loadable Roslyn under MonoBleedingEdge is the supported execute_csharp backend.";
+                Debug.LogWarning($"[Unity Open MCP Bridge] {LastInitError}");
+                return false;
+            }
+
             try
             {
                 foreach (var dep in Directory.GetFiles(roslynDir, "*.dll"))
@@ -92,6 +110,99 @@ namespace UnityOpenMcpBridge.MetaTools
                 Debug.LogWarning($"[Unity Open MCP Bridge] {LastInitError}");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Detect a non-pure-IL (ReadyToRun / mixed-native) PE image from its
+        /// header, WITHOUT loading the assembly. Unity 6000.0.x ships the Roslyn
+        /// compiler assemblies under DotNetSdkRoslyn as ReadyToRun composite
+        /// images the editor's Mono runtime cannot load ("Invalid Image",
+        /// "Invalid data directory 3"). The robust signal is the COR20 header's
+        /// Flags: a pure-IL (Mono-loadable) managed assembly always sets
+        /// <c>COMImageFlags.ILOnly</c> (0x1); an R2R composite clears it. Reads
+        /// only the PE/COR20 headers (DOS stub → PE sig → optional header →
+        /// COR20 data directory → COR20 header via the section table). Never
+        /// throws on a truncated/garbage file — returns false so the normal
+        /// LoadFrom path reports the real load error.
+        /// </summary>
+        internal static bool IsReadyToRunImage(string dllPath)
+        {
+            try
+            {
+                using (var fs = File.OpenRead(dllPath))
+                using (var br = new BinaryReader(fs, System.Text.Encoding.ASCII, leaveOpen: true))
+                {
+                    if (fs.Length < 0x40) return false;
+                    // DOS header: 'MZ' at 0, PE-header offset at 0x3c.
+                    if (br.ReadByte() != (byte)'M' || br.ReadByte() != (byte)'Z') return false;
+                    fs.Position = 0x3c;
+                    int peOffset = br.ReadInt32();
+                    if (peOffset <= 0 || peOffset + 24 > fs.Length) return false;
+
+                    // PE signature 'PE\0\0' + COFF header (20 bytes).
+                    fs.Position = peOffset;
+                    if (br.ReadByte() != (byte)'P' || br.ReadByte() != (byte)'E'
+                        || br.ReadByte() != 0 || br.ReadByte() != 0) return false;
+                    br.ReadUInt16(); // Machine
+                    int numSections = br.ReadUInt16();
+                    br.ReadInt32(); br.ReadInt32(); br.ReadInt32(); // TimeDateStamp, PointerToSymbolTable, NumberOfSymbols
+                    int sizeOfOptionalHeader = br.ReadUInt16();
+                    br.ReadUInt16(); // Characteristics
+
+                    // Optional header: the standard+NT fields (before the data
+                    // directory array) are 96 bytes for PE32 and 112 for PE32+.
+                    // The COR20 directory is data-directory index 14 (each entry
+                    // is 8 bytes: RVA + size).
+                    int optionalStart = peOffset + 24;
+                    fs.Position = optionalStart;
+                    ushort magic = br.ReadUInt16();
+                    int dataDirStart = optionalStart + (magic == 0x20b ? 112 : 96);
+                    int cor20DirPos = dataDirStart + 14 * 8;
+                    if (cor20DirPos + 8 > fs.Length) return false;
+                    fs.Position = cor20DirPos;
+                    int cor20Rva = br.ReadInt32();
+                    int cor20Size = br.ReadInt32();
+                    if (cor20Rva == 0 || cor20Size == 0) return false; // not a managed assembly
+
+                    // Section table immediately follows the optional header.
+                    long sectionTable = optionalStart + sizeOfOptionalHeader;
+                    long corHeaderOffset = ResolveRva(fs, sectionTable, numSections, cor20Rva);
+                    if (corHeaderOffset < 0 || corHeaderOffset + 0x18 > fs.Length) return false;
+
+                    // COR20 header: cb(4) MajorRuntimeVersion(2) MinorRuntimeVersion(2)
+                    // MetaData(8) Flags(4 @ 0x10).
+                    fs.Position = corHeaderOffset + 0x10;
+                    int flags = br.ReadInt32();
+                    const int corILonly = 0x00000001;
+                    return (flags & corILonly) == 0;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>Resolve a PE Relative Virtual Address to a file offset via
+        /// the section table. Each section header is 40 bytes: VirtualAddress
+        /// at +12, VirtualSize at +8, PointerToRawData at +20, SizeOfRawData at
+        /// +16. Returns -1 when the RVA is outside every section.</summary>
+        private static long ResolveRva(FileStream fs, long sectionTable, int numSections, int rva)
+        {
+            fs.Position = sectionTable;
+            var sect = new byte[40];
+            for (int i = 0; i < numSections; i++)
+            {
+                if (fs.Read(sect, 0, 40) < 40) return -1;
+                int virtualSize = BitConverter.ToInt32(sect, 8);
+                int virtualAddress = BitConverter.ToInt32(sect, 12);
+                int sizeOfRawData = BitConverter.ToInt32(sect, 16);
+                int pointerToRawData = BitConverter.ToInt32(sect, 20);
+                int sectionEnd = virtualAddress + (virtualSize > 0 ? virtualSize : sizeOfRawData);
+                if (rva >= virtualAddress && rva < sectionEnd)
+                    return pointerToRawData + (rva - virtualAddress);
+            }
+            return -1;
         }
 
         public static (byte[] pe, string errors) Compile(string source)

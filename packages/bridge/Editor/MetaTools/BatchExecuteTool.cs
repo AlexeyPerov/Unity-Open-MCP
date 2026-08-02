@@ -507,7 +507,27 @@ namespace UnityOpenMcpBridge.MetaTools
                 sb.Append("\",\"status\":\"").Append(Status).Append("\"");
                 if (Output != null)
                 {
-                    sb.Append(",\"output\":").Append(Output);
+                    // feedback-01-08-glm §4 — a nested tool's serialized Output
+                    // is spliced RAW into the batch envelope. If a deep/large
+                    // serialization (e.g. object_get_data) emits truncated or
+                    // unbalanced JSON — an exception escaping the per-member
+                    // try/catch in OutputSerializer — the whole envelope becomes
+                    // invalid and the MCP side rejects it as
+                    // bridge_response_unparsable, even though the batch itself
+                    // ran fine. Validate before splicing (mirrors the guard in
+                    // ExecuteCSharpTool.Execute) and substitute a structured
+                    // per-step error on failure so the envelope stays well-
+                    // formed and the agent sees WHICH step produced bad output.
+                    if (BridgeJson.IsValidJsonObject(Output))
+                    {
+                        sb.Append(",\"output\":").Append(Output);
+                    }
+                    else
+                    {
+                        sb.Append(",\"output\":{\"output_parse_failed\":true}");
+                        sb.Append(",\"error\":{\"code\":\"output_not_json\"")
+                          .Append(",\"message\":\"Step output was not valid JSON and was elided to keep the batch response parseable. Re-run this tool as a top-level call to inspect the raw output.\"}");
+                    }
                 }
                 if (ErrorCode != null)
                 {

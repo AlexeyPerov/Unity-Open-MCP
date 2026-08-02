@@ -449,7 +449,7 @@ test("route: find_references tags _source=live when served by the bridge", async
   const live = makeFakeLive({
     available: true,
     result: {
-      content: [{ type: "text", text: JSON.stringify({ referencedBy: ["Assets/Foo.prefab", "Assets/Bar.mat"], totalCount: 2 }) }],
+      content: [{ type: "text", text: JSON.stringify({ referencedBy: [{ assetPath: "Assets/Foo.prefab", guid: "g1" }, { assetPath: "Assets/Bar.mat", guid: "g2" }], totalCount: 2 }) }],
       isError: false,
     },
   });
@@ -2036,7 +2036,7 @@ test("routeOverride: dispatches through the override LiveClient, not the default
 test("routeOverride: find_references uses the override client for the live hop", async () => {
   const defaultLive = makeFakeLive();
   const overrideLive = makeFakeLive({
-    result: { content: [{ type: "text", text: JSON.stringify({ referencedBy: ["Assets/a.prefab"], totalCount: 1 }) }], isError: false },
+    result: { content: [{ type: "text", text: JSON.stringify({ referencedBy: [{ assetPath: "Assets/a.prefab", guid: "g1" }], totalCount: 1 }) }], isError: false },
   });
   const batch = makeFakeBatch();
   const router = makeRouter(defaultLive, batch, "/proj", makeFakeEventStream());
@@ -2752,9 +2752,9 @@ test("H2: live find_references default profile (no profile arg) preserves the fu
           type: "text",
           text: JSON.stringify({
             referencedBy: [
-              "Assets/Prefabs/Player.prefab",
-              "Assets/Materials/Player.mat",
-              "Assets/Scripts/Player.cs",
+              { assetPath: "Assets/Prefabs/Player.prefab", guid: "g1" },
+              { assetPath: "Assets/Materials/Player.mat", guid: "g2" },
+              { assetPath: "Assets/Scripts/Player.cs", guid: "g3" },
             ],
           }),
         },
@@ -2772,6 +2772,7 @@ test("H2: live find_references default profile (no profile arg) preserves the fu
   assert.equal(body._source, "live");
   assert.deepEqual(body._route, { route: "live" });
   assert.equal(body.totalCount, 3);
+  // The fold normalizes {assetPath, guid} entries to their asset-path strings.
   assert.deepEqual(body.referencedBy, [
     "Assets/Prefabs/Player.prefab",
     "Assets/Materials/Player.mat",
@@ -2790,9 +2791,9 @@ test("H2: live find_references explicit compact profile drops referencedBy + der
           type: "text",
           text: JSON.stringify({
             referencedBy: [
-              "Assets/Prefabs/Player.prefab",
-              "Assets/Materials/Player.mat",
-              "Assets/Scripts/Player.cs",
+              { assetPath: "Assets/Prefabs/Player.prefab", guid: "g1" },
+              { assetPath: "Assets/Materials/Player.mat", guid: "g2" },
+              { assetPath: "Assets/Scripts/Player.cs", guid: "g3" },
             ],
           }),
         },
@@ -2814,6 +2815,44 @@ test("H2: live find_references explicit compact profile drops referencedBy + der
   assert.deepEqual(body.byKind, { prefab: 1, mat: 1, cs: 1 });
 });
 
+// feedback-01-08-glm §3 — the live bridge emits referencedBy as objects
+// {assetPath, guid}, NOT flat strings. The compact-profile byKind grouping
+// previously called `.lastIndexOf` on each element and hard-crashed
+// (`path.lastIndexOf is not a function`) the moment it met an object entry.
+// Pin that the object form is normalized to asset paths and grouped correctly.
+test("H2: live find_references compact profile with object-form referencedBy does not crash and derives byKind", async () => {
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            referencedBy: [
+              { assetPath: "Assets/Resources/UI/Root/Dialogs/DialogUpdate.prefab", guid: "g1" },
+              { assetPath: "Assets/Resources/UI/Root/Dialogs/DialogLogin.prefab", guid: "g2" },
+              { assetPath: "Assets/Other.mat", guid: "g3" },
+            ],
+          }),
+        },
+      ],
+      isError: false,
+    },
+  });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_open_mcp_find_references", {
+    guid: "deadbeef",
+    profile: "compact",
+  });
+  const body = parseBody(result);
+  assert.equal(body._source, "live");
+  assert.deepEqual(body._route, { route: "live" });
+  assert.equal(body.totalCount, 3);
+  assert.deepEqual(body.referencedBy, []);
+  assert.deepEqual(body.byKind, { prefab: 2, mat: 1 });
+});
+
 test("H2: live find_references balanced profile with paging keeps page + pagination", async () => {
   const live = makeFakeLive({
     available: true,
@@ -2822,7 +2861,11 @@ test("H2: live find_references balanced profile with paging keeps page + paginat
         {
           type: "text",
           text: JSON.stringify({
-            referencedBy: ["Assets/A.prefab", "Assets/B.prefab", "Assets/C.prefab"],
+            referencedBy: [
+              { assetPath: "Assets/A.prefab", guid: "g1" },
+              { assetPath: "Assets/B.prefab", guid: "g2" },
+              { assetPath: "Assets/C.prefab", guid: "g3" },
+            ],
           }),
         },
       ],
@@ -2857,7 +2900,10 @@ test("H2: live find_references balanced profile without paging keeps the full li
         {
           type: "text",
           text: JSON.stringify({
-            referencedBy: ["Assets/A.prefab", "Assets/B.prefab"],
+            referencedBy: [
+              { assetPath: "Assets/A.prefab", guid: "g1" },
+              { assetPath: "Assets/B.prefab", guid: "g2" },
+            ],
             bridgeExtraField: "passes-through-untouched",
           }),
         },

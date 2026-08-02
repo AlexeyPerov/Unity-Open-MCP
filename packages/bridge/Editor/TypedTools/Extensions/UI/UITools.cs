@@ -85,12 +85,22 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             string render_mode = "ScreenSpaceOverlay",
             int sorting_order = 0,
             string new_root_name = null,
-            string[] paths_hint = null)
+            string[] paths_hint = null,
+            string scene_path = null,
+            string scene_name = null)
         {
             if (paths_hint == null || paths_hint.Length == 0)
                 return UIJson.Error("paths_hint_required",
                     "ui_canvas_add is mutating; pass a non-empty paths_hint scoped " +
                     "to the host's (or new root's) scene path.");
+
+            // feedback-01-08-glm §6 — optional explicit target scene for the new
+            // Canvas root + EventSystem. Without this, both landed in whatever
+            // the active scene was at call time, and EnsureEventSystem's global
+            // dedup could place a stray EventSystem in the wrong scene.
+            var targetScene = ResolveCanvasTargetScene(scene_path, scene_name, out var sceneError);
+            if (sceneError != null)
+                return UIJson.Error("scene_not_found", sceneError);
 
             // Resolve the host. When no host is addressed, create a new scene
             // root GameObject to hold the canvas (agents pass new_root_name to
@@ -102,6 +112,10 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
                 host = new GameObject(string.IsNullOrEmpty(new_root_name) ? "Canvas" : new_root_name);
                 Undo.RegisterCreatedObjectUndo(host, "Create UI Canvas root");
                 createdRoot = true;
+                // Route the new root into the requested scene (no-op when the
+                // selector was omitted → active scene, the historic default).
+                if (targetScene.IsValid() && targetScene.isLoaded && host.scene != targetScene)
+                    UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(host, targetScene);
             }
 
             Undo.RecordObject(host, "Add Canvas");
@@ -135,10 +149,13 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
                 addedRaycaster = true;
             }
 
-            // Ensure an EventSystem exists in the open scene(s). uGUI input
+            // Ensure an EventSystem exists in the target scene. uGUI input
             // (pointer / drag / keyboard on Selectables) does not work without
             // an EventSystem + a StandaloneInputModule / InputSystemUIInputModule.
-            bool addedEventSystem = EnsureEventSystem();
+            // feedback-01-08-glm §6 — scope the dedup to the canvas's scene so a
+            // stray EventSystem is not created in (or stolen from) a different
+            // loaded scene, and place the new EventSystem in that scene.
+            bool addedEventSystem = EnsureEventSystem(host.scene);
 
             EditorUtility.SetDirty(host);
 
@@ -713,20 +730,42 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
         // Helpers — EventSystem ensure
         // =====================================================================
 
-        // Ensure the open scene(s) have an EventSystem. uGUI pointer / keyboard
+        // Ensure the target scene has an EventSystem. uGUI pointer / keyboard
         // input requires one EventSystem with a StandaloneInputModule (or the
         // InputSystemUIInputModule when the Input System package is present).
         // Returns true when this call created one.
-        private static bool EnsureEventSystem()
+        //
+        // feedback-01-08-glm §6 — the dedup is scoped to `scene` (the Canvas's
+        // scene) so a second loaded scene with no EventSystem does not steal or
+        // duplicate one. The new EventSystem is moved into that scene. A default
+        // (invalid) `scene` keeps the historic global dedup + active-scene
+        // placement (used by callers that have no scene context).
+        private static bool EnsureEventSystem(UnityEngine.SceneManagement.Scene scene)
         {
             // SceneQuery centralizes the FindObjectsByType (2023.1+) /
             // FindObjectsOfType (pre-2023.1) version dance — see SceneQuery.cs.
             var existing = SceneQuery.FindAllOfType<EventSystem>(SceneQuery.Inactive.Include);
-            if (existing != null && existing.Length > 0) return false;
+            if (existing != null)
+            {
+                foreach (var es in existing)
+                {
+                    if (es == null) continue;
+                    // When a target scene is known, only an EventSystem already
+                    // in that scene satisfies the dedup. Without a target scene,
+                    // any EventSystem anywhere counts (historic global behavior).
+                    if (!scene.IsValid() || es.gameObject.scene == scene)
+                        return false;
+                }
+            }
 
             var esGo = new GameObject("EventSystem");
             Undo.RegisterCreatedObjectUndo(esGo, "Create EventSystem");
             Undo.AddComponent<EventSystem>(esGo);
+
+            // Route the new EventSystem into the target scene (no-op when the
+            // target is invalid/active — the historic active-scene placement).
+            if (scene.IsValid() && scene.isLoaded && esGo.scene != scene)
+                UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(esGo, scene);
 
             // Add StandaloneInputModule (the legacy input module). When the
             // Input System package is installed, the agent can swap this for
@@ -739,6 +778,36 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
         // =====================================================================
         // Helpers — parsing
         // =====================================================================
+
+        // feedback-01-08-glm §6 — resolve the optional scene_path/scene_name
+        // selector to a loaded Scene for the new Canvas root + EventSystem.
+        // Delegates to the shared SceneTargeting helper so canvas creation and
+        // gameobject_create share one scene-resolution path. Returns a default
+        // (invalid) Scene — meaning active-scene default — when both are null.
+        private static UnityEngine.SceneManagement.Scene ResolveCanvasTargetScene(
+            string scenePath, string sceneName, out string error)
+        {
+            if (string.IsNullOrWhiteSpace(scenePath) && string.IsNullOrWhiteSpace(sceneName))
+            {
+                error = null;
+                return new UnityEngine.SceneManagement.Scene();
+            }
+            if (!string.IsNullOrWhiteSpace(scenePath))
+            {
+                var scene = UnityOpenMcpBridge.TypedTools.SceneTargeting.ResolveByPath(scenePath);
+                if (scene.IsValid() && scene.isLoaded) { error = null; return scene; }
+                error = $"Target scene not found / not loaded for scene_path '{scenePath}'. " +
+                    "Use unity_open_mcp_scene_open (OpenSceneMode.Additive) to load it first, or omit " +
+                    "scene_path/scene_name to create in the active scene.";
+                return new UnityEngine.SceneManagement.Scene();
+            }
+            var byName = UnityOpenMcpBridge.TypedTools.SceneTargeting.ResolveByName(sceneName);
+            if (byName.IsValid() && byName.isLoaded) { error = null; return byName; }
+            error = $"Target scene not found / not loaded for scene_name '{sceneName}'. " +
+                "Use unity_open_mcp_scene_open (OpenSceneMode.Additive) to load it first, or omit " +
+                "scene_path/scene_name to create in the active scene.";
+            return new UnityEngine.SceneManagement.Scene();
+        }
 
         private static bool ParseRenderMode(string s, out RenderMode mode)
         {

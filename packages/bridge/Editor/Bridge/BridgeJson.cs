@@ -255,7 +255,31 @@ namespace UnityOpenMcpBridge
             sb.Append("{\"mutation\":{\"success\":");
             sb.Append(result.Mutation.Success ? "true" : "false");
             sb.Append(",\"output\":");
-            sb.Append(result.Mutation.Output ?? "null");
+            // feedback-01-08-glm §4 — the mutation output is spliced raw into
+            // the gate envelope. If a tool's serializer emitted truncated/
+            // unbalanced JSON (an exception escaping OutputSerializer's per-
+            // member guard on a deep object graph), the whole gate envelope
+            // becomes invalid and the MCP side rejects it as
+            // bridge_response_unparsable. Validate before splicing and
+            // substitute a structured placeholder on failure so the envelope
+            // stays parseable and the gate telemetry (delta, lifecycle) is
+            // not lost behind a transport error. Mirrors the per-step guard
+            // in BatchExecuteTool.BatchStepResult.WriteJson.
+            var mutationOutput = result.Mutation.Output;
+            if (string.IsNullOrEmpty(mutationOutput))
+            {
+                sb.Append("null");
+            }
+            else if (IsValidJsonObject(mutationOutput))
+            {
+                sb.Append(mutationOutput);
+            }
+            else
+            {
+                sb.Append("{\"output_parse_failed\":true}");
+                sb.Append(",\"output_error\":{\"code\":\"output_not_json\"")
+                  .Append(",\"message\":\"Tool output was not valid JSON and was elided to keep the gate response parseable. Re-run the tool as a top-level call to inspect the raw output.\"}");
+            }
             if (result.Mutation.ErrorCode != null)
             {
                 sb.Append(",\"error\":{\"code\":\"").Append(EscapeStringContent(result.Mutation.ErrorCode));

@@ -166,20 +166,28 @@ export class ToolSessionState {
   }
 
   /**
-   * Activate a group. Returns true if state changed (group was not active).
-   * Unknown groups are rejected with `false` — callers should validate via
-   * {@link GROUP_IDS} first and surface a structured error.
+   * Activate a group. Returns true if the active SET changed (group was not
+   * already active). Unknown groups are rejected with `false` — callers should
+   * validate via {@link GROUP_IDS} first and surface a structured error.
    *
-   * M8 — activating a previously-suppressed group clears the suppression
-   * (the source is overwritten to `"manual"`), so a later reconcile pass can
-   * auto-deactivate/reactivate it normally again.
+   * Manual intent wins: even when the group is already active, an explicit
+   * `activate` re-stamps the source to `"manual"` (from `"auto"`/`"default"`).
+   * feedback-01-08-glm §7 — previously `activate` was a full no-op when the
+   * group was already active, so a group that `activate_for` had auto-activated
+   * (source `"auto"`) was never upgraded to `"manual"` by a later explicit
+   * `activate`. The next {@link reconcileAutoActivation} then dropped it the
+   * moment its package was transiently unsatisfied — silently losing a group
+   * the agent believed it had manually activated, contradicting the
+   * "activation is ADDITIVE" / "manual activation wins" contract.
    */
   activate(groupId: string): boolean {
     if (!GROUP_IDS.has(groupId)) return false;
-    if (this.active.has(groupId)) return false;
+    const wasActive = this.active.has(groupId);
     this.active.add(groupId);
+    // Always record manual intent so reconcile won't drop a group the operator
+    // explicitly touched (only `"auto"`-sourced groups are reconcile-droppable).
     this.source.set(groupId, "manual");
-    return true;
+    return !wasActive;
   }
 
   /**

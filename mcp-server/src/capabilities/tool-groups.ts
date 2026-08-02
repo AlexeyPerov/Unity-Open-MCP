@@ -498,6 +498,8 @@ assign(
     "package_get_info",
     "package_get_dependencies",
     "package_check",
+    // feedback-01-08-glm §5 — deterministic force-recompile primitive.
+    "recompile_scripts",
     "console_clear",
     "console_log",
     "editor_set_state",

@@ -115,6 +115,11 @@ namespace UnityOpenMcpBridge
             // id is the scope); the tool additionally reports dllMtimeBefore/
             // After so an agent can detect a no-op recompile (specs/feedback.md).
             { "unity_open_mcp_reimport_package",    LifecyclePolicy.RestartThenSettle },
+            // feedback-01-08-glm §5 — recompile_scripts forces a project-wide
+            // script recompile via CompilationPipeline.RequestScriptCompilation;
+            // a domain reload follows. RestartThenSettle blocks until the
+            // compile settles before returning the dllMtimeBefore/After payload.
+            { "unity_open_mcp_recompile_scripts",   LifecyclePolicy.RestartThenSettle },
             // M16 Plan 5 — typed TagManager mutators. add_tag / add_layer
             // rewrite ProjectSettings/TagManager.asset and refresh the asset
             // database. None of them recompile editor scripts, so EditorSettle

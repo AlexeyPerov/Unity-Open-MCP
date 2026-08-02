@@ -268,7 +268,7 @@
     }
   },
   "unity_open_mcp_editor_status": {
-    "description": "Returns the current Unity Editor state: play mode, compile state, current scene path, Unity version, and editor type.",
+    "description": "Returns the current Unity Editor state: play mode, compile state, current scene path, Unity version, editor type, and the in-memory dirty-scene summary. The dirtySceneCount + dirtyScenes:[{name,path}] fields list every loaded scene with unsaved in-memory changes — the memory-vs-disk signal that tells you a unity_open_mcp_scene_save is pending before you reason against on-disk YAML (e.g. after a structural op like gameobject_set_parent that marks a scene dirty without writing it).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1579,7 +1579,7 @@
     }
   },
   "unity_open_mcp_read_compile_errors": {
-    "description": "Read C# compiler errors AND package/assembly red flags AND an Editor hang signal directly from Unity's Editor.log (offline, no bridge, no Unity spawn). Returns structured CSxxxx compiler errors (file/line/code/message) PLUS an `issues` list of red flags with per-issue `kind` + `hint`: assembly_resolution (Mono.Cecil unresolved-assembly failures — the classic package-version / Unity-version mismatch, e.g. ProBuilder 5.x on Unity 6), package_deprecated ([Package Manager] <id> is deprecated), package_manager_error (conflict / resolution errors), and editor_fd_exhaustion (the Editor hung mid-build after hitting an internal Mono/Unity file-descriptor limit — NOT a code error; the hint carries restart instructions). Use this when: (a) the bridge is unreachable after a recompile — a 'bridge_compile_failed' response points here, or ping returns connected:false unexpectedly; (b) Unity showed a 'package update' / incompatibility popup; (c) you suspect a package is too old for the current Editor; (d) the Editor appears hung after heavy automation (many recompiles) with no compile errors to explain it — editor_fd_exhaustion is the likely cause and only a restart recovers it. Works even when the bridge assembly itself is broken, because it reads the log file the Editor writes independently of the bridge. Check `unhealthy` first; when true, scan `headline` for a one-line triage then drill into `errors` and `issues`. When the response carries `staleLogSuspected: true`, the cited source files were edited more recently than Editor.log — the error block may reference on-disk code you have already fixed (Unity's incremental compiler no-op'd the recompile). Force a genuine recompile via unity_open_mcp_reimport_package (local package) or unity_open_mcp_compile_check before trusting the errors.",
+    "description": "Read C# compiler errors AND package/assembly red flags AND an Editor hang signal directly from Unity's Editor.log (offline, no bridge, no Unity spawn). Returns structured CSxxxx compiler errors (file/line/code/message) PLUS an `issues` list of red flags with per-issue `kind` + `hint`: assembly_resolution (Mono.Cecil unresolved-assembly failures — the classic package-version / Unity-version mismatch, e.g. ProBuilder 5.x on Unity 6), package_deprecated ([Package Manager] <id> is deprecated), package_manager_error (conflict / resolution errors), and editor_fd_exhaustion (the Editor hung mid-build after hitting an internal Mono/Unity file-descriptor limit — NOT a code error; the hint carries restart instructions). Use this when: (a) the bridge is unreachable after a recompile — a 'bridge_compile_failed' response points here, or ping returns connected:false unexpectedly; (b) Unity showed a 'package update' / incompatibility popup; (c) you suspect a package is too old for the current Editor; (d) the Editor appears hung after heavy automation (many recompiles) with no compile errors to explain it — editor_fd_exhaustion is the likely cause and only a restart recovers it. Works even when the bridge assembly itself is broken, because it reads the log file the Editor writes independently of the bridge. Check `unhealthy` first; when true, scan `headline` for a one-line triage then drill into `errors` and `issues`. When the response carries `staleLogSuspected: true`, the cited source files were edited more recently than Editor.log — the error block may reference on-disk code you have already fixed (Unity's incremental compiler no-op'd the recompile). Force a genuine recompile via unity_open_mcp_reimport_package (local package) or unity_open_mcp_compile_check before trusting the errors. When the response carries `staleAssembly: true`, at least one Assets/**/*.cs source is newer than the newest Library/ScriptAssemblies/*.dll — the running assembly predates the latest source, so a no_errors_found signal CANNOT be trusted until the assembly is rebuilt. Call unity_open_mcp_recompile_scripts (deterministic force-recompile) then re-read compile errors.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -2142,6 +2142,14 @@
         "scale": {
           "description": "Optional world-space scale as \"x,y,z\". Defaults to 1,1,1.",
           "type": "string"
+        },
+        "scene_name": {
+          "description": "Optional target scene name for the instance root (alternative to scene_path). The scene must already be loaded. Omit to instantiate in the active scene.",
+          "type": "string"
+        },
+        "scene_path": {
+          "description": "Optional target scene asset path (e.g. 'Assets/Scenes/Bootstrap.unity') for the instance root. The scene must already be loaded (use unity_open_mcp_scene_open Additive first). Omit to instantiate in the active scene. Ignored when parent_path is supplied (the parent's scene wins).",
+          "type": "string"
         }
       },
       "required": [
@@ -2474,7 +2482,7 @@
     }
   },
   "unity_open_mcp_gameobject_create": {
-    "description": "Create a new GameObject in the active scene, optionally parented under an existing scene GameObject and pre-positioned. Pass `primitive_type` to spawn a Unity primitive (Cube/Sphere/Capsule/Cylinder/Plane/Quad) with its default renderer+collider. Mutating: runs the full gate path; `paths_hint` should be the destination scene path (the GameObject is a scene side-effect). Returns the new instance's instanceId, name, path, transform, and component list so the agent can immediately chain component_add / modify / set_parent without an extra lookup.",
+    "description": "Create a new GameObject in the active scene (or an explicit target scene via scene_path/scene_name), optionally parented under an existing scene GameObject and pre-positioned. Pass `primitive_type` to spawn a Unity primitive (Cube/Sphere/Capsule/Cylinder/Plane/Quad) with its default renderer+collider. Mutating: runs the full gate path; `paths_hint` should be the destination scene path (the GameObject is a scene side-effect). When multiple scenes are loaded, pass scene_path/scene_name to control which scene receives the new root GameObject — otherwise it lands in the active scene. Returns the new instance's instanceId, name, path, transform, and component list so the agent can immediately chain component_add / modify / set_parent without an extra lookup.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -2528,6 +2536,14 @@
         },
         "scale": {
           "description": "Optional scale as \"x,y,z\". Defaults to 1,1,1.",
+          "type": "string"
+        },
+        "scene_name": {
+          "description": "Optional target scene name for the new root GameObject (alternative to scene_path). The scene must already be loaded. Omit to create in the active scene.",
+          "type": "string"
+        },
+        "scene_path": {
+          "description": "Optional target scene asset path (e.g. 'Assets/Scenes/Bootstrap.unity') for the new root GameObject. The scene must already be loaded (use unity_open_mcp_scene_open Additive first). Omit to create in the active scene. Ignored when parent_path is supplied (the parent's scene wins).",
           "type": "string"
         }
       },
@@ -3835,6 +3851,34 @@
       },
       "required": [
         "package_id"
+      ],
+      "type": "object"
+    }
+  },
+  "unity_open_mcp_recompile_scripts": {
+    "description": "Force Unity to recompile ALL scripts and block until the compile settles. Use this when unity_open_mcp_assets_refresh or unity_open_mcp_execute_csharp fail to recompile after a C# edit (Unity's incremental compiler frequently no-ops on unchanged-import views, leaving the running assembly stale while read_compile_errors reports the old healthy state). Mutating: calls CompilationPipeline.RequestScriptCompilation and blocks on the compile via its restart_then_settle lifecycle (a domain reload may follow). The response reports dllMtimeBefore / dllMtimeAfter (newest Library/ScriptAssemblies/*.dll mtime, in UTC ticks) and a recompiled boolean so a no-op recompile is detectable; agentNextSteps branches on the outcome. paths_hint is the set of script assets you edited (the gate validates the post-recompile state of those paths). Prefer this over assets_refresh when you need a DETERMINISTIC recompile of edited C#.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "gate": {
+          "default": "enforce",
+          "description": "Gate mode. Default 'enforce' — fails the call if the recompile surfaces new errors.",
+          "enum": [
+            "enforce",
+            "warn",
+            "off"
+          ]
+        },
+        "paths_hint": {
+          "description": "Mutation scope — the script asset(s) you edited (e.g. [\"Assets/Scripts/MyClass.cs\"]). The gate validates the post-recompile state of these paths. The recompile itself is project-wide; paths_hint exists to give the gate a non-empty, scoped hint.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths_hint"
       ],
       "type": "object"
     }
@@ -7835,7 +7879,7 @@
     }
   },
   "unity_open_mcp_ui_canvas_add": {
-    "description": "Add a Canvas to a GameObject (or as a new scene root when no host is addressed). Ensures the canvas has a CanvasScaler + GraphicRaycaster, and ensures an EventSystem exists in the open scene(s). Set render_mode (ScreenSpaceOverlay | ScreenSpaceCamera | WorldSpace, default ScreenSpaceOverlay) and sorting_order (default 0). Idempotent — re-using an existing Canvas reports added:false (the scaler / raycaster / EventSystem are still ensured). Mutating: runs the full gate path; paths_hint is the host / new-root scene path. Built-in UI module (no package dependency); the ui group is hidden until manage_tools activates it.",
+    "description": "Add a Canvas to a GameObject (or as a new scene root when no host is addressed). Ensures the canvas has a CanvasScaler + GraphicRaycaster, and ensures an EventSystem exists in the Canvas's scene (scoped per-scene so a stray EventSystem is not created in or stolen from a different loaded scene). Set render_mode (ScreenSpaceOverlay | ScreenSpaceCamera | WorldSpace, default ScreenSpaceOverlay) and sorting_order (default 0). When multiple scenes are loaded, pass scene_path/scene_name to control which scene receives the new Canvas root + EventSystem — otherwise both land in the active scene. Idempotent — re-using an existing Canvas reports added:false (the scaler / raycaster / EventSystem are still ensured). Mutating: runs the full gate path; paths_hint is the host / new-root scene path. Built-in UI module (no package dependency); the ui group is hidden until manage_tools activates it.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -7882,6 +7926,14 @@
             "ScreenSpaceCamera",
             "WorldSpace"
           ],
+          "type": "string"
+        },
+        "scene_name": {
+          "description": "Optional target scene name for the new Canvas root + EventSystem (alternative to scene_path). The scene must already be loaded. Omit to create in the active scene.",
+          "type": "string"
+        },
+        "scene_path": {
+          "description": "Optional target scene asset path (e.g. 'Assets/Scenes/Bootstrap.unity') for the new Canvas root + EventSystem when no host is addressed. The scene must already be loaded (use unity_open_mcp_scene_open Additive first). Omit to create in the active scene.",
           "type": "string"
         },
         "sorting_order": {

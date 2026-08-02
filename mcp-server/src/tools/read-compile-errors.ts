@@ -67,7 +67,13 @@ export const readCompileErrors = makeTool(
     "reference on-disk code you have already fixed (Unity's incremental " +
     "compiler no-op'd the recompile). Force a genuine recompile via " +
     "unity_open_mcp_reimport_package (local package) or " +
-    "unity_open_mcp_compile_check before trusting the errors.",
+    "unity_open_mcp_compile_check before trusting the errors. When the " +
+    "response carries `staleAssembly: true`, at least one Assets/**/*.cs " +
+    "source is newer than the newest Library/ScriptAssemblies/*.dll — the " +
+    "running assembly predates the latest source, so a no_errors_found signal " +
+    "CANNOT be trusted until the assembly is rebuilt. Call " +
+    "unity_open_mcp_recompile_scripts (deterministic force-recompile) then " +
+    "re-read compile errors.",
   {
     properties: {
           tail_bytes: {

@@ -155,6 +155,16 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
         public List<DuplicateComponentEntry> DuplicateComponents { get; } = new List<DuplicateComponentEntry>();
         public List<InvalidLayerEntry> InvalidLayers { get; } = new List<InvalidLayerEntry>();
 
+        // feedback-01-08-glm §10 — every fileID DECLARED by a top-level YAML
+        // object header (`--- !u!T &NNN`, including negative/stripped ids) in
+        // this asset. AssetDatabase.LoadAllAssetsAtPath only surfaces the main
+        // asset + a small subset for a .unity scene, NOT every serialized
+        // object header, so scene-internal declared-but-not-loadable fileIDs
+        // read as missing_local_fileid false positives. The declared-anchors
+        // set is the authoritative "this fileID exists in the file" source and
+        // is OR'd into ExistsInAssets resolution in ResolveReferences.
+        public HashSet<long> DeclaredFileIDs { get; } = new HashSet<long>();
+
         public int MissingFileIDAndGuidCount { get; private set; }
         public int MissingGuidCount { get; private set; }
         public int MissingFileIDCount { get; private set; }

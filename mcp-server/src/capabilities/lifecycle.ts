@@ -135,6 +135,19 @@ export const TOOL_LIFECYCLE: Record<string, ToolLifecycle> = {
       "an agent can detect a no-op recompile and fall back to a standalone " +
       "Roslyn compile (documented in agentNextSteps on a no-op).",
   },
+  // feedback-01-08-glm §5 — deterministic project-wide recompile primitive.
+  "unity_open_mcp_recompile_scripts": {
+    class: "compile-reload",
+    note:
+      "Calls CompilationPipeline.RequestScriptCompilation and blocks until the " +
+      "compile settles; a domain reload follows. The recompile is project-wide " +
+      "(unlike reimport_package, which is package-scoped). The response reports " +
+      "dllMtimeBefore/After + recompiled so a no-op recompile is detectable; " +
+      "agentNextSteps branches on the outcome (read_compile_errors when " +
+      "recompiled, poll isCompiling when a compile was already in flight, fall " +
+      "back to assets_refresh/reimport_package when Unity judged sources " +
+      "unchanged).",
+  },
 
   // ----- process-stale: long-running / async; bridge may stall -------------
   // The heartbeat may stop advancing during these; an agent should expect a

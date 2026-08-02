@@ -53,16 +53,37 @@ test("activate sets source to 'manual' for a previously-default group that was d
 });
 
 test("activateAuto then activate flips source from 'auto' to 'manual' (manual intent wins)", () => {
+  // feedback-01-08-glm §7 — an explicit activate() must upgrade an
+  // auto-activated group's source from 'auto' to 'manual', even when the group
+  // is already active. Without this, the group stayed 'auto' and a later
+  // reconcileAutoActivation dropped it when its package was transiently
+  // unsatisfied — silently losing a group the agent had explicitly activated.
+  // The active SET does not change (group was already active), so activate()
+  // still returns false (change-detection contract preserved); only the source
+  // is re-stamped.
   const s = new ToolSessionState();
   s.activateAuto("shadergraph");
   assert.equal(s.activationSource("shadergraph"), "auto");
-  // The group is already active, so activate() returns false (no change in
-  // active set), but it must NOT silently flip the source. The current
-  // contract: activate is a no-op when already active (see source). This test
-  // pins that contract so a future "manual wins on re-activate" change is
-  // intentional.
   assert.equal(s.activate("shadergraph"), false);
-  assert.equal(s.activationSource("shadergraph"), "auto");
+  assert.equal(s.activationSource("shadergraph"), "manual");
+});
+
+test("manual-activated auto group survives a reconcile that drops still-auto groups", () => {
+  // feedback-01-08-glm §7 regression guard: shadergraph and vfx both
+  // auto-activate; the agent then explicitly activate()s shadergraph. A
+  // reconcile with an empty satisfied set must drop vfx (still 'auto') but
+  // KEEP shadergraph (now 'manual') — that is the whole point of re-stamping
+  // the source on explicit activate.
+  const s = new ToolSessionState();
+  s.reconcileAutoActivation(new Set(["shadergraph", "vfx"]));
+  s.activate("shadergraph"); // upgrade auto -> manual
+  assert.equal(s.activationSource("shadergraph"), "manual");
+  assert.equal(s.activationSource("vfx"), "auto");
+  const changed = s.reconcileAutoActivation(new Set());
+  assert.ok(changed.includes("vfx"));
+  assert.ok(!changed.includes("shadergraph"));
+  assert.equal(s.isGroupActive("shadergraph"), true);
+  assert.equal(s.isGroupActive("vfx"), false);
 });
 
 test("activateAuto rejects unknown groups", () => {

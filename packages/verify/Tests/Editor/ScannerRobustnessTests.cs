@@ -462,6 +462,59 @@ namespace UnityOpenMcpVerify.Tests
                 $"Got: {string.Join(", ", missingFile.Select(i => i.IssueCode))}");
         }
 
+        // feedback-01-08-glm §10 — a .unity scene DECLARES every serialized
+        // object via a `--- !u!T &NNN` header, but AssetDatabase.LoadAllAssetsAt
+        // Path only surfaces the scene root + a tiny subset, NOT every header.
+        // Scene-internal declared-but-not-loadable fileIDs therefore read as
+        // missing_local_fileid false positives on a clean, just-reserialized
+        // scene. The scanner now indexes the YAML anchors into DeclaredFileIDs
+        // and ORs them into ExistsInAssets. Pin that a synthesized scene with
+        // several declared-only anchors reports ZERO missing_local_fileid.
+        [UnityTest]
+        public System.Collections.IEnumerator MissingReferences_SceneDeclaredFileIds_NotFlagged()
+        {
+            var rule = new MissingReferencesRule();
+            var scenePath = FixtureRoot + "/DeclaredFileIds.unity";
+
+            // A minimal scene: a GameObject (id 1) + its Transform (id 2), a
+            // second GameObject (id 3) + Transform (id 4) whose m_Father points
+            // at the first Transform, and a MonoBehaviour (id 5) on GameObject
+            // 1. fileIDs 1, 3, 5 are leaf anchors no other line references
+            // (LocalUsagesCount == 0) and none are surfaced by
+            // LoadAllAssetsAtPath for a scene — the exact false-positive shape.
+            var yaml = "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n" +
+                "--- !u!1 &1 GameObject\n" +
+                "  m_ObjectHideFlags: 0\n" +
+                "  m_Name: Root\n" +
+                "--- !u!4 &2 Transform\n" +
+                "  m_GameObject: {fileID: 1}\n" +
+                "  m_LocalPosition: {x: 0, y: 0, z: 0}\n" +
+                "  m_Father: {fileID: 0}\n" +
+                "--- !u!1 &3 GameObject\n" +
+                "  m_ObjectHideFlags: 0\n" +
+                "  m_Name: Child\n" +
+                "--- !u!4 &4 Transform\n" +
+                "  m_GameObject: {fileID: 3}\n" +
+                "  m_LocalPosition: {x: 1, y: 0, z: 0}\n" +
+                "  m_Father: {fileID: 2}\n" +
+                "--- !u!114 &5 MonoBehaviour\n" +
+                "  m_GameObject: {fileID: 1}\n" +
+                "  m_Script: {fileID: -1, guid: 00000000000000000000000000000000, type: 0}\n";
+            EnsureDirectory(Path.GetDirectoryName(scenePath));
+            File.WriteAllText(scenePath, yaml);
+            AssetDatabase.ImportAsset(scenePath, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { scenePath });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var missingLocal = sink.Where(i => i.IssueCode.StartsWith("missing_local_fileid")).ToList();
+            Assert.AreEqual(0, missingLocal.Count,
+                "scene-internal declared-but-not-loadable fileIDs must NOT be flagged missing_local_fileid. " +
+                $"Got: {string.Join(", ", missingLocal.Select(i => i.IssueCode))}");
+        }
+
         // -------------------------------------------------------------------
         // T3.3 — ResolveProjectPath handles paths containing /Assets
         // -------------------------------------------------------------------

@@ -27,6 +27,19 @@ export const prefabInstantiate = makeTool(
               "Optional destination scene path \"Root/Parent\" — the parent must already exist. " +
               "Omit to instantiate at scene root.",
           },
+          scene_path: {
+            type: "string",
+            description:
+              "Optional target scene asset path (e.g. 'Assets/Scenes/Bootstrap.unity') for the instance root. " +
+              "The scene must already be loaded (use unity_open_mcp_scene_open Additive first). Omit to " +
+              "instantiate in the active scene. Ignored when parent_path is supplied (the parent's scene wins).",
+          },
+          scene_name: {
+            type: "string",
+            description:
+              "Optional target scene name for the instance root (alternative to scene_path). The scene must " +
+              "already be loaded. Omit to instantiate in the active scene.",
+          },
           position: {
             type: "string",
             description: "Optional world-space position as \"x,y,z\". Defaults to 0,0,0.",

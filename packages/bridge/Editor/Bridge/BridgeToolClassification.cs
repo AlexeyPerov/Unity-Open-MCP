@@ -108,6 +108,8 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_package_get_info",
             "unity_open_mcp_package_get_dependencies",
             "unity_open_mcp_package_check",
+            // feedback-01-08-glm §5 — force-recompile primitive (see MutatingTools).
+            "unity_open_mcp_recompile_scripts",
             // M16 Plan 5 — typed console / editor state / selection / undo /
             // tags / layers tools.
             "unity_open_mcp_console_clear",
@@ -448,6 +450,13 @@ namespace UnityOpenMcpBridge
             // tool also returns dllMtimeBefore/After so a no-op recompile is
             // detectable (specs/feedback.md).
             "unity_open_mcp_reimport_package",
+            // feedback-01-08-glm §5 — recompile_scripts forces a project-wide
+            // script recompile (CompilationPipeline.RequestScriptCompilation)
+            // and blocks until it settles. It writes no assets itself, but the
+            // recompile/domain-reload is the mutation; RestartThenSettle covers
+            // the settle. The caller scopes paths_hint to the edited scripts so
+            // the gate can validate the post-recompile state.
+            "unity_open_mcp_recompile_scripts",
             // M16 Plan 5 — typed TagManager mutators. Each rewrites
             // ProjectSettings/TagManager.asset; the caller must scope
             // paths_hint to that asset. The other Plan 5 tools mutate editor

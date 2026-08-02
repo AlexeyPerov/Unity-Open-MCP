@@ -5,7 +5,7 @@ import type { BatchSpawn } from "./batch-spawn.js";
 import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline, dependenciesOffline } from "./offline.js";
-import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES, detectStaleLog } from "./unity-log.js";
+import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES, detectStaleLog, detectStaleAssembly } from "./unity-log.js";
 import { summarizeProjectHealth, extractProjectHealthIssues } from "./project-health.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
@@ -415,8 +415,15 @@ function foldFindReferencesLiveBody(
 ): Record<string, unknown> | null {
   if (body.error) return null;
 
-  // Bridge shape: { referencedBy: string[], totalCount, ... } (flat paths).
+  // Bridge shape: { referencedBy: Array<{assetPath, guid}>, totalCount, ... } —
+  // each entry is an object (FindReferencesTool emits {assetPath, guid}). Older
+  // comments assumed a flat string[]; the live bridge has never emitted that.
+  // `extractRefPath` normalizes both the object form and a legacy/defensive
+  // bare-string form so a future shape change does not crash the compact
+  // grouping (feedback-01-08-glm §3: a non-string element reached
+  // `.lastIndexOf` and hard-crashed the tool).
   const rawList = Array.isArray(body.referencedBy) ? body.referencedBy : [];
+  const pathList = rawList.map((entry) => extractRefPath(entry));
   const pageSize = typeof args.page_size === "number" && args.page_size > 0 ? (args.page_size as number) : 0;
   const cursor = typeof args.cursor === "string" ? (args.cursor as string) : undefined;
 
@@ -424,10 +431,10 @@ function foldFindReferencesLiveBody(
     // compact: counts + byKind grouping only — drop the per-asset list.
     const { referencedBy: _dropped, ...rest } = body;
     void _dropped;
-    const byKind = groupLiveRefsByKind(rawList as string[]);
+    const byKind = groupLiveRefsByKind(pathList);
     return {
       ...rest,
-      totalCount: rawList.length,
+      totalCount: pathList.length,
       byKind,
       referencedBy: [],
     };
@@ -435,17 +442,34 @@ function foldFindReferencesLiveBody(
 
   // balanced / full: keep the path list (paged when requested).
   if (pageSize > 0) {
-    const { page, block } = applyPaging(rawList as string[], "find_references", { page_size: pageSize, cursor });
-    return attachPagination({ ...body, referencedBy: page, totalCount: rawList.length }, block);
+    const { page, block } = applyPaging(pathList, "find_references", { page_size: pageSize, cursor });
+    return attachPagination({ ...body, referencedBy: page, totalCount: pathList.length }, block);
   }
 
-  return { ...body, totalCount: rawList.length };
+  return { ...body, referencedBy: pathList, totalCount: pathList.length };
+}
+
+/** Coerce a `referencedBy` entry to its asset path. The live bridge emits
+ *  `{assetPath, guid}` objects; accept a bare string defensively so a shape
+ *  change never reaches the string-only `.lastIndexOf` in the grouping. */
+function extractRefPath(entry: unknown): string {
+  if (typeof entry === "string") return entry;
+  if (entry && typeof entry === "object") {
+    const obj = entry as Record<string, unknown>;
+    if (typeof obj.assetPath === "string") return obj.assetPath;
+    if (typeof obj.path === "string") return obj.path;
+  }
+  return "";
 }
 
 /** Derive a byKind grouping from flat referenced paths for the live compact view. */
 function groupLiveRefsByKind(paths: string[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const path of paths) {
+    if (!path) {
+      counts.other = (counts.other ?? 0) + 1;
+      continue;
+    }
     const dot = path.lastIndexOf(".");
     const kind = dot > 0 ? path.slice(dot + 1).toLowerCase() : "other";
     counts[kind] = (counts[kind] ?? 0) + 1;
@@ -815,6 +839,15 @@ export class ToolRouter implements Router {
       if (stale.staleLogSuspected) staleLog = stale;
     }
 
+    // feedback-01-08-glm §5b — stale-ASSEMBLY detection. Runs UNCONDITIONALLY
+    // (even on no_errors_found): after a C# edit, AssetDatabase.Refresh often
+    // no-ops, the DLL is never rebuilt, and the log carries no fresh CSxxxx —
+    // so a healthy signal reported against a stale assembly misleads the agent
+    // into trusting code that has not actually been rebuilt. Cross-check the
+    // newest Library/ScriptAssemblies/*.dll mtime against Assets/**/*.cs source
+    // mtimes and surface staleAssembly when any source is newer than the DLL.
+    const staleAsm = detectStaleAssembly(this.projectPath);
+
     return sourceResult(
       {
         status,
@@ -840,6 +873,17 @@ export class ToolRouter implements Router {
               staleLogSuspected: true,
               staleLogHint: staleLog.hint,
               staleLogNewerFiles: staleLog.newerFiles,
+            }
+          : {}),
+        // Present ONLY when at least one Assets/**/*.cs source is newer than
+        // the newest built DLL — the running assembly predates the latest
+        // source, so a no_errors_found signal cannot be trusted until the
+        // assembly is rebuilt (feedback-01-08-glm §5b).
+        ...(staleAsm.staleAssembly
+          ? {
+              staleAssembly: true,
+              staleAssemblyHint: staleAsm.hint,
+              staleAssemblyNewerSources: staleAsm.newerSources,
             }
           : {}),
       },

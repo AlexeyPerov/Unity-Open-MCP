@@ -1181,6 +1181,11 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_package_add" => PackagesTools.Add(body),
                 "unity_open_mcp_package_remove" => PackagesTools.Remove(body),
                 "unity_open_mcp_reimport_package" => PackagesTools.ReimportPackage(body),
+                // feedback-01-08-glm §5 — force a project-wide script recompile
+                // and block until it settles. RestartThenSettle (ToolLifecycle)
+                // covers the domain reload; the handler reports dllMtimeBefore/
+                // After + recompiled so a no-op recompile is detectable.
+                "unity_open_mcp_recompile_scripts" => RecompileScriptsTool.Execute(body),
                 "unity_open_mcp_package_get_info" => PackagesTools.GetInfo(body),
                 "unity_open_mcp_package_get_dependencies" => PackagesTools.GetDependencies(body),
                 "unity_open_mcp_package_check" => PackagesTools.Check(body),

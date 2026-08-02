@@ -55,6 +55,17 @@ namespace UnityOpenMcpBridge.TypedTools
                         $"Parent GameObject not found at path '{parentPath}'.");
             }
 
+            // feedback-01-08-glm §6 — optional explicit target scene. Without
+            // this, a new root GameObject lands in whatever the active scene is
+            // at call time (invisible + mutable), so with multiple scenes loaded
+            // the result was inconsistent. When supplied, the new GameObject is
+            // moved into the target scene via MoveGameObjectToScene after
+            // creation. A parent_path in another scene already routes the GO
+            // there via SetParent, so scene targeting only applies to roots.
+            var targetScene = SceneTargeting.ResolveTargetScene(body, out var sceneError);
+            if (sceneError != null)
+                return ToolDispatchResult.Fail("scene_not_found", sceneError);
+
             GameObject go;
             try
             {
@@ -71,6 +82,8 @@ namespace UnityOpenMcpBridge.TypedTools
 
             if (parentGo != null)
                 go.transform.SetParent(parentGo.transform, false);
+            else
+                SceneTargeting.MoveToSceneIfDifferent(go, targetScene);
 
             ApplyTransform(go.transform, position, rotation, scale, localSpace);
 

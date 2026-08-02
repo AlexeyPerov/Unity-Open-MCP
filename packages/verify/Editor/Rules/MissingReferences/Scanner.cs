@@ -134,7 +134,15 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                     modBlockOpenIndent = -1;
                     var anchorMatch = SharedRegex.ObjectHeaderAnchor.Match(line);
                     if (anchorMatch.Success && long.TryParse(anchorMatch.Groups[1].Value, out var anchor))
+                    {
                         currentAnchor = anchor;
+                        // feedback-01-08-glm §10 — record the declared anchor so
+                        // the fileID "exists in the file" regardless of whether
+                        // AssetDatabase surfaces it. The regex captures -?\d+, so
+                        // negative (stripped) ids are declared too. This is the
+                        // authoritative source for ExistsInAssets resolution.
+                        refsData.DeclaredFileIDs.Add(anchor);
+                    }
                 }
                 else if (modBlockIndent >= 0)
                 {
@@ -372,7 +380,8 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             foreach (var asset in assets)
             {
                 foreach (var registry in asset.RefsData.LocalReferences)
-                    registry.ExistsInAssets = scopedFileIDs.Contains(registry.Id);
+                    registry.ExistsInAssets = scopedFileIDs.Contains(registry.Id)
+                        || asset.RefsData.DeclaredFileIDs.Contains(registry.Id);
 
                 foreach (var registry in asset.RefsData.ExternalReferences)
                 {
