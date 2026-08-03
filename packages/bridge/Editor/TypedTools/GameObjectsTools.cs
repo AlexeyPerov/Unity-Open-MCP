@@ -984,7 +984,7 @@ namespace UnityOpenMcpBridge.TypedTools
             var sb = new StringBuilder(16 + summary.Length + action.Length);
             sb.Append("{\"status\":\"ok\",\"action\":\"").Append(action).Append("\",");
             if (!string.IsNullOrEmpty(prefabConnection))
-                sb.Append("\"prefabConnection\":").Append(TypedTargets.Esc(prefabConnection)).Append(',');
+                sb.Append("\"prefabConnection\":\"").Append(TypedTargets.Esc(prefabConnection)).Append("\",");
             // Strip the leading '{' off the summary so we splice fields into
             // the outer object cleanly.
             sb.Append(summary.Substring(1));

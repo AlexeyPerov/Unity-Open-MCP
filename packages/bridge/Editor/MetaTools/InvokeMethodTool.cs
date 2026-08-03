@@ -407,7 +407,7 @@ namespace UnityOpenMcpBridge.MetaTools
         /// not loaded — exactly the static APIs (SetActiveScene /
         /// MoveGameObjectToScene) the field report was blocked on.
         /// </summary>
-        private static scene ResolveSceneArg(object value)
+        private static Scene ResolveSceneArg(object value)
         {
             string path = null;
             string name = null;

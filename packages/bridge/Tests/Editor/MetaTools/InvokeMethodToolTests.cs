@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using UnityOpenMcpBridge.MetaTools;
+using UnityOpenMcpBridge.ObjectRefs;
 using UnityEngine;
 
 namespace UnityOpenMcpBridge.Tests
@@ -66,7 +67,10 @@ namespace UnityOpenMcpBridge.Tests
             var go = new GameObject("InvokeMethodArgTarget");
             try
             {
-                var id = go.GetInstanceID();
+                // InstanceId.Of is the version-gated read path (GetInstanceID
+                // is a CS0619 error on Unity 6000.5+; see docs/code-conventions
+                // §Instance IDs).
+                var id = InstanceId.Of(go);
                 var result = InvokeMethodTool.Execute(
                     "{\"type_name\":\"UnityOpenMcpBridge.Tests.InvokeMethodArgProbe\"," +
                     "\"assembly_name\":\"com.alexeyperov.unity-open-mcp-bridge.Editor.Tests\"," +

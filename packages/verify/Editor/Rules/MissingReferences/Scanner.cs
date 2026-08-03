@@ -68,7 +68,9 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
                 var assetObject = AssetDatabase.LoadAssetAtPath<Object>(assetPath);
                 if (assetObject == null) continue;
-                if (!AssetDatabase.TryGetGUIDAndLocalFileIdentifier(assetObject, out var guid, out _))
+                // Explicit `long` — the discard makes the call ambiguous on
+                // 2022.3, where the deprecated (out int) overload still exists.
+                if (!AssetDatabase.TryGetGUIDAndLocalFileIdentifier(assetObject, out var guid, out long _))
                     continue;
 
                 var refsData = new AssetReferencesData();
