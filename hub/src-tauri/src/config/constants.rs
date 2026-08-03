@@ -33,7 +33,7 @@ pub const LOOPBACK_HOST: &str = "127.0.0.1";
 /// Pinning (not `@latest`) keeps the MCP server aligned with the bridge /
 /// verify packages the wizard installs. Mirrors the C# `BridgeConstants.NpmPackage`
 /// and the TS `NPM_PACKAGE`. Kept in sync by `scripts/sync-version.mjs`.
-pub const NPM_PACKAGE: &str = "unity-open-mcp@0.8.4";
+pub const NPM_PACKAGE: &str = "unity-open-mcp@0.9.0";
 
 /// Markers wrapping the JSON payload emitted by the headless batch / verify
 /// entry points so the mcp-server can extract it from mixed stdout. MUST

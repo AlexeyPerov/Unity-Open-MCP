@@ -75,7 +75,7 @@ export const BRIDGE_MAX_TIMEOUT_MS = 600_000;
  * verify packages. Mirrors the C# `BridgeConstants.NpmPackage`. Kept in
  * sync by `scripts/sync-version.mjs`.
  */
-export const NPM_PACKAGE = "unity-open-mcp@0.8.4";
+export const NPM_PACKAGE = "unity-open-mcp@0.9.0";
 
 /**
  * Build the bridge base URL for a given port. Centralizes the loopback +

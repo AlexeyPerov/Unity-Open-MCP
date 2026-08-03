@@ -52,7 +52,7 @@ Code、Rider、Unity AI、ZooCode 和 Antigravity：
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.8.4"],
+      "args": ["-y", "unity-open-mcp@0.9.0"],
       "env": {
         "UNITY_PROJECT_PATH": "/absolute/path/to/project"
       }
@@ -69,7 +69,7 @@ Code、Rider、Unity AI、ZooCode 和 Antigravity：
     "unity-open-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.8.4"],
+      "args": ["-y", "unity-open-mcp@0.9.0"],
       "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
   }
@@ -84,7 +84,7 @@ Code、Rider、Unity AI、ZooCode 和 Antigravity：
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@0.8.4"],
+      "command": ["npx", "-y", "unity-open-mcp@0.9.0"],
       "enabled": true,
       "environment": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
@@ -101,7 +101,7 @@ Code、Rider、Unity AI、ZooCode 和 Antigravity：
       "unity-open-mcp": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "unity-open-mcp@0.8.4"],
+        "args": ["-y", "unity-open-mcp@0.9.0"],
         "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
       }
     }
@@ -115,7 +115,7 @@ Code、Rider、Unity AI、ZooCode 和 Antigravity：
 [mcp_servers.unity-open-mcp]
 enabled = true
 command = "npx"
-args = ["-y", "unity-open-mcp@0.8.4"]
+args = ["-y", "unity-open-mcp@0.9.0"]
 
 [mcp_servers.unity-open-mcp.env]
 UNITY_PROJECT_PATH = "/absolute/path/to/project"
@@ -126,7 +126,7 @@ UNITY_PROJECT_PATH = "/absolute/path/to/project"
 ```sh
 claude mcp add unity-open-mcp \
   --env UNITY_PROJECT_PATH=/absolute/path/to/project \
-  -- npx -y unity-open-mcp@0.8.4
+  -- npx -y unity-open-mcp@0.9.0
 ```
 
 若服务器已注册，当命令、版本锁定或项目路径需要变更时，请先移除再重新添加。
