@@ -550,6 +550,40 @@
     return mcpSourceMode === "npx";
   }
 
+  /** Commit the step being left, exactly as footer Next does.
+   *
+   *  Every navigation away from a step routes through `goToStep`, which runs
+   *  this first: footer Next / Back, the progress-strip segment jumps, and the
+   *  in-step shortcuts ("Go to Verify", "Step by step", "Skip"). Before this
+   *  existed only footer Next did the commit work, so leaving a step by any
+   *  other route silently dropped what the user had entered on it — the
+   *  toolkit root typed on the MCP-server-source step never reached app
+   *  settings (it only landed there on Finish), and an open express panel
+   *  stayed armed, keeping the packages + client planners running off-step and
+   *  re-showing the panel instead of the diagnostics on return to Preflight.
+   *
+   *  The `settingsStore` setters short-circuit on unchanged values, so running
+   *  this on every step change costs nothing when nothing was edited. */
+  function commitCurrentStep() {
+    // Leaving the Preflight step while the express panel is open collapses the
+    // panel back to the diagnostics view.
+    if (expressActive) exitExpress();
+    // Apply the launch-source values entered on the MCP-server-source step, so
+    // the mode + toolkit root the later steps plan against are what the user
+    // typed rather than the last persisted ones. Everything else on the form is
+    // already live `$state` read by the planners, and is mirrored into the
+    // per-project draft by the debounced persist effect.
+    void persistToolkitRoot();
+  }
+
+  /** Move to `id`, committing the step being left first. `reRunWizard` assigns
+   *  `currentStep` directly instead — it deliberately discards the form. */
+  function goToStep(id: StepId) {
+    if (id === currentStep) return;
+    commitCurrentStep();
+    currentStep = id;
+  }
+
   function nextStep() {
     if (!canGoNext()) return;
     const i = stepIndex(currentStep);
@@ -569,11 +603,15 @@
       const after = STEP_ORDER.indexOf("step5");
       if (after > i) next = STEP_ORDER[after];
     }
-    currentStep = next;
+    goToStep(next);
   }
 
+  /** Progress-strip / shortcut jump. Free navigation is intentional (the strip
+   *  is how the demoted MCP-source step is reached at all, and how the
+   *  already-configured banner skips to Verify), so unlike `nextStep` a jump is
+   *  not gated on `canGoNext()` — but it does commit the step being left. */
   function jumpToStep(id: StepId) {
-    currentStep = id;
+    goToStep(id);
   }
 
   function selectPreset(id: PresetId) {
@@ -619,7 +657,7 @@
     if (!canGoBack()) return;
     const i = stepIndex(currentStep);
     if (i > 0) {
-      currentStep = STEP_ORDER[i - 1];
+      goToStep(STEP_ORDER[i - 1]);
     }
   }
 
@@ -662,13 +700,9 @@
       return;
     }
     if (isLastFormStep()) {
-      void persistToolkitRoot();
-      currentStep = "done";
+      goToStep("done");
       return;
     }
-    // Leaving the Preflight step via footer while the express panel is open
-    // collapses the panel back to the diagnostics view.
-    if (expressActive) exitExpress();
     nextStep();
   }
 
@@ -1492,7 +1526,7 @@
     S.appendDrawerLog(
       `AI Setup: skipped Step 5 verify for ${wizardProjectName} — wizard marked incomplete on Done`,
     );
-    currentStep = "done";
+    goToStep("done");
   }
 
   /** Plan 2 — whether the express path is offered. Shown on Preflight when the
@@ -1574,6 +1608,9 @@
         S.appendDrawerLog(
           `AI Setup: express setup complete for ${wizardProjectName}`,
         );
+        // Not `goToStep` — express owns its own commit (`persistToolkitRoot`
+        // above) and `commitCurrentStep`'s `exitExpress` would reset
+        // `expressPhase` back to "idle", dropping the completed run's state.
         currentStep = "done";
         expressActive = false;
       } else {
@@ -1700,6 +1737,8 @@
     expressRunning = false;
     expressPhase = "idle";
     expressError = null;
+    // Not `goToStep` — a re-run deliberately discards the form, so there is
+    // nothing to commit on the way out.
     currentStep = "step0";
     void clearPersistedDraft();
     void refreshDetection();
@@ -1984,7 +2023,7 @@
     setUpgradeAcknowledged: (v: boolean) => (upgradeAcknowledged = v),
     setShowDiff: (v: boolean) => (showDiff = v),
     installManifest: () => void installManifest(),
-    skipToMcpClient: () => (currentStep = "step4"),
+    skipToMcpClient: () => goToStep("step4"),
     setMcpClient: (v: McpClientId) => (mcpClient = v),
     setCursorProjectScope: (v: boolean) => (cursorProjectScope = v),
     setBridgePort: (v: string) => (bridgePort = v),

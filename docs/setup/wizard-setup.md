@@ -38,7 +38,7 @@ Wizard choices (preset, MCP client, package toggles, bridge port, and other form
 
 ## Wizard steps
 
-The wizard shows a clickable progress strip at the top. Segments turn **green** when their checks already pass, so you can see at a glance which steps still need attention. You can click any segment to jump to that step; Back/Next still move sequentially. The recommended path needs no **Advanced (optional)** expansion on any step.
+The wizard shows a clickable progress strip at the top. Segments turn **green** when their checks already pass, so you can see at a glance which steps still need attention. You can click any segment to jump to that step; Back/Next still move sequentially. Leaving a step by any route — Next, Back, or a strip jump — applies what you entered on it, so you never lose a typed value by navigating away. The recommended path needs no **Advanced (optional)** expansion on any step.
 
 ### Preset — Setup preset (optional)
 
