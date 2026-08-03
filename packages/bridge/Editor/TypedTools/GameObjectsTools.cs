@@ -133,25 +133,39 @@ namespace UnityOpenMcpBridge.TypedTools
             var go = resolved.GameObject;
 
             GameObject clone;
+            // Track whether the clone retained its prefab connection, so the
+            // result can tell the agent exactly what kind of copy it got.
+            string prefabConnection;
             try
             {
-                // Prefab instances must clone via PrefabUtility.InstantiatePrefab —
-                // Object.Instantiate strips the prefab connection and produces a
-                // broken disconnected copy (PrefabTools.Instantiate uses the same
-                // API at PrefabTools.cs:49 as the reference). Re-apply the
-                // caller's local pose after InstantiatePrefab (it does not take a
-                // world pose), then place the clone next to the source (editor
-                // duplicate sibling-index semantics).
-                if (PrefabUtility.IsPartOfPrefabInstance(go))
+                // InstantiatePrefab preserves the prefab connection — but it
+                // ONLY accepts the OUTERMOST root of a prefab instance. Passing
+                // a nested part of a prefab instance (e.g. a child Toggle of a
+                // prefab-root Canvas) returns null and broke duplication of any
+                // non-root prefab-instance object. Use it solely for the
+                // outermost root; every other object (plain GO OR a nested part
+                // of a prefab instance) clones via Object.Instantiate, which
+                // produces a plain child — the correct editor-duplicate outcome
+                // for a part-of-prefab-instance object.
+                if (PrefabUtility.IsPartOfPrefabInstance(go)
+                    && PrefabUtility.IsOutermostPrefabInstanceRoot(go))
                 {
                     clone = PrefabUtility.InstantiatePrefab(go, go.transform.parent) as GameObject;
                     if (clone == null)
                         return ToolDispatchResult.Fail("duplicate_failed",
-                            "PrefabUtility.InstantiatePrefab returned null.");
+                            "PrefabUtility.InstantiatePrefab returned null (the target is not a loadable prefab-instance root).");
+                    prefabConnection = "preserved";
                 }
                 else
                 {
+                    // Object.Instantiate on a nested part of a prefab instance
+                    // yields a plain (non-prefab) copy — the only sane result,
+                    // since a nested object has no prefab root of its own to
+                    // reconnect to. A plain GO clones to a plain GO (unchanged).
                     clone = Object.Instantiate(go, go.transform.parent, false);
+                    prefabConnection = PrefabUtility.IsPartOfPrefabInstance(go)
+                        ? "nested_to_plain"   // source was part of a prefab instance
+                        : "plain";
                 }
                 // Name after Instantiate appends "(Clone)" — match editor
                 // duplicate semantics so the result name is stable.
@@ -177,7 +191,7 @@ namespace UnityOpenMcpBridge.TypedTools
             EditorUtility.SetDirty(clone);
             MarkObjectSceneDirty(clone);
 
-            return ToolDispatchResult.Ok(BuildGameObjectResult(clone, "duplicated"));
+            return ToolDispatchResult.Ok(BuildGameObjectResult(clone, "duplicated", prefabConnection));
         }
 
         // Find returns a token-bounded list of GameObjects that match the
@@ -957,10 +971,20 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         private static string BuildGameObjectResult(GameObject go, string action)
+            => BuildGameObjectResult(go, action, null);
+
+        // `prefabConnection` (Duplicate only) reports how the clone relates to
+        // its source's prefab connection: "preserved" (InstantiatePrefab on the
+        // outermost root), "nested_to_plain" (Object.Instantiate on a nested
+        // part of a prefab instance — a plain copy, since a nested object has
+        // no prefab root of its own), or "plain" (source was a plain GO).
+        private static string BuildGameObjectResult(GameObject go, string action, string prefabConnection)
         {
             var summary = BuildGameObjectSummary(go);
             var sb = new StringBuilder(16 + summary.Length + action.Length);
             sb.Append("{\"status\":\"ok\",\"action\":\"").Append(action).Append("\",");
+            if (!string.IsNullOrEmpty(prefabConnection))
+                sb.Append("\"prefabConnection\":").Append(TypedTargets.Esc(prefabConnection)).Append(',');
             // Strip the leading '{' off the summary so we splice fields into
             // the outer object cleanly.
             sb.Append(summary.Substring(1));

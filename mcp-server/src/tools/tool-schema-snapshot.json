@@ -2598,7 +2598,7 @@
     }
   },
   "unity_open_mcp_gameobject_duplicate": {
-    "description": "Duplicate a GameObject (and its children) in the active scene, preserving the parent relationship and transform. Undo-recorded. Mutating: runs the full gate path; `paths_hint` is the scene path that contains the target. Returns the clone's instanceId, name, path, transform, and component list so the agent can immediately chain further ops. Address the source by instance_id > path > name.",
+    "description": "Duplicate a GameObject (and its children) in the active scene, preserving the parent relationship and transform. Undo-recorded. Mutating: runs the full gate path; `paths_hint` is the scene path that contains the target. Returns the clone's instanceId, name, path, transform, component list, and a `prefabConnection` field describing how the clone relates to the source's prefab connection. Address the source by instance_id > path > name. Prefab-handling: duplicating the OUTERMOST root of a prefab instance preserves the prefab connection (prefabConnection \"preserved\"); duplicating a NESTED part of a prefab instance (e.g. a child Toggle under a prefab-root Canvas) produces a plain non-prefab copy (prefabConnection \"nested_to_plain\") — the only sane result, since a nested object has no prefab root of its own. A plain GO clones to a plain GO (prefabConnection \"plain\").",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

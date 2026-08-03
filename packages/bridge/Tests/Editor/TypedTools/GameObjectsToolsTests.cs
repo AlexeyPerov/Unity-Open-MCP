@@ -894,6 +894,78 @@ namespace UnityOpenMcpBridge.Tests
             }
         }
 
+        // Reported defect: gameobject_duplicate used InstantiatePrefab for ANY
+        // part of a prefab instance, but InstantiatePrefab only accepts the
+        // OUTERMOST root — passing a nested child (e.g. a Toggle under a
+        // prefab-root Canvas) returned null and failed with duplicate_failed.
+        // The fix routes nested parts through Object.Instantiate, producing a
+        // plain (non-prefab) clone — the only sane result for a nested object.
+        [Test]
+        public void Duplicate_NestedPartOfPrefabInstance_ClonesToPlainNotNull()
+        {
+            const string TmpDir = "Assets/TmpDupTests";
+            const string PrefabPath = TmpDir + "/NestedChildPrefab.prefab";
+            if (AssetDatabase.LoadMainAssetAtPath(PrefabPath) != null)
+                AssetDatabase.DeleteAsset(PrefabPath);
+            if (AssetDatabase.IsValidFolder(TmpDir))
+                AssetDatabase.DeleteAsset(TmpDir);
+            AssetDatabase.CreateFolder("Assets", "TmpDupTests");
+
+            GameObject instance = null;
+            try
+            {
+                // Prefab with a child "Toggle" — the nested target.
+                var prefabSrc = new GameObject("NestedChildPrefab");
+                var child = new GameObject("Toggle");
+                child.transform.SetParent(prefabSrc.transform, false);
+                PrefabUtility.SaveAsPrefabAsset(prefabSrc, PrefabPath);
+                Object.DestroyImmediate(prefabSrc);
+
+                var prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
+                Assert.IsNotNull(prefabAsset);
+                instance = PrefabUtility.InstantiatePrefab(prefabAsset) as GameObject;
+                var nestedChild = instance.transform.Find("Toggle")?.gameObject;
+                Assert.IsNotNull(nestedChild, "sanity: nested child must exist on the instance");
+                Assert.IsTrue(PrefabUtility.IsPartOfPrefabInstance(nestedChild),
+                    "sanity: nested child is part of the prefab instance");
+                Assert.IsFalse(PrefabUtility.IsOutermostPrefabInstanceRoot(nestedChild),
+                    "sanity: nested child is NOT the outermost root");
+
+                // Before the fix this returned duplicate_failed (InstantiatePrefab
+                // returned null for the non-root). Now it must clone successfully.
+                var result = GameObjectsTools.Duplicate(
+                    "{\"instance_id\":" + InstanceId.Of(nestedChild) + "}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                StringAssert.Contains("\"prefabConnection\":\"nested_to_plain\"", result.Output);
+
+                // The clone is a plain (non-prefab) child of the same parent.
+                var clones = new System.Collections.Generic.List<GameObject>();
+                foreach (var t in instance.GetComponentsInChildren<Transform>(true))
+                    if (t.name == "Toggle") clones.Add(t.gameObject);
+                // One prefab-connected source + one plain clone share the name.
+                Assert.AreEqual(2, clones.Count, "nested source + clone expected");
+                GameObject plainClone = null;
+                foreach (var c in clones)
+                {
+                    if (c == nestedChild) continue;
+                    plainClone = c;
+                    break;
+                }
+                Assert.IsNotNull(plainClone);
+                Assert.IsFalse(PrefabUtility.IsPartOfPrefabInstance(plainClone),
+                    "nested-instance clone must be a plain (non-prefab) object");
+            }
+            finally
+            {
+                if (instance != null) Object.DestroyImmediate(instance);
+                foreach (var go in SceneQuery.FindAllOfType<GameObject>(SceneQuery.Inactive.Include))
+                    if (go != null && (go.name == "NestedChildPrefab" || go.name == "Toggle"))
+                        Object.DestroyImmediate(go);
+                if (AssetDatabase.IsValidFolder(TmpDir))
+                    AssetDatabase.DeleteAsset(TmpDir);
+            }
+        }
+
         [Test]
         public void ResolveInstance_NotFound_ReturnsGameObjectNotFound()
         {
