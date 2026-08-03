@@ -50,5 +50,3 @@
     - **Suggested fix:** <idea or existing internal-plan pointer>
     ```
   - Only log genuine issues. Do not log expected/working behavior, successful calls, or personal preference rants. Keep entries concrete and reproducible (include the error code, the args that triggered it, the route taken).
-
-## Imported Claude Cowork project instructions
