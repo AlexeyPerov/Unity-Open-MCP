@@ -116,7 +116,9 @@ Compile failures surface as **machine-readable error codes** — branch on the c
 
 For `bridge_compile_failed` / `bridge_offline`: call `**unity_open_mcp_read_compile_errors`** → fix `errors[].file`/`line`/`code` → trigger recompile. (If no Editor is open, `Editor.log` is stale from the previous session and won't reflect your latest edits — recompile verification needs Unity running.)
 
-**Stale-log guard.** When the response carries `staleLogSuspected: true`, the cited source files were edited more recently than `Editor.log` — the error block may reference on-disk code you have **already fixed** (Unity's incremental compiler no-op'd the recompile of the broken assembly, so the log's most-recent error block never got rewritten). Before chasing the errors, force a genuine recompile (`reimport_package` for a local `packages/` package, or `compile_check`) and re-read. The response also carries `staleLogHint` + `staleLogNewerFiles[]` (the offending files).
+**Stale-log guard.** When the response carries `staleLogSuspected: true`, the cited source files were edited more recently than `Editor.log` — the error block may reference on-disk code you have **already fixed** (Unity's incremental compiler no-op'd the recompile of the broken assembly, so the log's most-recent error block never got rewritten). Before chasing the errors, force a genuine recompile (`reimport_package` for a local `packages/` package, `recompile_scripts` for a project-wide nudge, or `compile_check`) and re-read. The response also carries `staleLogHint` + `staleLogNewerFiles[]` (the offending files).
+
+**Stale-assembly guard.** The response carries `staleAssembly: true` when at least one `Assets/**/*.cs` source is newer than the newest `Library/ScriptAssemblies/*.dll` — the running assembly predates the latest source (Unity's incremental compiler no-op'd a recompile), so a `no_errors_found` signal **cannot** be trusted until the assembly is rebuilt. This runs even on a clean log. Recovery: call `**unity_open_mcp_recompile_scripts`** (deterministic `CompilationPipeline.RequestScriptCompilation`, blocks until settled, reports `dllMtimeBefore`/`After` + `recompiled`), then re-read compile errors. Prefer it over `assets_refresh` / `execute_csharp` when you need a guaranteed recompile of edited C#.
 
 ## Editor fd-exhaustion recovery (Bee build-driver hang)
 
@@ -315,7 +317,7 @@ Prefer these over `execute_csharp` for routine workflows — explicit schemas, s
 
 **GameObjects** (`paths_hint` = active scene path) — `gameobject_create` / `gameobject_destroy` / `gameobject_duplicate` / `gameobject_modify` (note: target name is `name_target` so `name` stays free for the new value; supports name/tag/layer/active + transform, plus a three-surface form: `gameObjectDiffs` for grouped root patches, `pathPatchesPerGameObject` for descendants, `jsonPatchesPerGameObject` for per-component reflection patches) / `gameobject_set_parent` (cycle-safe). Address by `instance_id` > `path` > `name`. Every mutator is undo-recorded.
 
-**Components** (`paths_hint` = scene path containing host) — `component_add` (by `component_types[]`, full name preferred) / `component_destroy` / `component_modify` (per-path serialized patches via `fields: [{path, value, type?}]`; for enums `type: "name"` sets by enum name). `component_modify` records Undo (`ApplyModifiedProperties`) — a single `editor_undo` reverts the whole patch. Resolve by `component_instance_id` (specific) or `type_name` (full name preferred). Use `component_list_all` to discover attachable types before `add`; `component_get` (default `profile: compact` — top-level serialized fields; `property_path` for drill-down; `page_size`/`cursor` to page) to discover serialized paths before `modify`.
+**Components** (`paths_hint` = scene path containing host) — `component_add` (by `component_types[]`, full name preferred) / `component_destroy` / `component_modify` (per-path serialized patches via `fields: [{path, value, type?}]`; for enums `type: "name"` sets by enum name). `component_modify` records Undo (`ApplyModifiedProperties`) — a single `editor_undo` reverts the whole patch. Resolve by `component_instance_id` (specific) or `type_name` (full name preferred). Use `component_list_all` to discover attachable types before `add`; `component_get` (default `profile: compact` — top-level serialized fields; `property_path` for drill-down; `page_size`/`cursor` to page; optional `fields: ["name", ...]` filter returns only matching entries, bypassing paging/max_fields) to discover serialized paths before `modify`. Object-reference field values accept `{"path"|"asset_path"|"instance_id": N}` or null — a scene-hierarchy `path` resolves through the hierarchy walker (and `GetComponent(fieldType)` for component-typed fields), and an unresolvable value reports a per-field error instead of silently writing null.
 
 **Prefabs** — `prefab_instantiate` / `prefab_create` / `prefab_open` / `prefab_close` / `prefab_save` / `prefab_apply` / `prefab_revert` / `prefab_unpack`. Read-only: `prefab_get_overrides` / `prefab_status`. Address scene instances by `instance_id` > `path` > `name`.
 
@@ -370,7 +372,9 @@ Workflow (CI build prep): `build_get_scenes` → `build_set_scenes` → `build_g
 
 ## Agent senses (live-only, no batch fallback)
 
-- `**unity_senses_run_tests`** — EditMode + PlayMode test runner with per-test pass/fail. Filter by assembly / namespace / class / method. Set `include_passes: false` on large suites to avoid truncation. **Never fire a second `run_tests` before the first resolves** (no concurrency guard; results interleave).
+- `**unity_senses_run_tests`** — EditMode + PlayMode test runner with per-test pass/fail. Filter by assembly / namespace / class / method. Set `include_passes: false` on large suites to avoid truncation. **Never fire a second `run_tests` before the first resolves** (no concurrency guard; results interleave). Results are retrieved by the server polling a results file (NOT via `unity_senses_pull_events`).
+  - **Zero-match looks like "no results".** When the filter matches zero tests, `TestRunnerApi.Execute` runs nothing and the result is `status:"completed"` with `summary.total:0` and a `note` — that is a no-match filter, not a failure. `test_class` maps to NUnit `groupNames` (a partial/group match), and `assembly_name` must name a real test assembly.
+  - **Single-test workaround.** To run one test method deterministically (and get NUnit assertion failures verbatim), invoke the test class/method directly via `unity_open_mcp_invoke_method` instead of `run_tests`.
   - **Brief reloading window after a run.** A test run (PlayMode especially) can trigger a Unity domain reload that freezes the bridge's heartbeat for a few seconds. The MCP server recognizes an in-flight run and treats that window as a normal reload rather than a dead bridge, so subsequent tools keep waiting instead of failing fast with `bridge_compile_failed`. For robustness, after `run_tests` returns `{status:"started", runId}`, poll the result file (or call `ping` / `editor_status`) once before issuing other tools — the run itself is async and the bridge may still be settling.
   - **Headless / CI alternative.** `run_tests` has no MCP batch form (it needs a live Editor). For headless CI, invoke Unity's CLI directly with `-runTests`. **Omit `-quit`** — with `-quit` the editor exits after the initial asset refresh, *before* the test runner starts, so no tests run and no XML is written despite an exit code of 0. The correct invocation:
     ```
@@ -482,3 +486,42 @@ For routing details, see the `routing` object on the capabilities response — n
 - [ ] Fixes applied / retried as needed
 - [ ] Compile verified (`read_console` `type: "error"`, or `read_compile_errors` if bridge down)
 - [ ] Tests run on affected assembly (one run at a time)
+
+---
+
+# Project inventory — demo
+
+> Project-specific section generated by `unity_open_mcp_generate_skill`. Regenerate after package or script changes.
+
+## Project environment
+
+- **Unity version:** 6000.5.5f1
+- **Bridge package:** com.alexeyperov.unity-open-mcp-bridge @ file:../../packages/bridge
+- **Verify package:** com.alexeyperov.unity-open-mcp-verify @ file:../../packages/verify
+
+### Installed packages
+
+| Package | Version |
+|---|---|
+| com.alexeyperov.unity-open-mcp-bridge | file:../../packages/bridge |
+| com.alexeyperov.unity-open-mcp-verify | file:../../packages/verify |
+| com.unity.ai.navigation | 2.0.14 |
+| com.unity.ide.rider | 3.0.38 |
+| com.unity.ide.visualstudio | 2.0.26 |
+| com.unity.ide.vscode | 1.2.5 |
+| com.unity.inputsystem | 1.19.0 |
+| com.unity.modules.physicscore2d | 1.0.0 |
+| com.unity.probuilder | 6.1.2 |
+| com.unity.render-pipelines.universal | 17.5.0 |
+| com.unity.splines | 2.9.0 |
+| com.unity.timeline | 1.8.12 |
+| com.unity.ugui | 2.5.0 |
+
+## Key project types
+
+Use `unity_open_mcp_find_members` to inspect any of these before editing.
+
+### MonoBehaviours
+
+- **ScriptWithGameObjectField** — `Assets/Scripts/ScriptWithGameObjectField.cs`
+
