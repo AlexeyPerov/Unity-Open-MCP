@@ -27,6 +27,9 @@ namespace UnityOpenMcpBridge
             // Page scroll is owned by the shell (DrawContent).
             OptionalDependenciesPanel.Draw();
 
+            BridgeGUIUtilities.HorizontalLine(2, 8);
+            DrawRoslynFallbackSection();
+
             // Hide the additional-packs section entirely when the catalog is
             // empty — no header, no dev-facing catalog source path, no empty
             // row count. The data path stays intact for future packs.
@@ -36,6 +39,68 @@ namespace UnityOpenMcpBridge
             BridgeGUIUtilities.HorizontalLine(2, 8);
 
             DrawCommunityPacksSection();
+        }
+
+        // Roslyn backend for execute_csharp / script validation. On Unity
+        // 6000.x the editor ships only ReadyToRun Roslyn images Mono cannot
+        // load, so the bridge offers a downloadable IL-only fallback (see
+        // RoslynFallbackInstaller). This row surfaces the current state and
+        // the one-click install.
+        private void DrawRoslynFallbackSection()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Roslyn (execute_csharp)", EditorStyles.boldLabel);
+
+            var editorRoslyn = MetaTools.RoslynHost.IsAvailable;
+            var fallbackInstalled = MetaTools.RoslynFallback.RoslynFallbackInstaller.IsInstalled;
+            var installing = MetaTools.RoslynFallback.RoslynFallbackInstaller.Status.State ==
+                MetaTools.RoslynFallback.RoslynFallbackInstaller.InstallState.Installing;
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.BeginHorizontal();
+
+            var dotColor = editorRoslyn
+                ? new Color(0.6f, 0.9f, 0.6f)
+                : installing
+                    ? new Color(1f, 0.85f, 0.4f)
+                    : new Color(0.9f, 0.5f, 0.5f);
+            var prev = GUI.color;
+            GUI.color = dotColor;
+            GUILayout.Label("●", EditorStyles.boldLabel, GUILayout.Width(18));
+            GUI.color = prev;
+
+            var label = editorRoslyn
+                ? (fallbackInstalled ? "available (fallback 4.8.0)" : "available (editor Roslyn)")
+                : installing
+                    ? "installing fallback…"
+                    : fallbackInstalled
+                        ? "installed, not loaded yet"
+                        : "unavailable";
+            EditorGUILayout.LabelField(label, EditorStyles.boldLabel);
+            GUILayout.FlexibleSpace();
+
+            if (!editorRoslyn && !installing)
+            {
+                var buttonLabel = fallbackInstalled ? "Reload" : "Install Roslyn Fallback";
+                if (GUILayout.Button(buttonLabel, GUILayout.Width(160)))
+                {
+                    if (fallbackInstalled)
+                        MetaTools.RoslynHost.Reinitialize();
+                    else
+                        MetaTools.RoslynFallback.RoslynFallbackMenu.ConfirmAndInstall();
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (!editorRoslyn && !fallbackInstalled)
+                EditorGUILayout.LabelField(
+                    "This Unity version ships no Roslyn the editor's Mono runtime can load, " +
+                    "so execute_csharp and script validation are disabled. The fallback " +
+                    "downloads ~15 MB of SHA-256-pinned packages from nuget.org into " +
+                    "~/.unity-open-mcp/roslyn.",
+                    EditorStyles.wordWrappedMiniLabel);
+
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawCommunityPacksSection()

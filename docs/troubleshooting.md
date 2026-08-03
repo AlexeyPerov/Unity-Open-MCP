@@ -110,6 +110,45 @@ actually launches `node` (for example the terminal or IDE). Grant it in
 **System Settings → Privacy & Security → Accessibility**, then restart the MCP
 client.
 
+## `execute_csharp` reports `roslyn_unavailable` (Unity 6000.x)
+
+### What it means
+
+`execute_csharp` and script validation compile snippets with Roslyn loaded
+from the Unity installation. Unity 6000.x ships every Roslyn copy
+(`DotNetSdkRoslyn/`, the ApiUpdater copy) as ReadyToRun (R2R) crossgen'd
+images, which the editor's Mono runtime cannot load — the Unity console shows
+`Could not load image … due to Invalid data directory 3` if such an image is
+probed. The editor locations that used to carry a Mono-loadable Roslyn
+(`MonoBleedingEdge/.../Roslyn`, `Tools/roslyn`) no longer exist in 6000.x.
+
+**This is not a corrupted install — reinstalling Unity does not help.**
+
+### Recovery
+
+Install the bridge's IL-only Roslyn fallback (Roslyn 4.8.0 + its dependency
+closure, ~15 MB, downloaded from nuget.org as SHA-256-pinned packages into
+`~/.unity-open-mcp/roslyn/4.8.0/`). Either surface works:
+
+- **From your agent:** call `execute_csharp` with `{"setup_roslyn": true}`.
+  Re-call to poll; when the status is `installed`, snippets compile
+  immediately (you can pass `code` in the same call).
+- **From the editor:** menu **Tools → Unity Open MCP Bridge - Install Roslyn
+  Fallback**, or the **Roslyn (execute_csharp)** row in the bridge window's
+  Extensions tab.
+
+The install is shared across projects and editor versions on the machine; a
+domain reload or editor restart picks it up automatically. On Unity 2022.3,
+where the editor still ships a Mono-loadable Roslyn, the fallback is never
+used.
+
+### Manual / offline install
+
+On a machine without nuget.org access, copy the whole
+`~/.unity-open-mcp/roslyn/4.8.0/` directory (DLLs plus
+`install-manifest.json`) from a machine where the install succeeded. The
+directory is self-contained and portable.
+
 ## Related docs
 
 - [Dialog policy](dialog-policy.md) — startup and steady-state modal handling

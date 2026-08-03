@@ -28,6 +28,41 @@ namespace UnityOpenMcpBridge.MetaTools
         public static bool IsAvailable { get; private set; }
         public static string LastInitError { get; private set; }
 
+        /// <summary>
+        /// Shared agent-facing message for roslyn_unavailable failures
+        /// (execute_csharp and script validation). Explains the Unity 6000.x
+        /// R2R situation and both remediation paths, with the download's
+        /// size/source/destination disclosed up front.
+        /// </summary>
+        public static string UnavailableHint =>
+            "Could not load Roslyn compiler assemblies from the Unity installation. " +
+            (string.IsNullOrEmpty(LastInitError) ? "" : LastInitError + " ") +
+            "Unity 6000.x ships only ReadyToRun (R2R) Roslyn images the editor's Mono " +
+            "runtime cannot load; reinstalling Unity does not help. To enable this tool, " +
+            "install the IL-only Roslyn " + RoslynFallback.RoslynFallbackConfig.RoslynVersion +
+            " fallback (~15 MB, downloaded from nuget.org with SHA-256 pinned packages, " +
+            "installed to ~/" + Config.BridgeConstants.SettingsDirName + "/roslyn): call " +
+            "execute_csharp with {\"setup_roslyn\": true}, or use the Unity menu " +
+            "'Tools > Unity Open MCP Bridge - Install Roslyn Fallback'.";
+
+        /// <summary>
+        /// Reset the one-shot init latch and probe the candidate directories
+        /// again. Used after the Roslyn fallback installer completes so a
+        /// freshly installed ~/.unity-open-mcp/roslyn dir is picked up without
+        /// a domain reload. Main thread only.
+        /// </summary>
+        public static void Reinitialize()
+        {
+            IsAvailable = false;
+            _initAttempted = false;
+            LastInitError = null;
+            _ca = null;
+            _cacs = null;
+            _cachedReferences = null;
+            _cachedReferenceAssemblyCount = -1;
+            Initialize();
+        }
+
         public static bool Initialize()
         {
             if (IsAvailable) return true;
@@ -52,11 +87,16 @@ namespace UnityOpenMcpBridge.MetaTools
             return false;
         }
 
-        private static IEnumerable<string> GetRoslynDirectoryCandidates(string contentsPath)
+        internal static IEnumerable<string> GetRoslynDirectoryCandidates(string contentsPath)
         {
             yield return Path.Combine(contentsPath, "Resources", "Scripting", "MonoBleedingEdge", "lib", "mono", "msbuild", "Current", "bin", "Roslyn");
             yield return Path.Combine(contentsPath, "DotNetSdkRoslyn");
             yield return Path.Combine(contentsPath, "Tools", "roslyn");
+            // Downloaded IL-only NuGet Roslyn fallback (Unity 6000.x ships only
+            // R2R images — see IsReadyToRunImage). LAST so an editor-shipped
+            // Mono Roslyn keeps winning where one exists (2022.3), preserving
+            // diagnostic parity with the project compiler.
+            yield return RoslynFallback.RoslynFallbackConfig.InstallDir;
         }
 
         private static bool TryLoadRoslyn(string roslynDir)
@@ -82,7 +122,9 @@ namespace UnityOpenMcpBridge.MetaTools
             {
                 LastInitError = $"Roslyn candidate '{roslynDir}' ships ReadyToRun (R2R) images " +
                     "the editor's Mono runtime cannot load (Microsoft.CodeAnalysis.dll). Skipping; " +
-                    "the Mono-loadable Roslyn under MonoBleedingEdge is the supported execute_csharp backend.";
+                    "on editors with no Mono-loadable Roslyn (Unity 6000.x) install the IL-only " +
+                    "fallback via execute_csharp {\"setup_roslyn\":true} or the Unity menu " +
+                    "'Tools > Unity Open MCP Bridge - Install Roslyn Fallback'.";
                 Debug.LogWarning($"[Unity Open MCP Bridge] {LastInitError}");
                 return false;
             }
@@ -100,6 +142,18 @@ namespace UnityOpenMcpBridge.MetaTools
 
                 _ca = Assembly.LoadFrom(codeAnalysisPath);
                 _cacs = Assembly.LoadFrom(codeAnalysisCSharpPath);
+
+                // The downloaded NuGet fallback carries its own dependency
+                // closure (System.Collections.Immutable 7.0 etc.) at assembly
+                // versions newer than the editor Mono's built-ins. The eager
+                // sibling LoadFrom loop above covers most bindings; a scoped
+                // AssemblyResolve hook catches names Mono binds lazily later.
+                if (string.Equals(
+                        Path.GetFullPath(roslynDir),
+                        Path.GetFullPath(RoslynFallback.RoslynFallbackConfig.InstallDir),
+                        StringComparison.OrdinalIgnoreCase))
+                    RegisterFallbackResolver(roslynDir);
+
                 return true;
             }
             catch (Exception e)
@@ -110,6 +164,35 @@ namespace UnityOpenMcpBridge.MetaTools
                 Debug.LogWarning($"[Unity Open MCP Bridge] {LastInitError}");
                 return false;
             }
+        }
+
+        private static bool _fallbackResolverRegistered;
+
+        /// <summary>
+        /// Scoped AppDomain.AssemblyResolve backstop for the downloaded Roslyn
+        /// fallback dir: responds only for simple names that exist as
+        /// <c>&lt;dir&gt;/&lt;name&gt;.dll</c>, so it can never hijack unrelated binds.
+        /// Registered once per domain, only after the fallback dir actually
+        /// loaded.
+        /// </summary>
+        private static void RegisterFallbackResolver(string roslynDir)
+        {
+            if (_fallbackResolverRegistered) return;
+            _fallbackResolverRegistered = true;
+
+            AppDomain.CurrentDomain.AssemblyResolve += (_, args) =>
+            {
+                try
+                {
+                    var simpleName = new AssemblyName(args.Name).Name;
+                    var candidate = Path.Combine(roslynDir, simpleName + ".dll");
+                    return File.Exists(candidate) ? Assembly.LoadFrom(candidate) : null;
+                }
+                catch
+                {
+                    return null;
+                }
+            };
         }
 
         /// <summary>

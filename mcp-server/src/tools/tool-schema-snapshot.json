@@ -10,74 +10,75 @@
   "unity_open_mcp_execute_csharp": {
     "description": "Compile and run a C# snippet in the Editor (Roslyn). Primary escape hatch — covers most Editor APIs without typed tools.",
     "inputSchema": {
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
         "code": {
-          "description": "C# source. Use return x; to produce output.",
-          "type": "string"
+          "type": "string",
+          "description": "C# source. Use return x; to produce output. Required unless setup_roslyn is true."
+        },
+        "setup_roslyn": {
+          "type": "boolean",
+          "description": "Install the IL-only Roslyn compiler fallback and/or report its install status. Use when this tool fails with roslyn_unavailable (Unity 6000.x ships only ReadyToRun Roslyn images the editor's Mono runtime cannot load). Downloads ~15 MB of SHA-256-pinned packages from nuget.org into ~/.unity-open-mcp/roslyn — ask the user before triggering. Re-call with setup_roslyn: true to poll until status is 'installed'; combine with `code` to compile immediately once ready."
+        },
+        "usings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra using directives beyond defaults (UnityEngine, UnityEditor, etc.)"
+        },
+        "object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Instance IDs (or full handle JSON) of live UnityEngine.Objects to inject into the snippet. Access them via Refs[index] or Ref<T>(index) in the code body. Instance IDs come from the 'objectId' field of object handles returned by other tools. Instance IDs change on domain reload."
+        },
+        "paths_hint": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Asset paths likely touched; drives scoped gate validation"
+        },
+        "ignore_scene_dirty": {
+          "type": "boolean",
+          "default": false,
+          "description": "Bypass the active-scene dirty guard. By default a disruptive op (recompile / scene switch) is refused with scene_dirty when any loaded scene has unsaved changes, so Unity's native save modal never interrupts the flow. Set true to proceed and accept the risk of a native save prompt."
         },
         "confirm_bypass": {
+          "type": "boolean",
           "default": false,
-          "description": "Bypass the deny heuristic for destructive patterns (EditorApplication.Exit, AssetDatabase.DeleteAsset, BuildPipeline.BuildPlayer, etc.). Requires gate: \"off\" as well — both flags must be set. The bypass is audited.",
-          "type": "boolean"
+          "description": "Bypass the deny heuristic for destructive patterns (EditorApplication.Exit, AssetDatabase.DeleteAsset, BuildPipeline.BuildPlayer, etc.). Requires gate: \"off\" as well — both flags must be set. The bypass is audited."
         },
         "gate": {
-          "default": "enforce",
           "enum": [
             "enforce",
             "warn",
             "off"
-          ]
-        },
-        "ignore_scene_dirty": {
-          "default": false,
-          "description": "Bypass the active-scene dirty guard. By default a disruptive op (recompile / scene switch) is refused with scene_dirty when any loaded scene has unsaved changes, so Unity's native save modal never interrupts the flow. Set true to proceed and accept the risk of a native save prompt.",
-          "type": "boolean"
-        },
-        "max_depth": {
-          "default": 4,
-          "description": "Max recursion depth when serializing the returned object graph (default 4). Composite nodes deeper than this are stringified to bound payload size.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "max_items": {
-          "default": 100,
-          "description": "Max items emitted per list/enumerable in the returned object graph (default 100). Truncated lists report a `truncated` count of the elided items.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "object_ids": {
-          "description": "Instance IDs (or full handle JSON) of live UnityEngine.Objects to inject into the snippet. Access them via Refs[index] or Ref<T>(index) in the code body. Instance IDs come from the 'objectId' field of object handles returned by other tools. Instance IDs change on domain reload.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "paths_hint": {
-          "description": "Asset paths likely touched; drives scoped gate validation",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+          ],
+          "default": "enforce"
         },
         "timeout_ms": {
+          "type": "integer",
           "default": 30000,
-          "maximum": 300000,
           "minimum": 1000,
-          "type": "integer"
+          "maximum": 300000
         },
-        "usings": {
-          "description": "Extra using directives beyond defaults (UnityEngine, UnityEditor, etc.)",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "max_depth": {
+          "type": "integer",
+          "default": 4,
+          "minimum": 0,
+          "description": "Max recursion depth when serializing the returned object graph (default 4). Composite nodes deeper than this are stringified to bound payload size."
+        },
+        "max_items": {
+          "type": "integer",
+          "default": 100,
+          "minimum": 0,
+          "description": "Max items emitted per list/enumerable in the returned object graph (default 100). Truncated lists report a `truncated` count of the elided items."
         }
       },
-      "required": [
-        "code"
-      ],
-      "type": "object"
+      "additionalProperties": false
     }
   },
   "unity_open_mcp_invoke_method": {

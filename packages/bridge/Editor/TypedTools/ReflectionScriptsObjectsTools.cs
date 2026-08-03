@@ -921,9 +921,10 @@ namespace UnityOpenMcpBridge.TypedTools
         {
             if (!RoslynHost.Initialize())
                 // When Roslyn is unavailable we cannot validate — refuse to
-                // write rather than silently skip validation.
-                return (false, "Roslyn compiler assemblies are not available; cannot validate. " +
-                    (RoslynHost.LastInitError ?? ""));
+                // write rather than silently skip validation. The shared hint
+                // explains the Unity 6000 R2R situation and the fallback
+                // install paths.
+                return (false, RoslynHost.UnavailableHint);
 
             // Compile-only validation: we never load/execute the assembly.
             var (_, errors) = RoslynHost.Compile(content);

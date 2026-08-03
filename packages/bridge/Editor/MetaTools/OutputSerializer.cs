@@ -15,6 +15,7 @@ using UnityOpenMcpBridge.ObjectRefs;
 [assembly: InternalsVisibleTo("com.alexeyperov.unity-open-mcp-bridge.Editor.Tests")]
 [assembly: InternalsVisibleTo("com.alexeyperov.unity-open-mcp-bridge.TestRunner.Editor")]
 [assembly: InternalsVisibleTo("com.alexeyperov.unity-open-mcp-bridge.Dependencies.Editor")]
+[assembly: InternalsVisibleTo("com.alexeyperov.unity-open-mcp-bridge.UI.Editor")]
 
 namespace UnityOpenMcpBridge.MetaTools
 {

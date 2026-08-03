@@ -75,6 +75,21 @@ namespace UnityOpenMcpBridge.MetaTools
         public static ToolDispatchResult Execute(string body)
         {
             var code = JsonBody.GetString(body, "code");
+
+            // Roslyn fallback setup flow (Unity 6000.x ships only R2R Roslyn
+            // images — see RoslynHost.UnavailableHint). The explicit
+            // setup_roslyn call is the consent act for the ~15 MB nuget.org
+            // download; nothing downloads without it. Runs BEFORE the code
+            // requirement so {"setup_roslyn":true} alone is a valid request.
+            if (JsonBody.GetBool(body, "setup_roslyn"))
+            {
+                var setupResult = HandleSetupRoslyn(hasCode: !string.IsNullOrEmpty(code));
+                if (setupResult != null)
+                    return setupResult;
+                // null → Roslyn is ready and the caller also sent code:
+                // fall through and compile it in the same call.
+            }
+
             if (string.IsNullOrEmpty(code))
                 return ToolDispatchResult.Fail("validation_error",
                     "Field 'code' is required and must be non-empty");
@@ -122,10 +137,16 @@ namespace UnityOpenMcpBridge.MetaTools
             }
 
             if (!RoslynHost.Initialize())
-                return ToolDispatchResult.Fail("roslyn_unavailable",
-                    "Could not load Roslyn compiler assemblies from Unity installation. " +
-                    (RoslynHost.LastInitError ??
-                     "Expected Mono-compatible Roslyn under {Unity.app}/Contents/Resources/Scripting/MonoBleedingEdge/.../Roslyn/"));
+            {
+                // A completed install that Initialize hasn't seen (install
+                // finished in another window / just now) is picked up here
+                // rather than telling the agent to set up again.
+                var installing = RoslynFallback.RoslynFallbackInstaller.Status;
+                if (installing.State == RoslynFallback.RoslynFallbackInstaller.InstallState.Installing)
+                    return ToolDispatchResult.Ok(BuildSetupStatusJson("installing", installing));
+
+                return ToolDispatchResult.Fail("roslyn_unavailable", RoslynHost.UnavailableHint);
+            }
 
             var source = BuildSource(code, allUsings);
 
@@ -196,6 +217,66 @@ namespace UnityOpenMcpBridge.MetaTools
             {
                 return ToolDispatchResult.Fail("execution_error", e.Message);
             }
+        }
+
+        /// <summary>
+        /// setup_roslyn handling. Returns the response to send, or null when
+        /// Roslyn is ready AND the caller also passed code (fall through to
+        /// compile). Status envelope states: already_available / installing
+        /// (re-call to poll) / installed; failures use roslyn_install_failed.
+        /// </summary>
+        private static ToolDispatchResult HandleSetupRoslyn(bool hasCode)
+        {
+            if (RoslynHost.Initialize())
+                return hasCode ? null
+                    : ToolDispatchResult.Ok("{\"status\":\"already_available\"}");
+
+            var status = RoslynFallback.RoslynFallbackInstaller.Status;
+            switch (status.State)
+            {
+                case RoslynFallback.RoslynFallbackInstaller.InstallState.Installing:
+                    return ToolDispatchResult.Ok(BuildSetupStatusJson("installing", status));
+
+                case RoslynFallback.RoslynFallbackInstaller.InstallState.Failed:
+                    // Surface the error once, then clear it so the next
+                    // setup_roslyn call can retry the install.
+                    RoslynFallback.RoslynFallbackInstaller.ResetFailure();
+                    return ToolDispatchResult.Fail("roslyn_install_failed",
+                        "Roslyn fallback install failed: " + (status.Error ?? "unknown error") +
+                        ". Re-call execute_csharp with {\"setup_roslyn\":true} to retry, " +
+                        "or see docs/troubleshooting.md for the manual offline install.");
+
+                default:
+                    // Idle (or Installed but not yet loaded): a valid on-disk
+                    // install just needs a re-probe; otherwise start one.
+                    if (RoslynFallback.RoslynFallbackInstaller.IsInstalled)
+                    {
+                        RoslynHost.Reinitialize();
+                        if (RoslynHost.IsAvailable)
+                            return hasCode ? null
+                                : ToolDispatchResult.Ok("{\"status\":\"installed\",\"roslynLoaded\":true}");
+                        return ToolDispatchResult.Fail("roslyn_install_failed",
+                            "Roslyn fallback is installed but failed to load: " +
+                            (RoslynHost.LastInitError ?? "unknown error"));
+                    }
+
+                    RoslynFallback.RoslynFallbackInstaller.StartInstall();
+                    return ToolDispatchResult.Ok(BuildSetupStatusJson(
+                        "installing", RoslynFallback.RoslynFallbackInstaller.Status));
+            }
+        }
+
+        private static string BuildSetupStatusJson(
+            string status, RoslynFallback.RoslynFallbackInstaller.InstallStatus s)
+        {
+            var sb = new StringBuilder(96);
+            sb.Append("{\"status\":").Append(BridgeJson.EscapeString(status));
+            sb.Append(",\"progress\":").Append(
+                s.Progress.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+            if (!string.IsNullOrEmpty(s.Step))
+                sb.Append(",\"step\":").Append(BridgeJson.EscapeString(s.Step));
+            sb.Append(",\"hint\":\"re-call execute_csharp with setup_roslyn:true to poll until status is installed\"}");
+            return sb.ToString();
         }
 
         private static SerializeOptions BuildSerializeOptions(string body)

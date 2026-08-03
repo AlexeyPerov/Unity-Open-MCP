@@ -6,11 +6,27 @@ export const executeCsharp = makeTool(
   "unity_open_mcp_execute_csharp",
   "Compile and run a C# snippet in the Editor (Roslyn). Primary escape hatch — covers most Editor APIs without typed tools.",
   {
-    required: ["code"],
+    // `code` is required unless setup_roslyn is true (the Roslyn fallback
+    // install/poll flow needs no source). The bridge enforces this; a plain
+    // `required: ["code"]` here would reject valid setup-only calls.
         properties: {
           code: {
             type: "string",
-            description: "C# source. Use return x; to produce output.",
+            description:
+              "C# source. Use return x; to produce output. Required unless " +
+              "setup_roslyn is true.",
+          },
+          setup_roslyn: {
+            type: "boolean",
+            description:
+              "Install the IL-only Roslyn compiler fallback and/or report its " +
+              "install status. Use when this tool fails with roslyn_unavailable " +
+              "(Unity 6000.x ships only ReadyToRun Roslyn images the editor's " +
+              "Mono runtime cannot load). Downloads ~15 MB of SHA-256-pinned " +
+              "packages from nuget.org into ~/.unity-open-mcp/roslyn — ask the " +
+              "user before triggering. Re-call with setup_roslyn: true to poll " +
+              "until status is 'installed'; combine with `code` to compile " +
+              "immediately once ready.",
           },
           usings: {
             type: "array",
