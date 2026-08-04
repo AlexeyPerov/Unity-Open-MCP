@@ -16,6 +16,12 @@ suites. Root `AGENTS.md` also applies. Human overview:
   (wrapper around sync-version + token estimates; does not replace those tools).
   Push trio tags and the Hub tag in separate git pushes (≤3 tags per command);
   GitHub skips tag webhook events when more than three tags are pushed at once.
+- Consuming projects are the opposite direction and never a generated target
+  here: `node scripts/switch-project-version.mjs <project> <X.Y.Z>` rewrites
+  another project's client-config npm pins and UPM `#bridge-v` / `#verify-v`
+  pins. Keep its rewrite set aligned with the pin shapes `sync-version.mjs`
+  emits — a new pin surface in `docs/setup/` usually means a new one in the
+  wild too.
 - Token estimates: `node scripts/generate-token-estimates.mjs` writes
   `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs`. Regenerate after
   MCP tool schema, catalog, or group changes; `--check` is advisory in CI.

@@ -17,9 +17,32 @@ Live suites need a Unity Editor open on the target project with the bridge runni
 | Script | Purpose |
 |--------|---------|
 | [`sync-version.mjs`](sync-version.mjs) | Keeps version strings in sync from `version.json` (MCP server + bridge + verify trio) or `hub/version.json` (Hub app). Covers the English setup docs plus their `docs/ru/` and `docs/zh-CN/` mirrors (git-URL pins and npm pins). Supports `--check`, `bump`, `set`, and `tags`. |
+| [`switch-project-version.mjs`](switch-project-version.mjs) | The consumer-side mirror of `sync-version.mjs`: moves **another** project's pins onto a release — every `unity-open-mcp@<ver>` npm pin in its agent/MCP client configs plus the `#bridge-v` / `#verify-v` UPM pins in `Packages/manifest.json` and `packages-lock.json`. Finds the Unity project below the path you pass, so a repo root with the Unity project in `Client/` works. Supports `--dry-run`, `--up`, `--depth`, `--keep-lock`, `--json`. |
 | [`release.mjs`](release.mjs) | One-shot release: clean-tree gate → token estimates → set trio + Hub → commit → tags → push (trio and Hub tags in separate pushes, ≤3 tags each — GitHub drops tag webhooks above that). Supports `--dry-run`, `--yes`, `--trio-only`, `--hub-only`. See [Maintainer versioning](../docs/contributing/versioning.md#one-shot-release-trio--hub). |
 | [`generate-token-estimates.mjs`](generate-token-estimates.mjs) | Generates `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs` from live MCP tool schemas. `--check` is advisory in CI (`continue-on-error`). |
 | [`gen-mcp-coverage-matrix.mjs`](gen-mcp-coverage-matrix.mjs) | Regenerates the internal, gitignored per-tool coverage matrix. Fails if any registered tool has no suite owner. |
+
+### Switch a consuming project onto a release
+
+Preview first, then apply — every rewrite is idempotent, so re-running is a
+no-op:
+
+```bash
+node scripts/switch-project-version.mjs ~/work/my-game 0.9.0 --dry-run
+```
+
+```bash
+node scripts/switch-project-version.mjs ~/work/my-game 0.9.0
+```
+
+Pass the folder your AI client is opened on, not the Unity folder — the Unity
+project is found below it (`my-game/Client/Packages/manifest.json`). If you point
+at the Unity project itself, its client configs are one level up: the summary
+lists them and `--up 2` includes them.
+
+Markdown and other prose are deliberately left alone, and the script never
+touches `$HOME`-scoped client configs. See
+[Version compatibility](../docs/versioning.md#switch-a-whole-project-to-a-release).
 
 ## MCP test suites
 

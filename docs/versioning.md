@@ -76,6 +76,50 @@ release. [Manual setup](setup/manual-setup.md) shows the package pins, and
 [MCP client configuration](setup/client-configuration.md) owns the client
 command shapes.
 
+## Switch a whole project to a release
+
+A project pins the version in more than one place: once per AI client config and
+once per UPM package. From a clone of this repository, one command moves all of
+them together. Preview first:
+
+```bash
+node scripts/switch-project-version.mjs /path/to/my-game 0.9.0 --dry-run
+```
+
+Then apply:
+
+```bash
+node scripts/switch-project-version.mjs /path/to/my-game 0.9.0
+```
+
+Pass the folder your AI client is opened on. The Unity project does not have to
+sit there — for a repository whose Unity project is in `Client/`, the same
+command updates the client configs at the top and the UPM pins below:
+
+```
+Unity Open MCP → 0.9.0
+  project: /path/to/my-game
+  Unity project: Client
+
+  .cursor/mcp.json                    npm pin                     0.8.4 → 0.9.0
+  .codex/config.toml                  npm pin                     0.8.4 → 0.9.0
+  Client/Packages/manifest.json       UPM git pin                 0.8.4 → 0.9.0 ×2
+  Client/Packages/packages-lock.json  UPM git pin                 0.8.4 → 0.9.0 ×2
+                                      verify dependency pin       0.8.4 → 0.9.0
+                                      stale resolved hash dropped removed ×2
+```
+
+Then restart the AI client (most read MCP config only at startup) and reopen
+Unity so Package Manager re-resolves the two packages. `--dry-run`, `--up`,
+`--depth`, `--keep-lock`, and `--json` are documented in
+[`scripts/README.md`](../scripts/README.md#switch-a-consuming-project-onto-a-release);
+`-h` prints the same list.
+
+Rewrites are idempotent, so running it twice changes nothing the second time. The
+script only edits config files under the path you pass: a client config in your
+home directory (`~/.cursor/mcp.json`) is a machine-wide surface and stays yours
+to update.
+
 ## Suppress an intentional warning
 
 ```bash
