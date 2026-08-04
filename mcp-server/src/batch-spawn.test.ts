@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
-import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator } from "./batch-spawn.js";
+import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, extractOffendingPackages, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator } from "./batch-spawn.js";
 import { lockPath } from "./instance-discovery.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
@@ -470,6 +470,65 @@ test("classifyBatchFailure returns null for genuine failures (no lock)", () => {
   assert.equal(classifyBatchFailure("all good"), null);
 });
 
+test("classifyBatchFailure detects package-resolution / project-load signature", () => {
+  // Verbatim signatures from the feedback entry (compile_check
+  // batch_spawn_failed): Unity bails at package resolution before the batch
+  // entry point runs, so no markers are emitted.
+  assert.equal(
+    classifyBatchFailure("[Package Manager] Project has invalid dependencies:"),
+    "project_load_failed",
+  );
+  assert.equal(
+    classifyBatchFailure("Package Manager Server process was shutdown"),
+    "project_load_failed",
+  );
+  assert.equal(
+    classifyBatchFailure("Package Manager Server process was terminated"),
+    "project_load_failed",
+  );
+});
+
+test("classifyBatchFailure prefers editor_instance_locked when both signatures appear", () => {
+  // A live-editor lock is the more actionable failure (close the Editor);
+  // it should take precedence over a project-load signal if both appear.
+  assert.equal(
+    classifyBatchFailure("another Unity instance ... Project has invalid dependencies"),
+    "editor_instance_locked",
+  );
+});
+
+test("classifyBatchFailure keeps returning null for a clean compile tail", () => {
+  // The case-2 reproduction: exit 0, healthy compile, no markers. The tail
+  // has no lock/project-load phrase, so the classifier returns null and the
+  // close handler's exit-0 message improvement handles it. This guards
+  // against a future regex widening that would misclassify a clean tail.
+  assert.equal(
+    classifyBatchFailure("Compilation succeeded. Elapsed time: 1.23s"),
+    null,
+  );
+});
+
+test("extractOffendingPackages captures reverse-DNS ids and dedupes", () => {
+  // A Package Manager resolution failure names the offending package(s) by
+  // their reverse-DNS identifier. extractOffendingPackages pulls them out so
+  // the project_load_failed error can name them.
+  const tail =
+    "[Package Manager] com.unity.modules.physicscore2d is not a valid package.\n" +
+    "Missing or invalid dependencies: com.unity.modules.physicscore2d\n" +
+    "while org.nuget.somepackage was also referenced";
+  assert.deepEqual(extractOffendingPackages(tail), [
+    "com.unity.modules.physicscore2d",
+    "org.nuget.somepackage",
+  ]);
+  // Dedupes repeats and ignores bare two-label prefixes.
+  assert.deepEqual(
+    extractOffendingPackages("com.unity com.unity com.foo.bar com.foo.bar"),
+    ["com.foo.bar"],
+  );
+  assert.deepEqual(extractOffendingPackages(""), []);
+  assert.deepEqual(extractOffendingPackages("no packages here"), []);
+});
+
 test("BatchClassificationError carries a targeted code for route()", () => {
   const err = new BatchClassificationError(
     "editor_instance_locked",
@@ -533,6 +592,77 @@ test("compile_check with a live Editor open surfaces editor_instance_locked, not
       assert.ok(
         (body.agentNextSteps as string[]).some((s) => s.includes("read_compile_errors")),
         "agentNextSteps should mention read_compile_errors",
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  } finally {
+    if (savedPath === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = savedPath;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// specs/feedback.md (compile_check batch_spawn_failed) — when Unity bails at
+// package resolution before the batch entry point runs, no JSON markers are
+// emitted. route() must emit project_load_failed (not the generic
+// batch_spawn_failed) so an agent does not mistake a manifest problem for a
+// compile failure or a parsing failure.
+// ---------------------------------------------------------------------------
+test("compile_check surfaces project_load_failed when the batch tail matches the package-resolution signature", async () => {
+  const savedPath = process.env.UNITY_PATH;
+  delete process.env.UNITY_PATH;
+  try {
+    const tmp = mkdtempSync(join(tmpdir(), "batch-pkgfail-"));
+    try {
+      const installDir = join(tmp, "6000.0.0f1");
+      const exeRel = process.platform === "win32"
+        ? ["Editor", "Unity.exe"]
+        : process.platform === "darwin"
+          ? ["Unity.app", "Contents", "MacOS", "Unity"]
+          : ["Editor", "Unity"];
+      const exe = join(installDir, ...exeRel);
+      mkdirSync(dirname(exe), { recursive: true });
+      // Fake binary prints the package-resolution failure to stderr, names the
+      // offending package, then exits 1 without JSON markers — exactly the
+      // shape Unity's manifest-resolution bail-out produces.
+      if (process.platform === "win32") {
+        writeFileSync(exe, "fake");
+      } else {
+        writeFileSync(
+          exe,
+          "#!/bin/sh\n" +
+            'echo "[Package Manager] Project has invalid dependencies:" 1>&2\n' +
+            'echo "[Package Manager] com.unity.modules.physicscore2d is not a valid package." 1>&2\n' +
+            "exit 1\n",
+        );
+        chmodSync(exe, 0o755);
+      }
+
+      const batch = new BatchSpawn({ discoveryRoots: [tmp], projectPath: tmp });
+      const result = await batch.route("unity_open_mcp_compile_check", {});
+      const body = parseBody(result);
+      const error = body.error as Record<string, string>;
+      assert.equal(error.code, "project_load_failed");
+      assert.ok(
+        error.message.includes("package/project resolution"),
+        "message should explain this is a package-resolution failure, not a compile failure",
+      );
+      assert.ok(
+        error.message.includes("com.unity.modules.physicscore2d"),
+        "message should name the offending package extracted from the tail",
+      );
+      assert.ok(
+        Array.isArray(body.agentNextSteps) && body.agentNextSteps.length > 0,
+        "project_load_failed should carry a non-empty agentNextSteps array",
+      );
+      assert.ok(
+        (body.agentNextSteps as string[]).some((s) => s.includes("read_compile_errors")),
+        "agentNextSteps should mention read_compile_errors",
+      );
+      assert.ok(
+        (body.agentNextSteps as string[]).some((s) => s.includes("manifest")),
+        "agentNextSteps should point at the manifest",
       );
     } finally {
       rmSync(tmp, { recursive: true, force: true });

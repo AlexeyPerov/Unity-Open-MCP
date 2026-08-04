@@ -255,13 +255,56 @@ export function encodeSpaces(value: string): string {
 // situation apart from a genuine compile/spawn failure and act on it (close
 // the live Editor, or use live introspection instead of a headless spawn).
 //
+// Package-resolution failures get the same treatment: Unity bails at package
+// resolution BEFORE writing the VERIFY_JSON_BEGIN/END markers, so the generic
+// `batch_spawn_failed` / "did not contain JSON markers" error masks the real
+// root cause (an unresolvable Packages/manifest.json dependency). Surfacing
+// `project_load_failed` with the offending package stops an agent from
+// "fixing" a compile that never ran. See specs/feedback.md (compile_check
+// batch_spawn_failed).
+//
 // Returns the error code to emit, or null when the tail does not match a
 // known classification (caller falls back to batch_spawn_failed).
 const PROJECT_LOCK_PATTERN = /another unity instance|already open/i;
+
+// Unity prints these when the project fails to load at the package-resolution
+// stage — before the batch entry point ever runs, so no markers are emitted:
+//   - "Project has invalid dependencies" (Package Manager resolution failure)
+//   - "Package Manager Server process was shutdown" (backend process died)
+const PROJECT_LOAD_FAILED_PATTERN =
+  /Project has invalid dependencies|Package Manager Server process was (?:shutdown|terminated)/i;
+
 export function classifyBatchFailure(combined: string): string | null {
   if (typeof combined !== "string" || combined.length === 0) return null;
   if (PROJECT_LOCK_PATTERN.test(combined)) return "editor_instance_locked";
+  if (PROJECT_LOAD_FAILED_PATTERN.test(combined)) return "project_load_failed";
   return null;
+}
+
+// Capture the offending package id(s) from a Package Manager resolution
+// failure tail. Unity prints reverse-DNS package identifiers on lines like:
+//   [Package Manager] com.unity.modules.physicscore2d is not a valid package
+//   Missing or invalid dependencies: com.unity.modules.physicscore2d
+// We match com.*/org.* identifiers with at least three dot-separated labels
+// (so "com.unity" alone does not match), deduped and capped — best-effort,
+// since the exact phrasing varies across Unity versions. Returns the raw
+// matches in first-seen order.
+const PACKAGE_ID_PATTERN = /\b((?:com|org)\.[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)+)\b/gi;
+export function extractOffendingPackages(combined: string): string[] {
+  if (typeof combined !== "string" || combined.length === 0) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  PACKAGE_ID_PATTERN.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = PACKAGE_ID_PATTERN.exec(combined)) !== null) {
+    const id = m[1];
+    if (!seen.has(id)) {
+      seen.add(id);
+      out.push(id);
+      if (out.length >= 8) break; // cap; a wall of ids is not more useful
+    }
+  }
+  return out;
 }
 
 const UNITY_SPAWN_REFUSED_NEXT_STEPS = [
@@ -708,6 +751,33 @@ export class BatchSpawn implements Router {
             ));
             return;
           }
+          if (classified === "project_load_failed") {
+            // Unity bailed at package resolution BEFORE the batch entry point
+            // ran, so no markers were emitted — the generic "did not contain
+            // JSON markers" error would mask the real root cause (an
+            // unresolvable Packages/manifest.json dependency). Name the
+            // offending package(s) and point at read_compile_errors, which
+            // surfaces the Package Manager notice without a headless spawn.
+            const offending = extractOffendingPackages(combined);
+            const pkgPart = offending.length > 0
+              ? ` Offending package(s): ${offending.join(", ")}.`
+              : "";
+            reject(new BatchClassificationError(
+              "project_load_failed",
+              `Batch Unity exited at package/project resolution (exit ${exitCode}) ` +
+                `without running the batch entry point, so no compile took place. ` +
+                `The project failed to load — this is NOT a C# compile error.${pkgPart} ` +
+                `Check Packages/manifest.json for unresolvable dependencies and call ` +
+                `unity_open_mcp_read_compile_errors to see the Package Manager notice.`,
+              [
+                `Batch Unity failed to load the project (exit ${exitCode}) before reaching the batch entry point — this is a package-resolution / project-load failure, not a compile failure.${pkgPart}`,
+                "Call unity_open_mcp_read_compile_errors to read the Package Manager notice offline (no headless spawn).",
+                "Inspect Packages/manifest.json and Packages/packages-lock.json for packages that cannot be resolved by the current Unity version.",
+                "Do not retry compile_check blindly — the same project-load failure will recur until the manifest is fixed.",
+              ],
+            ));
+            return;
+          }
           if (exitCode === 127) {
             reject(new BatchClassificationError(
               "unity_spawn_refused",
@@ -717,9 +787,21 @@ export class BatchSpawn implements Router {
             ));
             return;
           }
+          // Final generic fallback. Two cases reach here with no markers:
+          //   - exit 0: Unity exited cleanly (likely a healthy compile) but
+          //     emitted no markers — the async finalize path (BridgeBatchEntry
+          //     → EditorApplication.update) did not fire. Point the agent at
+          //     read_compile_errors so it can confirm the clean state instead
+          //     of trusting an opaque failure. See specs/feedback.md (case 2).
+          //   - non-zero: an unclassified spawn failure.
           reject(new Error(
             `Batch output did not contain JSON markers. Exit code: ${exitCode}.` +
-              (tail ? ` Last output: ${tail}` : ""),
+              (tail ? ` Last output: ${tail}` : "") +
+              (exitCode === 0
+                ? " Unity exited cleanly but emitted no markers (the async " +
+                  "finalize path did not run) — the compile likely succeeded. " +
+                  "Call unity_open_mcp_read_compile_errors to confirm."
+                : ""),
           ));
           return;
         }
