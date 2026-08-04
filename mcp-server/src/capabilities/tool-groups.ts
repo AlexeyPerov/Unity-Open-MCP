@@ -329,8 +329,8 @@ export const TOOL_GROUPS: ToolGroup[] = [
     id: "agent-senses",
     description:
       "Agent senses surface (run_tests, screenshot variants, capture_inline, " +
-      "frame_debugger, read_console, profiler capture / capture_frame / memory " +
-      "/ rendering, spatial_query). Live-only.",
+      "visual_compare, frame_debugger, read_console, profiler capture / " +
+      "capture_frame / memory / rendering, spatial_query). Live-only.",
     defaultEnabled: false,
   },
   {
@@ -918,6 +918,10 @@ assign("agent-senses", [
   // + inline-image capture extend the screenshot surface.
   "unity_senses_screenshot_camera",
   "unity_senses_capture_inline",
+  // Visual regression compare — reference-snapshot capture + pixel/perceptual
+  // diff (save / compare / list / delete). The diff image is returned as an
+  // inlineImage field unwrapped into an MCP image block.
+  "unity_senses_visual_compare",
   // M20 Plan 1 / T20.1.2 — EditorWindow capture.
   "unity_senses_screenshot_window",
   // M20 Plan 1 / T20.1.3 — Frame Debugger control + draw-call list.

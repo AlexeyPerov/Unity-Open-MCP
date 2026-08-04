@@ -284,13 +284,14 @@ namespace UnityOpenMcpBridge
             { "unity_senses_profiler_capture_frame", 542 },
             { "unity_senses_profiler_memory", 145 },
             { "unity_senses_profiler_rendering", 109 },
-            { "unity_senses_pull_events", 265 },
+            { "unity_senses_pull_events", 348 },
             { "unity_senses_read_console", 428 },
             { "unity_senses_run_tests", 587 },
             { "unity_senses_screenshot", 334 },
             { "unity_senses_screenshot_camera", 357 },
             { "unity_senses_screenshot_window", 407 },
             { "unity_senses_spatial_query", 834 },
+            { "unity_senses_visual_compare", 769 },
         };
 
         // tool name → group id (null when the tool is an always-visible
@@ -556,6 +557,7 @@ namespace UnityOpenMcpBridge
             { "unity_senses_screenshot_camera", "agent-senses" },
             { "unity_senses_screenshot_window", "agent-senses" },
             { "unity_senses_spatial_query", "agent-senses" },
+            { "unity_senses_visual_compare", "agent-senses" },
         };
 
         /// <summary>Token estimate for a tool, or null when the catalog

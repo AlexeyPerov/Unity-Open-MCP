@@ -27,6 +27,11 @@ import { screenshot } from "./screenshot.js";
 // files to screenshot.ts.
 import { screenshotCamera } from "./screenshot-camera.js";
 import { captureInline } from "./capture-inline.js";
+// Visual regression compare — reference-snapshot capture + pixel/perceptual
+// diff (the one transferable idea from unity-biome-mcp's visual baseline/diff).
+// Action-driven meta-tool (save / compare / list / delete); the diff image is
+// returned as an inlineImage field unwrapped into an MCP image block.
+import { visualCompare } from "./visual-compare.js";
 // M20 Plan 1 / T20.1.2 — Editor window screenshot. Win-only full-fidelity via
 // PrintWindow; cross-platform best-effort readback with platformLimited flag.
 import { screenshotWindow } from "./screenshot-window.js";
@@ -539,6 +544,7 @@ export const M20_PLAN1_TOOLS: Tool[] = [
   screenshotWindow,
   frameDebugger,
   profilerCaptureFrame,
+  visualCompare,
 ];
 
 export const M11_TOOLS: Tool[] = [agentCapabilities, generateSkill];

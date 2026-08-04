@@ -185,6 +185,12 @@ namespace UnityOpenMcpBridge
             "unity_senses_screenshot_camera",
             "unity_senses_capture_inline",
             "unity_senses_screenshot_window",
+            // Visual regression compare — registry-discovered, also listed here
+            // so it returns tool JSON directly (matching the senses screenshot
+            // family). The 'compare' action's inlineImage field (the diff PNG)
+            // must surface at the top level for the MCP server to unwrap into an
+            // image content block, same as capture_inline.
+            "unity_senses_visual_compare",
             "unity_senses_read_console",
             "unity_senses_profiler_capture",
             "unity_senses_profiler_memory",
@@ -251,6 +257,12 @@ namespace UnityOpenMcpBridge
             "unity_senses_screenshot_camera",
             "unity_senses_capture_inline",
             "unity_senses_screenshot_window",
+            // Visual regression compare — read-only (gate off, no asset/scene
+            // write; 'save' writes a user-level screenshots dir, not the
+            // project). Routes as a direct-response tool so the 'compare'
+            // action's inlineImage field (the diff PNG) surfaces at the top
+            // level for MCP-side unwrapping, matching capture_inline.
+            "unity_senses_visual_compare",
             "unity_senses_read_console",
             "unity_senses_profiler_capture",
             "unity_senses_profiler_memory",

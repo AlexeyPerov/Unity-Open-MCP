@@ -76,6 +76,11 @@ const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   // PNG). The postTool handler unwraps it into an MCP image content block so
   // the agent receives a viewable image without reading the filesystem.
   "unity_senses_capture_inline",
+  // Visual compare: the 'compare' action returns a diff image as an inlineImage
+  // field (base64 PNG) when the diff is non-zero. Same unwrap as capture_inline.
+  // The other actions (save / list / delete) carry no inlineImage field, so the
+  // unwrap is a no-op for them (the guard requires a non-empty inlineImage).
+  "unity_senses_visual_compare",
   "unity_senses_screenshot_camera",
   // M20 Plan 1 / T20.1.2 — EditorWindow capture (file path). Read-only.
   "unity_senses_screenshot_window",
