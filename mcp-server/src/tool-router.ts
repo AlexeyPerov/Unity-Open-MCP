@@ -121,6 +121,15 @@ export type SourceTag = "live" | "offline" | "local";
 export interface RouteMeta {
   route: "live" | "batch";
   fallbackReason?: string;
+  /**
+   * feedback-fable-04-08 §7 — present only when a `live_unavailable` batch
+   * fallback landed on `editor_instance_locked` AND a live PID holds the
+   * project. The actionable truth for the agent is "the editor is busy
+   * (TestRunner run / long import); retry later", not a lock conflict, so
+   * `fallbackReason` is rewritten to `editor_busy` and the live PID is
+   * surfaced here so the agent can correlate.
+   */
+  editorPid?: number;
 }
 
 /**
@@ -725,10 +734,13 @@ export class ToolRouter implements Router {
     }
 
     const result = await this.batch.route(toolName, args);
-    return injectRouteMeta(result, {
+    // feedback-fable-04-08 §7 — when the batch fallback hit a live editor's
+    // project lock, the actionable signal is editor_busy, not live_unavailable.
+    const meta = this.rewriteEditorBusy(result, {
       route: "batch",
       fallbackReason: "live_unavailable",
     });
+    return injectRouteMeta(result, meta);
   }
 
   private batchPingResult(): CallToolResult {
@@ -753,6 +765,52 @@ export class ToolRouter implements Router {
       ],
       isError: false,
     };
+  }
+
+  /**
+   * feedback-fable-04-08 §7 — when a `live_unavailable` batch fallback lands
+   * on `editor_instance_locked`, the message describes the BATCH SPAWNER's
+   * problem ("a live editor holds the project lock, so no headless spawn"),
+   * but the agent's actionable truth is "the editor is busy (TestRunner run /
+   * long import); retry later", not a lock conflict. Detect this case by
+   * inspecting the batch result for `error.code === "editor_instance_locked"`
+   * AND confirming a live PID still holds the project (a stale lock with no
+   * live PID is a genuine lock conflict — leave it as `live_unavailable`).
+   *
+   * Returns the rewritten meta (and the result unchanged — the lock error body
+   * is real and must stay intact) so the caller stamps it via injectRouteMeta.
+   * The live PID is surfaced as `editorPid` for agent correlation. Falls
+   * through unchanged when the code differs, no live PID exists, or the body
+   * is unparseable.
+   */
+  private rewriteEditorBusy(
+    result: CallToolResult,
+    meta: RouteMeta,
+  ): RouteMeta {
+    if (meta.fallbackReason !== "live_unavailable") return meta;
+    const body = parseResultBody(result);
+    if (body === null) return meta;
+    const err = body.error;
+    const code =
+      typeof err === "object" && err !== null
+        ? (err as { code?: unknown }).code
+        : undefined;
+    if (code !== "editor_instance_locked") return meta;
+    // Confirm a live editor actually holds the project. The batch pre-spawn
+    // lock check already read the lock, but a race (the editor quit between
+    // the batch check and here) or a corrupt lock must NOT be misreported as
+    // "busy" — fall through to the generic live_unavailable in that case.
+    try {
+      const lock = readInstanceLock(this.projectPath);
+      if (!lock?.pid || !isPidAlive(lock.pid)) return meta;
+      return {
+        route: "batch",
+        fallbackReason: "editor_busy",
+        editorPid: lock.pid,
+      };
+    } catch {
+      return meta;
+    }
   }
 
   private async routeReadCompileErrors(
@@ -2578,6 +2636,10 @@ export class ToolRouter implements Router {
       }
     }
 
+    // feedback-fable-04-08 §7 — rewrite the generic live_unavailable to
+    // editor_busy when the batch hit a live editor's project lock.
+    routeMeta = this.rewriteEditorBusy(raw, routeMeta);
+
     const body = parseResultBody(raw);
     if (body === null) {
       // Body not parseable — fall back to the legacy injectRouteMeta path so
@@ -2638,7 +2700,14 @@ export class ToolRouter implements Router {
         raw = injectRouteMeta(raw, { route: "live" });
       } else {
         raw = await this.batch.route("unity_open_mcp_scene_get_data", bridgeArgs);
-        raw = injectRouteMeta(raw, { route: "batch", fallbackReason: "live_unavailable" });
+        // feedback-fable-04-08 §7 — rewrite to editor_busy when the batch hit
+        // a live editor's project lock. Compute the meta from the raw result
+        // (which carries the editor_instance_locked error) before stamping.
+        const meta = this.rewriteEditorBusy(raw, {
+          route: "batch",
+          fallbackReason: "live_unavailable",
+        });
+        raw = injectRouteMeta(raw, meta);
       }
     }
 

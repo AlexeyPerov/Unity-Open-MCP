@@ -201,6 +201,23 @@ namespace UnityOpenMcpBridge.Tests
                     $"execute_csharp should still require paths_hint: {body}"));
         }
 
+        // feedback-fable-04-08 §8 — read_only flag waives the paths_hint
+        // requirement for pure-read snippets (type lookups, SessionState reads,
+        // console reads). The flag is a scope hint, not a safety boundary: the
+        // deny heuristic still applies (a read_only snippet matching
+        // AssetDatabase.DeleteAsset is still denied). This test only asserts the
+        // paths_hint gate is skipped; the snippet may then reach
+        // roslyn_unavailable when Roslyn is not installed, which is past the
+        // gate and therefore a successful skip.
+        [UnityTest]
+        public static IEnumerator MetaTools_ReadOnly_ExecuteCsharp_SkipsPathsHint()
+        {
+            return PostAndWait("/tools/unity_open_mcp_execute_csharp",
+                "{\"code\":\"return 1;\",\"read_only\":true,\"paths_hint\":[]}",
+                body => Assert.IsFalse(body.Contains("paths_hint_required"),
+                    $"read_only execute_csharp should NOT require paths_hint: {body}"));
+        }
+
         [UnityTest]
         public static IEnumerator MutatingTypedTool_WithoutPathsHint_ReturnsPathsHintRequired()
         {

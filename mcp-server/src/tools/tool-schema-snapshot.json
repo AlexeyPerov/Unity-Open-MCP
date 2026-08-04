@@ -41,6 +41,11 @@
           },
           "description": "Asset paths likely touched; drives scoped gate validation"
         },
+        "read_only": {
+          "type": "boolean",
+          "default": false,
+          "description": "Hint that the snippet performs no asset writes (a pure-read probe: type lookup, SessionState read, console read). When true the paths_hint requirement is waived and the gate is skipped (no checkpoint/validate), so a read probe no longer needs a fake scope. This is a SCOPE HINT, not a safety boundary: the deny heuristic still applies (a snippet matching AssetDatabase.DeleteAsset / EditorApplication.Exit / etc. is still denied), and the bridge cannot statically prove the snippet writes nothing — only assert it does not need a scope."
+        },
         "ignore_scene_dirty": {
           "type": "boolean",
           "default": false,

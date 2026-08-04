@@ -4,6 +4,8 @@ import type { MutationEnvelope } from "./gate-error.js";
 import type { PingCache, PingSnapshot } from "./ping-cache.js";
 import type { BridgeToolsInventory } from "./bridge-tools-cache.js";
 import { BridgeToolsCache } from "./bridge-tools-cache.js";
+import { StaleAssemblyCache } from "./stale-assembly-cache.js";
+import { detectStaleAssembly } from "./unity-log.js";
 import { deriveIsError } from "./gate-error.js";
 import { readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -118,6 +120,20 @@ const COMPILE_RELOAD_ANNOTATION_TOOLS: ReadonlySet<string> = new Set([
 function shouldAnnotateCompileVerify(toolName: string): boolean {
   return COMPILE_RELOAD_ANNOTATION_TOOLS.has(toolName);
 }
+
+// feedback-fable-04-08 §5 — the two reflection/code-execution tools where a
+// stale AppDomain silently produces wrong answers. When the response carries
+// no error AND at least one Assets/**/*.cs source is newer than the newest
+// Library/ScriptAssemblies/*.dll, the snippet ran against the PRE-edit
+// assembly. shapeToolResult attaches a `_staleDomain` annotation (additive —
+// never blocks a successful response) so an agent can re-invoke after a
+// recompile instead of trusting results from code that has not been loaded.
+// Other tools are excluded: a stale-domain warning on gameobject_create
+// (which cannot observe stale code) is pure noise.
+const STALE_DOMAIN_ANNOTATION_TOOLS: ReadonlySet<string> = new Set([
+  "unity_open_mcp_execute_csharp",
+  "unity_open_mcp_invoke_method",
+]);
 
 interface PingResponse {
   connected: boolean;
@@ -237,6 +253,13 @@ export class LiveClient implements Router {
    * waitForCompile settle) so a reload or compile is observed promptly.
    */
   private bridgeToolsCache: BridgeToolsCache;
+  /**
+   * feedback-fable-04-08 §5 — short-TTL cache for detectStaleAssembly() used
+   * by the `_staleDomain` annotation on execute_csharp / invoke_method.
+   * Invalidated alongside bridgeToolsCache on dead-bridge / reload / compile
+   * settle so a reload that rebuilt the assembly clears a cached stale signal.
+   */
+  private staleAssemblyCache: StaleAssemblyCache;
   private dismissEnabled: boolean;
   private dismissTimeoutMs: number;
   private dismissIntervalMs: number;
@@ -292,6 +315,7 @@ export class LiveClient implements Router {
     this.baseUrl = bridgeBaseUrl(port);
     this.pingCache = pingCache;
     this.bridgeToolsCache = new BridgeToolsCache();
+    this.staleAssemblyCache = new StaleAssemblyCache();
     this.authToken = authToken;
     this.projectPath = projectPath;
     this.retry = readRetryTunables();
@@ -828,6 +852,32 @@ export class LiveClient implements Router {
       parsed = null;
     }
 
+    // feedback-fable-04-08 §5 — `_staleDomain` annotation. For the two
+    // reflection/code-execution tools (execute_csharp, invoke_method) a stale
+    // AppDomain silently produces WRONG answers: the snippet runs against the
+    // pre-edit assembly while the agent believes the on-disk fix is loaded. The
+    // bridge already computes this signal for read_compile_errors
+    // (detectStaleAssembly); attach the same check here as an additive field
+    // on a SUCCESSFUL (non-error) body. Cached short-TTL so repeated probes in
+    // one agent turn reuse one scan; invalidated on dead-bridge / compile
+    // settle. Mutating `parsed` before the mutation/direct-body branches below
+    // serializes the field into whichever response shape the bridge emitted.
+    if (
+      parsed != null &&
+      STALE_DOMAIN_ANNOTATION_TOOLS.has(toolName) &&
+      parsed.error == null &&
+      parsed._staleDomain === undefined
+    ) {
+      const staleAsm = this.resolveStaleAssembly();
+      if (staleAsm != null && staleAsm.staleAssembly) {
+        parsed._staleDomain = {
+          hint: staleAsm.hint,
+          newerSources: staleAsm.newerSources,
+          dllMtimeMs: staleAsm.dllMtimeMs,
+        };
+      }
+    }
+
     // capture_inline returns an `inlineImage` base64 PNG field. Unwrap it into
     // an MCP image content block alongside a text metadata block
     // ([{type: image}, {type: text}]). The image carries the same viewable
@@ -1183,6 +1233,7 @@ export class LiveClient implements Router {
     // ensureReady already probes fresh after a transient failure, so the two
     // caches stay consistent.)
     this.bridgeToolsCache.invalidate();
+    this.staleAssemblyCache.invalidate();
 
     // Dead bridge assembly — not recoverable by waiting. Fail fast so the
     // agent can fetch compile errors instead of hanging on /ping.
@@ -1473,7 +1524,11 @@ export class LiveClient implements Router {
             // bridge recompiled, so its tool inventory likely changed (new /
             // removed scripts, asmdef edits, package_add/remove, …). Drop the
             // cache so the next listBridgeTools refetches the fresh set.
+            // feedback-fable-04-08 §5 — a rebuild also clears the staleness
+            // signal the _staleDomain annotation caches; drop it so the next
+            // execute_csharp / invoke_method re-scans against fresh DLLs.
             this.bridgeToolsCache.invalidate();
+            this.staleAssemblyCache.invalidate();
             return null;
           }
         } catch {
@@ -1666,6 +1721,23 @@ export class LiveClient implements Router {
       }
     }
     return newest;
+  }
+
+  /**
+   * feedback-fable-04-08 §5 — resolve the stale-assembly signal for the
+   * `_staleDomain` annotation, backed by a short-TTL cache so repeated
+   * execute_csharp / invoke_method probes in one agent turn reuse one scan.
+   * Returns the cached result within the TTL, otherwise runs
+   * {@link detectStaleAssembly} against this project's `Assets/` + `Library/
+   * ScriptAssemblies`, records it, and returns it. Never throws — any fs error
+   * inside detectStaleAssembly degrades to a non-stale result.
+   */
+  private resolveStaleAssembly(): ReturnType<typeof detectStaleAssembly> {
+    const cached = this.staleAssemblyCache.get();
+    if (cached !== null) return cached;
+    const fresh = detectStaleAssembly(this.projectPath);
+    this.staleAssemblyCache.record(fresh);
+    return fresh;
   }
 
   /**

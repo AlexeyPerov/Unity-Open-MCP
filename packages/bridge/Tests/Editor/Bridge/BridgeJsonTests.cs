@@ -13,6 +13,48 @@ namespace UnityOpenMcpBridge.Tests
     // body — see specs/feedback.md entry 2026-07-03-c.
     public static class BridgeJsonTests
     {
+        // ---- feedback-fable-04-08 §9 — compilePending gate envelope advisory ----
+
+        // Helper: build a minimal GateDispatchResult for envelope-shape tests.
+        private static GateDispatchResult MakeResult(bool compilePending)
+        {
+            return new GateDispatchResult
+            {
+                Mutation = ToolDispatchResult.Ok("{}"),
+                GateRan = true,
+                Outcome = GateOutcome.Passed,
+                CheckpointId = "test-cp",
+                CategoriesRun = new[] { "missing_references" },
+                Delta = new DeltaData(),
+                AgentNextSteps = new[] { "Gate passed — no new issues detected." },
+                CompilePending = compilePending,
+            };
+        }
+
+        [Test]
+        public static void BuildGateEnvelope_EmitsCompilePending_WhenFlagSet()
+        {
+            var json = BridgeJson.BuildGateEnvelope(
+                MakeResult(compilePending: true), "enforce", LifecyclePolicy.EditorSettle);
+            StringAssert.Contains("\"compilePending\":true", json,
+                $"envelope must surface compilePending when the editor is still compiling post-settle: {json}");
+            // The advisory must also reach agentNextSteps so an agent branching
+            // on prose (not just the flag) is steered to poll isCompiling.
+            StringAssert.Contains("PRE-compile state", json,
+                $"envelope agentNextSteps must carry the compilePending advisory: {json}");
+        }
+
+        [Test]
+        public static void BuildGateEnvelope_OmitsCompilePending_WhenFlagClear()
+        {
+            // The common (clean) path must not change shape: compilePending is
+            // omitted entirely, not emitted as false.
+            var json = BridgeJson.BuildGateEnvelope(
+                MakeResult(compilePending: false), "enforce", LifecyclePolicy.EditorSettle);
+            Assert.IsFalse(json.Contains("compilePending"),
+                $"clean path must NOT emit compilePending (additive only): {json}");
+        }
+
         // ---- Accepted: balanced JSON objects ----
 
         [Test]

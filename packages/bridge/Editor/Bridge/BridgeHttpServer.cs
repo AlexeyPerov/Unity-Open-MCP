@@ -927,7 +927,9 @@ namespace UnityOpenMcpBridge
                         // paths_hint_required.
                         bool skipPathsHint = reserializeAllPathsInvalid
                             || (toolName == "unity_open_mcp_execute_menu"
-                                && ExecuteMenuTool.IsReadOnlyMenu(JsonBody.GetString(body, "menu_path")));
+                                && ExecuteMenuTool.IsReadOnlyMenu(JsonBody.GetString(body, "menu_path")))
+                            || (toolName == "unity_open_mcp_execute_csharp"
+                                && JsonBody.GetBool(body, "read_only"));
 
                         if (!skipPathsHint)
                         {
@@ -1034,6 +1036,22 @@ namespace UnityOpenMcpBridge
                     && ToolLifecycle.RequiresSettleWait(lifecycle))
                 {
                     result.SettleMs = EditorSettleWait.Wait(lifecycle);
+
+                    // feedback-fable-04-08 §9 — after the settle wait, if the
+                    // editor is STILL compiling, the gate's delta reflects the
+                    // PRE-compile state. A `passed`/`newErrors:0` in that window
+                    // must not be read as "the new code is verified healthy" —
+                    // the compile that would surface CS errors has not finished
+                    // (or never started: RequestScriptCompilation can no-op,
+                    // issue #3). Surface compilePending so the agent polls
+                    // isCompiling then read_compile_errors instead of trusting
+                    // the delta. BridgeSession.IsCompiling is the thread-safe
+                    // volatile flag EditorSettleWait itself polls.
+                    if (BridgeSession.IsCompiling)
+                    {
+                        result.CompilePending = true;
+                        result.AgentNextSteps = AppendCompilePendingStep(result.AgentNextSteps);
+                    }
                 }
 
                 BridgeAuditRecorder.RecordGateRun(toolName, effectiveGateMode, result, pathsHint);
@@ -1070,6 +1088,25 @@ namespace UnityOpenMcpBridge
                 BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "execution_error", e.Message, sw.ElapsedMilliseconds);
                 BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildFaultEnvelope(e, effectiveGateMode));
             }
+        }
+
+        // feedback-fable-04-08 §9 — append the compilePending advisory to the
+        // gate envelope's agentNextSteps. Returns a new array (preserving the
+        // existing steps) so the gate's own next-steps (issue hints, etc.) are
+        // not dropped. Null/empty input yields a single-element array.
+        private static string[] AppendCompilePendingStep(string[] existing)
+        {
+            const string step =
+                "A script compilation was still in progress when the gate validated " +
+                "— the gate's passed/newErrors:0 reflects the PRE-compile state, not " +
+                "the new code. Poll unity_open_mcp_editor_status.isCompiling until " +
+                "false, then unity_open_mcp_read_compile_errors to confirm the new " +
+                "code is healthy before trusting this result.";
+            if (existing == null || existing.Length == 0) return new[] { step };
+            var combined = new string[existing.Length + 1];
+            System.Array.Copy(existing, combined, existing.Length);
+            combined[existing.Length] = step;
+            return combined;
         }
 
         private static GateDispatchResult DispatchWithGate(string toolName, string body, string gateMode, string[] pathsHint)

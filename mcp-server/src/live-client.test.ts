@@ -23,7 +23,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PingCache } from "./ping-cache.js";
@@ -2178,6 +2178,271 @@ test("M4: execute_menu is NOT annotated with _compileVerify (no reliable recompi
     else process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = prevCompileWait;
     if (prevPollInterval === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
     else process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = prevPollInterval;
+    disposeSandbox(s);
+  }
+});
+
+// ----- feedback-fable-04-08 §5 — `_staleDomain` annotation on execute_csharp /
+// invoke_method. When a source .cs is newer than the newest ScriptAssemblies
+// DLL, the snippet ran against the pre-edit assembly; shapeToolResult attaches
+// an additive `_staleDomain` field so the agent re-invokes after a recompile
+// instead of trusting results from code that has not been loaded.
+
+const STALE_DOMAIN_PROJECT = "/test/StaleDomainGame";
+
+/**
+ * Plant a ScriptAssemblies DLL + an Assets source file under the sandbox at
+ * the given mtimes (ms). detectStaleAssembly flags staleness when the source
+ * mtime is newer than the newest DLL mtime.
+ */
+function plantStaleAssemblyFixture(
+  s: Sandbox,
+  dllMtimeMs: number,
+  sourceMtimeMs: number,
+): void {
+  const dllDir = join(s.dir, "proj", "Library", "ScriptAssemblies");
+  mkdirSync(dllDir, { recursive: true });
+  const srcDir = join(s.dir, "proj", "Assets", "Scripts");
+  mkdirSync(srcDir, { recursive: true });
+  const dllPath = join(dllDir, "Test.dll");
+  const srcPath = join(srcDir, "Foo.cs");
+  writeFileSync(dllPath, "pe");
+  writeFileSync(srcPath, "// source");
+  const setMtime = (p: string, ms: number): void => {
+    const sec = Math.floor(ms / 1000);
+    const frac = (ms % 1000) / 1000;
+    try {
+      utimesSync(p, sec + frac, sec + frac);
+    } catch {
+      /* best-effort */
+    }
+  };
+  setMtime(dllPath, dllMtimeMs);
+  setMtime(srcPath, sourceMtimeMs);
+}
+
+test("feedback-fable-04-08 §5: execute_csharp carries _staleDomain when a source .cs is newer than the DLL", async () => {
+  const s = makeSandbox();
+  let bridge: BridgeStub | null = null;
+  const prevCacheTtl = process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS;
+  // Disable the cache so the scan always runs (deterministic, no TTL races).
+  process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS = "0";
+  try {
+    plantStaleAssemblyFixture(s, 1000, 5000); // DLL old, source new → stale
+    bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: STALE_DOMAIN_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      // execute_csharp returns a direct (non-mutation) success body.
+      res.end(JSON.stringify({ value: 42 }));
+    });
+    plantLock(s, STALE_DOMAIN_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      join(s.dir, "proj"),
+    );
+
+    const result = await client.route("unity_open_mcp_execute_csharp", {
+      code: "return 42;",
+      paths_hint: ["Assets/Scripts/Foo.cs"],
+    });
+    assert.equal(result.isError, false);
+    const body = JSON.parse(
+      result.content[0]?.type === "text" ? (result.content[0].text as string) : "{}",
+    ) as Record<string, unknown>;
+    assert.ok(
+      body._staleDomain,
+      "execute_csharp must carry _staleDomain when a source is newer than the DLL",
+    );
+    const stale = body._staleDomain as { hint: string; newerSources: string[] };
+    assert.ok(stale.hint, "_staleDomain.hint is populated");
+    assert.ok(
+      stale.newerSources.length > 0,
+      "_staleDomain.newerSources lists the offending source",
+    );
+  } finally {
+    if (bridge) await bridge.close();
+    if (prevCacheTtl === undefined) delete process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS;
+    else process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS = prevCacheTtl;
+    disposeSandbox(s);
+  }
+});
+
+test("feedback-fable-04-08 §5: invoke_method carries _staleDomain when a source .cs is newer than the DLL", async () => {
+  const s = makeSandbox();
+  let bridge: BridgeStub | null = null;
+  const prevCacheTtl = process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS;
+  process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS = "0";
+  try {
+    plantStaleAssemblyFixture(s, 1000, 5000);
+    bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: STALE_DOMAIN_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      res.end(JSON.stringify({ returned: null }));
+    });
+    plantLock(s, STALE_DOMAIN_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      join(s.dir, "proj"),
+    );
+
+    const result = await client.route("unity_open_mcp_invoke_method", {
+      type_name: "UnityEngine.Time",
+      method_name: "get_time",
+      is_static: true,
+      paths_hint: ["Assets/Scripts/Foo.cs"],
+    });
+    assert.equal(result.isError, false);
+    const body = JSON.parse(
+      result.content[0]?.type === "text" ? (result.content[0].text as string) : "{}",
+    ) as Record<string, unknown>;
+    assert.ok(
+      body._staleDomain,
+      "invoke_method must carry _staleDomain when a source is newer than the DLL",
+    );
+  } finally {
+    if (bridge) await bridge.close();
+    if (prevCacheTtl === undefined) delete process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS;
+    else process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS = prevCacheTtl;
+    disposeSandbox(s);
+  }
+});
+
+test("feedback-fable-04-08 §5: _staleDomain omitted when the assembly is fresh (DLL newer than source)", async () => {
+  const s = makeSandbox();
+  let bridge: BridgeStub | null = null;
+  const prevCacheTtl = process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS;
+  process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS = "0";
+  try {
+    plantStaleAssemblyFixture(s, 5000, 1000); // DLL new, source old → fresh
+    bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: STALE_DOMAIN_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      res.end(JSON.stringify({ value: 42 }));
+    });
+    plantLock(s, STALE_DOMAIN_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      join(s.dir, "proj"),
+    );
+
+    const result = await client.route("unity_open_mcp_execute_csharp", {
+      code: "return 42;",
+      paths_hint: ["Assets/Scripts/Foo.cs"],
+    });
+    assert.equal(result.isError, false);
+    const body = JSON.parse(
+      result.content[0]?.type === "text" ? (result.content[0].text as string) : "{}",
+    ) as Record<string, unknown>;
+    assert.equal(
+      body._staleDomain,
+      undefined,
+      "fresh assembly (DLL newer than source) must NOT carry _staleDomain",
+    );
+  } finally {
+    if (bridge) await bridge.close();
+    if (prevCacheTtl === undefined) delete process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS;
+    else process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS = prevCacheTtl;
+    disposeSandbox(s);
+  }
+});
+
+test("feedback-fable-04-08 §5: _staleDomain omitted on execute_csharp ERROR responses", async () => {
+  const s = makeSandbox();
+  let bridge: BridgeStub | null = null;
+  const prevCacheTtl = process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS;
+  process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS = "0";
+  try {
+    plantStaleAssemblyFixture(s, 1000, 5000); // stale on disk
+    bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: STALE_DOMAIN_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      // An errored snippet carries no domain-relevance signal.
+      res.end(
+        JSON.stringify({ error: { code: "execution_error", message: "boom" } }),
+      );
+    });
+    plantLock(s, STALE_DOMAIN_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      join(s.dir, "proj"),
+    );
+
+    const result = await client.route("unity_open_mcp_execute_csharp", {
+      code: "throw new System.Exception();",
+      paths_hint: ["Assets/Scripts/Foo.cs"],
+    });
+    const body = JSON.parse(
+      result.content[0]?.type === "text" ? (result.content[0].text as string) : "{}",
+    ) as Record<string, unknown>;
+    assert.equal(
+      body._staleDomain,
+      undefined,
+      "error responses must NOT carry _staleDomain (no domain signal on a failed snippet)",
+    );
+  } finally {
+    if (bridge) await bridge.close();
+    if (prevCacheTtl === undefined) delete process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS;
+    else process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS = prevCacheTtl;
     disposeSandbox(s);
   }
 });

@@ -128,6 +128,17 @@ glance without the ~222 KB a full prefab rebuild used to inline). What an agent
 branches on is `mutation.success` + `gate.outcome` + the counts; the full key
 list is available via `validate_edit` / `scan_paths` on the touched paths.
 
+`compilePending: true` (next to `settleMs`) is emitted when the editor is still
+compiling after the post-mutation settle wait — the gate's delta then reflects
+the **pre-compile** state, so a `passed` / `newErrors:0` does not verify the new
+code. Poll `editor_status.isCompiling` until false, then `read_compile_errors`.
+`agentNextSteps` repeats the advisory.
+
+`execute_csharp` accepts `read_only: true` for pure-read probes (type lookups,
+`SessionState` reads, console reads): it waives the `paths_hint` requirement and
+skips the gate. It is a scope hint, not a safety boundary — the deny heuristic
+still applies, and it must not be used for a snippet that mutates assets.
+
 `unity_open_mcp_apply_fix` defaults to `dry_run: true`. Review the preview before
 applying. Unsafe fixes require an explicit replacement target. A top-level
 non-dry-run fix can restore touched files when application fails or introduces

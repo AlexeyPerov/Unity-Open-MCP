@@ -63,6 +63,16 @@ namespace UnityOpenMcpBridge
             _connected = value;
         }
 
+        // feedback-fable-04-08 §9 — test seam so the compilePending gate
+        // advisory can be exercised without driving a real compile. The flag
+        // is normally refreshed by the main-thread update tick; this setter
+        // lets a unit test pin it and assert the envelope surfaces the
+        // advisory. Production never calls this (the update tick owns the flag).
+        internal static void SetCompilingForTest(bool value)
+        {
+            _isCompiling = value;
+        }
+
         public static bool IsInitialized => _initialized;
     }
 }

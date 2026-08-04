@@ -105,6 +105,18 @@ namespace UnityOpenMcpBridge
         // `rollbackDisabled` warning so the agent knows the mutation committed
         // without auto-rollback protection. False on every other path.
         public bool RollbackDisabled;
+        // feedback-fable-04-08 §9 — set by the dispatcher when, after the
+        // post-mutation settle wait, the editor is STILL compiling (the settle
+        // cap elapsed without the compile finishing, or a compile is queued but
+        // has not yet started — the #3 root cause: RequestScriptCompilation
+        // can no-op silently). The gate's delta.newErrors reflects the PRE-
+        // compile state in that window, so a `passed`/`newErrors:0` must NOT
+        // be read as "the new code is verified healthy". The envelope surfaces
+        // `compilePending:true` (next to settleMs) plus an agentNextSteps
+        // advisory so the agent polls isCompiling then read_compile_errors.
+        // False (the common case) means the compile settled or was never
+        // relevant to this mutation.
+        public bool CompilePending;
     }
 
     public static class GatePolicy

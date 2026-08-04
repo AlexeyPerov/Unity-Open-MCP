@@ -61,6 +61,21 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("unity_senses_run_tests", result.ErrorMessage);
         }
 
+        // feedback-fable-04-08 §8 — the read_only flag is a SCOPE HINT (waives
+        // paths_hint at the dispatcher gate), NOT a safety boundary. The deny
+        // heuristic runs inside Execute and is independent of read_only, so a
+        // read_only snippet matching a destructive pattern is STILL denied.
+        // This pins the contract: read_only removes gate friction, not safety.
+        [Test]
+        public static void Execute_ReadOnly_StillDeniedByPolicy_OnDestructivePattern()
+        {
+            var result = ExecuteCSharpTool.Execute(
+                "{\"code\":\"EditorApplication.Exit(0);\",\"read_only\":true}");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("denied_by_policy", result.ErrorCode);
+            StringAssert.Contains("EditorApplication", result.ErrorMessage);
+        }
+
         [Test]
         public static void Execute_BypassWithGateOffAndConfirm_AllowsDestructive()
         {

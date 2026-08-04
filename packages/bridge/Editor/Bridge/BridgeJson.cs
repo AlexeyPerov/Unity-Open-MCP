@@ -350,6 +350,16 @@ namespace UnityOpenMcpBridge
             sb.Append(",\"lifecycle\":\"").Append(lifecycle.ToWireString()).Append("\"");
             sb.Append(",\"settleMs\":").Append(result.SettleMs);
 
+            // feedback-fable-04-08 §9 — emitted ONLY when the editor was still
+            // compiling after the post-mutation settle wait. The gate's delta
+            // reflects the pre-compile state in that window, so a passed/
+            // newErrors:0 must not be read as "the new code is verified
+            // healthy". Omitted on the clean/normal path (no shape change).
+            if (result.CompilePending)
+            {
+                sb.Append(",\"compilePending\":true");
+            }
+
             // M13 T4.2 — dirty-scene paths when the op was refused by the
             // active-scene guard. Omitted (null) when allowed.
             if (result.DirtyScenePaths != null && result.DirtyScenePaths.Length > 0)

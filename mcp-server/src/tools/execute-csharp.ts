@@ -45,6 +45,20 @@ export const executeCsharp = makeTool(
               "Instance IDs change on domain reload.",
           },
           paths_hint: { ...PATHS_HINT_TYPE, description: "Asset paths likely touched; drives scoped gate validation" },
+          read_only: {
+            type: "boolean",
+            default: false,
+            description:
+              "Hint that the snippet performs no asset writes (a pure-read probe: " +
+              "type lookup, SessionState read, console read). When true the " +
+              "paths_hint requirement is waived and the gate is skipped (no " +
+              "checkpoint/validate), so a read probe no longer needs a fake " +
+              "scope. This is a SCOPE HINT, not a safety boundary: the deny " +
+              "heuristic still applies (a snippet matching " +
+              "AssetDatabase.DeleteAsset / EditorApplication.Exit / etc. is " +
+              "still denied), and the bridge cannot statically prove the " +
+              "snippet writes nothing — only assert it does not need a scope.",
+          },
           ignore_scene_dirty: { ...IGNORE_SCENE_DIRTY_BASE, description: "Bypass the active-scene dirty guard. By default a disruptive op " + "(recompile / scene switch) is refused with scene_dirty when any " + "loaded scene has unsaved changes, so Unity's native save modal " + "never interrupts the flow. Set true to proceed and accept the risk " + "of a native save prompt." },
           confirm_bypass: { ...CONFIRM_BYPASS_BASE, description: "Bypass the deny heuristic for destructive patterns " + "(EditorApplication.Exit, AssetDatabase.DeleteAsset, " + "BuildPipeline.BuildPlayer, etc.). Requires gate: \"off\" as well — " + "both flags must be set. The bypass is audited." },
           gate: { ...GATE_PROP },

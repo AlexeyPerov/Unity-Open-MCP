@@ -579,6 +579,195 @@ test("route: batch-capable tool falls back to batch with _route=batch when live 
   assert.equal((parseBody(result)._route as { fallbackReason?: string }).fallbackReason, "live_unavailable");
 });
 
+// ----- feedback-fable-04-08 §7 — editor_busy fallbackReason when the batch
+// fallback hits a live editor's project lock. A `live_unavailable` → batch
+// path whose batch result is editor_instance_locked, combined with a live PID
+// holding the project, rewrites the route meta to fallbackReason=editor_busy
+// so the agent retries instead of treating it as a lock conflict.
+
+const EDITOR_BUSY_PROJECT = "/test/EditorBusyGame";
+
+/** Plant an instance lock for `projectPath` in a sandboxed HOME. */
+async function plantInstanceLock(
+  sandboxDir: string,
+  projectPath: string,
+  pid: number,
+): Promise<void> {
+  const { projectHash } = await import("./instance-discovery.js");
+  const hash = projectHash(projectPath);
+  const instancesDir = join(sandboxDir, ".unity-open-mcp", "instances");
+  await mkdir(instancesDir, { recursive: true });
+  const fresh = new Date().toISOString();
+  const payload = {
+    pid,
+    port: 24678,
+    projectPath,
+    projectHash: hash,
+    startedAt: fresh,
+    updatedAt: fresh,
+    heartbeatAt: fresh,
+    state: "playing",
+    isPlaying: true,
+    isCompiling: false,
+    bridgeVersion: "0.0.0",
+    unityVersion: "6000.0.0",
+  };
+  await writeFile(join(instancesDir, `${hash}.json`), JSON.stringify(payload));
+}
+
+test("route: editor_busy fallbackReason when batch returns editor_instance_locked and a live pid holds the project", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "uomcp-busy-"));
+  const sandboxDir = await mkdtemp(join(tmpdir(), "uomcp-busy-home-"));
+  const prevHome = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE;
+  process.env.HOME = sandboxDir;
+  process.env.USERPROFILE = sandboxDir;
+  try {
+    await plantInstanceLock(sandboxDir, EDITOR_BUSY_PROJECT, process.pid);
+    const live = makeFakeLive({ available: false });
+    const batch = makeFakeBatch({
+      batchTools: new Set(["unity_open_mcp_find_members"]),
+      result: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: {
+                code: "editor_instance_locked",
+                message: "A live Unity Editor (pid 12345) holds the project lock.",
+              },
+            }),
+          },
+        ],
+        isError: true,
+      },
+    });
+    const router = makeRouter(live, batch, EDITOR_BUSY_PROJECT, makeFakeEventStream());
+
+    const result = await router.route("unity_open_mcp_find_members", {});
+    assert.equal(routeOf(result), "batch");
+    const meta = parseBody(result)._route as {
+      fallbackReason?: string;
+      editorPid?: number;
+    };
+    assert.equal(
+      meta.fallbackReason,
+      "editor_busy",
+      "a live-pid lock conflict during live_unavailable fallback is editor_busy, not a lock conflict",
+    );
+    assert.equal(
+      meta.editorPid,
+      process.pid,
+      "the live PID is surfaced for agent correlation",
+    );
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
+    await rm(tmp, { recursive: true, force: true });
+    await rm(sandboxDir, { recursive: true, force: true });
+  }
+});
+
+test("route: stays live_unavailable when batch returns editor_instance_locked but no live pid (stale lock)", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "uomcp-busy-stale-"));
+  const sandboxDir = await mkdtemp(join(tmpdir(), "uomcp-busy-stale-home-"));
+  const prevHome = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE;
+  process.env.HOME = sandboxDir;
+  process.env.USERPROFILE = sandboxDir;
+  try {
+    // PID 999999 is almost certainly not alive → no live editor → genuine
+    // lock conflict, must NOT be rewritten to editor_busy.
+    await plantInstanceLock(sandboxDir, EDITOR_BUSY_PROJECT, 999999);
+    const live = makeFakeLive({ available: false });
+    const batch = makeFakeBatch({
+      batchTools: new Set(["unity_open_mcp_find_members"]),
+      result: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: {
+                code: "editor_instance_locked",
+                message: "A live Unity Editor holds the project lock.",
+              },
+            }),
+          },
+        ],
+        isError: true,
+      },
+    });
+    const router = makeRouter(live, batch, EDITOR_BUSY_PROJECT, makeFakeEventStream());
+
+    const result = await router.route("unity_open_mcp_find_members", {});
+    const meta = parseBody(result)._route as {
+      fallbackReason?: string;
+      editorPid?: number;
+    };
+    assert.equal(
+      meta.fallbackReason,
+      "live_unavailable",
+      "a stale lock (no live pid) is a genuine lock conflict, not editor_busy",
+    );
+    assert.equal(meta.editorPid, undefined);
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
+    await rm(tmp, { recursive: true, force: true });
+    await rm(sandboxDir, { recursive: true, force: true });
+  }
+});
+
+test("route: stays live_unavailable when batch returns a non-lock error", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "uomcp-busy-other-"));
+  const sandboxDir = await mkdtemp(join(tmpdir(), "uomcp-busy-other-home-"));
+  const prevHome = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE;
+  process.env.HOME = sandboxDir;
+  process.env.USERPROFILE = sandboxDir;
+  try {
+    await plantInstanceLock(sandboxDir, EDITOR_BUSY_PROJECT, process.pid);
+    const live = makeFakeLive({ available: false });
+    const batch = makeFakeBatch({
+      batchTools: new Set(["unity_open_mcp_find_members"]),
+      result: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: {
+                code: "unity_not_discovered",
+                message: "No Unity install found.",
+              },
+            }),
+          },
+        ],
+        isError: true,
+      },
+    });
+    const router = makeRouter(live, batch, EDITOR_BUSY_PROJECT, makeFakeEventStream());
+
+    const result = await router.route("unity_open_mcp_find_members", {});
+    const meta = parseBody(result)._route as { fallbackReason?: string };
+    assert.equal(
+      meta.fallbackReason,
+      "live_unavailable",
+      "non-lock batch errors are not rewritten to editor_busy",
+    );
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
+    await rm(tmp, { recursive: true, force: true });
+    await rm(sandboxDir, { recursive: true, force: true });
+  }
+});
+
 test("route: compile_check always routes to batch even when live is available", async () => {
   // The whole point of compile_check is to recompile from scratch; routing it
   // to a live Editor that already compiled would trivially report success.
