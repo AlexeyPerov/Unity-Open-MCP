@@ -78,6 +78,29 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
         // determine them; the mapper falls back to the line in that case.
         public long Anchor { get; }
         public string Property { get; }
+
+        // feedback-04-08-opus §4 — content-addressed identity of the empty-ref
+        // site. An anchor fileID is NOT content: an editor script that rebuilds
+        // a prefab renumbers every anchor, so the whole issue set renames again
+        // (the report saw 729 resolved + 729 new on an idempotent rebuild). The
+        // object's transform PATH ("LobbyChrome/LeftOffersTab/Content") plus the
+        // property ("PromotionTimer") survives renumbering — that is what makes
+        // a delta mean something across a rebuild. Filled by a post-pass after
+        // the anchor→metadata map is built; null when a path could not be
+        // resolved (the mapper then falls back to the anchor id).
+        public string TransformPath { get; set; }
+
+        // feedback-04-08-opus §5 — the GUID of the MonoBehaviour script that
+        // declares this empty-ref field (the owning component's m_Script guid),
+        // when the owning object is a MonoBehaviour. Null for built-in
+        // components (Transform, RectTransform, Button, Image, …). The mapper
+        // uses this to split severity: a field on a user script whose GUID
+        // resolves under Assets/ stays a Warning (a real, possibly-shipping
+        // null); the same field on a built-in Unity/package component is demoted
+        // to Info (empty-by-default noise — m_SelectOn*, sprite-swap sprites,
+        // TMP material/style fields — that buries the real bugs under a 98 %
+        // noise floor).
+        public string OwnerScriptGuid { get; set; }
     }
 
     public class MissingMethodEntry

@@ -22,7 +22,15 @@ namespace UnityOpenMcpVerify
             var keyPath = SanitizeComponent(assetPath);
             var keyCode = SanitizeComponent(issueCode);
             ValidateComponents(ruleId, severity, keyPath, keyCode);
-            var sev = severity == VerifySeverity.Error ? "ERROR" : "WARN";
+            // feedback-04-08-opus §5 — Info severity token. ComputeDelta counts
+            // only ERROR/WARN, so an INFO key never fails the gate; it surfaces
+            // for awareness only.
+            var sev = severity switch
+            {
+                VerifySeverity.Error => "ERROR",
+                VerifySeverity.Info => "INFO",
+                _ => "WARN",
+            };
             return $"{ruleId}|{sev}|{keyPath}|{keyCode}";
         }
 
@@ -76,6 +84,10 @@ namespace UnityOpenMcpVerify
                 case "ERROR": severity = VerifySeverity.Error; return true;
                 case "WARN":
                 case "WARNING": severity = VerifySeverity.Warning; return true;
+                // feedback-04-08-opus §5 — INFO severity for demoted
+                // empty_local_ref built-in-field sites.
+                case "INFO":
+                case "INFORMATIONAL": severity = VerifySeverity.Info; return true;
                 default: return false;
             }
         }

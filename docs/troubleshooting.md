@@ -88,6 +88,16 @@ live tools time out. Errors mention **`dead_bridge`** or **`main_thread_blocked`
 If tools are still missing after a config edit, restart the MCP client. Most
 clients read MCP configuration only at startup.
 
+### Status tab says the client is not configured
+
+The **Client** stage in the connection strip is a file heuristic. It searches the
+Unity project and up to four parent folders for a project-scoped client config,
+so a Unity project nested in a larger repository (`<repo>/Client` configured by
+`<repo>/.cursor/mcp.json`) reads as configured — the panel's **Found in** field
+names the file it matched. The heuristic still cannot see Claude Code (CLI-only,
+no file) or a config in a location outside that search, so a warning here is
+advisory: if tools work, the client is configured.
+
 ## Node or `npx` problems
 
 - **`node` / `npx` not found:** install Node.js 18 or newer from
@@ -148,6 +158,30 @@ On a machine without nuget.org access, copy the whole
 `~/.unity-open-mcp/roslyn/4.8.0/` directory (DLLs plus
 `install-manifest.json`) from a machine where the install succeeded. The
 directory is self-contained and portable.
+
+## `read_compile_errors` reports errors from a different Unity
+
+### What it means
+
+`read_compile_errors` reads the tail of `Editor.log`. When a `-batchmode` run of
+a **different** Unity version (e.g. a CI build on 6000.5) wrote the log, its
+compiler errors — including API deprecations that are only errors on that
+version — can look like the live editor is broken. The response carries
+`logUnityVersion`, `logBatchMode`, and `liveUnityVersion` so you can tell who
+wrote the log: on a version mismatch it adds
+`logAuthorshipMismatch: true` + `logAuthorshipHint` warning that the errors
+**cannot all occur** in the live editor.
+
+### Recovery
+
+When `logAuthorshipMismatch` is set (or `logUnityVersion` differs from
+`liveUnityVersion`), do **not** act on the reported errors as if the live editor
+produced them. Confirm the live editor's health with `bridge_status`
+(`unityVersion`) and `editor_status` (`isCompiling`). If the live editor is the
+project you care about, its own log (`~/Library/Logs/Unity/Editor.log` on
+pre-6000.5, `<project>/Logs/Editor.log` on 6000.5+) holds the authoritative
+errors; `read_compile_errors` resolves that path automatically when the project
+is the live one.
 
 ## Related docs
 

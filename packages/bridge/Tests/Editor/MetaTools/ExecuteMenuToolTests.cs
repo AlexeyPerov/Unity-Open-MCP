@@ -30,6 +30,18 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public static void IsReadOnlyMenu_PlayModeControls_ReturnsTrue()
+        {
+            // feedback-04-08-opus §6 — Edit/Play / Pause / Step write no project
+            // asset, so they are read-only for gate-scope purposes. Without this
+            // the mandatory paths_hint rule forced a fabricated scene path that
+            // manufactured false scope (and triggered §1's scanner errors).
+            Assert.IsTrue(ExecuteMenuTool.IsReadOnlyMenu("Edit/Play"));
+            Assert.IsTrue(ExecuteMenuTool.IsReadOnlyMenu("Edit/Pause"));
+            Assert.IsTrue(ExecuteMenuTool.IsReadOnlyMenu("Edit/Step"));
+        }
+
+        [Test]
         public static void IsReadOnlyMenu_NonAllowlisted_ReturnsFalse()
         {
             Assert.IsFalse(ExecuteMenuTool.IsReadOnlyMenu("File/Save Project"));

@@ -27,7 +27,17 @@ namespace UnityOpenMcpBridge.MetaTools
             "Window/General/Console",
             "Window/General/Scene",
             "Window/General/Game",
-            "Window/Layouts"
+            "Window/Layouts",
+            // feedback-04-08-opus §6 — play-mode control menus write NO project
+            // asset, so the gate (which checkpoints/validates ASSET paths) has
+            // nothing to scope. Forcing a fabricated paths_hint (e.g. a scene
+            // path) just to satisfy the mandatory-paths rule manufactured false
+            // scope AND triggered the scanner's scene-path console errors (§1)
+            // on every play/pause/step. These menus mutate editor RUNTIME state
+            // only, never Assets/.
+            "Edit/Play",
+            "Edit/Pause",
+            "Edit/Step",
         };
 
         // Batch-viable menu allow-list (M26 Plan 3). Most Editor menus open a

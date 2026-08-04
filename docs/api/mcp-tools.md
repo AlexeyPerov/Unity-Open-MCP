@@ -118,6 +118,16 @@ reports success. Gate modes are:
 - `warn` — report issues without blocking;
 - `off` — skip the gate when explicitly supported.
 
+`gate.delta` carries the counts (`newErrors`, `newWarnings`, `resolvedErrors`,
+`resolvedWarnings`) plus **bounded** issue-key arrays: `newIssues` /
+`resolvedIssues` are capped at the first 25 keys each, with a companion
+`newIssuesTruncated` / `resolvedIssuesTruncated` count for the elided tail, and
+`newIssuesByRule` / `resolvedIssuesByRule` histograms showing the per-rule
+distribution (so a 729-issue delta that is all one noisy rule is visible at a
+glance without the ~222 KB a full prefab rebuild used to inline). What an agent
+branches on is `mutation.success` + `gate.outcome` + the counts; the full key
+list is available via `validate_edit` / `scan_paths` on the touched paths.
+
 `unity_open_mcp_apply_fix` defaults to `dry_run: true`. Review the preview before
 applying. Unsafe fixes require an explicit replacement target. A top-level
 non-dry-run fix can restore touched files when application fails or introduces
@@ -242,6 +252,31 @@ match). To run a single test method deterministically, invoke the test class or
 method directly via `unity_open_mcp_invoke_method` — NUnit assertion failures
 come back verbatim in the error.
 
+### `unity_senses_visual_compare`
+
+Visual regression compare — capture a named reference snapshot, then diff a
+later capture against it. A `compare` response carries `pixelDiffPercent`,
+`mismatchedPixels`, `perceptualDistance` (8×8 average-hash Hamming distance —
+tolerates minor anti-aliasing / compression drift), and `match`. The `match`
+flag is true when `pixelDiffPercent <= sensitivity * 100` (default `sensitivity:
+0.01` = 1% pixel diff); raise it for noisier scenes (dynamic backgrounds,
+particle systems), set `0` for an exact match. On a non-zero diff the tool
+returns an **inline diff image** (mismatched pixels highlighted red over the
+current frame) as an MCP image content block — same `inlineImage` unwrap
+mechanism `capture_inline` uses. Set `include_diff_image: false` to receive
+metrics only.
+
+References persist as flat named files under
+`~/.unity-open-mcp/screenshots/references/` (`<name>.png` + `<name>.meta.json`);
+`name` rejects path separators and traversal. The compare resamples the current
+capture to the reference dimensions when they differ, so the diff is
+resolution-stable across captures at different sizes. Per-channel drift up to an
+epsilon (8) counts as equal, so sub-threshold AA noise does not register as a
+regression. (Named "reference snapshot" / "visual compare" rather than
+"baseline" — that name is taken by the verify-issue baseline tools
+`baseline_create` / `regression_check`, which compare compiler-error /
+project-health snapshots, not images.)
+
 ### `unity_open_mcp_manage_tools`
 
 Activation is **additive** (activating one group never drops another). After
@@ -272,6 +307,19 @@ The response also carries `staleAssembly: true` when at least one
 no-op'd a recompile), so a `no_errors_found` signal **cannot** be trusted until
 the assembly is rebuilt. Call `unity_open_mcp_recompile_scripts`, then re-read
 compile errors.
+
+When the log header was parseable (a short `-batchmode` run usually fits in the
+tail; a long live-editor session usually does not), the response also carries
+log-authorship fields that identify **which Unity wrote the log**:
+`logUnityVersion` (from the `Unity Editor version:` header line), `logBatchMode`
+(from `Batch mode:`), `logDate`, and `liveUnityVersion` (the live bridge's
+version, from the instance lock). On a version mismatch the response adds
+`logAuthorshipMismatch: true` + `logAuthorshipHint` warning that the errors
+**cannot all occur** in the live editor — a batch run of a newer Unity leaves
+errors (e.g. an API deprecation that is only an error on that version) that the
+live editor never produced. Do **not** "fix" those files or refuse to continue on
+a `compile_failed` signal from a log whose version differs from the live editor;
+the inverse of the stale-log trap is just as dangerous.
 
 ### `unity_open_mcp_recompile_scripts`
 

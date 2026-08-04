@@ -81,27 +81,14 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append(",\"resolvedWarnings\":").Append(delta.ResolvedWarnings);
             sb.Append('}');
 
-            sb.Append(",\"newIssues\":[");
-            if (delta.NewIssueKeys != null)
-            {
-                for (int i = 0; i < delta.NewIssueKeys.Length; i++)
-                {
-                    if (i > 0) sb.Append(',');
-                    sb.Append('"').Append(Esc(delta.NewIssueKeys[i])).Append('"');
-                }
-            }
-            sb.Append(']');
-
-            sb.Append(",\"resolvedIssues\":[");
-            if (delta.ResolvedIssueKeys != null)
-            {
-                for (int i = 0; i < delta.ResolvedIssueKeys.Length; i++)
-                {
-                    if (i > 0) sb.Append(',');
-                    sb.Append('"').Append(Esc(delta.ResolvedIssueKeys[i])).Append('"');
-                }
-            }
-            sb.Append(']');
+            // feedback-04-08-opus §3 — bound the inlined issue-key arrays (first
+            // MaxDeltaIssuesInResponse, with a "Truncated" count for the elided
+            // tail) plus a per-rule histogram. The full key list is available via
+            // validate_edit / scan_paths; the agent branches on summary + counts.
+            BridgeJson.AppendBoundedIssueArray(sb, "newIssues", delta.NewIssueKeys);
+            BridgeJson.AppendBoundedIssueArray(sb, "resolvedIssues", delta.ResolvedIssueKeys);
+            BridgeJson.AppendCountsByRule(sb, "newIssues", delta.NewIssueKeys);
+            BridgeJson.AppendCountsByRule(sb, "resolvedIssues", delta.ResolvedIssueKeys);
 
             sb.Append('}');
             return sb.ToString();

@@ -532,3 +532,158 @@ export function detectStaleAssembly(projectRoot: string | null | undefined): Sta
       "recompile, then re-read compile errors.",
   };
 }
+
+// ---------------------------------------------------------------------------
+// feedback-04-08-opus §2 — log-authorship detection (distinct from stale-log
+// and stale-assembly). The two existing heuristics cover "my editor wrote the
+// log but the errors may be stale" (staleLogSuspected) and "my editor's DLL
+// predates my source" (staleAssembly). Neither covers the inverse, more
+// dangerous case: the log was written by a DIFFERENT Unity — a batch-mode run
+// of a newer Unity version whose errors (e.g. an API deprecation that is only
+// an error on that version) cannot occur in the live editor.
+//
+// Unity prints a header block at the top of Editor.log whose first lines are:
+//
+//   Unity Editor version:    6000.5.5f1 (d16e074b49fd)
+//   Batch mode:              YES
+//   Date:                    2026-08-04T08:39:08Z
+//   COMMAND LINE ARGUMENTS: ...
+//
+// We parse that header from the tail (the tail always begins mid-log unless the
+// editor just launched, but a -batchmode run writes its header near its end too
+// because a batch run is short — and even when the header scrolled past the
+// tail, the absence of a parseable header is itself the benign signal "this is
+// a live-editor log we cannot fingerprint", so no false mismatch fires).
+// ---------------------------------------------------------------------------
+
+export interface LogAuthorship {
+  /** Unity version parsed from the log header's "Unity Editor version:" line,
+   *  e.g. "6000.5.5f1". null when the header was not present in the tail. */
+  logUnityVersion: string | null;
+  /** True when the header's "Batch mode:" line is "YES". null when absent. */
+  logBatchMode: boolean | null;
+  /** ISO timestamp parsed from the header's "Date:" line, when present. */
+  logDate: string | null;
+}
+
+/**
+ * Parse the Unity Editor.log header fields that identify WHO wrote the log.
+ * Scans only the tail content already read by the tool (no extra disk I/O).
+ *
+ * Returns nulls (not throws) when the header lines are absent — a long-running
+ * live editor's tail starts mid-log and won't contain the header, which is the
+ * benign case (no version to compare against, so no false mismatch).
+ */
+export function parseLogAuthorship(tail: string): LogAuthorship {
+  const empty: LogAuthorship = {
+    logUnityVersion: null,
+    logBatchMode: null,
+    logDate: null,
+  };
+  if (!tail) return empty;
+
+  // The header is written once per editor launch near the TOP of the log. The
+  // tool reads only the tail, so for a long session the header is gone — that
+  // is fine (return nulls). For a short -batchmode run the whole log fits in
+  // the tail and the header is present. Match the first occurrence only.
+  const versionMatch = tail.match(
+    /Unity Editor version:\s*([0-9][^\s)]*)/,
+  );
+  const batchMatch = tail.match(/Batch mode:\s*(YES|NO)/i);
+  const dateMatch = tail.match(/Date:\s*([^\r\n]+)/);
+
+  return {
+    logUnityVersion: versionMatch ? versionMatch[1].trim() : null,
+    logBatchMode: batchMatch
+      ? batchMatch[1].trim().toUpperCase() === "YES"
+      : null,
+    logDate: dateMatch ? dateMatch[1].trim() : null,
+  };
+}
+
+export interface LogAuthorshipMismatch {
+  /** True when the log's Unity version differs from the live bridge's. */
+  versionMismatch: boolean;
+  /** The version that wrote the log (from the header). */
+  logUnityVersion: string | null;
+  /** The live bridge's version, when known. */
+  liveUnityVersion: string | null;
+  /** True when the log was written by a -batchmode run (not the live editor). */
+  logBatchMode: boolean | null;
+  /** One-line agent-facing warning. Empty when not a mismatch. */
+  hint: string;
+}
+
+/**
+ * Compare the log's authorship against the live bridge's Unity version. This is
+ * the cross-check feedback-04-08-opus §2 asks for: a batch run of a NEWER Unity
+ * leaves a log whose errors (e.g. a deprecation that is only an error on that
+ * version) cannot occur in the live editor, so surfacing them as "current"
+ * sends the agent chasing ghosts (or refusing to continue) for minutes.
+ *
+ * Two cheap signals, both from data already at hand:
+ *   - the log's "Unity Editor version:" vs the live bridge unityVersion
+ *   - the log's "Batch mode:" flag (a batch run is never the live editor)
+ *
+ * Conservative: only flags a mismatch when BOTH the log version parsed AND a
+ * live version is known, AND they differ. A null log version (header scrolled
+ * past the tail) never fires — there is nothing to compare. When the log is a
+ * batch run but the versions agree, we surface the batch-mode flag WITHOUT
+ * calling it a mismatch (the agent still benefits from knowing it is a batch
+ * log). The router decides how to fold this into the response.
+ */
+export function compareLogAuthorship(
+  authorship: LogAuthorship,
+  liveUnityVersion: string | null | undefined,
+): LogAuthorshipMismatch {
+  const logUnityVersion = authorship.logUnityVersion;
+  const logBatchMode = authorship.logBatchMode;
+  const live = liveUnityVersion ?? null;
+
+  const versionMismatch =
+    logUnityVersion !== null && live !== null && logUnityVersion !== live;
+
+  if (versionMismatch) {
+    return {
+      versionMismatch: true,
+      logUnityVersion,
+      liveUnityVersion: live,
+      logBatchMode,
+      hint:
+        `Editor.log was written by Unity ${logUnityVersion}` +
+        (logBatchMode ? " (batch mode)" : "") +
+        ` but the live editor is ${live}. The errors below CANNOT all occur ` +
+        `in the live editor — do NOT treat a compile_failed signal from this ` +
+        `log as current. A different Unity wrote it` +
+        (logBatchMode ? " (likely a headless -batchmode run)" : "") +
+        `. If the live editor is healthy, these errors do not apply.`,
+    };
+  }
+
+  // No version mismatch, but still surface a batch-mode log so the agent knows
+  // the errors are from a headless run, not the interactive editor. This is
+  // informational (hint present, versionMismatch false) — the router emits the
+  // fields without the "do not trust" framing.
+  if (logBatchMode === true) {
+    return {
+      versionMismatch: false,
+      logUnityVersion,
+      liveUnityVersion: live,
+      logBatchMode,
+      hint:
+        `Editor.log was written by a -batchmode Unity run` +
+        (logUnityVersion ? ` (${logUnityVersion})` : "") +
+        (live ? `, not the live editor (${live})` : "") +
+        `. The errors are real for that run; confirm they still apply to the ` +
+        `live editor before acting.`,
+    };
+  }
+
+  return {
+    versionMismatch: false,
+    logUnityVersion,
+    liveUnityVersion: live,
+    logBatchMode,
+    hint: "",
+  };
+}

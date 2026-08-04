@@ -328,25 +328,17 @@ namespace UnityOpenMcpBridge
                 sb.Append(",\"newWarnings\":").Append(result.Delta?.NewWarnings ?? 0);
                 sb.Append(",\"resolvedErrors\":").Append(result.Delta?.ResolvedErrors ?? 0);
                 sb.Append(",\"resolvedWarnings\":").Append(result.Delta?.ResolvedWarnings ?? 0);
-                sb.Append(",\"newIssues\":[");
-                if (result.Delta?.NewIssueKeys != null)
-                {
-                    for (int i = 0; i < result.Delta.NewIssueKeys.Length; i++)
-                    {
-                        if (i > 0) sb.Append(',');
-                        sb.Append('"').Append(EscapeStringContent(result.Delta.NewIssueKeys[i])).Append('"');
-                    }
-                }
-                sb.Append("],\"resolvedIssues\":[");
-                if (result.Delta?.ResolvedIssueKeys != null)
-                {
-                    for (int i = 0; i < result.Delta.ResolvedIssueKeys.Length; i++)
-                    {
-                        if (i > 0) sb.Append(',');
-                        sb.Append('"').Append(EscapeStringContent(result.Delta.ResolvedIssueKeys[i])).Append('"');
-                    }
-                }
-                sb.Append("]}");
+                // feedback-04-08-opus §3 — bound the inlined issue-key arrays
+                // (first MaxDeltaIssuesInResponse, with a "Truncated" count for
+                // the elided tail) plus a countsByRule histogram so the delta's
+                // distribution stays visible without the ~222 KB a full prefab
+                // rebuild produced. The agent branches on the counts above; the
+                // full key list is available via validate_edit / scan_paths.
+                AppendBoundedIssueArray(sb, "newIssues", result.Delta?.NewIssueKeys);
+                AppendBoundedIssueArray(sb, "resolvedIssues", result.Delta?.ResolvedIssueKeys);
+                AppendCountsByRule(sb, "newIssues", result.Delta?.NewIssueKeys);
+                AppendCountsByRule(sb, "resolvedIssues", result.Delta?.ResolvedIssueKeys);
+                sb.Append('}');
             }
 
             sb.Append('}');
@@ -426,6 +418,80 @@ namespace UnityOpenMcpBridge
             sb.Append("]}");
 
             return sb.ToString();
+        }
+
+        // feedback-04-08-opus §3 — the gate delta inlines every issue key into
+        // the response. A large prefab rebuild produced ~1 450 keys (~222 KB),
+        // spilling the tool result to disk and forcing the agent to read the
+        // file in chunks just to learn mutation.success == true. What the agent
+        // actually branches on is mutation.success + gate outcome + the counts;
+        // the full key list is rarely needed and, when it is, the agent can
+        // validate_edit / scan_paths for the detail. Bound the inlined arrays to
+        // a small cap, report how many were elided, and add a countsByRule
+        // histogram so the distribution (the "is this all empty_local_ref
+        // noise?") stays visible without the bytes.
+        internal const int MaxDeltaIssuesInResponse = 25;
+
+        // Append a bounded JSON string array of issue keys plus a companion
+        // "<field>Truncated" count. Writes `"fieldName":["k1","k2",...]` and,
+        // when the source list exceeds the cap, `,"fieldNameTruncated":N`. The
+        // caller is responsible for the leading comma/field positioning; this
+        // helper only emits the array token (and the trailing truncation field
+        // when present) so it composes the same way the old inline loops did.
+        internal static void AppendBoundedIssueArray(
+            StringBuilder sb, string fieldName, string[] keys)
+        {
+            sb.Append(",\"").Append(fieldName).Append("\":[");
+            if (keys != null)
+            {
+                var limit = keys.Length < MaxDeltaIssuesInResponse
+                    ? keys.Length
+                    : MaxDeltaIssuesInResponse;
+                for (int i = 0; i < limit; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(EscapeStringContent(keys[i])).Append('"');
+                }
+            }
+            sb.Append(']');
+            if (keys != null && keys.Length > MaxDeltaIssuesInResponse)
+            {
+                sb.Append(",\"").Append(fieldName).Append("Truncated\":");
+                sb.Append(keys.Length - MaxDeltaIssuesInResponse);
+            }
+        }
+
+        // Build a per-rule histogram from a set of issue keys. Each key is
+        // `ruleId|severity|assetPath|issueCode` (IssueKey.Build); the first
+        // segment is the ruleId. Appends `,"<fieldName>ByRule":{"missing_references":729,...}`
+        // to `sb` so an agent can see at a glance whether the delta is all one
+        // noisy rule (e.g. empty_local_ref) or a genuine spread across
+        // categories. Emits nothing when `keys` is null/empty so the response
+        // stays free of empty objects in the common no-delta case.
+        internal static void AppendCountsByRule(StringBuilder sb, string fieldName, string[] keys)
+        {
+            if (keys == null || keys.Length == 0) return;
+            var counts = new Dictionary<string, int>();
+            foreach (var key in keys)
+            {
+                if (string.IsNullOrEmpty(key)) continue;
+                var pipe = key.IndexOf('|');
+                var ruleId = pipe > 0 ? key.Substring(0, pipe) : key;
+                counts.TryGetValue(ruleId, out var c);
+                counts[ruleId] = c + 1;
+            }
+            if (counts.Count == 0) return;
+
+            sb.Append(",\"").Append(fieldName).Append("ByRule\":{");
+            var first = true;
+            foreach (var kvp in counts)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append('"').Append(EscapeStringContent(kvp.Key)).Append("\":");
+                sb.Append(kvp.Value);
+            }
+            sb.Append('}');
         }
 
         // Render the `logs` array for a captured entry list. Null/empty both

@@ -5,7 +5,7 @@ import type { BatchSpawn } from "./batch-spawn.js";
 import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline, dependenciesOffline } from "./offline.js";
-import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES, detectStaleLog, detectStaleAssembly } from "./unity-log.js";
+import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES, detectStaleLog, detectStaleAssembly, parseLogAuthorship, compareLogAuthorship } from "./unity-log.js";
 import { summarizeProjectHealth, extractProjectHealthIssues } from "./project-health.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
@@ -848,6 +848,19 @@ export class ToolRouter implements Router {
     // mtimes and surface staleAssembly when any source is newer than the DLL.
     const staleAsm = detectStaleAssembly(this.projectPath);
 
+    // feedback-04-08-opus §2 — log-authorship cross-check. A batch run of a
+    // NEWER Unity writes a log whose errors (e.g. an API deprecation that is
+    // only an error on that version) CANNOT occur in the live editor. Parse the
+    // log header's version + batch-mode + date, compare against the live bridge
+    // version, and surface a mismatch so the agent does not "fix" 31 unrelated
+    // files or refuse to continue on errors that cannot occur here. The fields
+    // are always emitted when the header was parseable (so an agent can see the
+    // log was a batch run even when versions agree); the warning hint is added
+    // only on a real mismatch or a batch-mode log.
+    const authorship = parseLogAuthorship(tail.content);
+    const liveUnityVersion = this.resolveLiveUnityVersion();
+    const authorshipCheck = compareLogAuthorship(authorship, liveUnityVersion);
+
     return sourceResult(
       {
         status,
@@ -886,6 +899,25 @@ export class ToolRouter implements Router {
               staleAssemblyNewerSources: staleAsm.newerSources,
             }
           : {}),
+        // feedback-04-08-opus §2 — log authorship. Emitted whenever the header
+        // was parseable (the live editor's long tail usually has no header, so
+        // these stay absent in the common case). On a version mismatch the hint
+        // says the errors CANNOT all occur in the live editor; on a batch-mode
+        // log it reminds the agent the errors are from a headless run.
+        ...(authorship.logUnityVersion !== null || authorship.logBatchMode !== null
+          ? {
+              logUnityVersion: authorship.logUnityVersion,
+              liveUnityVersion: authorshipCheck.liveUnityVersion,
+              logBatchMode: authorship.logBatchMode,
+              logDate: authorship.logDate,
+              ...(authorshipCheck.hint
+                ? {
+                    logAuthorshipMismatch: authorshipCheck.versionMismatch,
+                    logAuthorshipHint: authorshipCheck.hint,
+                  }
+                : {}),
+            }
+          : {}),
       },
       "offline",
     );
@@ -906,6 +938,26 @@ export class ToolRouter implements Router {
       // Unreadable/missing lock → no live PID known.
     }
     return undefined;
+  }
+
+  // feedback-04-08-opus §2 — resolve the live bridge's Unity version from the
+  // instance lock, so read_compile_errors can cross-check the LOG's version
+  // header against the version of the editor that is actually running. A batch
+  // run of a NEWER Unity leaves a log whose errors cannot occur in the live
+  // editor; without this check the tool would surface them as current. Returns
+  // null when no live editor / no version recorded (the benign case — no
+  // version to compare against, so no false mismatch fires).
+  private resolveLiveUnityVersion(): string | null {
+    if (!this.projectPath) return null;
+    try {
+      const lock = readInstanceLock(this.projectPath);
+      if (lock && lock.pid && isPidAlive(lock.pid) && lock.unityVersion) {
+        return lock.unityVersion;
+      }
+    } catch {
+      // Unreadable/missing lock → no live version known.
+    }
+    return null;
   }
 
   private async routeListAssets(

@@ -5,7 +5,15 @@ namespace UnityOpenMcpVerify
     public enum VerifySeverity
     {
         Error,
-        Warning
+        Warning,
+        // feedback-04-08-opus §5 — informational, below Warning. Used to demote
+        // empty_local_ref sites on built-in Unity/package component fields that
+        // are empty-by-default (m_SelectOn*, sprite-swap sprites, TMP
+        // material/style fields) so the ~98 % noise floor stops burying genuine
+        // user-script empties. Info issues do NOT count as errors or warnings in
+        // the gate delta / baseline / batch entry counts, so they never fail the
+        // gate; they surface for awareness via scan_paths / validate_edit.
+        Info
     }
 
     public class VerifyIssue

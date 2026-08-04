@@ -14,6 +14,8 @@ import {
   readLogTail,
   detectStaleLog,
   detectStaleAssembly,
+  parseLogAuthorship,
+  compareLogAuthorship,
   DEFAULT_LOG_TAIL_BYTES,
 } from "./unity-log.js";
 
@@ -483,4 +485,91 @@ test("detectStaleAssembly returns not-stale when Library/ScriptAssemblies is abs
 test("detectStaleAssembly returns not-stale when no project root is supplied", () => {
   assert.equal(detectStaleAssembly(null).staleAssembly, false);
   assert.equal(detectStaleAssembly(undefined).staleAssembly, false);
+});
+
+// ---------------------------------------------------------------------------
+// parseLogAuthorship / compareLogAuthorship — feedback-04-08-opus §2
+// ---------------------------------------------------------------------------
+
+test("parseLogAuthorship extracts version / batch mode / date from a Unity log header", () => {
+  const tail = [
+    "Unity Editor version:    6000.5.5f1 (d16e074b49fd)",
+    "Batch mode:              YES",
+    "Date:                     2026-08-04T08:39:08Z",
+    "COMMAND LINE ARGUMENTS: -batchmode -quit -projectPath /x",
+    "",
+    "Assets/Foo.cs(10,14): error CS0246: ...",
+  ].join("\n");
+  const a = parseLogAuthorship(tail);
+  assert.equal(a.logUnityVersion, "6000.5.5f1");
+  assert.equal(a.logBatchMode, true);
+  assert.equal(a.logDate, "2026-08-04T08:39:08Z");
+});
+
+test("parseLogAuthorship returns nulls when the header scrolled past the tail", () => {
+  // A long-running live editor's tail starts mid-log and has no header. This is
+  // the benign case — no version to compare against, so no false mismatch fires.
+  const tail = [
+    "[some mid-session log line]",
+    "Assets/Foo.cs(10,14): error CS0246: ...",
+  ].join("\n");
+  const a = parseLogAuthorship(tail);
+  assert.equal(a.logUnityVersion, null);
+  assert.equal(a.logBatchMode, null);
+  assert.equal(a.logDate, null);
+});
+
+test("parseLogAuthorship handles Batch mode: NO", () => {
+  const tail = "Unity Editor version: 6000.0.80f1\nBatch mode: NO\nDate: 2026-08-04T10:00:00Z";
+  const a = parseLogAuthorship(tail);
+  assert.equal(a.logUnityVersion, "6000.0.80f1");
+  assert.equal(a.logBatchMode, false);
+});
+
+test("compareLogAuthorship flags a version mismatch (batch run of a newer Unity)", () => {
+  const a = parseLogAuthorship(
+    "Unity Editor version: 6000.5.5f1\nBatch mode: YES\nDate: 2026-08-04T08:39:08Z",
+  );
+  const r = compareLogAuthorship(a, "6000.0.80f1");
+  assert.equal(r.versionMismatch, true);
+  assert.equal(r.logUnityVersion, "6000.5.5f1");
+  assert.equal(r.liveUnityVersion, "6000.0.80f1");
+  assert.equal(r.logBatchMode, true);
+  assert.ok(r.hint.includes("6000.5.5f1"), "hint names the log's version");
+  assert.ok(r.hint.includes("6000.0.80f1"), "hint names the live version");
+  assert.ok(r.hint.includes("do NOT"), "hint warns not to trust the errors");
+});
+
+test("compareLogAuthorship surfaces a batch-mode log without a version mismatch", () => {
+  // Same version, but a -batchmode run — the agent benefits from knowing the
+  // errors are from a headless run, not the interactive editor.
+  const a = parseLogAuthorship(
+    "Unity Editor version: 6000.0.80f1\nBatch mode: YES\nDate: 2026-08-04T08:39:08Z",
+  );
+  const r = compareLogAuthorship(a, "6000.0.80f1");
+  assert.equal(r.versionMismatch, false);
+  assert.equal(r.logBatchMode, true);
+  assert.ok(r.hint.includes("batchmode"), "hint mentions batch mode");
+});
+
+test("compareLogAuthorship stays silent when versions agree and not batch", () => {
+  const a = parseLogAuthorship(
+    "Unity Editor version: 6000.0.80f1\nBatch mode: NO\nDate: 2026-08-04T10:00:00Z",
+  );
+  const r = compareLogAuthorship(a, "6000.0.80f1");
+  assert.equal(r.versionMismatch, false);
+  assert.equal(r.hint, "");
+});
+
+test("compareLogAuthorship does not flag a mismatch when no live version is known", () => {
+  // No live bridge / no lock → nothing to compare against. A log version alone
+  // must not fire a false mismatch (the live editor might be the same version).
+  const a = parseLogAuthorship(
+    "Unity Editor version: 6000.5.5f1\nBatch mode: YES\nDate: 2026-08-04T08:39:08Z",
+  );
+  const r = compareLogAuthorship(a, null);
+  assert.equal(r.versionMismatch, false);
+  assert.equal(r.liveUnityVersion, null);
+  // batch-mode hint still surfaces so the agent knows it's a headless log
+  assert.ok(r.hint.includes("batchmode"));
 });

@@ -829,26 +829,22 @@ namespace UnityOpenMcpBridge.TypedTools
 
             if (delta != null)
             {
+                // feedback-04-08-opus §3 — bound the inlined issue-key arrays
+                // (first MaxDeltaIssuesInResponse + "Truncated" count) plus a
+                // per-rule histogram, matching BuildGateEnvelope / DeltaTool.
+                // The counts open the delta object so AppendBoundedIssueArray's
+                // leading comma composes correctly (newIssues is never the first
+                // field, avoiding a stray `{,`).
                 sb.Append(",\"delta\":{");
-                sb.Append("\"newIssues\":[");
-                if (delta.NewIssueKeys != null)
-                {
-                    for (int i = 0; i < delta.NewIssueKeys.Length; i++)
-                    {
-                        if (i > 0) sb.Append(',');
-                        sb.Append('"').Append(OutputSerializer.EscapeJsonString(delta.NewIssueKeys[i])).Append('"');
-                    }
-                }
-                sb.Append("],\"resolvedIssues\":[");
-                if (delta.ResolvedIssueKeys != null)
-                {
-                    for (int i = 0; i < delta.ResolvedIssueKeys.Length; i++)
-                    {
-                        if (i > 0) sb.Append(',');
-                        sb.Append('"').Append(OutputSerializer.EscapeJsonString(delta.ResolvedIssueKeys[i])).Append('"');
-                    }
-                }
-                sb.Append("]}");
+                sb.Append("\"newErrors\":").Append(delta.NewErrors);
+                sb.Append(",\"newWarnings\":").Append(delta.NewWarnings);
+                sb.Append(",\"resolvedErrors\":").Append(delta.ResolvedErrors);
+                sb.Append(",\"resolvedWarnings\":").Append(delta.ResolvedWarnings);
+                BridgeJson.AppendBoundedIssueArray(sb, "newIssues", delta.NewIssueKeys);
+                BridgeJson.AppendBoundedIssueArray(sb, "resolvedIssues", delta.ResolvedIssueKeys);
+                BridgeJson.AppendCountsByRule(sb, "newIssues", delta.NewIssueKeys);
+                BridgeJson.AppendCountsByRule(sb, "resolvedIssues", delta.ResolvedIssueKeys);
+                sb.Append('}');
             }
 
             if (categoriesRun != null && categoriesRun.Length > 0)

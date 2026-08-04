@@ -261,7 +261,15 @@ namespace UnityOpenMcpVerify.Batch
                 br.issues.Add(new IssueEntry
                 {
                     ruleId = issue.RuleId,
-                    severity = issue.Severity == VerifySeverity.Error ? "Error" : "Warning",
+                    // feedback-04-08-opus §5 — Info severity (demoted
+                    // empty_local_ref built-in-field sites) serializes as its
+                    // own token instead of collapsing onto "Warning".
+                    severity = issue.Severity switch
+                    {
+                        VerifySeverity.Error => "Error",
+                        VerifySeverity.Info => "Info",
+                        _ => "Warning",
+                    },
                     assetPath = issue.AssetPath,
                     issueCode = issue.IssueCode,
                     description = issue.Description

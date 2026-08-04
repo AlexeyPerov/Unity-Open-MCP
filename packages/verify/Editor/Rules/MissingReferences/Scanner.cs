@@ -24,6 +24,29 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             foreach (var assetPath in paths)
             {
                 if (string.IsNullOrEmpty(assetPath)) continue;
+                // feedback-04-08-opus §1 — a .unity scene is NOT an asset
+                // container for LoadAllAssetsAtPath: calling it on a scene path
+                // logs a Unity console ERROR ("Do not use ReadObjectThreaded on
+                // scene objects!") at checkpoint creation AND validation, twice
+                // per gated call. The error lands in the console as a real red
+                // entry — the exact signal an agent uses to decide it broke
+                // something — so a clean gated op leaves two red herrings. The
+                // scene's fileIDs are authoritative via DeclaredFileIDs (parsed
+                // from YAML anchors, glm #10), which is OR'd into ExistsInAssets
+                // resolution; LoadAllAssetsAtPath adds nothing but noise for a
+                // scene. Only the SceneAsset's own main-asset fileID is safe to
+                // load here.
+                if (assetPath.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
+                {
+                    var sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(assetPath);
+                    if (sceneAsset != null
+                        && AssetDatabase.TryGetGUIDAndLocalFileIdentifier(sceneAsset, out _, out long sceneFileId))
+                    {
+                        scopedFileIDs.Add(sceneFileId);
+                    }
+                    continue;
+                }
+
                 var assetObject = AssetDatabase.LoadAssetAtPath<Object>(assetPath);
                 if (assetObject == null) continue;
                 if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(assetObject, out _, out long fileId))
@@ -88,6 +111,16 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
                 if (fullScan)
                     ScanInvalidLayers(lines, refsData);
+
+                // feedback-04-08-opus §4 / §5 — resolve each empty-ref site's
+                // transform path (content-addressed, survives renumbering) and
+                // script owner (user script vs built-in) from a per-asset anchor
+                // metadata map. The anchor-keyed scheme still churned 729/729 on
+                // an idempotent prefab rebuild because a rebuild renumbers every
+                // anchor; the transform path + property is stable. The owner
+                // classification lets real user-script empties stay Warning while
+                // built-in empty-by-default fields are demoted to Info.
+                EnrichEmptyRefs(lines, refsData);
 
                 var typeName = AssetTypeUtilities.GetReadableTypeName(type);
                 results.Add(new AssetData(assetPath, type, typeName, guid, refsData));
@@ -436,6 +469,20 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             if (cache.TryGetValue(assetPath, out var cached))
                 return cached;
 
+            // feedback-04-08-opus §1 — same scene-path guard as the scoped
+            // loop above. An external PPtr can target a scene (a prefab or
+            // ScriptableObject holding a SceneAsset reference); LoadAllAssetsAtPath
+            // on that .unity path logs the "Do not use ReadObjectThreaded on
+            // scene objects!" error. A scene is not an asset container here, so
+            // return an empty set (the caller treats null-target as "fileID
+            // exists" already; an empty set makes a non-existent fileID surface
+            // cleanly instead of erroring).
+            if (assetPath.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
+            {
+                cache[assetPath] = null;
+                return null;
+            }
+
             HashSet<long> fileIds = null;
             var allAssets = AssetDatabase.LoadAllAssetsAtPath(assetPath);
             if (allAssets != null && allAssets.Length > 0)
@@ -620,6 +667,28 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                     continue;
                 if (!validLayers.Contains(layerIndex))
                     refsData.InvalidLayers.Add(new InvalidLayerEntry(layerIndex, i));
+            }
+        }
+
+        // feedback-04-08-opus §4 / §5 — resolve transform path + script owner
+        // for every empty-ref site from a per-asset anchor metadata map, so the
+        // mapper can key on path+property (content-addressed, survives rebuild
+        // renumbering) and split severity by field owner (user script vs
+        // built-in). No-op when there are no empty refs.
+        private static void EnrichEmptyRefs(string[] lines, AssetReferencesData refsData)
+        {
+            if (refsData.EmptyFileIDs.Count == 0) return;
+
+            var map = EmptyRefMetadata.Build(lines, refsData.DeclaredFileIDs);
+            if (map.Count == 0) return;
+
+            foreach (var empty in refsData.EmptyFileIDs)
+            {
+                if (empty.Anchor == 0) continue;
+                if (!map.TryGetValue(empty.Anchor, out var meta)) continue;
+
+                empty.TransformPath = EmptyRefMetadata.ResolveTransformPath(empty.Anchor, map);
+                empty.OwnerScriptGuid = meta.ScriptGuid;
             }
         }
     }

@@ -105,11 +105,17 @@ const MISSING_REFERENCES_ISSUES: RuleIssueDescriptor[] = [
   },
   {
     code: "empty_local_ref",
+    // feedback-04-08-opus §5 — severity is split by field OWNER. A field on a
+    // user script (m_Script guid under Assets/) stays Warning (a real,
+    // possibly-shipping null); a known-optional built-in field (m_SelectOn*,
+    // sprite swaps, TMP material/style) is demoted to Info so the ~98 % noise
+    // floor stops burying genuine bugs. The catalog lists the floor severity
+    // (Warning); Info instances surface with their own severity token.
     severity: "Warning",
     fixIds: [],
     rootCause: "missing_fileid_reference",
     remediation:
-      "An empty local fileID reference was serialized. Reconnect it to a valid local object, or remove it.",
+      "An empty local fileID reference was serialized. Reconnect it to a valid local object, or remove it. Note: empty refs on built-in Unity/package fields that are empty-by-default (m_SelectOn*, sprite swaps, TMP material/style) are reported at Info severity and are usually benign; empty refs on user-script fields are the ones likely to be real bugs.",
   },
   {
     code: "missing_method",

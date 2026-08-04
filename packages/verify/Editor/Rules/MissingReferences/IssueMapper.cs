@@ -65,49 +65,81 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                     }
                 }
 
-                // C2 (feedback-fable-31-07 §7): key each empty-local-ref issue
-                // by owning anchor + property, the content-addressed identity of
-                // the `{fileID: 0}` site. The old ordinal keys (:0, :1, ...)
-                // renamed on every unrelated count change, so a delta reported
-                // hundreds of spurious resolves/adds. Anchor+property is stable:
-                // adding an empty ref on a DIFFERENT object/property does not
-                // rename this key. Fall back to the line only when the scanner
-                // could not determine anchor+property (both 0/empty), which
-                // keeps malformed/legacy YAML reportable. When two empty refs
-                // share the same anchor+property (same property nulled twice on
-                // one object), suffix a 1-based ordinal so each still gets a
-                // distinct dedup key without re-introducing positional churn for
-                // the common case.
+                // feedback-fable-31-07 §7 + feedback-04-08-opus §4/§5/§7 — key
+                // each empty-local-ref issue by the most content-addressed
+                // identity available, in priority order:
+                //   1. transform PATH + property (§4) — survives a prefab rebuild
+                //      that renumbers every anchor. This is what makes a delta
+                //      mean something: two consecutive idempotent builds of the
+                //      same prefab now produce STABLE keys instead of 729/729
+                //      churn. Resolved by the scanner's EnrichEmptyRefs post-pass.
+                //   2. anchor + property (fable §7 fallback) — when a transform
+                //      path could not be resolved (the owning GameObject or its
+                //      transform chain is missing from the anchor metadata).
+                //   3. line (last resort) — malformed/legacy YAML where neither
+                //      anchor nor property could be determined.
+                //
+                // §7 — array-element properties: a `{fileID: 0}` inside a YAML
+                // list (`  - m_Target: {fileID: 0}`) previously keyed as
+                // `:<property>#<dupOrdinal>`, colliding with the dedup suffix and
+                // producing unreadable `:#1`..`:#N` keys. The dedup ordinal stays
+                // for genuine same-path+property duplicates, but the property
+                // segment is normalized: never empty, and array indices ride on
+                // the property as `[N]` when the scanner recorded them.
+                //
+                // §5 — severity is split by field OWNER via EmptyRefClassifier:
+                // a user-script field (m_Script guid under Assets/) stays a
+                // Warning; a known-optional built-in field (m_SelectOn*, sprite
+                // swaps, TMP material/style) is demoted to Info so the ~98 % noise
+                // floor stops burying the real bugs.
                 var emptyKeyCounts = new Dictionary<string, int>();
                 foreach (var empty in refs.EmptyFileIDs)
                 {
-                    var hasAnchor = empty.Anchor != 0;
-                    var hasProp = !string.IsNullOrEmpty(empty.Property);
-                    string disc;
-                    if (hasAnchor || hasProp)
+                    var severity = EmptyRefClassifier.Classify(empty);
+                    var prop = NormalizeEmptyRefProperty(empty.Property);
+                    var hasProp = !string.IsNullOrEmpty(prop);
+
+                    string identity;
+                    string identityLabel;
+                    if (!string.IsNullOrEmpty(empty.TransformPath))
                     {
-                        disc = (hasAnchor ? empty.Anchor.ToString() : "0") + ":"
-                             + (hasProp ? IssueKey.SanitizeComponent(empty.Property) : "");
+                        // §4 — transform path + property is the primary key.
+                        identity = empty.TransformPath + ":" + (hasProp ? IssueKey.SanitizeComponent(prop) : "");
+                        identityLabel = $"path '{empty.TransformPath}', property '{prop}'";
                     }
                     else
                     {
-                        disc = "line:" + empty.Line;
+                        var hasAnchor = empty.Anchor != 0;
+                        if (hasAnchor || hasProp)
+                        {
+                            identity = (hasAnchor ? empty.Anchor.ToString() : "0") + ":"
+                                 + (hasProp ? IssueKey.SanitizeComponent(prop) : "");
+                            identityLabel = $"anchor {empty.Anchor}, property '{prop}'";
+                        }
+                        else
+                        {
+                            identity = "line:" + empty.Line;
+                            identityLabel = null;
+                        }
                     }
-                    // De-duplicate identical anchor+property keys with a stable
-                    // 1-based suffix.
-                    if (!emptyKeyCounts.TryGetValue(disc, out var dup)) dup = 0;
-                    emptyKeyCounts[disc] = dup + 1;
-                    var key = dup == 0 ? disc : disc + "#" + dup;
+
+                    // De-duplicate identical identities with a stable 1-based
+                    // suffix (the common case has no collision, so most keys are
+                    // suffix-free). This handles two empty refs on the SAME
+                    // path+property (same property nulled twice on one object).
+                    if (!emptyKeyCounts.TryGetValue(identity, out var dup)) dup = 0;
+                    emptyKeyCounts[identity] = dup + 1;
+                    var key = dup == 0 ? identity : identity + "#" + dup;
 
                     sink.Add(MakeIssue(asset, CodeEmptyLocalRef + ":" + key,
                         $"Empty local fileID reference at line {empty.Line}"
-                        + (hasAnchor || hasProp
-                            ? $" (anchor {empty.Anchor}, property '{empty.Property}')"
-                            : ""),
-                        VerifySeverity.Warning,
+                        + (identityLabel != null ? $" ({identityLabel})" : ""),
+                        severity,
                         Evidence("line", empty.Line.ToString(), empty.Line,
                             ("anchor", empty.Anchor.ToString()),
-                            ("property", empty.Property ?? ""))));
+                            ("property", empty.Property ?? ""),
+                            ("transformPath", empty.TransformPath ?? ""),
+                            ("ownerScriptGuid", empty.OwnerScriptGuid ?? ""))));
                 }
 
                 foreach (var method in refs.MissingMethods)
@@ -210,6 +242,40 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             IReadOnlyDictionary<string, string> evidence = null)
         {
             return new VerifyIssue("missing_references", severity, asset.Path, code, description, evidence);
+        }
+
+        // feedback-04-08-opus §7 — normalize an empty-ref property for use as a
+        // key segment. Returns the property verbatim when it is a real field
+        // name, "" when the scanner could not determine one (the caller then
+        // falls back to the line). Never emits a bare array index as the whole
+        // segment: Unity serializes list elements as `- <key>: {fileID: 0}` where
+        // <key> is the real field (e.g. `m_Target`); the PropertyKeyBeforeFileId
+        // regex already captures that key. When the recorded property looks like
+        // a bare index (`#N` or a pure integer), it is folded into the previous
+        // segment's notation as `[N]` — but since we key on a single property
+        // here, a bare-index property collapses to "" so the path/anchor
+        // identity still uniquely identifies the site via the dedup suffix.
+        private static string NormalizeEmptyRefProperty(string property)
+        {
+            if (string.IsNullOrEmpty(property)) return "";
+            var p = property.Trim();
+            if (p.Length == 0) return "";
+            // A bare array index ("#3", "3") is not a readable property; emit
+            // empty so the dedup ordinal carries disambiguation instead of a
+            // garbage segment like ":#3". Real Unity field names never start
+            // with '#' and never consist solely of digits.
+            if (p[0] == '#') return "";
+            if (IsDigitsOnly(p)) return "";
+            return p;
+        }
+
+        private static bool IsDigitsOnly(string s)
+        {
+            foreach (var c in s)
+            {
+                if (c < '0' || c > '9') return false;
+            }
+            return s.Length > 0;
         }
 
         // Evidence builders — keep the per-instance payload small and flat.
