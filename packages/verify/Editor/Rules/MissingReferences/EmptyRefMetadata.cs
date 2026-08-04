@@ -105,7 +105,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             {
                 var line = lines[i];
 
-                if (line.StartsWith("---", System.String.Ordinal))
+                if (line.StartsWith("---", System.StringComparison.Ordinal))
                 {
                     var hm = HeaderClassAndAnchor.Match(line);
                     if (hm.Success && long.TryParse(hm.Groups[2].Value, out var anchor))
