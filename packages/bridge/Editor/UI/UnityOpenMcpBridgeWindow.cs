@@ -140,6 +140,11 @@ namespace UnityOpenMcpBridge
         [NonSerialized] private string _configureClientSnippet = "";
         [NonSerialized] private string _configureClientTargetPath = "";
         [NonSerialized] private bool _configureClientConfigured;
+        // Where the entry was actually found. Differs from
+        // _configureClientTargetPath when the config lives in an ancestor of the
+        // Unity project (a Unity folder inside a larger repository); empty when
+        // the client is not configured.
+        [NonSerialized] private string _configureClientFoundPath = "";
 
         // M29 Plan 3 — prefs migration. Before this plan the enum had 8 values
         // (Status, Tools, Gate, Activity, Batch, Settings, Extensions, Info).

@@ -40,6 +40,21 @@
 
 只要客户端支持，优先使用项目级路径。
 
+`<project>` 指 AI 客户端打开的文件夹，它并不总是 Unity 项目本身。当 Unity 项目
+是更大仓库的子文件夹（`<repo>/Client`）时，把配置放在仓库根目录，并让
+`UNITY_PROJECT_PATH` 继续指向 Unity 文件夹：
+
+```
+my-game/                    <- AI 客户端在此打开，配置也放在这里
+  .cursor/mcp.json          <- UNITY_PROJECT_PATH = /abs/my-game/Client
+  Client/                   <- Unity 项目（Assets/、Packages/）
+  Server/
+```
+
+桥接窗口的 **Configure AI client** 面板会搜索 Unity 项目本身以及最多四层父
+文件夹，因此这种布局会显示 **Configured: yes**，并在 **Found in** 中给出找到
+的文件路径。
+
 ## 复制这些
 
 ### `mcpServers`（Cursor 与大多数客户端）

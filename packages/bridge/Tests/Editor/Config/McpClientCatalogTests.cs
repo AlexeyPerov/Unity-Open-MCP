@@ -16,6 +16,9 @@ namespace UnityOpenMcpBridge.Tests
     //     runs against the target file's contents.
     //   - ResolveDisplayPath(client, project) — how the panel renders the
     //     target path for a project-scoped vs global vs CLI-only client.
+    //   - ResolveSearchPaths(client, project, home, levels) — the ordered
+    //     candidate list the configured check walks, including the ancestors of
+    //     a Unity project nested inside a larger repository.
     // The full snippet bytes are already covered by the Hub parity checks;
     // these tests focus on the detection + display surface this plan added.
     [TestFixture]
@@ -157,6 +160,151 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsNull(McpClientCatalog.ResolveDisplayPath(client, "/proj"));
         }
 
+        [Test]
+        public void IsConfiguredEntry_DottedMergeKey_MatchesNestedSections()
+        {
+            // ZCode nests the server under `mcp` → `servers`. The dotted key
+            // never appears verbatim in a config file, so it has to be matched
+            // segment by segment or the client could never report configured.
+            var body =
+                "{\n  \"mcp\": {\n    \"servers\": {\n      \"unity-open-mcp\": {}\n    }\n  }\n}";
+            Assert.IsTrue(McpClientCatalog.IsConfiguredEntry(
+                Envelope.ZcodeStdio, body, "mcp.servers"));
+        }
+
+        [Test]
+        public void IsConfiguredEntry_DottedMergeKey_MissingSegmentIsFalse()
+        {
+            // Server key present but not under `mcp` — the client will not read
+            // it, so this must stay a negative.
+            var body = "{\n  \"servers\": {\n    \"unity-open-mcp\": {}\n  }\n}";
+            Assert.IsFalse(McpClientCatalog.IsConfiguredEntry(
+                Envelope.ZcodeStdio, body, "mcp.servers"));
+        }
+
+        [Test]
+        public void IsConfiguredEntry_MergeKeyIsMatchedAsQuotedKey()
+        {
+            // `servers` must not match inside `"mcpServers"` — a VS Code Copilot
+            // entry pasted under Cursor's section is exactly the wrong-section
+            // bug the merge-key gate exists to catch.
+            var body = "{\n  \"mcpServers\": {\n    \"unity-open-mcp\": {}\n  }\n}";
+            Assert.IsFalse(McpClientCatalog.IsConfiguredEntry(
+                Envelope.McpServersStdio, body, "servers"));
+        }
+
+        // ---- ResolveSearchPaths (walk-up candidates) ---------------------
+        //
+        // A Unity project is frequently a subfolder of the repository holding
+        // the agent config (`<repo>/Client`). The panel therefore searches the
+        // project folder AND its ancestors; these pin the candidate list, its
+        // order, and the two boundaries (level cap, home directory).
+
+        [Test]
+        public void ResolveSearchPaths_ProjectScope_ProjectFirstThenAncestors()
+        {
+            var client = FindById("cursor-project");
+            var paths = McpClientCatalog.ResolveSearchPaths(
+                client, "/Users/dev/repo/Client", "/Users/dev", 4);
+            // Nearest first, stopping before the home directory (/Users/dev).
+            Assert.AreEqual(
+                new[] { "/Users/dev/repo/Client/.cursor/mcp.json", "/Users/dev/repo/.cursor/mcp.json" },
+                Normalize(paths));
+        }
+
+        [Test]
+        public void ResolveSearchPaths_ProjectScope_StopsBeforeHomeDirectory()
+        {
+            // A project directly in $HOME has no ancestor worth searching:
+            // $HOME/.cursor/mcp.json is the separate global-scope row, and
+            // treating it as a project config would report every project on the
+            // machine as configured.
+            var client = FindById("cursor-project");
+            var paths = McpClientCatalog.ResolveSearchPaths(
+                client, "/Users/dev/Game", "/Users/dev", 4);
+            Assert.AreEqual(new[] { "/Users/dev/Game/.cursor/mcp.json" }, Normalize(paths));
+        }
+
+        [Test]
+        public void ResolveSearchPaths_ProjectScope_HonorsAncestorLevelCap()
+        {
+            var client = FindById("codex");
+            var paths = McpClientCatalog.ResolveSearchPaths(
+                client, "/a/b/c/d/e/Client", "/nowhere", 2);
+            // Project + 2 ancestors = 3 candidates, nearest first.
+            Assert.AreEqual(
+                new[]
+                {
+                    "/a/b/c/d/e/Client/.codex/config.toml",
+                    "/a/b/c/d/e/.codex/config.toml",
+                    "/a/b/c/d/.codex/config.toml",
+                },
+                Normalize(paths));
+        }
+
+        [Test]
+        public void ResolveSearchPaths_ProjectScope_StopsAtFilesystemRoot()
+        {
+            var client = FindById("cursor-project");
+            var paths = McpClientCatalog.ResolveSearchPaths(client, "/Client", "/nowhere", 4);
+            Assert.AreEqual(new[] { "/Client/.cursor/mcp.json" }, Normalize(paths));
+        }
+
+        [Test]
+        public void ResolveSearchPaths_ProjectScope_TrailingSeparatorIsIgnored()
+        {
+            var client = FindById("cursor-project");
+            var paths = McpClientCatalog.ResolveSearchPaths(
+                client, "/Users/dev/repo/Client/", "/Users/dev", 4);
+            Assert.AreEqual(
+                new[] { "/Users/dev/repo/Client/.cursor/mcp.json", "/Users/dev/repo/.cursor/mcp.json" },
+                Normalize(paths));
+        }
+
+        [Test]
+        public void ResolveSearchPaths_GlobalScope_IsSingleAbsolutePath()
+        {
+            // Global clients already point at one machine-wide file — walking up
+            // from the project would be meaningless.
+            var client = FindById("cursor");
+            var paths = McpClientCatalog.ResolveSearchPaths(client, "/proj", "/Users/dev", 4);
+            Assert.AreEqual(1, paths.Length);
+            Assert.IsTrue(paths[0].Replace('\\', '/').EndsWith("/.cursor/mcp.json"));
+        }
+
+        [Test]
+        public void ResolveSearchPaths_CliAndManual_AreEmpty()
+        {
+            Assert.IsEmpty(McpClientCatalog.ResolveSearchPaths(
+                FindById("claudeCode"), "/proj", "/Users/dev", 4));
+            Assert.IsEmpty(McpClientCatalog.ResolveSearchPaths(
+                FindById("manual"), "/proj", "/Users/dev", 4));
+        }
+
+        [Test]
+        public void ResolveSearchPaths_EmptyProjectPath_IsEmpty()
+        {
+            var client = FindById("cursor-project");
+            Assert.IsEmpty(McpClientCatalog.ResolveSearchPaths(client, "", "/Users/dev", 4));
+            Assert.IsEmpty(McpClientCatalog.ResolveSearchPaths(client, null, "/Users/dev", 4));
+        }
+
+        [Test]
+        public void ResolveSearchPaths_FirstCandidateMatchesResolveDisplayPath()
+        {
+            // The nearest candidate is the write target the panel renders, so
+            // the two must not drift apart for any project-scoped client.
+            foreach (var client in McpClientCatalog.Clients)
+            {
+                if (client.ScopeKind != McpClientCatalog.Scope.Project) continue;
+                var paths = McpClientCatalog.ResolveSearchPaths(client, "/repo/Client", "/nowhere", 4);
+                Assert.AreEqual(
+                    McpClientCatalog.ResolveDisplayPath(client, "/repo/Client"),
+                    paths[0],
+                    $"Client '{client.Id}' search list must start at its display path.");
+            }
+        }
+
         // ---- catalog shape (guards for the actions added this plan) ------
 
         [Test]
@@ -189,6 +337,15 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         // ---- helper ------------------------------------------------------
+
+        /// <summary>Forward-slash the candidate list so assertions read the same
+        /// on Windows, where Path.Combine emits backslashes.</summary>
+        private static string[] Normalize(string[] paths)
+        {
+            var copy = new string[paths.Length];
+            for (var i = 0; i < paths.Length; i++) copy[i] = paths[i].Replace('\\', '/');
+            return copy;
+        }
 
         private static McpClientCatalog.ClientEntry FindById(string id)
         {

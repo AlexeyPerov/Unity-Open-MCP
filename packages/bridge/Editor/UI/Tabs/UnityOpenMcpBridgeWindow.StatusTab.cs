@@ -21,11 +21,15 @@ namespace UnityOpenMcpBridge
         // memoize per-repaint instead. The cache is invalidated at the top of
         // every DrawStatusTab by bumping _configuredCacheGeneration; it is keyed
         // by the client Id string.
+        //
+        // The cached value is the absolute path the entry was FOUND at (null =
+        // not configured), because a project-scoped config may live in an
+        // ancestor of the Unity project and the panel names that path.
         [NonSerialized] private int _guiGeneration;
         [NonSerialized] private int _configuredCacheGeneration = -1;
         [NonSerialized] private string _configuredCacheProjectPath;
-        [NonSerialized] private readonly Dictionary<string, bool> _configuredCache =
-            new Dictionary<string, bool>();
+        [NonSerialized] private readonly Dictionary<string, string> _configuredCache =
+            new Dictionary<string, string>();
         [NonSerialized] private bool _anyClientConfiguredCached;
 
         private void DrawStatusTab()
@@ -153,7 +157,7 @@ namespace UnityOpenMcpBridge
         }
 
         // Populate the per-repaint client-configured cache once per OnGUI.
-        // Reads each known client's target file exactly once, derives the
+        // Reads each known client's candidate files exactly once, derives the
         // anyClientConfigured aggregate, and is consumed by the connection
         // strip, the configure-client auto-expand heuristic, and the configure
         // panel's per-client badge — so the same client file is never read more
@@ -175,29 +179,30 @@ namespace UnityOpenMcpBridge
             if (string.IsNullOrEmpty(projectPath)) return;
             foreach (var client in UnityOpenMcpBridge.Config.McpClientCatalog.Clients)
             {
-                if (!_configuredCache.TryGetValue(client.Id, out var configured))
+                if (!_configuredCache.TryGetValue(client.Id, out var foundAt))
                 {
-                    configured = ComputeClientConfigured(client, projectPath);
-                    _configuredCache[client.Id] = configured;
+                    foundAt = FindClientConfigPath(client, projectPath);
+                    _configuredCache[client.Id] = foundAt;
                 }
-                if (configured) _anyClientConfiguredCached = true;
+                if (!string.IsNullOrEmpty(foundAt)) _anyClientConfiguredCached = true;
             }
         }
 
-        // Read a client's configured state from the per-repaint cache. Falls
-        // back to a direct read if the cache was not warmed this generation
-        // (e.g. a caller outside DrawStatusTab) so the answer is always correct.
-        private bool IsClientConfiguredCached(UnityOpenMcpBridge.Config.McpClientCatalog.ClientEntry client)
+        // Read the path a client's config was found at from the per-repaint
+        // cache (null when not configured). Falls back to a direct read if the
+        // cache was not warmed this generation (e.g. a caller outside
+        // DrawStatusTab) so the answer is always correct.
+        private string ClientConfigPathCached(UnityOpenMcpBridge.Config.McpClientCatalog.ClientEntry client)
         {
             var projectPath = BridgeSession.ProjectPath;
-            if (string.IsNullOrEmpty(projectPath)) return false;
+            if (string.IsNullOrEmpty(projectPath)) return null;
             if (_configuredCacheGeneration == _guiGeneration
                 && string.Equals(_configuredCacheProjectPath, projectPath, StringComparison.Ordinal)
                 && _configuredCache.TryGetValue(client.Id, out var cached))
             {
                 return cached;
             }
-            return ComputeClientConfigured(client, projectPath);
+            return FindClientConfigPath(client, projectPath);
         }
 
         // M29 Plan 2 — gather the existing signals into the pure strip inputs
@@ -535,7 +540,7 @@ namespace UnityOpenMcpBridge
                 "Copy the MCP client config snippet for this project into your AI " +
                 "client's config file. The Hub wizard (Unity Hub Pro) writes the file " +
                 "for you in one click; this panel is for configuring a client without " +
-                "leaving Unity. The launch command is `npx -y unity-open-mcp@0.8.2` " +
+                "leaving Unity. The launch command is `npx -y " + BridgeConstants.NpmPackage + "` " +
                 "(or `node <root>/mcp-server/dist/index.js` for a local checkout).",
                 MessageType.None);
 
@@ -573,11 +578,15 @@ namespace UnityOpenMcpBridge
             _configureClientTargetPath =
                 UnityOpenMcpBridge.Config.McpClientCatalog.ResolveDisplayPath(client, projectPath) ?? "";
 
-            // Configured-state check: read the target file (when file-backed)
-            // and look for our server key under the client's merge key. Uses the
-            // per-repaint cache populated by RefreshConfiguredCache so the file
-            // is read at most once per client per frame.
-            _configureClientConfigured = IsClientConfiguredCached(client);
+            // Configured-state check: read the candidate files (when
+            // file-backed) and look for our server key under the client's merge
+            // key. Uses the per-repaint cache populated by
+            // RefreshConfiguredCache so each file is read at most once per
+            // client per frame. The candidates include ancestors of the Unity
+            // project, so a project inside a larger repository resolves against
+            // that repository's config.
+            _configureClientFoundPath = ClientConfigPathCached(client) ?? "";
+            _configureClientConfigured = !string.IsNullOrEmpty(_configureClientFoundPath);
 
             if (client.IsFileBacked && !string.IsNullOrEmpty(_configureClientTargetPath))
             {
@@ -595,12 +604,37 @@ namespace UnityOpenMcpBridge
                 EditorGUILayout.EndHorizontal();
 
                 EditorGUILayout.BeginHorizontal();
-                BridgeGUIUtilities.FieldLabel("Configured", "Whether the target file already has a unity-open-mcp entry.", 120);
+                BridgeGUIUtilities.FieldLabel("Configured", "Whether a unity-open-mcp entry was found for this project — in the target file, or in one of its parent folders.", 120);
                 var prev = GUI.color;
                 GUI.color = _configureClientConfigured ? new Color(0.6f, 0.9f, 0.6f) : new Color(1f, 0.85f, 0.5f);
                 GUILayout.Label(_configureClientConfigured ? "yes" : "no", EditorStyles.boldLabel);
                 GUI.color = prev;
                 EditorGUILayout.EndHorizontal();
+
+                // Found somewhere other than the project folder — name the file
+                // so the operator does not go looking for a second config (and
+                // knows which one to edit when switching versions).
+                var foundElsewhere = _configureClientConfigured
+                    && !string.Equals(
+                        _configureClientFoundPath,
+                        _configureClientTargetPath,
+                        StringComparison.Ordinal);
+                if (foundElsewhere)
+                {
+                    EditorGUILayout.BeginHorizontal();
+                    BridgeGUIUtilities.FieldLabel(
+                        "Found in",
+                        "The config that actually configures this project. Clients read " +
+                        "project-scoped config relative to the folder they were opened on, " +
+                        "so a Unity project inside a larger repository is configured by the " +
+                        "repository's file rather than one next to Assets/.",
+                        120);
+                    EditorGUILayout.SelectableLabel(
+                        _configureClientFoundPath,
+                        EditorStyles.textField,
+                        GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                    EditorGUILayout.EndHorizontal();
+                }
             }
             else if (client.IsCliOnly)
             {
@@ -638,23 +672,33 @@ namespace UnityOpenMcpBridge
             // merge writer. The buttons are only meaningful when a target file
             // path resolves (file-backed clients with a path template); CLI /
             // manual clients have no file to reveal.
+            //
+            // When the entry was found in a parent folder, both buttons act on
+            // THAT file: revealing the project-scoped path instead would create
+            // a second, redundant config next to Assets/ and leave the operator
+            // editing the one their client does not read.
             var canTargetFile = client.IsFileBacked && !string.IsNullOrEmpty(_configureClientTargetPath);
+            var actionPath = string.IsNullOrEmpty(_configureClientFoundPath)
+                ? _configureClientTargetPath
+                : _configureClientFoundPath;
             EditorGUI.BeginDisabledGroup(!canTargetFile);
             if (GUILayout.Button(new GUIContent(
                 "Copy path",
-                "Copy the target config file path to the clipboard."),
+                "Copy the config file path to the clipboard — the existing config when one " +
+                "was found, otherwise the target this snippet should be written to."),
                 GUILayout.Width(100)))
             {
-                GUIUtility.systemCopyBuffer = _configureClientTargetPath;
+                GUIUtility.systemCopyBuffer = actionPath;
             }
             if (GUILayout.Button(new GUIContent(
                 "Open target",
-                "Reveal the target config file in the OS file browser (Finder / Explorer). " +
+                "Reveal the config file in the OS file browser (Finder / Explorer) — the " +
+                "existing config when one was found, otherwise the target for this snippet. " +
                 "Creates the file first (as a valid empty document) if it does not yet exist, " +
                 "so you can paste the snippet into it without hunting for the path."),
                 GUILayout.Width(110)))
             {
-                RevealClientConfigTarget(_configureClientTargetPath, client.EnvelopeKind);
+                RevealClientConfigTarget(actionPath, client.EnvelopeKind);
             }
             EditorGUI.EndDisabledGroup();
             EditorGUILayout.EndHorizontal();
@@ -711,29 +755,43 @@ namespace UnityOpenMcpBridge
         }
 
         /// <summary>
-        /// Best-effort <c>IsConfigured</c> heuristic: returns <c>true</c> when the
-        /// client's target file exists and contains a <c>unity-open-mcp</c> entry
-        /// under the client's merge key (or, for TOML/Codex, the
-        /// <c>[mcp_servers.unity-open-mcp]</c> table). File-read failures default
-        /// to <c>false</c> so a missing or unreadable file never falsely reports
-        /// as configured. The content match itself is delegated to
+        /// Best-effort <c>IsConfigured</c> probe: returns the first path, nearest
+        /// first, that exists and contains a <c>unity-open-mcp</c> entry under
+        /// the client's merge key (or, for TOML/Codex, the
+        /// <c>[mcp_servers.unity-open-mcp]</c> table); <c>null</c> when none
+        /// does. File-read failures skip that candidate, so a missing or
+        /// unreadable file never falsely reports as configured.
+        ///
+        /// The candidate list comes from
+        /// <see cref="UnityOpenMcpBridge.Config.McpClientCatalog.ResolveSearchPaths"/>,
+        /// which walks up from the Unity project — a project at
+        /// <c>&lt;repo&gt;/Client</c> is configured by <c>&lt;repo&gt;/.cursor/mcp.json</c>,
+        /// and reporting that as "no client configured" sent operators hunting
+        /// for a problem they did not have. The content match is delegated to
         /// <see cref="UnityOpenMcpBridge.Config.McpClientCatalog.IsConfiguredEntry"/>
-        /// so the policy is unit-testable without the filesystem.
+        /// so both halves of the policy stay unit-testable without a filesystem.
         /// </summary>
-        private static bool ComputeClientConfigured(UnityOpenMcpBridge.Config.McpClientCatalog.ClientEntry client, string projectPath)
+        private static string FindClientConfigPath(UnityOpenMcpBridge.Config.McpClientCatalog.ClientEntry client, string projectPath)
         {
-            var path = UnityOpenMcpBridge.Config.McpClientCatalog.ResolveDisplayPath(client, projectPath);
-            if (string.IsNullOrEmpty(path)) return false;
-            if (!File.Exists(path)) return false;
-            try
+            foreach (var path in UnityOpenMcpBridge.Config.McpClientCatalog.ResolveSearchPaths(client, projectPath))
             {
-                var body = File.ReadAllText(path);
-                return UnityOpenMcpBridge.Config.McpClientCatalog.IsConfiguredEntry(client.EnvelopeKind, body, client.MergeKey);
+                if (string.IsNullOrEmpty(path)) continue;
+                if (!File.Exists(path)) continue;
+                try
+                {
+                    var body = File.ReadAllText(path);
+                    if (UnityOpenMcpBridge.Config.McpClientCatalog.IsConfiguredEntry(
+                            client.EnvelopeKind, body, client.MergeKey))
+                    {
+                        return path;
+                    }
+                }
+                catch
+                {
+                    // Unreadable candidate — keep looking further up.
+                }
             }
-            catch
-            {
-                return false;
-            }
+            return null;
         }
 
         // Probe the MCP server end-to-end by shelling out to its status command.

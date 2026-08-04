@@ -40,6 +40,22 @@ take 10–60 seconds while the package downloads; later launches are fast.
 
 Prefer the project-local path when the client supports it.
 
+`<project>` is the folder your AI client is opened on, which is not always the
+Unity project. When the Unity project is a subfolder of a larger repository
+(`<repo>/Client`), put the config at the repository root and keep
+`UNITY_PROJECT_PATH` pointing at the Unity folder:
+
+```
+my-game/                    <- AI client opened here, config lives here
+  .cursor/mcp.json          <- UNITY_PROJECT_PATH = /abs/my-game/Client
+  Client/                   <- Unity project (Assets/, Packages/)
+  Server/
+```
+
+The bridge window's **Configure AI client** panel searches the Unity project and
+up to four parent folders, so a layout like this reports **Configured: yes** and
+names the file it found under **Found in**.
+
 ## Copy these
 
 ### `mcpServers` (Cursor and most clients)

@@ -222,7 +222,9 @@ namespace UnityOpenMcpBridge
         // configured under a path it does not check, so Unknown is the
         // honest default. A positive signal is Ok; a negative signal from
         // the file-backed heuristic is a Warning (the operator probably
-        // still needs to wire a client).
+        // still needs to wire a client). The heuristic searches the Unity
+        // project AND its parent folders, so a Unity project nested inside a
+        // configured repository reads as Ok rather than as a missing client.
         private static StripStage BuildClientStage(ConnectionStripInputs inputs)
         {
             const string label = "Client";
@@ -243,7 +245,8 @@ namespace UnityOpenMcpBridge
             return new StripStage(
                 label,
                 StripStageState.Warning,
-                "No known client config detected for this project — see 'Configure AI client' below.");
+                "No known client config detected for this project or its parent folders — " +
+                "see 'Configure AI client' below.");
         }
 
         // The lock states that represent a busy (non-idle, non-playing) bridge.

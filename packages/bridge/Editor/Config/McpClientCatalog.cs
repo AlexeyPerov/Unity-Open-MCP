@@ -54,6 +54,20 @@ namespace UnityOpenMcpBridge.Config
 
         public const string ServerKey = "unity-open-mcp";
 
+        /// <summary>
+        /// How many directories above the Unity project a project-scoped client
+        /// config may live in and still count as configuring this project.
+        ///
+        /// A Unity project is very often a subfolder of the repository that
+        /// holds the agent configs (<c>&lt;repo&gt;/Client</c>,
+        /// <c>&lt;repo&gt;/unity/Client</c>, …). Clients read those files
+        /// relative to the workspace root they were opened on, not relative to
+        /// <c>Assets/</c>, so a config one or two levels up is the normal
+        /// layout — not a missing config. Four levels covers the deepest
+        /// realistic nesting without wandering off into unrelated trees.
+        /// </summary>
+        public const int MaxAncestorLevels = 4;
+
         public enum Scope { Global, Project, None }
 
         public enum Envelope
@@ -222,6 +236,82 @@ namespace UnityOpenMcpBridge.Config
         }
 
         /// <summary>
+        /// Every path where this client's config could be configuring the given
+        /// Unity project, nearest first.
+        ///
+        /// For a project-scoped client that is the project folder followed by up
+        /// to <see cref="MaxAncestorLevels"/> ancestors, because the Unity
+        /// project is frequently a subfolder of the repository the agent was
+        /// opened on (<c>&lt;repo&gt;/Client</c>) and the client reads its
+        /// config relative to that repository root. Global-scope clients keep
+        /// their single absolute path, and CLI/manual clients have none.
+        ///
+        /// The walk stops before the home directory: <c>$HOME/.cursor/mcp.json</c>
+        /// and friends are already separate global-scope rows in
+        /// <see cref="Clients"/>, and treating them as a project config would
+        /// report every project on the machine as configured.
+        ///
+        /// Pure string math (no filesystem access) so the policy is
+        /// unit-testable; <paramref name="homePath"/> is injectable for the same
+        /// reason and defaults to the real user profile directory.
+        /// </summary>
+        public static string[] ResolveSearchPaths(
+            ClientEntry client,
+            string projectPath,
+            string homePath = null,
+            int maxAncestorLevels = MaxAncestorLevels)
+        {
+            if (client.PathTemplate == null) return new string[0];
+            if (client.ScopeKind != Scope.Project)
+            {
+                var single = ResolveDisplayPath(client, projectPath);
+                return single == null ? new string[0] : new[] { single };
+            }
+            if (string.IsNullOrEmpty(projectPath)) return new string[0];
+
+            var home = NormalizeDir(
+                homePath ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+            var results = new List<string>();
+            var dir = NormalizeDir(projectPath);
+            for (var level = 0; dir != null && level <= maxAncestorLevels; level++)
+            {
+                results.Add(Path.Combine(dir, client.PathTemplate).Replace('\\', '/'));
+                var parent = ParentDir(dir);
+                if (parent == null) break;
+                if (!string.IsNullOrEmpty(home)
+                    && string.Equals(parent, home, StringComparison.OrdinalIgnoreCase))
+                {
+                    break;
+                }
+                dir = parent;
+            }
+            return results.ToArray();
+        }
+
+        /// <summary>Forward-slash form with any trailing separator removed, so
+        /// parent/home comparisons are plain string comparisons.</summary>
+        private static string NormalizeDir(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return path;
+            var p = path.Replace('\\', '/');
+            while (p.Length > 1 && p[p.Length - 1] == '/') p = p.Substring(0, p.Length - 1);
+            return p;
+        }
+
+        /// <summary>Parent of a normalized directory, or <c>null</c> at a root
+        /// (<c>/</c> or a bare Windows drive) — a filesystem root is never worth
+        /// searching for a project config.</summary>
+        private static string ParentDir(string normalized)
+        {
+            if (string.IsNullOrEmpty(normalized)) return null;
+            var idx = normalized.LastIndexOf('/');
+            if (idx <= 0) return null;
+            var parent = normalized.Substring(0, idx);
+            if (parent.Length == 2 && parent[1] == ':') return null; // "C:"
+            return parent;
+        }
+
+        /// <summary>
         /// Pure content check: does the target config file body already
         /// contain a <c>unity-open-mcp</c> entry for this client's envelope?
         /// Extracted from the Status panel's configured-detection so the
@@ -235,6 +325,12 @@ namespace UnityOpenMcpBridge.Config
         /// as configured and silencing further troubleshooting. Codex (TOML)
         /// matches on its table header; CLI/Manual envelopes never report
         /// configured from file contents (they have no target file).
+        ///
+        /// A dotted merge key names nested objects (<c>mcp.servers</c> →
+        /// <c>{"mcp": {"servers": …}}</c>), so each segment is matched as its own
+        /// quoted JSON key. Matching the dotted string verbatim never hits: it
+        /// only appears in the catalog, never in a config file. Quoting also
+        /// stops <c>servers</c> from matching inside <c>"mcpServers"</c>.
         /// </summary>
         public static bool IsConfiguredEntry(Envelope envelope, string fileBody, string mergeKey = null)
         {
@@ -249,12 +345,17 @@ namespace UnityOpenMcpBridge.Config
                     return false;
                 default:
                     // JSON clients: require the server key. When the client has a
-                    // known merge key, also require it so an entry pasted under a
-                    // different section (a common config bug) is NOT reported as
-                    // configured.
+                    // known merge key, also require every segment of it so an
+                    // entry pasted under a different section (a common config
+                    // bug) is NOT reported as configured.
                     if (!fileBody.Contains("\"unity-open-mcp\"")) return false;
                     if (string.IsNullOrEmpty(mergeKey)) return true;
-                    return fileBody.Contains(mergeKey);
+                    foreach (var segment in mergeKey.Split('.'))
+                    {
+                        if (segment.Length == 0) continue;
+                        if (!fileBody.Contains("\"" + segment + "\"")) return false;
+                    }
+                    return true;
             }
         }
 
