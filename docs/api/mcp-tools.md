@@ -288,18 +288,35 @@ manually re-request the tool list, or route the tool by id through
 
 ### `unity_open_mcp_read_compile_errors`
 
-Resolves the authoritative `Editor.log` per platform (project-relative on Unity
-6000.5+, global elsewhere). When a live editor holds the project (known from the
-instance lock) and the resolved log looks frozen (implausibly small — the
-signature of a batch spawn that rotated `Editor.log` to `Editor-prev.log` while
-the live editor keeps writing to the rotated file), it falls back to
-`Editor-prev.log` and reports `logSource: "prev_log_live_editor"` in the
-response. When an assembly is stuck in a failed-compile state,
-`AssetDatabase.Refresh` no-ops and the response carries `staleLogSuspected` —
-force a recompile (`reimport_package` / `compile_check`) before trusting the
-errors. `compile_check` itself short-circuits with `editor_instance_locked`
-**before** spawning when a live editor holds the project, avoiding the spawn
-that would rotate the log in the first place.
+Resolves the authoritative `Editor.log` per platform. Unity 6000.5+ writes a
+project-relative log (`<project>/Logs/Editor.log`); pre-6000.5 writes the global
+per-user log. When **both** exist, the resolver picks the **freshest** (newest
+mtime): a project opened in 6000.5+ at some point leaves a stale
+`<project>/Logs/Editor.log` on disk, and re-opening it under a pre-6000.5 Unity
+makes the live editor write the global log while the project log lingers.
+Existence-only resolution read the stale project log; the freshness comparison
+prefers whichever file was written most recently (reported as
+`logSource: "global_log_fresher"` when the global log wins).
+
+When a live editor holds the project (known from the instance lock) and the
+resolved log looks frozen (implausibly small — the signature of a batch spawn
+that rotated `Editor.log` to `Editor-prev.log` while the live editor keeps
+writing to the rotated file), it falls back to `Editor-prev.log` and reports
+`logSource: "prev_log_live_editor"` in the response. When an assembly is stuck
+in a failed-compile state, `AssetDatabase.Refresh` no-ops and the response
+carries `staleLogSuspected` — force a recompile (`reimport_package` /
+`compile_check`) before trusting the errors. `compile_check` itself
+short-circuits with `editor_instance_locked` **before** spawning when a live
+editor holds the project, avoiding the spawn that would rotate the log in the
+first place.
+
+When the log is stale (a cited source is newer than the log) **or** authored by
+a different Unity (a version mismatch), the top-level `status` is downgraded to
+`"stale_log"` and `unhealthy` is suppressed — the `errors[]` are still attached
+as evidence, but the headline makes clear they **may not apply** to the running
+editor and must be confirmed by a genuine recompile before acting on them. The
+raw verdict (what the log literally says) is preserved in `logVerdict`. An agent
+that branches on `unhealthy` will not treat phantom errors as a hard failure.
 
 The response also carries `staleAssembly: true` when at least one
 `Assets/**/*.cs` source is newer than the newest `Library/ScriptAssemblies/*.dll`

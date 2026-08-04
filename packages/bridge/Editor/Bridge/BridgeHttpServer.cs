@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
@@ -43,6 +44,24 @@ namespace UnityOpenMcpBridge
         private static Thread _listenerThread;
         private static volatile bool _running;
         private static int _port;
+
+        // feedback-fable-04-08 §2a — in-flight request/SSE context tracker.
+        // Each accepted HttpListenerContext owns an OS socket (an FD registered
+        // with Mono's IOSelector). On a domain reload, ForceStopListener stops
+        // accepting NEW connections but previously the in-flight workers
+        // (HandleRequest on the ThreadPool, and the long-lived SSE loops that
+        // can run up to 10 minutes) kept their response sockets open until the
+        // AppDomain was torn down. Across dozens of reloads the cumulative
+        // abandoned wait-handle registrations exhaust Mono's kqueue fd budget
+        // and the Bee build driver raises
+        // `System.NotSupportedException: Could not register to wait for file
+        // descriptor N`, after which every compile no-ops until the Editor is
+        // restarted by hand. Tracking the live contexts lets the teardown path
+        // forcibly Abort them so their sockets release BEFORE the AppDomain
+        // unload, instead of leaking across the reload boundary. A dictionary
+        // (not a bag) is used so each completed request can retire its own
+        // entry in the finally — only genuinely in-flight contexts remain.
+        private static readonly ConcurrentDictionary<HttpListenerContext, byte> _inFlightContexts = new();
 
         // M26 Plan 4 — bounded in-process recovery when bind fails with
         // "address already in use" (zombie listener / OS release lag).
@@ -329,10 +348,46 @@ namespace UnityOpenMcpBridge
                 try { BridgeInstanceLock.Release(); } catch { }
             }
 
+            // feedback-fable-04-08 §2a — release in-flight request/SSE contexts
+            // BEFORE the listener stop, so workers parked in a blocking read /
+            // Thread.Sleep / OutputStream.Flush observe a closed socket and
+            // fall through to their finally (which closes the response) instead
+            // of holding the FD open across the AppDomain unload. This runs on
+            // every reload (the dominant leak vector) and on graceful stop.
+            AbortInFlightContexts();
+
+            // feedback-fable-04-08 §2a — fail every pending fair-queue request
+            // so the worker threads awaiting their TaskCompletionSource unblock
+            // immediately (their HTTP contexts are now closed above). Without
+            // this Reset each stranded worker holds its context's socket until
+            // its own per-tool timeout elapses, long after the reload began.
+            try { BridgeRequestQueue.Reset(); } catch { }
+
             CleanupPartialListener();
 
             if (logStopped)
                 UnityEngine.Debug.Log("[Unity Open MCP Bridge] Stopped.");
+        }
+
+        // feedback-fable-04-08 §2a — close every tracked in-flight HTTP context
+        // so its OS socket / wait-handle registration releases NOW rather than
+        // at AppDomain teardown. Closing the Response aborts the underlying
+        // connection; a worker blocked in OutputStream.Flush / a blocking read
+        // then throws and reaches its finally. Swallow all errors — these
+        // contexts may already be half-closed by their own finally, and a
+        // failure to close one must not skip the rest. Clears the set so a
+        // fresh post-reload listener starts with an empty tracker.
+        private static void AbortInFlightContexts()
+        {
+            if (_inFlightContexts.IsEmpty) return;
+            var keys = _inFlightContexts.Keys;
+            _inFlightContexts.Clear();
+            foreach (var ctx in keys)
+            {
+                if (ctx == null) continue;
+                try { ctx.Response.Abort(); } catch { }
+                try { ctx.Response.Close(); } catch { }
+            }
         }
 
         private static void CleanupPartialListener()
@@ -380,6 +435,12 @@ namespace UnityOpenMcpBridge
 
         private static void HandleRequest(HttpListenerContext context)
         {
+            // feedback-fable-04-08 §2a — register the context so the teardown
+            // path can forcibly close its socket on a domain reload instead of
+            // leaking the FD across the AppDomain boundary. Tracked for the
+            // whole request lifetime (including the long-lived SSE streams) and
+            // retired in the finally below so the set holds only live contexts.
+            _inFlightContexts.TryAdd(context, 0);
             var activity = BridgeActivityRecorder.BeginActivity(context);
             BridgeActivityRecorder.CurrentActivity = activity;
             try
@@ -536,6 +597,12 @@ namespace UnityOpenMcpBridge
                 {
                     try { context.Response.Close(); } catch { }
                 }
+                // feedback-fable-04-08 §2a — retire the context from the
+                // in-flight tracker so the set holds only genuinely live
+                // contexts (and stays bounded across a long session). The
+                // teardown path may have already cleared+closed it; TryRemove
+                // is a no-op in that case.
+                _inFlightContexts.TryRemove(context, out _);
             }
         }
 

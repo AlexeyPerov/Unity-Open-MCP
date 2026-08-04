@@ -11,6 +11,19 @@ namespace UnityOpenMcpBridge
     {
         private static readonly ConcurrentQueue<QueuedAction> _queue = new();
 
+        // feedback-fable-04-08 §2a — outstanding per-call Timers. EnqueueAsync
+        // creates a System.Threading.Timer per dispatch whose disposal is tied
+        // to the Task completing (ContinueWith → timer.Dispose). When a domain
+        // reload happens while a dispatch is still queued (main thread blocked
+        // by a modal, or the gate never settled), the Task never completes, the
+        // ContinueWith never runs, and the Timer — which holds a native wait
+        // handle registered with Mono's IOSelector — leaks across the AppDomain
+        // unload. Across many reloads the cumulative abandoned registrations
+        // exhaust the fd budget and the Bee build driver raises
+        // `Could not register to wait for file descriptor N`. Tracking the live
+        // timers lets Shutdown dispose them en masse on teardown.
+        private static readonly ConcurrentBag<Timer> _outstandingTimers = new();
+
         // specs/feedback.md 2026-07-03 — main-thread-stall detection. When a
         // Unity modal (unsaved-changes, scene-modified-externally, a
         // third-party Editor window) blocks the main thread, ProcessQueue stops
@@ -37,7 +50,44 @@ namespace UnityOpenMcpBridge
         {
             EditorApplication.update -= ProcessQueue;
             EditorApplication.update += ProcessQueue;
+            // feedback-fable-04-08 §2a — dispose stranded timers + drain the
+            // queue on domain reload so wait-handle registrations release before
+            // the AppDomain unloads (see _outstandingTimers).
+            AssemblyReloadEvents.beforeAssemblyReload -= Shutdown;
+            AssemblyReloadEvents.beforeAssemblyReload += Shutdown;
         }
+
+        // feedback-fable-04-08 §2a — release every outstanding per-call Timer
+        // and fail the queued actions that never ran. Runs on
+        // beforeAssemblyReload so the native wait handles the Timers registered
+        // with Mono's IOSelector are freed BEFORE the AppDomain is torn down
+        // (the leak that, accumulated over many reloads, trips the Bee driver's
+        // `Could not register to wait for file descriptor N`). Idempotent and
+        // best-effort — never throws, so a reload is never blocked by cleanup.
+        // Internal so the EditMode test can drive it directly + inspect the
+        // outstanding-timer count.
+        internal static void Shutdown()
+        {
+            // Drain the queue so a stranded action's TCS resolves (the worker
+            // awaiting it then closes its HTTP context) rather than lingering.
+            // The dequeued action is NOT run here — it would touch Editor state
+            // mid-teardown — and its TCS cannot be reached from the closure, so
+            // the per-call Timer disposal below is what unblocks the awaiter via
+            // its timeout callback.
+            while (_queue.TryDequeue(out _)) { }
+            if (_outstandingTimers.IsEmpty) return;
+            var snapshot = _outstandingTimers.ToArray();
+            _outstandingTimers.Clear();
+            foreach (var timer in snapshot)
+            {
+                try { timer.Dispose(); } catch { }
+            }
+        }
+
+        // feedback-fable-04-08 §2a — test-only count of outstanding per-call
+        // Timers, so the EditMode test can prove Shutdown drains them. Not part
+        // of any production call path.
+        internal static int OutstandingTimerCount => _outstandingTimers.Count;
 
         private static void ProcessQueue()
         {
@@ -119,7 +169,16 @@ namespace UnityOpenMcpBridge
                     tcs.TrySetException(new TimeoutException());
                 }
             }, null, timeoutMs, Timeout.Infinite);
-            tcs.Task.ContinueWith(_ => timer.Dispose());
+            // feedback-fable-04-08 §2a — track the Timer so Shutdown can dispose
+            // it on a domain reload if this dispatch is still pending then. The
+            // ContinueWith still disposes it on normal completion; double-dispose
+            // of a System.Threading.Timer is a documented no-op, so the Shutdown
+            // path re-disposing an already-completed timer is safe.
+            _outstandingTimers.Add(timer);
+            tcs.Task.ContinueWith(_ =>
+            {
+                try { timer.Dispose(); } catch { }
+            });
 
             return tcs.Task;
         }

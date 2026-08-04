@@ -119,6 +119,7 @@ export interface ResolvedEditorLog {
   reason:
     | "project_log"
     | "global_log"
+    | "global_log_fresher"
     | "prev_log_live_editor"
     | "prev_log_fallback";
 }
@@ -152,13 +153,47 @@ export function resolveEditorLogPath(
   projectPath: string | null | undefined,
   platform: UnityLogPlatform = process.platform as UnityLogPlatform,
   livePid?: number,
+  globalLogPathOverride?: string,
 ): ResolvedEditorLog {
   const project = projectEditorLogPath(projectPath);
-  const global = editorLogPath(platform);
+  const global = globalLogPathOverride ?? editorLogPath(platform);
+  const projectExists = !!(project && existsSync(project));
+  const globalExists = existsSync(global);
 
-  const candidate = project && existsSync(project) ? project : global;
-  const candidateReason: ResolvedEditorLog["reason"] =
-    project && existsSync(project) ? "project_log" : "global_log";
+  // Choose the base candidate. Unity 6000.5+ writes a project-relative log
+  // (<project>/Logs/Editor.log) and stops touching the global log; pre-6000.5
+  // writes only the global log. Existence alone is NOT enough, though: a
+  // project opened in 6000.5+ at some point leaves a STALE project-relative
+  // Editor.log on disk forever, and if the same project is later opened under
+  // a pre-6000.5 Unity the live editor writes the GLOBAL log while the stale
+  // project log lingers. Picking the project log on existence alone then reads
+  // errors from an unrelated older session (feedback-fable-04-08 §2b/§4: the
+  // field report's 31 phantom CS0619s came from a project log last written at
+  // 11:39 while the live editor wrote the global log at 19:36).
+  //
+  // When BOTH exist, prefer the FRESHEST (newest mtime). A genuinely-live
+  // project log on 6000.5+ is newer than the stale global log, so the common
+  // 6000.5+ case is unaffected; the fix only redirects the cross-version stale
+  // case where the global log is newer.
+  let candidate: string;
+  let candidateReason: ResolvedEditorLog["reason"];
+  if (projectExists && globalExists) {
+    const projectMtime = statMtimeMs(project as string);
+    const globalMtime = statMtimeMs(global);
+    if (globalMtime > projectMtime) {
+      candidate = global;
+      candidateReason = "global_log_fresher";
+    } else {
+      candidate = project as string;
+      candidateReason = "project_log";
+    }
+  } else if (projectExists) {
+    candidate = project as string;
+    candidateReason = "project_log";
+  } else {
+    candidate = global;
+    candidateReason = "global_log";
+  }
 
   // On 6000.5+ the rotated prev log lives next to the project-relative live
   // log (<project>/Logs/Editor-prev.log), not in the global dir. When the
@@ -192,6 +227,16 @@ export function resolveEditorLogPath(
     return { path: prev, reason: "prev_log_fallback" };
   }
   return { path: candidate, reason: candidateReason };
+}
+
+/** Read a file's mtime in epoch ms, or 0 on any failure (missing/unreadable).
+ *  Used to compare log freshness without throwing. */
+function statMtimeMs(path: string): number {
+  try {
+    return existsSync(path) ? statSync(path).mtimeMs : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** Threshold below which Editor.log is "frozen" — a freshly-rotated log the

@@ -184,6 +184,12 @@ function makeRouter(
   sessionState: ToolSessionState = new ToolSessionState(),
   onToolListChanged?: () => void | Promise<void>,
   hubBackend?: import("./tool-router.js").HubControlBackend,
+  // feedback-fable-04-08 §2b — default to a path that never exists so the
+  // freshness comparison in resolveEditorLogPath does not consult the HOST
+  // machine's real ~/Library/Logs/Unity/Editor.log (newer than the artificial
+  // mtimes tests plant, it would win the comparison and read the wrong file).
+  // Tests that exercise the freshness logic pass an explicit override.
+  globalLogPathOverride: string = "__test_no_global_log__/Editor.log",
 ): ToolRouter {
   return new ToolRouter(
     live,
@@ -193,6 +199,7 @@ function makeRouter(
     sessionState,
     onToolListChanged,
     hubBackend,
+    globalLogPathOverride,
   );
 }
 
@@ -734,12 +741,19 @@ test("route: read_compile_errors attaches staleLogSuspected when a cited source 
     utimesSync(logPath, new Date(1000_000), new Date(1000_000));
     utimesSync(srcPath, new Date(2000_000), new Date(2000_000));
 
-    const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
+    const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream(),
+      undefined, undefined, undefined, join(tmp, "no-global-log", "Editor.log"));
     const result = await router.route("unity_open_mcp_read_compile_errors", {});
     const body = parseBody(result);
 
     assert.equal(result.isError, false);
-    assert.equal(body.status, "compile_failed");
+    // feedback-fable-04-08 §4 — a stale log downgrades the top-level status to
+    // stale_log (the errors may not apply). The raw verdict is preserved in
+    // logVerdict, and unhealthy is suppressed so an agent branching on it does
+    // not treat phantom errors as a hard failure.
+    assert.equal(body.status, "stale_log");
+    assert.equal(body.logVerdict, "compile_failed");
+    assert.equal(body.unhealthy, false);
     assert.equal(body.errorCount, 1);
     assert.equal(body.staleLogSuspected, true);
     assert.ok(typeof body.staleLogHint === "string" && body.staleLogHint.length > 0);
@@ -765,7 +779,8 @@ test("route: read_compile_errors omits staleLogSuspected when the log is fresher
     utimesSync(srcPath, new Date(1000_000), new Date(1000_000));
     utimesSync(logPath, new Date(2000_000), new Date(2000_000));
 
-    const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
+    const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream(),
+      undefined, undefined, undefined, join(tmp, "no-global-log", "Editor.log"));
     const result = await router.route("unity_open_mcp_read_compile_errors", {});
     const body = parseBody(result);
 
@@ -2230,6 +2245,81 @@ test("route: restart_editor refuses with restart_signature_absent on a plain dea
       const err = body.error as { code?: string; message?: string };
       assert.equal(err.code, "restart_signature_absent");
       assert.equal(killerCalled, false, "must not kill on a fixable compile failure");
+    } finally {
+      restoreKiller();
+      restoreScan();
+    }
+  });
+});
+
+// feedback-fable-04-08 §2b — when the resolved Editor.log does NOT carry the
+// fd-exhaustion signature but the live Unity console DOES (the Bee driver
+// exception is raised into the console independently of whichever log file the
+// resolver picked), restart_editor falls back to scanning the live console via
+// unity_senses_read_console. This catches the case where the log file read
+// missed the signature because the wrong/stale log was resolved.
+test("route: restart_editor detects the signature from the live console when the log lacks it", async () => {
+  await withTmp("router-restart-console-fallback-", async (tmp) => {
+    await setupProject(tmp);
+    // The resolved log has only a plain compile error — no fd signature.
+    await plantEditorLog(tmp, PLAIN_COMPILE_ERROR_LOG);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 4242, projectPath: tmp }];
+      },
+    });
+    const restoreKiller = setProcessKillerForTest({
+      async kill() {
+        return { terminated: true, pid: 4242, method: "sigterm", elapsedMs: 1 };
+      },
+    });
+    try {
+      // A fake live client whose /events-style route answers
+      // unity_senses_read_console with an entries[] carrying the fd-exhaustion
+      // signature in the message+stack — exactly what the Bee driver raises.
+      const calls: LiveCall[] = [];
+      const live = {
+        calls,
+        async isLiveAvailable() {
+          return true;
+        },
+        async route(tool: string, args: Record<string, unknown>) {
+          calls.push({ tool, args });
+          const body =
+            tool === "unity_senses_read_console"
+              ? {
+                  entries: [
+                    {
+                      type: "error",
+                      message: "Unhandled exception during build",
+                      stack:
+                        "System.NotSupportedException: Could not register to wait for file descriptor 2899",
+                    },
+                  ],
+                }
+              : { ok: true };
+          return {
+            content: [{ type: "text", text: JSON.stringify(body) }],
+            isError: false,
+          } as CallToolResult;
+        },
+        async listBridgeTools() {
+          return { tools: new Set<string>(), groups: [] };
+        },
+      } as unknown as LiveClient & { calls: LiveCall[] };
+
+      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+      const result = await router.route("unity_open_mcp_restart_editor", {
+        confirm: true,
+      });
+      const body = parseBody(result);
+      // The live-console signature was detected → the kill proceeded.
+      assert.equal(result.isError, false);
+      assert.equal(body.killed, true);
+      assert.equal(body.signatureSource, "live_console");
+      // And the console tool was actually consulted.
+      const consoleCall = calls.find((c) => c.tool === "unity_senses_read_console");
+      assert.ok(consoleCall, "must have probed the live console for the signature");
     } finally {
       restoreKiller();
       restoreScan();

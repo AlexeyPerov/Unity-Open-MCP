@@ -183,6 +183,57 @@ pre-6000.5, `<project>/Logs/Editor.log` on 6000.5+) holds the authoritative
 errors; `read_compile_errors` resolves that path automatically when the project
 is the live one.
 
+## `read_compile_errors` reports a `stale_log` status
+
+### What it means
+
+When the log is stale (a cited source file is newer than the log's last write)
+**or** authored by a different Unity (a version mismatch), the response
+**downgrades** the top-level `status` to `"stale_log"` and suppresses
+`unhealthy`. The `errors[]` are still attached as evidence, and the literal log
+verdict is preserved in `logVerdict`, but the headline makes clear the errors
+**may not apply** to the running editor. This stops an agent from "fixing" a
+burst of phantom errors that were already resolved on disk (e.g. 31 obsolete-API
+warnings from a session that ended hours earlier).
+
+### Recovery
+
+Do not act on the errors until a genuine recompile confirms them. Call
+`unity_open_mcp_recompile_scripts` (deterministic force-recompile) and re-read
+compile errors. If the status returns to `no_errors_found` or `compile_failed`
+without the `stale_log` downgrade, the errors are current.
+
+### Why the wrong log file is read
+
+Unity 6000.5+ writes a project-relative log (`<project>/Logs/Editor.log`) and
+stops touching the global per-user log. A project opened in 6000.5+ at some point
+leaves a `<project>/Logs/Editor.log` on disk; if the same project is later
+opened under a pre-6000.5 Unity, the live editor writes the **global** log while
+the project log lingers. `read_compile_errors` now picks the **freshest** of the
+two (newest mtime) rather than preferring the project log on existence alone —
+reported as `logSource: "global_log_fresher"` when the global log wins.
+
+## `restart_editor` refuses with `restart_signature_absent`
+
+### What it means
+
+`restart_editor` only terminates the Editor when the fd-exhaustion signature
+(`Could not register to wait for file descriptor N`) is present. It first scans
+the resolved `Editor.log` tail; when that log does not carry the signature **but
+the bridge is still reachable**, it falls back to scanning the live Unity
+console (`unity_senses_read_console`) — the Bee driver exception is raised into
+the console independently of whichever log file the resolver picked. The
+response reports `signatureSource: "editor_log"` or `"live_console"` so you can
+tell which source confirmed it.
+
+### Recovery
+
+If the signature is genuinely absent, the Editor is slow/stuck for a different
+reason (a fixable compile failure, a modal, an unresponsive main thread) — re-run
+`read_compile_errors` to confirm the diagnosis before killing the Editor. If the
+bridge is down and the log is stale, start the Editor from the Hub and use
+`resource_pressure` to monitor fd headroom proactively.
+
 ## Related docs
 
 - [Dialog policy](dialog-policy.md) — startup and steady-state modal handling

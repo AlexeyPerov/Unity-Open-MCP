@@ -608,6 +608,14 @@ export class ToolRouter implements Router {
     // default calls the real hub-control functions); tests pass a fake to
     // avoid real subprocess + network side effects.
     private hubBackend: HubControlBackend = defaultHubBackend,
+    // feedback-fable-04-08 §2b — injectable global Editor.log path for tests.
+    // Production leaves this undefined so resolveEditorLogPath computes the
+    // real platform global path; tests pass a path under their tmp sandbox so
+    // the freshness comparison does not consult the host machine's real
+    // ~/Library/Logs/Unity/Editor.log (which is newer than the artificial
+    // 1970-era mtimes the tests plant and would win the comparison, reading
+    // the wrong file).
+    private globalLogPathOverride?: string,
   ) {}
 
   async route(
@@ -766,7 +774,7 @@ export class ToolRouter implements Router {
     // editor keeps writing. Pass the live PID from the instance lock so the
     // resolver can make the strong-signal decision.
     const livePid = this.resolveLiveEditorPid();
-    const resolvedLog = resolveEditorLogPath(this.projectPath, undefined, livePid);
+    const resolvedLog = resolveEditorLogPath(this.projectPath, undefined, livePid, this.globalLogPathOverride);
     const logPath = resolvedLog.path;
     const tail = readLogTail(logPath, tailBytes);
 
@@ -815,11 +823,6 @@ export class ToolRouter implements Router {
     // backward compatibility) so existing callers do not break.
     const health = summarizeProjectHealth(tail.content);
     const errors = health.compilerErrors;
-    const status = health.unhealthy
-      ? errors.length > 0
-        ? "compile_failed"
-        : "project_unhealthy"
-      : "no_errors_found";
 
     // specs/feedback.md 2026-07-05 — stale-log detection. When an assembly is
     // stuck in a failed-compile state, AssetDatabase.Refresh no-ops and the
@@ -861,11 +864,43 @@ export class ToolRouter implements Router {
     const liveUnityVersion = this.resolveLiveUnityVersion();
     const authorshipCheck = compareLogAuthorship(authorship, liveUnityVersion);
 
+    // feedback-fable-04-08 §4 — downgrade the top-level status when the errors
+    // may not apply to the running editor. An agent that trusts a
+    // `compile_failed` + `unhealthy: true` headline will start "fixing" 31
+    // phantom errors from a stale / batch-authored log. When EITHER the log is
+    // stale (a cited source is newer than the log) OR a version-mismatch is
+    // detected (a different Unity wrote the log), the verdict becomes
+    // `stale_log` — the errors[] are still attached as evidence, but the
+    // headline + status make clear they MUST NOT be acted on until a genuine
+    // recompile confirms them. The raw verdict (what the log itself says) is
+    // preserved in `logVerdict` for agents that want the literal signal.
+    const logVerdict = health.unhealthy
+      ? errors.length > 0
+        ? "compile_failed"
+        : "project_unhealthy"
+      : "no_errors_found";
+    const errorsMayNotApply =
+      health.unhealthy &&
+      (!!staleLog || authorshipCheck.versionMismatch);
+    const status = errorsMayNotApply ? "stale_log" : logVerdict;
+
     return sourceResult(
       {
         status,
-        unhealthy: health.unhealthy,
-        headline: health.headline,
+        // When the errors may not apply (stale log / version mismatch), the
+        // top-level verdict is downgraded to "stale_log" and unhealthy is
+        // suppressed so an agent branching on `unhealthy` does not treat
+        // phantom errors as a hard failure (feedback-fable-04-08 §4). The raw
+        // log verdict is preserved in `logVerdict` for callers that want the
+        // literal signal regardless of freshness.
+        unhealthy: errorsMayNotApply ? false : health.unhealthy,
+        headline: errorsMayNotApply
+          ? `${errors.length} error(s) in Editor.log, but the log appears ` +
+            "STALE or authored by a different Unity — these errors may NOT " +
+            "apply to the running editor. Do NOT act on them until a genuine " +
+            "recompile (unity_open_mcp_recompile_scripts) confirms them."
+          : health.headline,
+        ...(errorsMayNotApply ? { logVerdict } : {}),
         errorCount: errors.length,
         errors,
         // Package / assembly issues from the same log tail. Empty when the
@@ -1809,25 +1844,63 @@ export class ToolRouter implements Router {
     //    fixable compile failure. We reuse the same offline log read +
     //    health-issue extractor as read_compile_errors so the diagnosis is
     //    identical to what the agent already saw.
-    const logPath = resolveEditorLogPath(this.projectPath, undefined, this.resolveLiveEditorPid()).path;
+    const logPath = resolveEditorLogPath(this.projectPath, undefined, this.resolveLiveEditorPid(), this.globalLogPathOverride).path;
     const tail = readLogTail(logPath, DEFAULT_LOG_TAIL_BYTES);
     let signaturePresent = false;
+    let signatureSource: "editor_log" | "live_console" | null = null;
     let logWarning: string | null = null;
     if (tail.error || !tail.exists) {
-      // Without the log we cannot confirm the signature — refuse for safety.
+      // Without the log we cannot confirm the signature from the file. The
+      // live-console fallback below may still recover it.
       logWarning = tail.error
         ? `Editor.log unreadable at ${logPath}: ${tail.error}`
         : `No Editor.log found at ${logPath}.`;
     } else {
       const issues = extractProjectHealthIssues(tail.content);
       signaturePresent = issues.some((i) => i.kind === "editor_fd_exhaustion");
-      if (!signaturePresent) {
+      if (signaturePresent) {
+        signatureSource = "editor_log";
+      } else {
         logWarning =
           "The editor_fd_exhaustion signature is NOT present in the recent " +
           "Editor.log tail. The Editor may be slow/stuck for a different " +
           "reason (a fixable compile failure, a modal, an unresponsive main " +
           "thread). Re-run unity_open_mcp_read_compile_errors to confirm " +
           "the diagnosis before killing the Editor.";
+      }
+    }
+
+    // feedback-fable-04-08 §2b — live-console signature fallback. When the log
+    // file did not carry the signature (it may be the wrong/stale log for the
+    // running session, or the bridge is still up and the Bee exception is only
+    // in the live console via LogEntries), probe the bridge's console read as a
+    // secondary signature source. The fd-exhaustion exception is raised into
+    // the live Unity console independently of whichever Editor.log file the
+    // resolver picked, so this catches the case the file read missed. The
+    // bridge is usually down by full fd-exhaustion, so this is opportunistic —
+    // a failure here leaves the file-based verdict standing.
+    if (!signaturePresent) {
+      try {
+        const liveAvailable = await live.isLiveAvailable();
+        if (liveAvailable) {
+          const consoleResult = await live.route(
+            "unity_senses_read_console",
+            { max_entries: 200, type: "error", detail: "verbose" },
+          );
+          const consoleBody = parseResultBody(consoleResult);
+          const text = this.serializeConsoleEntries(consoleBody);
+          if (text) {
+            const liveIssues = extractProjectHealthIssues(text);
+            if (liveIssues.some((i) => i.kind === "editor_fd_exhaustion")) {
+              signaturePresent = true;
+              signatureSource = "live_console";
+              logWarning = null;
+            }
+          }
+        }
+      } catch {
+        // Bridge unreachable (expected on fd-exhaustion). The file-based
+        // verdict above is the authoritative fallback.
       }
     }
 
@@ -1853,6 +1926,7 @@ export class ToolRouter implements Router {
           confirm: false,
           dryRun: true,
           signaturePresent,
+          ...(signatureSource !== null ? { signatureSource } : {}),
           ...(pid !== null ? { wouldKillPid: pid } : {}),
           ...(logWarning !== null ? { warning: logWarning } : {}),
           projectPath: this.projectPath,
@@ -1931,7 +2005,7 @@ export class ToolRouter implements Router {
 
     // 6. Kill the Editor.
     const kill = await killEditorProcess(pid, graceMs);
-    return this.restartEditorKillResponse(pid, graceMs, kill, dirtyScenesWarning);
+    return this.restartEditorKillResponse(pid, graceMs, kill, dirtyScenesWarning, signatureSource);
   }
 
   /** Build the confirmed-kill response from a {@link KillResult}. */
@@ -1940,6 +2014,7 @@ export class ToolRouter implements Router {
     graceMs: number,
     kill: KillResult,
     dirtyScenesWarning: Array<{ name: string; path: string; isDirty: boolean }> | null,
+    signatureSource: "editor_log" | "live_console" | null,
   ): CallToolResult {
     if (kill.terminated) {
       return sourceResult(
@@ -1951,6 +2026,7 @@ export class ToolRouter implements Router {
           method: kill.method,
           elapsedMs: kill.elapsedMs,
           graceMs,
+          ...(signatureSource !== null ? { signatureSource } : {}),
           ...(dirtyScenesWarning !== null
             ? {
                 dirtyScenesWarning,
@@ -2001,6 +2077,29 @@ export class ToolRouter implements Router {
       "local",
       true,
     );
+  }
+
+  /**
+   * Flatten a unity_senses_read_console result body into a single string the
+   * health-issue extractor can scan for the fd-exhaustion signature. The
+   * console result is a JSON object with an `entries[]` array of
+   * `{ message, stack, ... }`; we join message + stack so the Bee driver's
+   * `Could not register to wait for file descriptor N` frame (which lives in
+   * the stack trace) is reachable by {@link extractProjectHealthIssues}.
+   * Returns "" when the body has no entries.
+   */
+  private serializeConsoleEntries(body: unknown): string {
+    if (!body || typeof body !== "object") return "";
+    const entries = (body as { entries?: unknown }).entries;
+    if (!Array.isArray(entries)) return "";
+    const parts: string[] = [];
+    for (const ent of entries) {
+      if (!ent || typeof ent !== "object") continue;
+      const e = ent as { message?: unknown; stack?: unknown };
+      if (typeof e.message === "string") parts.push(e.message);
+      if (typeof e.stack === "string") parts.push(e.stack);
+    }
+    return parts.join("\n");
   }
 
   /**

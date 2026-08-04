@@ -87,6 +87,52 @@ test("resolveEditorLogPath prefers the project-relative log when it exists", () 
   assert.equal(resolved.reason, "project_log");
 });
 
+// feedback-fable-04-08 §2b/§4 — when BOTH the project log and the global log
+// exist, the resolver must pick the FRESHEST. A project opened in 6000.5+ at
+// some point leaves a stale <project>/Logs/Editor.log on disk; re-opening it
+// under a pre-6000.5 Unity makes the live editor write the GLOBAL log while
+// the project log lingers. Existence-only resolution read the stale project
+// log and surfaced hours-old phantom errors as the current state.
+test("resolveEditorLogPath picks the GLOBAL log when it is fresher than the project log", () => {
+  // Both logs exist. The project log is OLDER (stale, from a prior 6000.5
+  // session); the global log is NEWER (the live pre-6000.5 editor). The
+  // resolver must prefer the global log and report global_log_fresher.
+  const project = mkdtempSync(join(tmpdir(), "proj-"));
+  const globalDir = mkdtempSync(join(tmpdir(), "global-"));
+  mkdirSync(join(project, "Logs"));
+  const projectLog = join(project, "Logs", "Editor.log");
+  const globalLog = join(globalDir, "Editor.log");
+  writeFileSync(projectLog, "x".repeat(8192));
+  writeFileSync(globalLog, "y".repeat(8192));
+  // project log mtime = t=1000, global log mtime = t=2000.
+  utimesSync(projectLog, new Date(1000_000), new Date(1000_000));
+  utimesSync(globalLog, new Date(2000_000), new Date(2000_000));
+
+  const resolved = resolveEditorLogPath(project, "darwin", undefined, globalLog);
+  assert.equal(resolved.path, globalLog);
+  assert.equal(resolved.reason, "global_log_fresher");
+});
+
+test("resolveEditorLogPath keeps the PROJECT log when it is fresher than the global log", () => {
+  // Both logs exist; the project log is NEWER (the common 6000.5+ case where
+  // the live editor writes the project log). The resolver must keep it and
+  // NOT downgrade to the global log.
+  const project = mkdtempSync(join(tmpdir(), "proj-"));
+  const globalDir = mkdtempSync(join(tmpdir(), "global-"));
+  mkdirSync(join(project, "Logs"));
+  const projectLog = join(project, "Logs", "Editor.log");
+  const globalLog = join(globalDir, "Editor.log");
+  writeFileSync(projectLog, "x".repeat(8192));
+  writeFileSync(globalLog, "y".repeat(8192));
+  // project log mtime = t=2000, global log mtime = t=1000.
+  utimesSync(projectLog, new Date(2000_000), new Date(2000_000));
+  utimesSync(globalLog, new Date(1000_000), new Date(1000_000));
+
+  const resolved = resolveEditorLogPath(project, "darwin", undefined, globalLog);
+  assert.equal(resolved.path, projectLog);
+  assert.equal(resolved.reason, "project_log");
+});
+
 test("resolveEditorLogPath falls back to the global log when the project log is absent", () => {
   // A project dir with no Logs/Editor.log → resolver returns the global path.
   const project = mkdtempSync(join(tmpdir(), "proj-"));
