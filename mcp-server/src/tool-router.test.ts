@@ -3610,3 +3610,50 @@ test("B-N20: scene_get_data paging preserves _route (and other top-level fields)
   });
 });
 
+test("B-N21: scene_get_data paging does not duplicate a pre-unwrapped body's full roots array", async () => {
+  await withTmp("router-scene-page-preunwrapped-", async (tmp) => {
+    await setupProject(tmp);
+    // Pre-unwrapped shape: roots/truncated at the TOP level, no `scene`
+    // wrapper. flattenSceneBody falls back to the top level for this shape,
+    // but pageSceneNodes previously only stripped the structural fields from
+    // `body.scene` (resolved to {} here) — the ...topMeta spread then carried
+    // the ENTIRE unpaged roots array into the response alongside the page,
+    // so paging never bounded the payload.
+    const roots = [];
+    for (let i = 0; i < 6; i++) {
+      roots.push({ name: `Root${i}`, childCount: 0, components: [] });
+    }
+    const preUnwrapped: Record<string, unknown> = {
+      status: "ok",
+      name: "SampleScene",
+      roots,
+      moreHidden: [],
+      truncated: 4,
+    };
+    const live = makeSceneGetDataFakeLive({ body: preUnwrapped });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+    const result = await router.route(
+      "unity_open_mcp_scene_get_data",
+      { page_size: 2 },
+    );
+    assert.equal(result.isError, false);
+    const body = parseBody(result);
+    // The full tree must NOT ride along at the top level.
+    assert.equal(body.roots, undefined, "top-level roots must be stripped from the paged response");
+    assert.equal(body.rootGameObjects, undefined);
+    assert.equal(body.nodes, undefined);
+    assert.equal(body.moreHidden, undefined);
+    // The page itself is bounded.
+    const scene = body.scene as { nodes: unknown[]; truncated?: number };
+    assert.ok(Array.isArray(scene.nodes), "paged nodes present under scene");
+    assert.equal(scene.nodes.length, 2, "page_size=2 bounds the node list");
+    // Non-structural top-level metadata still survives.
+    assert.equal(body.name, "SampleScene", "non-structural top-level meta preserved");
+    // The source-side truncated count is carried onto the scene envelope even
+    // when it lived at the top level (pre-unwrapped shape).
+    assert.equal(scene.truncated, 4, "top-level bridge truncated count carried through");
+    const pagination = body.pagination as { next_cursor: string | null };
+    assert.ok(pagination.next_cursor, "more pages remain");
+  });
+});
+

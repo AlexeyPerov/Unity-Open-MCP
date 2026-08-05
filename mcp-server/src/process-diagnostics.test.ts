@@ -390,3 +390,56 @@ test("H2: classifyLsofError keeps ambiguous exit-1-with-no-stdout as lsof_failed
   assert.equal(r.reason, "lsof_failed");
   assert.match(r.message ?? "", /lsof failed for PID 1234/);
 });
+
+test("H2: classifyLsofError with err.stdout === undefined is a FAILED probe, not a 0-fd success", () => {
+  // Spawn-level failure (ENOENT/EPERM): execFileSync throws before any output,
+  // so err.stdout exists but is undefined. The old String() coercion turned
+  // that into the literal "undefined" — one line — which parsed as a confident
+  // count of 0 fds, misreporting a failed probe as "ok"/reliable.
+  const err = Object.assign(new Error("spawn lsof ENOENT"), {
+    stdout: undefined,
+    code: "ENOENT",
+  });
+  const r = classifyLsofError(err, 1234);
+  assert.equal(r.count, null, "no captured output → the count is unknown, never 0");
+  assert.equal(r.method, "lsof");
+  assert.equal((r as { reason?: string }).reason, "lsof_failed");
+});
+
+test("H2: classifyLsofError with err.stdout === null is a FAILED probe, not a 1-line parse", () => {
+  const err = Object.assign(new Error("spawn lsof EPERM"), {
+    stdout: null,
+    code: "EPERM",
+  });
+  const r = classifyLsofError(err, 1234);
+  assert.equal(r.count, null);
+  assert.equal((r as { reason?: string }).reason, "lsof_failed");
+});
+
+test("H2: classifyLsofError flags a timed-out probe's partial stdout as approximate", () => {
+  // FD_PROBE_TIMEOUT_MS killed lsof mid-write: the captured stdout is a
+  // partial listing, so the parsed count is a lower bound — approximate,
+  // never a confident exact count.
+  const err = Object.assign(new Error("spawnSync lsof ETIMEDOUT"), {
+    stdout: "COMMAND   PID USER   FD   TYPE\nUnity    1234 user   0r   REG\nUnity    1234 user   1w   REG\n",
+    code: "ETIMEDOUT",
+    killed: true,
+    signal: "SIGTERM",
+  });
+  const r = classifyLsofError(err, 1234);
+  assert.equal(r.count, 2, "partial rows still parsed");
+  assert.equal((r as { approximate?: boolean }).approximate, true, "timeout partial output must be approximate");
+});
+
+test("H2: classifyLsofError maps a timeout with NO output to lsof_failed", () => {
+  const err = Object.assign(new Error("spawnSync lsof ETIMEDOUT"), {
+    stdout: "",
+    code: "ETIMEDOUT",
+    killed: true,
+    signal: "SIGTERM",
+  });
+  const r = classifyLsofError(err, 1234);
+  assert.equal(r.count, null);
+  assert.equal((r as { reason?: string }).reason, "lsof_failed");
+  assert.match((r as { message?: string }).message ?? "", /timed out/);
+});

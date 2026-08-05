@@ -5,7 +5,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 
@@ -27,6 +27,7 @@ import {
   getCollectFilesCount,
   parallelMap,
   collectFiles,
+  collectMetaTriples,
   walkMeta,
   AsyncSemaphore,
   buildGuidAndScriptIndex,
@@ -2336,6 +2337,62 @@ test("H3: scanIntegrityOffline output is byte-stable across runs (golden shape)"
       second.issues.map((i) => `${i.code}:${i.path}`),
       "issue ordering must be deterministic across runs",
     );
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("collectMetaTriples returns triples in deterministic readdir-inline order (not I/O-completion order)", async () => {
+  // Regression: the previous implementation pushed triples from inside
+  // walkMeta's Promise.all fan-out AFTER an awaited readFile, so triples
+  // landed in I/O-completion order. Downstream derivations (duplicate-GUID
+  // last-write-wins in guidByPath/fullGuidIndex, capped issue lists) then
+  // flapped between runs. The fixed walker merges input-order-indexed slots
+  // (like collectFiles), so the order must match a purely sequential
+  // reference walk — readdir order with each directory's descendants inlined
+  // where the directory sat in its parent's listing — on every run.
+  const sequentialMetaWalk = async (dir: string): Promise<string[]> => {
+    let entries: string[];
+    try { entries = await readdir(dir); } catch { return []; }
+    const out: string[] = [];
+    for (const name of entries) {
+      const fullPath = join(dir, name);
+      let isDir = false;
+      try { isDir = (await stat(fullPath)).isDirectory(); } catch { continue; }
+      if (isDir) out.push(...await sequentialMetaWalk(fullPath));
+      else if (name.endsWith(".meta")) out.push(fullPath);
+    }
+    return out;
+  };
+
+  const tmp = await mkdtemp(join(tmpdir(), "offline-triples-order-"));
+  try {
+    // Wide fixture: several sibling dirs × many .meta files with wildly
+    // different file sizes so read-completion order genuinely interleaves.
+    for (let d = 0; d < 5; d++) {
+      const dir = join(tmp, "Assets", `Dir${d}`);
+      await mkdir(dir, { recursive: true });
+      for (let f = 0; f < 20; f++) {
+        const guid = `${d}${f}`.padStart(2, "0").padEnd(32, "0");
+        const padding = "# pad\n".repeat((f * 37) % 200);
+        await writeFile(join(dir, `File${f}.cs.meta`), `guid: ${guid}\n${padding}`);
+      }
+    }
+    const expected = await sequentialMetaWalk(join(tmp, "Assets"));
+    assert.equal(expected.length, 100, "fixture sanity: 100 meta files");
+
+    for (let run = 0; run < 3; run++) {
+      const triples = await collectMetaTriples(tmp);
+      assert.deepEqual(
+        triples.map((t) => t.metaPath),
+        expected,
+        `run ${run}: triple order must match the sequential readdir-inline walk`,
+      );
+    }
+    // GUID extraction still works through the ordered walker.
+    const first = (await collectMetaTriples(tmp))[0];
+    assert.match(first.guid, /^[0-9a-f]{32}$/);
+    assert.equal(first.assetPath, first.metaPath.slice(0, -5));
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }

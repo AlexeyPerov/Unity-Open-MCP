@@ -2769,8 +2769,29 @@ function pageSceneNodes(
   void _existing;
 
   // Pull the top-level meta (everything except `scene`, which we rebuild).
-  const { scene: _s, ...topMeta } = body;
+  // B-N21 — strip the structural fields from the TOP level too. For a
+  // pre-unwrapped body (roots/rootGameObjects at the top level, no `scene`
+  // wrapper — the fallback flattenSceneBody handles), `scene` above resolves
+  // to {} and strips nothing, so spreading the raw remainder of `body` used
+  // to carry the ENTIRE unpaged roots array into the response alongside the
+  // page — paging never bounded the payload for that shape. flattenSceneBody
+  // already consumed those fields; drop them wherever they live.
+  const {
+    scene: _s,
+    roots: topRoots,
+    rootGameObjects: topRootGameObjects,
+    nodes: topNodes,
+    truncated: topTruncated,
+    moreHidden: topMoreHidden,
+    pagination: _topExisting,
+    ...topMeta
+  } = body;
   void _s;
+  void topRoots;
+  void topRootGameObjects;
+  void topNodes;
+  void topMoreHidden;
+  void _topExisting;
 
   const result: Record<string, unknown> = {
     ...topMeta,
@@ -2784,8 +2805,10 @@ function pageSceneNodes(
   // Carry the bridge's source-side truncation count through to the page so an
   // agent can distinguish "more pages" (pagination.truncated) from "the bridge
   // capped the hierarchy" (scene.truncated). Both can be non-zero at once.
-  if (typeof truncated === "number" && truncated > 0) {
-    (result.scene as Record<string, unknown>).truncated = truncated;
+  // For a pre-unwrapped body the count lives at the top level (B-N21).
+  const sourceTruncated = typeof truncated === "number" ? truncated : topTruncated;
+  if (typeof sourceTruncated === "number" && sourceTruncated > 0) {
+    (result.scene as Record<string, unknown>).truncated = sourceTruncated;
   }
 
   return attachPagination(result, block);

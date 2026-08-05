@@ -476,18 +476,62 @@ export interface MetaTriple {
  * may not exist — an orphan), and the lowercased GUID (or "" when missing).
  * Callers derive guidByPath / allAssetPaths / fullGuidIndex / orphan detection
  * from this single pass instead of re-walking the tree for each derivation.
+ *
+ * Ordering: DETERMINISTIC, matching {@link collectFiles} — entries appear in
+ * `readdir` order with each directory's descendants inlined where the
+ * directory sat in its parent's listing. The previous implementation pushed
+ * triples from inside walkMeta's fan-out callback AFTER an await, so triples
+ * landed in I/O-completion order and downstream derivations (duplicate-GUID
+ * last-write-wins, capped issue lists) flapped between runs. This walker uses
+ * the same input-order-indexed-slot merge as collectFiles so the output is
+ * stable regardless of which sibling's I/O settles first.
  */
 export async function collectMetaTriples(projectRoot: string): Promise<MetaTriple[]> {
-  const triples: MetaTriple[] = [];
   const assetsDir = join(projectRoot, "Assets");
-  await walkMeta(assetsDir, async (metaPath) => {
-    let guid = "";
+  return collectMetaTriplesWalk(assetsDir, new AsyncSemaphore());
+}
+
+/**
+ * Recursive slot-ordered meta walk backing {@link collectMetaTriples}. Same
+ * concurrency shape as walkMeta/collectFiles (shared semaphore gates each
+ * individual readdir/stat/readFile; recursion fans out ungated) and the same
+ * slot merge as collectFiles for deterministic output order. Increments the
+ * walkMeta test-seam counter so single-walk assertions (H3/H5) keep counting
+ * this as the one meta walk it is.
+ */
+async function collectMetaTriplesWalk(
+  dir: string,
+  sem: AsyncSemaphore,
+): Promise<MetaTriple[]> {
+  walkMetaCount++;
+  let entries: string[];
+  try { entries = await sem.withPermit(() => readdir(dir)); } catch { return []; }
+  const perEntry: MetaTriple[][] = new Array(entries.length);
+  await Promise.all(entries.map(async (name, i) => {
+    perEntry[i] = [];
+    if (shouldSkipDir(name)) return;
+    const fullPath = join(dir, name);
+    let isDir = false;
     try {
-      guid = readMetaGUID(await readFile(metaPath, "utf-8")).toLowerCase();
-    } catch { /* leave guid = "" */ }
-    triples.push({ metaPath, assetPath: metaPath.slice(0, -5), guid });
-  });
-  return triples;
+      const s = await sem.withPermit(() => stat(fullPath));
+      isDir = s.isDirectory();
+    } catch { return; }
+    if (isDir) {
+      // Recurse WITHOUT holding a permit (see walkMeta's M16 note).
+      perEntry[i] = await collectMetaTriplesWalk(fullPath, sem);
+    } else if (name.endsWith(".meta")) {
+      let guid = "";
+      try {
+        guid = readMetaGUID(
+          await sem.withPermit(() => readFile(fullPath, "utf-8")),
+        ).toLowerCase();
+      } catch { /* leave guid = "" */ }
+      perEntry[i] = [{ metaPath: fullPath, assetPath: fullPath.slice(0, -5), guid }];
+    }
+  }));
+  const results: MetaTriple[] = [];
+  for (const list of perEntry) for (const t of list) results.push(t);
+  return results;
 }
 
 // ===========================================================================

@@ -160,22 +160,49 @@ export function parseLsofStdout(stdout: string, pid: number): FdCountResult {
  * non-empty, parse it instead of reporting not_found. Only map to not_found
  * when there is no usable stdout AND the message indicates the PID is truly
  * absent — a bare "exit code: 1" is ambiguous (privilege errors also exit 1).
+ *
+ * Two guardrails on the captured-stdout path:
+ *   - `err.stdout` is only parsed when it is genuinely a non-empty string.
+ *     When execFileSync fails at spawn (ENOENT/EPERM) the property exists but
+ *     is undefined/null; naive String() coercion turned that into the literal
+ *     "undefined" — one "line" — which parsed as a confident count of ZERO
+ *     fds, exactly the failed-probe-as-ok misreport FdCountFailed exists to
+ *     prevent.
+ *   - When the probe was killed by the FD_PROBE_TIMEOUT_MS timeout, any
+ *     captured stdout is a PARTIAL listing (lsof was still writing). The
+ *     parsed count is a lower bound, so it is flagged `approximate: true`
+ *     instead of being reported as an exact count.
  */
 export function classifyLsofError(
   err: unknown,
   pid: number,
 ): FdCountResult {
   const message = err instanceof Error ? err.message : String(err);
+  const errObj = err && typeof err === "object"
+    ? (err as { stdout?: unknown; code?: unknown; killed?: unknown; signal?: unknown })
+    : undefined;
   const capturedStdout =
-    err && typeof err === "object" && "stdout" in err
-      ? String((err as { stdout: unknown }).stdout)
-      : "";
+    typeof errObj?.stdout === "string" ? errObj.stdout : "";
+  // execFileSync timeout: Node kills the child (SIGTERM by default) and sets
+  // `code: "ETIMEDOUT"` / `killed: true` on the error. Stdout captured up to
+  // that point is a partial fd listing.
+  const timedOut =
+    errObj?.code === "ETIMEDOUT" ||
+    (errObj?.killed === true && typeof errObj?.signal === "string");
   const capturedLines = capturedStdout.split(/\r?\n/).filter((l) => l.length > 0);
   if (capturedLines.length > 0) {
     return {
       count: Math.max(0, capturedLines.length - 1),
       method: "lsof",
-      approximate: false,
+      approximate: timedOut,
+    };
+  }
+  if (timedOut) {
+    return {
+      count: null,
+      method: "lsof",
+      reason: "lsof_failed",
+      message: `lsof timed out after ${FD_PROBE_TIMEOUT_MS}ms for PID ${pid} with no output.`,
     };
   }
   if (/no such file|no process|not found/i.test(message)) {

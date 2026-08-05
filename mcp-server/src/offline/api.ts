@@ -1170,29 +1170,41 @@ async function buildReverseEdgeGraph(
   // append the asset's edge to each referenced guid's edge list. Also record
   // the asset's own guid (from its .meta) so the impact BFS can resolve a
   // frontier node's guid without re-reading .meta per hop.
-  await parallelMap(candidates, async (absPath) => {
+  //
+  // Determinism: the I/O fans out via parallelMap, but the graph/pathToGuid
+  // maps are built SEQUENTIALLY from parallelMap's input-order result array
+  // afterwards. Mutating the maps inside the mapped fn (as this previously
+  // did) inserted edges in I/O-completion order, so edge-list order — and
+  // everything derived from it (findReferencesFromGraph output order, BFS
+  // visit order, capped/truncated lists) — flapped between runs.
+  const perFile = await parallelMap(candidates, async (absPath): Promise<
+    { assetPath: string; ownGuid: string; kind: ReverseEdge["kind"]; referenced: string[] } | null
+  > => {
     const ext = extname(absPath).toLowerCase();
-    if (!OFFLINE_PARSEABLE_EXTENSIONS.has(ext)) return;
+    if (!OFFLINE_PARSEABLE_EXTENSIONS.has(ext)) return null;
     let content: string;
-    try { content = await readFile(absPath, "utf-8"); } catch { return; }
-    if (!content.includes("guid:")) return;
+    try { content = await readFile(absPath, "utf-8"); } catch { return null; }
+    if (!content.includes("guid:")) return null;
     const assetPath = toAssetPath(projectRoot, absPath);
     const kind = kindForPath(absPath);
     // Resolve the asset's own guid once (cheap .meta read, OS-cached).
     const ownGuid = (await safeReadMetaGUID(absPath + ".meta")).toLowerCase();
-    const edge: ReverseEdge = { assetPath, guid: ownGuid, kind };
-    if (ownGuid !== "") pathToGuid.set(assetPath, ownGuid);
     // findGUIDs returns every guid: substring in the content (lowercased).
     // Dedup within this file via a Set so a guid referenced N times in one
     // asset still produces one edge entry (matches findReferencesOffline,
     // which pushes at most one entry per referencing file).
-    const referenced = new Set(findGUIDs(content));
-    for (const guid of referenced) {
+    return { assetPath, ownGuid, kind, referenced: [...new Set(findGUIDs(content))] };
+  });
+  for (const entry of perFile) {
+    if (!entry) continue;
+    const edge: ReverseEdge = { assetPath: entry.assetPath, guid: entry.ownGuid, kind: entry.kind };
+    if (entry.ownGuid !== "") pathToGuid.set(entry.assetPath, entry.ownGuid);
+    for (const guid of entry.referenced) {
       let list = graph.get(guid);
       if (!list) { list = []; graph.set(guid, list); }
       list.push(edge);
     }
-  });
+  }
   return { graph, pathToGuid };
 }
 
