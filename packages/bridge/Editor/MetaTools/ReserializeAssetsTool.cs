@@ -14,12 +14,38 @@ namespace UnityOpenMcpBridge.MetaTools
     // Scope: explicit `paths` array only. Whole-project reserialize is intentionally
     // not exposed because the gate needs scoped paths_hint to validate the delta;
     // enumerating affected assets is the safe failure mode.
+    [InitializeOnLoad]
     public static class ReserializeAssetsTool
     {
         public static readonly string[] SupportedExtensions =
         {
             ".prefab", ".unity", ".asset", ".mat", ".controller", ".anim"
         };
+
+        // Project root (parent of Assets) + the absolute Assets folder, cached
+        // ONCE on the main thread. Application.dataPath is a main-thread-only
+        // API, but NormalizePaths also runs on the HTTP worker thread —
+        // BridgeHttpServer.HandleRequest calls NormalizeForHint from a
+        // ThreadPool worker to build the reserialize paths_hint — where
+        // reading it throws UnityException. Both values are fixed for the
+        // whole domain lifetime (mirrors CompileCheckState.ProjectPath), so
+        // the load-time snapshot is always valid. [InitializeOnLoad] runs this
+        // static ctor during domain load on the main thread; BridgeHttpServer
+        // additionally forces it via EnsureMainThreadCache() BEFORE starting
+        // its listener, so no worker-thread caller can be the first toucher.
+        private static readonly string ProjectRoot;
+        private static readonly string AssetsAbs;
+
+        static ReserializeAssetsTool()
+        {
+            ProjectRoot = Directory.GetParent(UnityEngine.Application.dataPath)?.FullName;
+            AssetsAbs = Path.GetFullPath(Path.Combine(ProjectRoot ?? "", "Assets"));
+        }
+
+        // Forces the static ctor (the main-thread cache above) to run. Called
+        // by BridgeHttpServer's [InitializeOnLoad] ctor before the HTTP
+        // listener starts serving requests.
+        internal static void EnsureMainThreadCache() { }
 
         public static ToolDispatchResult Execute(string body)
         {
@@ -160,11 +186,14 @@ namespace UnityOpenMcpBridge.MetaTools
             var result = new System.Collections.Generic.List<string>(rawPaths.Length);
             containmentInvalid = new System.Collections.Generic.List<string>();
 
-            // Project root = parent of Assets (Application.dataPath). Resolve
-            // once; both the Assets folder and each candidate are resolved
-            // against it so `..` segments collapse before the containment check.
-            var projectRoot = Directory.GetParent(UnityEngine.Application.dataPath)?.FullName;
-            string assetsAbs = Path.GetFullPath(Path.Combine(projectRoot ?? "", "Assets"));
+            // Project root = parent of Assets (Application.dataPath). Read the
+            // main-thread cache (see the static ctor) — resolving it here would
+            // throw UnityException when this runs on the HTTP worker thread
+            // (NormalizeForHint). Both the Assets folder and each candidate are
+            // resolved against it so `..` segments collapse before the
+            // containment check.
+            var projectRoot = ProjectRoot;
+            string assetsAbs = AssetsAbs;
 
             foreach (var raw in rawPaths)
             {

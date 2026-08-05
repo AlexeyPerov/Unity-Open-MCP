@@ -29,12 +29,24 @@ namespace UnityOpenMcpBridge
     {
         private const double HeartbeatIntervalSec = 0.5;
 
+        // Minimum age (seconds) a forced TRANSITIONAL state (entering_playmode)
+        // must reach before the "transition abandoned" clear may fire. A normal
+        // ExitingEditMode → playing transition spends a few ticks with
+        // !isPlaying && !isCompiling before the domain reload / play state
+        // lands; clearing on the first such tick advertised idle into a dying
+        // domain. Success paths clear sooner via their own signals (isPlaying,
+        // or Force(playing) from EnteredPlayMode replacing the forced state).
+        private const double AbandonedTransitionGraceSec = 5.0;
+
         private static double _lastWriteTime;
         private static bool _registered;
         // Forced state set by callbacks; cleared after the next throttled
         // write so we don't keep emitting it forever.
         private static string _forcedState;
         private static volatile bool _forcedPending;
+        // EditorApplication.timeSinceStartup at which the current forced state
+        // was set — age-gates the abandoned-transition clear in WriteNow.
+        private static double _forcedAtTime;
 
         public static bool IsRunning => _registered;
 
@@ -94,6 +106,7 @@ namespace UnityOpenMcpBridge
         {
             _forcedState = state;
             _forcedPending = true;
+            _forcedAtTime = EditorApplication.timeSinceStartup;
             WriteNow();
         }
 
@@ -143,13 +156,22 @@ namespace UnityOpenMcpBridge
                 // error cancels entering play mode and the editor settles back
                 // to idle). Clear them when the editor has reached a state the
                 // transition targets or visibly abandoned it:
-                //   - entering_playmode → resolved once playing (reached it) or
-                //     idle without compiling (gave up — no domain reload in
-                //     flight to still produce play mode).
+                //   - entering_playmode → resolved once playing (reached it),
+                //     or once idle without compiling for at least the
+                //     abandoned-transition grace period (gave up). The age gate
+                //     matters: during a NORMAL transition the first heartbeat
+                //     tick after ExitingEditMode still reads !isPlaying &&
+                //     !isCompiling — the old ungated check was a tautology
+                //     there and cleared the force immediately, briefly
+                //     advertising idle into a domain about to reload for play
+                //     mode.
                 //   - exiting_playmode  → resolved once back in edit mode
                 //     (!isPlaying) and not mid-reload.
                 else if (_forcedState == BridgeInstanceLock.StateEnteringPlaymode
-                    && (isPlaying || (!isCompiling && !isPlaying)))
+                    && (isPlaying
+                        || (!isCompiling
+                            && EditorApplication.timeSinceStartup - _forcedAtTime
+                                >= AbandonedTransitionGraceSec)))
                 {
                     _forcedPending = false;
                 }

@@ -11,9 +11,10 @@ namespace UnityOpenMcpBridge
     {
         private static readonly ConcurrentQueue<QueuedAction> _queue = new();
 
-        // feedback-fable-04-08 §2a — outstanding per-call Timers. EnqueueAsync
-        // creates a System.Threading.Timer per dispatch whose disposal is tied
-        // to the Task completing (ContinueWith → timer.Dispose). When a domain
+        // feedback-fable-04-08 §2a — outstanding per-call dispatches, keyed by
+        // a monotonically-increasing id. EnqueueAsync creates a
+        // System.Threading.Timer per dispatch whose disposal is tied to the
+        // Task completing (ContinueWith → retire + Dispose). When a domain
         // reload happens while a dispatch is still queued (main thread blocked
         // by a modal, or the gate never settled), the Task never completes, the
         // ContinueWith never runs, and the Timer — which holds a native wait
@@ -21,8 +22,18 @@ namespace UnityOpenMcpBridge
         // unload. Across many reloads the cumulative abandoned registrations
         // exhaust the fd budget and the Bee build driver raises
         // `Could not register to wait for file descriptor N`. Tracking the live
-        // timers lets Shutdown dispose them en masse on teardown.
-        private static readonly ConcurrentBag<Timer> _outstandingTimers = new();
+        // dispatches lets Shutdown fail their awaiters and dispose the timers
+        // en masse on teardown.
+        //
+        // A dictionary (not the old ConcurrentBag) so each COMPLETED dispatch
+        // retires its own entry — the bag only ever grew, accumulating one
+        // dead Timer + closure per dispatch until the next domain reload. The
+        // entry also carries the dispatch's cancel hook: Timer.Dispose CANCELS
+        // the pending timeout callback, so Shutdown must complete the TCS
+        // FIRST or a still-queued dispatch's awaiter (a .Result caller with no
+        // timeout of its own) would hang forever.
+        private static readonly ConcurrentDictionary<long, PendingDispatch> _pendingDispatches = new();
+        private static long _nextDispatchId;
 
         // specs/feedback.md 2026-07-03 — main-thread-stall detection. When a
         // Unity modal (unsaved-changes, scene-modified-externally, a
@@ -50,44 +61,45 @@ namespace UnityOpenMcpBridge
         {
             EditorApplication.update -= ProcessQueue;
             EditorApplication.update += ProcessQueue;
-            // feedback-fable-04-08 §2a — dispose stranded timers + drain the
+            // feedback-fable-04-08 §2a — fail stranded dispatches + drain the
             // queue on domain reload so wait-handle registrations release before
-            // the AppDomain unloads (see _outstandingTimers).
+            // the AppDomain unloads (see _pendingDispatches).
             AssemblyReloadEvents.beforeAssemblyReload -= Shutdown;
             AssemblyReloadEvents.beforeAssemblyReload += Shutdown;
         }
 
-        // feedback-fable-04-08 §2a — release every outstanding per-call Timer
-        // and fail the queued actions that never ran. Runs on
-        // beforeAssemblyReload so the native wait handles the Timers registered
-        // with Mono's IOSelector are freed BEFORE the AppDomain is torn down
-        // (the leak that, accumulated over many reloads, trips the Bee driver's
-        // `Could not register to wait for file descriptor N`). Idempotent and
-        // best-effort — never throws, so a reload is never blocked by cleanup.
-        // Internal so the EditMode test can drive it directly + inspect the
-        // outstanding-timer count.
+        // feedback-fable-04-08 §2a — fail every outstanding dispatch's awaiter
+        // and release its per-call Timer. Runs on beforeAssemblyReload so the
+        // native wait handles the Timers registered with Mono's IOSelector are
+        // freed BEFORE the AppDomain is torn down (the leak that, accumulated
+        // over many reloads, trips the Bee driver's `Could not register to
+        // wait for file descriptor N`). Idempotent and best-effort — never
+        // throws, so a reload is never blocked by cleanup. Internal so the
+        // EditMode test can drive it directly + inspect the outstanding count.
         internal static void Shutdown()
         {
-            // Drain the queue so a stranded action's TCS resolves (the worker
-            // awaiting it then closes its HTTP context) rather than lingering.
-            // The dequeued action is NOT run here — it would touch Editor state
-            // mid-teardown — and its TCS cannot be reached from the closure, so
-            // the per-call Timer disposal below is what unblocks the awaiter via
-            // its timeout callback.
+            // Drain the queue first: the dequeued actions are NOT run here —
+            // they would touch Editor state mid-teardown. Their awaiters are
+            // completed via the pending-dispatch map below.
             while (_queue.TryDequeue(out _)) { }
-            if (_outstandingTimers.IsEmpty) return;
-            var snapshot = _outstandingTimers.ToArray();
-            _outstandingTimers.Clear();
-            foreach (var timer in snapshot)
+            if (_pendingDispatches.IsEmpty) return;
+            foreach (var kv in _pendingDispatches)
             {
-                try { timer.Dispose(); } catch { }
+                if (!_pendingDispatches.TryRemove(kv.Key, out var pending)) continue;
+                // Complete the TCS BEFORE disposing the timer: Timer.Dispose
+                // CANCELS the pending timeout callback, so a still-queued
+                // dispatch's awaiter would otherwise never complete and any
+                // unbounded .Result caller would hang across the reload.
+                try { pending.FailPending(); } catch { }
+                try { pending.Timer.Dispose(); } catch { }
             }
         }
 
         // feedback-fable-04-08 §2a — test-only count of outstanding per-call
-        // Timers, so the EditMode test can prove Shutdown drains them. Not part
-        // of any production call path.
-        internal static int OutstandingTimerCount => _outstandingTimers.Count;
+        // dispatches (each owning one Timer), so the EditMode test can prove
+        // both Shutdown and normal completion retire them. Not part of any
+        // production call path.
+        internal static int OutstandingTimerCount => _pendingDispatches.Count;
 
         private static void ProcessQueue()
         {
@@ -158,6 +170,9 @@ namespace UnityOpenMcpBridge
             // main_thread_blocked / modal_likely_open error; the latter keeps
             // the legacy TimeoutException so existing handlers
             // (BuildTimeoutEnvelope) still match.
+            // Create the timer DISARMED (Timeout.Infinite) and only arm it
+            // after it is registered in the pending map, so the timeout
+            // callback can never race ahead of the bookkeeping below.
             var timer = new Timer(_ =>
             {
                 if (!queued.StartedDrainAtUtc.HasValue)
@@ -168,19 +183,48 @@ namespace UnityOpenMcpBridge
                 {
                     tcs.TrySetException(new TimeoutException());
                 }
-            }, null, timeoutMs, Timeout.Infinite);
-            // feedback-fable-04-08 §2a — track the Timer so Shutdown can dispose
-            // it on a domain reload if this dispatch is still pending then. The
-            // ContinueWith still disposes it on normal completion; double-dispose
-            // of a System.Threading.Timer is a documented no-op, so the Shutdown
-            // path re-disposing an already-completed timer is safe.
-            _outstandingTimers.Add(timer);
+            }, null, Timeout.Infinite, Timeout.Infinite);
+            // feedback-fable-04-08 §2a — track the dispatch (Timer + TCS
+            // cancel hook) so Shutdown can fail the awaiter and dispose the
+            // timer on a domain reload if it is still pending then. On normal
+            // completion the ContinueWith retires the entry itself — the map
+            // must not accumulate one dead Timer + closure per dispatch until
+            // the next reload. Double-dispose of a System.Threading.Timer is a
+            // documented no-op, so Shutdown re-disposing a timer that just
+            // completed is safe.
+            var dispatchId = Interlocked.Increment(ref _nextDispatchId);
+            _pendingDispatches.TryAdd(dispatchId, new PendingDispatch
+            {
+                Timer = timer,
+                FailPending = () => tcs.TrySetException(new OperationCanceledException(
+                    "The main-thread dispatcher was shut down (domain reload / editor teardown) " +
+                    "before this dispatch ran.")),
+            });
+            try { timer.Change(timeoutMs, Timeout.Infinite); }
+            catch (ObjectDisposedException)
+            {
+                // Shutdown raced this dispatch between TryAdd and Change —
+                // it already failed the awaiter and disposed the timer.
+            }
             tcs.Task.ContinueWith(_ =>
             {
-                try { timer.Dispose(); } catch { }
+                if (_pendingDispatches.TryRemove(dispatchId, out var done))
+                {
+                    try { done.Timer.Dispose(); } catch { }
+                }
             });
 
             return tcs.Task;
+        }
+
+        // One in-flight EnqueueAsync dispatch: its timeout Timer plus the hook
+        // Shutdown uses to fail the awaiter (TrySetException on the TCS, which
+        // the closure captures) before the timer — and with it the only other
+        // path that could complete the Task — is disposed.
+        private sealed class PendingDispatch
+        {
+            public Timer Timer;
+            public Action FailPending;
         }
 
         // Holds the queue-wait timing for the stall diagnostic. ProcessQueue

@@ -97,6 +97,13 @@ namespace UnityOpenMcpBridge
             BridgeToolRegistry.Scan();
             BridgeResourceRegistry.Scan();
 
+            // Force ReserializeAssetsTool's main-thread cache (project root /
+            // Assets path, derived from the main-thread-only
+            // Application.dataPath) to initialize BEFORE the listener starts:
+            // HandleRequest calls ReserializeAssetsTool.NormalizeForHint on a
+            // ThreadPool worker, where a lazily-run static ctor would throw.
+            ReserializeAssetsTool.EnsureMainThreadCache();
+
             _port = ResolvePort();
             Start();
 
@@ -1036,6 +1043,24 @@ namespace UnityOpenMcpBridge
                     && ToolLifecycle.RequiresSettleWait(lifecycle))
                 {
                     result.SettleMs = EditorSettleWait.Wait(lifecycle);
+
+                    // recompile_scripts — Execute() runs on the main thread and
+                    // cannot observe the compile it requests (the request only
+                    // schedules work for a future editor tick, which cannot run
+                    // while the tool still holds the thread), so its payload
+                    // always reads recompiled:false. Now that the main thread
+                    // is free, rebuild the payload on THIS worker thread from
+                    // the post-settle DLL mtimes (same worker-side window that
+                    // surfaces compilePending below).
+                    if (toolName == "unity_open_mcp_recompile_scripts"
+                        && result.Mutation.Success)
+                    {
+                        var rebuilt = RecompileScriptsTool.RebuildAfterSettle(
+                            result.Mutation.Output, out var extraSettleMs);
+                        result.SettleMs += extraSettleMs;
+                        if (!ReferenceEquals(rebuilt, result.Mutation.Output))
+                            result.Mutation = ToolDispatchResult.Ok(rebuilt);
+                    }
 
                     // feedback-fable-04-08 §9 — after the settle wait, if the
                     // editor is STILL compiling, the gate's delta reflects the

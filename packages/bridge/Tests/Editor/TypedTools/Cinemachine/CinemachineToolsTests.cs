@@ -244,8 +244,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.CinemachineExt
                 Assert.IsTrue(create.Success, create.ErrorMessage ?? create.Output);
                 StringAssert.Contains("\"status\":\"ok\"", create.Output);
 
-                var id = ExtractInt(create.Output, "instanceId");
-                Assert.AreNotEqual(0, id);
+                var id = ExtractId(create.Output, "instanceId");
+                Assert.AreNotEqual(0L, id);
                 camera = InstanceId.ToObject(id) as GameObject;
                 Assert.IsNotNull(camera);
 
@@ -264,7 +264,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.CinemachineExt
                     "{}");
                 Assert.IsNotNull(list);
                 Assert.IsTrue(list.Success, list.ErrorMessage ?? list.Output);
-                StringAssert.Contains("\"instanceId\":" + id, list.Output);
+                StringAssert.Contains("\"instanceId\":\"" + id + "\"", list.Output);
             }
             finally
             {
@@ -277,15 +277,19 @@ namespace UnityOpenMcpBridge.Tests.Extensions.CinemachineExt
         // Helpers
         // -----------------------------------------------------------------
 
-        private static int ExtractInt(string json, string key)
+        // instanceId is emitted in the canonical quoted-string wire form
+        // (InstanceId.ToJson) and can exceed int range on Unity 6000.5+
+        // (8-byte EntityIds) — parse it as a long, tolerating the quotes.
+        private static long ExtractId(string json, string key)
         {
             var pattern = "\"" + key + "\":";
             var idx = json.IndexOf(pattern, System.StringComparison.Ordinal);
             Assert.GreaterOrEqual(idx, 0, $"Expected key '{key}' in output: {json}");
             var start = idx + pattern.Length;
+            if (start < json.Length && json[start] == '"') start++;
             var end = start;
             while (end < json.Length && (char.IsDigit(json[end]) || json[end] == '-')) end++;
-            return int.Parse(json.Substring(start, end - start));
+            return long.Parse(json.Substring(start, end - start));
         }
     }
 }

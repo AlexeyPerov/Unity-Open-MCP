@@ -46,9 +46,10 @@ namespace UnityOpenMcpBridge.Tests
             // The per-call Timer is created in EnqueueAsync; whether the queue
             // drained (timer retired by its ContinueWith) or is still pending
             // (timer outstanding), Shutdown must leave the count at 0.
+            var tasks = new System.Collections.Generic.List<Task<int>>();
             for (int i = 0; i < 3; i++)
             {
-                MainThreadDispatcher.EnqueueAsync(() => i, 60_000);
+                tasks.Add(MainThreadDispatcher.EnqueueAsync(() => i, 60_000));
             }
 
             MainThreadDispatcher.Shutdown();
@@ -56,6 +57,14 @@ namespace UnityOpenMcpBridge.Tests
             Assert.That(MainThreadDispatcher.OutstandingTimerCount, Is.EqualTo(0),
                 "Shutdown must dispose every outstanding Timer so its native " +
                 "wait handle releases before the AppDomain unloads");
+
+            // Shutdown now FAULTS still-pending dispatches (so unbounded
+            // .Result callers can't hang) — observe those faults so they never
+            // surface as UnobservedTaskExceptions.
+            foreach (var t in tasks)
+            {
+                try { t.Wait(1_000); } catch (System.AggregateException) { }
+            }
         }
 
         [Test]
@@ -65,6 +74,61 @@ namespace UnityOpenMcpBridge.Tests
             MainThreadDispatcher.Shutdown();
             MainThreadDispatcher.Shutdown();
             Assert.That(MainThreadDispatcher.OutstandingTimerCount, Is.EqualTo(0));
+        }
+
+        // Shutdown must COMPLETE (fault) the awaiter of a still-queued
+        // dispatch, not just dispose its Timer: Timer.Dispose CANCELS the
+        // pending timeout callback, so before the fix the TCS never resolved
+        // and any unbounded .Result caller hung across the reload.
+        [Test]
+        public static void Shutdown_FailsPendingAwaitersInsteadOfStrandingThem()
+        {
+            // The queue is drained by EditorApplication.update, which cannot
+            // tick while this test body holds the main thread — the dispatch
+            // is deterministically still queued when Shutdown runs.
+            var task = MainThreadDispatcher.EnqueueAsync(() => 1, 60_000);
+
+            MainThreadDispatcher.Shutdown();
+
+            try
+            {
+                bool completed = task.Wait(5_000);
+                Assert.Fail(completed
+                    ? "Task must fault (the action never ran), not complete successfully."
+                    : "Task never completed — Shutdown stranded the awaiter.");
+            }
+            catch (System.AggregateException ae)
+            {
+                Assert.IsInstanceOf<System.OperationCanceledException>(ae.InnerException,
+                    "Shutdown must fail the pending dispatch with OperationCanceledException.");
+            }
+        }
+
+        // A dispatch that completes on its own must retire its pending entry —
+        // the old ConcurrentBag only ever grew, leaking one dead Timer +
+        // closure per dispatch until the next domain reload.
+        [Test]
+        public static void CompletedDispatch_RetiresItsOutstandingEntry()
+        {
+            // Short timeout: the Timer faults the task (the queue is not
+            // drained while this test holds the main thread), and the task's
+            // ContinueWith must then remove the entry.
+            var task = MainThreadDispatcher.EnqueueAsync(() => 42, 100);
+            Assert.That(MainThreadDispatcher.OutstandingTimerCount, Is.EqualTo(1));
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (MainThreadDispatcher.OutstandingTimerCount > 0 && sw.ElapsedMilliseconds < 5_000)
+            {
+                Thread.Sleep(20);
+            }
+
+            Assert.That(MainThreadDispatcher.OutstandingTimerCount, Is.EqualTo(0),
+                "a completed dispatch must retire its Timer entry instead of " +
+                "accumulating until the next domain reload");
+            // Observe the expected fault so it never surfaces as an
+            // UnobservedTaskException.
+            try { task.Wait(1_000); }
+            catch (System.AggregateException) { }
         }
     }
 }

@@ -59,9 +59,9 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             string position = null,
             string rotation = null,
             int priority = 0,
-            int follow_instance_id = 0,
+            long follow_instance_id = 0,
             string follow_path = null,
-            int look_at_instance_id = 0,
+            long look_at_instance_id = 0,
             string look_at_path = null,
             string[] paths_hint = null)
         {
@@ -130,7 +130,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
 
             var sb = new StringBuilder(160);
             sb.Append("\"camera\":{");
-            sb.Append("\"instanceId\":").Append(CinemachineTargets.EntityId(go)).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
             sb.Append("\"path\":").Append(CinemachineJson.Esc(CinemachineTargets.BuildPath(go))).Append(',');
             sb.Append("\"priority\":").Append(priority);
             sb.Append('}');
@@ -155,12 +155,12 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             "it unchanged. Mutating: runs the gate path; paths_hint is the host " +
             "scene path. Requires Cinemachine 3.x.")]
         public static string SetTargets(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
-            int follow_instance_id = 0,
+            long follow_instance_id = 0,
             string follow_path = null,
-            int look_at_instance_id = 0,
+            long look_at_instance_id = 0,
             string look_at_path = null,
             string[] paths_hint = null)
         {
@@ -236,7 +236,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             "fields keep the current value. Mutating: runs the gate path; " +
             "paths_hint is the host scene path. Requires Cinemachine 3.x.")]
         public static string SetLens(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             float field_of_view = -1f,
@@ -329,7 +329,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             "is removed when its type differs. Mutating: runs the gate path; " +
             "paths_hint is the host scene path. Requires Cinemachine 3.x.")]
         public static string SetBody(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string body_name = null,
@@ -362,7 +362,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             "differs. Mutating: runs the gate path; paths_hint is the host scene " +
             "path. Requires Cinemachine 3.x.")]
         public static string SetNoise(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string noise_name = null,
@@ -375,7 +375,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
 
         // Shared Body/Noise mutator — both follow the same add-or-replace shape.
         private static string SetPipelineComponent(
-            int instanceId, string path, string name,
+            long instanceId, string path, string name,
             string componentName, string pipelineSlot,
             string toolName, string[] paths_hint)
         {
@@ -429,7 +429,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             var sb = new StringBuilder(140);
             sb.Append($"\"{pipelineSlot.ToLower()}\":{{");
             sb.Append("\"component\":").Append(CinemachineJson.Esc(componentType.Name)).Append(',');
-            sb.Append("\"instanceId\":").Append(CinemachineTargets.EntityId(current));
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(current));
             sb.Append('}');
             return CinemachineJson.Ok(sb.ToString());
         }
@@ -454,7 +454,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             "Mutating: runs the gate path; paths_hint is the host scene path. " +
             "Requires Cinemachine 3.x.")]
         public static string BrainEnsure(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string[] paths_hint = null)
@@ -489,7 +489,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
                 var sbAlready = new StringBuilder(120);
                 sbAlready.Append("\"brain\":{");
                 sbAlready.Append("\"alreadyPresent\":true,");
-                sbAlready.Append("\"instanceId\":").Append(CinemachineTargets.EntityId(existing));
+                sbAlready.Append("\"instanceId\":").Append(InstanceId.ToJson(existing));
                 sbAlready.Append('}');
                 return CinemachineJson.Ok(sbAlready.ToString());
             }
@@ -501,7 +501,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             var sb = new StringBuilder(120);
             sb.Append("\"brain\":{");
             sb.Append("\"added\":true,");
-            sb.Append("\"instanceId\":").Append(CinemachineTargets.EntityId(brain));
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(brain));
             sb.Append('}');
             return CinemachineJson.Ok(sb.ToString());
         }
@@ -543,7 +543,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
                 if (!first) sb.Append(',');
                 first = false;
                 sb.Append('{');
-                sb.Append("\"instanceId\":").Append(CinemachineTargets.EntityId(mb)).Append(',');
+                sb.Append("\"instanceId\":").Append(InstanceId.ToJson(mb)).Append(',');
                 sb.Append("\"path\":").Append(CinemachineJson.Esc(CinemachineTargets.BuildPath(mb.gameObject))).Append(',');
                 sb.Append("\"priority\":").Append(GetPriorityValue(mb)).Append(',');
                 sb.Append("\"follow\":").Append(CinemachineJson.Esc(GetTransformPath(GetObjectFieldOrProperty(mb, "Follow") as Transform))).Append(',');
@@ -561,7 +561,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
         // Helpers — reflection over Cinemachine 3.x fields
         // =====================================================================
 
-        private static GameObject ResolveTarget(int instanceId, string path)
+        private static GameObject ResolveTarget(long instanceId, string path)
         {
             if (instanceId != 0)
             {

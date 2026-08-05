@@ -20,7 +20,6 @@
 // reserved for version-split APIs — Cinemachine is exactly that case.
 using System.Text;
 using UnityEngine;
-using UnityEditor;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 using Object = UnityEngine.Object;
@@ -88,43 +87,17 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
     internal static class CinemachineTargets
     {
         // Unity 6.5 made Object.GetInstanceID() / InstanceIDToObject a CS0619
-        // error and widened EntityId to 8 bytes. Prefer EntityId.ToULong /
-        // FromULong on UNITY_6000_5_OR_NEWER; earlier Editors (including
-        // 6000.0–6000.4) still use the int InstanceID APIs. Cast through uint
-        // so a negative instance id sign-extends (e.g. -3072 ↔ 0xFFFFF400).
-        // This reflection-gated assembly must compile across Unity versions,
-        // so route the ID read/write through one version-guarded pair.
-        //
-        // NOTE: the Unity 6 struct type is UnityEngine.EntityId. It is fully
-        // qualified below because this class ALSO declares a method named
-        // EntityId(Object) — an unqualified `EntityId` would bind to the method
-        // (CS0119 "is a method, which is not valid in the given context")
-        // rather than the struct type.
-        public static int EntityId(Object obj)
-        {
-#if UNITY_6000_5_OR_NEWER
-            return (int)UnityEngine.EntityId.ToULong(obj.GetEntityId());
-#else
-            return obj.GetInstanceID();
-#endif
-        }
+        // error and widened EntityId to 8 BYTES — values like
+        // 568105589213726936 no longer fit in int. Route resolution through
+        // the bridge's central InstanceId helper (long-wide, with the
+        // UNITY_6000_5_OR_NEWER dance in one audited place) instead of a local
+        // pair: the old (int)ToULong / FromULong((uint)id) round-trip silently
+        // truncated 8-byte EntityIds on Unity 6000.5+. Emission goes through
+        // InstanceId.ToJson at the call sites (the canonical quoted-string
+        // wire form).
+        public static Object ObjectForId(long id) => InstanceId.ToObject(id);
 
-        public static Object ObjectForId(int id)
-        {
-#if UNITY_6000_5_OR_NEWER
-            return EditorUtility.EntityIdToObject(EntityIdStruct(id));
-#else
-            return EditorUtility.InstanceIDToObject(id);
-#endif
-        }
-
-        // Build an EntityId from the int wire value (negative ids preserved).
-#if UNITY_6000_5_OR_NEWER
-        private static UnityEngine.EntityId EntityIdStruct(int id)
-            => UnityEngine.EntityId.FromULong((uint)id);
-#endif
-
-        public static GameObject Resolve(int instanceId, string path, string name)
+        public static GameObject Resolve(long instanceId, string path, string name)
         {
             if (instanceId != 0)
             {

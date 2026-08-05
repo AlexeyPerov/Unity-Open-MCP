@@ -381,24 +381,53 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         // feedback-fable-31-07 §10 — the optional `fields` name filter returns
-        // only matching entries (case-insensitive leaf match) without paging.
+        // only matching entries (case-insensitive leaf match, tolerating the
+        // serialized "m_" prefix) without paging.
         [Test]
         public void Get_FieldsFilter_ReturnsOnlyMatchingEntries()
         {
             var go = new GameObject("__MCPTest_Comp_Get_FieldsFilter");
             try
             {
-                // Ask for just m_LocalPosition on a Transform.
+                // Ask for just m_LocalPosition on a Transform, addressed
+                // WITHOUT the m_ prefix (the promised agent-facing spelling).
                 var result = ComponentsTools.Get(
                     "{\"instance_id\":" + InstanceId.Of(go) +
                     ",\"type_name\":\"UnityEngine.Transform\"," +
                     "\"fields\":[\"localPosition\"]}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
-                StringAssert.Contains("\"localPosition\"", result.Output);
+                StringAssert.Contains("\"m_LocalPosition\"", result.Output);
                 // Other Transform serialized fields (m_LocalRotation,
                 // m_LocalScale) must be filtered OUT.
-                StringAssert.DoesNotContain("\"localScale\"", result.Output);
-                StringAssert.DoesNotContain("\"localRotation\"", result.Output);
+                StringAssert.DoesNotContain("\"m_LocalScale\"", result.Output);
+                StringAssert.DoesNotContain("\"m_LocalRotation\"", result.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        // The serialized leaf usually carries Unity's "m_" backing-field
+        // prefix while agents address the field by its plain name — both
+        // spellings must match in the same filter, the output must stay valid
+        // JSON, and the call must not throw even though the filter lifts the
+        // collection cap to unbounded.
+        [Test]
+        public void Get_FieldsFilter_MatchesMPrefixedFieldAddressedWithoutPrefix()
+        {
+            var go = new GameObject("__MCPTest_Comp_Get_FieldsFilter_MPrefix");
+            try
+            {
+                var result = ComponentsTools.Get(
+                    "{\"instance_id\":" + InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Transform\"," +
+                    "\"fields\":[\"localRotation\",\"m_LocalScale\"]}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.IsTrue(BridgeJson.IsValidJsonObject(result.Output),
+                    "fields-filtered output must be valid JSON: " + result.Output);
+                // "localRotation" (no prefix) must match the serialized
+                // "m_LocalRotation"; the exact "m_LocalScale" keeps working.
+                StringAssert.Contains("\"m_LocalRotation\"", result.Output);
+                StringAssert.Contains("\"m_LocalScale\"", result.Output);
+                StringAssert.DoesNotContain("\"m_LocalPosition\"", result.Output);
             }
             finally { Object.DestroyImmediate(go); }
         }
@@ -423,7 +452,7 @@ namespace UnityOpenMcpBridge.Tests
                     ",\"type_name\":\"UnityEngine.Transform\"," +
                     "\"max_fields\":1,\"fields\":[\"localScale\"]}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
-                StringAssert.Contains("\"localScale\"", result.Output,
+                StringAssert.Contains("\"m_LocalScale\"", result.Output,
                     "fields filter must bypass the max_fields collection cap");
             }
             finally { Object.DestroyImmediate(go); }

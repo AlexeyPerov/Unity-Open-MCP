@@ -150,10 +150,16 @@ namespace UnityOpenMcpBridge.TypedTools
             // after collection for a filtered set.
             var fieldsFilter = JsonBody.GetStringArray(body, "fields");
             var hasFieldsFilter = fieldsFilter != null && fieldsFilter.Length > 0;
+
+            // Size the list from the PRE-override cap (bounded — capacity is
+            // only a hint): List<T>(capacity) allocates its backing array
+            // eagerly, so the int.MaxValue cap below must never flow into the
+            // constructor (it would throw OutOfMemoryException before a single
+            // field was collected). The override only lifts the collection
+            // COUNT cap checked in TryAddEntry.
+            var entries = new List<ComponentGetEntry>(System.Math.Min(options.MaxFields, 256));
             if (hasFieldsFilter)
                 options.MaxFields = int.MaxValue;
-
-            var entries = new List<ComponentGetEntry>(options.MaxFields);
             int truncatedDuringCollect = 0;
 
             // SerializedObject is IDisposable (holds a native SerializedFile
@@ -192,10 +198,12 @@ namespace UnityOpenMcpBridge.TypedTools
 
             // Apply the `fields` name filter parsed above (feedback-fable-31-07
             // §10): keep only entries whose leaf path/name matches one of the
-            // requested names (exact, case-insensitive on the last path
-            // segment, so "CastleNotif" matches "m_CastleNotif" and
-            // "Items[0].CastleNotif"). The cap was raised before collection so
-            // a requested field past the default max_fields is present here.
+            // requested names (case-insensitive on the last path segment; a
+            // Unity "m_" backing-field prefix on the serialized leaf is also
+            // stripped for the comparison, so "CastleNotif" matches
+            // "m_CastleNotif" and "Items[0].CastleNotif"). The cap was raised
+            // before collection so a requested field past the default
+            // max_fields is present here.
             if (hasFieldsFilter)
             {
                 var wanted = new System.Collections.Generic.HashSet<string>(
@@ -207,7 +215,10 @@ namespace UnityOpenMcpBridge.TypedTools
                     var leaf = e.Path;
                     var dot = leaf.LastIndexOf('.');
                     if (dot >= 0 && dot + 1 < leaf.Length) leaf = leaf.Substring(dot + 1);
-                    if (wanted.Contains(leaf.ToLowerInvariant()))
+                    var leafLower = leaf.ToLowerInvariant();
+                    if (wanted.Contains(leafLower)
+                        || (leafLower.StartsWith("m_", System.StringComparison.Ordinal)
+                            && wanted.Contains(leafLower.Substring(2))))
                         filtered.Add(e);
                 }
                 entries = filtered;
