@@ -160,7 +160,17 @@ namespace UnityOpenMcpVerify.Fixes
                 };
             }
 
-            bool sceneOpen = IsSceneOpen(assetPath);
+            // Resolve the open Scene ONCE with the same case-insensitive scan
+            // for every leg. SceneManager.GetSceneByPath is an EXACT-match
+            // lookup, so a case-mismatched assetPath (macOS/Windows default to
+            // case-insensitive filesystems) previously passed the open-scene
+            // detection yet skipped the dirty-scene refusal AND made
+            // ReloadOpenScene early-return — Apply reported Success while the
+            // stale in-memory scene reverted the on-disk relink on the next
+            // save. The single handle below feeds both the dirty check and
+            // the reload, so all three legs agree on the same scene identity.
+            var openScene = FindOpenScene(assetPath);
+            bool sceneOpen = openScene.IsValid();
             if (sceneOpen)
             {
                 // A-R3 — refuse when the open scene has UNSAVED changes. The
@@ -170,8 +180,7 @@ namespace UnityOpenMcpVerify.Fixes
                 // proceeding would silently destroy the user's edits. This
                 // restores the safe pre-B-N21 refusal for the dirty case only;
                 // a clean open scene still takes the edit-and-reload path.
-                var openScene = SceneManager.GetSceneByPath(assetPath);
-                if (openScene.IsValid() && openScene.isDirty)
+                if (openScene.isDirty)
                 {
                     return new FixResult
                     {
@@ -193,7 +202,7 @@ namespace UnityOpenMcpVerify.Fixes
             // surfaced as a FAILED fix result: the disk rewrite landed, but
             // the stale in-memory copy would revert it on the next save —
             // reporting Success here would hide exactly that hazard.
-            var reloadError = ReloadOpenScene(assetPath);
+            var reloadError = ReloadOpenScene(openScene);
             if (reloadError != null)
             {
                 return new FixResult
@@ -208,22 +217,28 @@ namespace UnityOpenMcpVerify.Fixes
             return rewrite;
         }
 
-        // B-N21 — true when the referencing scene at assetPath is loaded
-        // (active or additively). Compared OrdinalIgnoreCase so a path that
-        // differs only in case (macOS/Windows default to case-insensitive
-        // filesystems) is still recognized as open.
-        private static bool IsSceneOpen(string assetPath)
+        // B-N21 — the loaded scene (active or additive) whose path matches
+        // assetPath, compared OrdinalIgnoreCase so a path that differs only in
+        // case (macOS/Windows default to case-insensitive filesystems) is
+        // still recognized as open. Returns default(Scene) (IsValid() ==
+        // false) when no loaded scene matches. Apply resolves this ONCE and
+        // threads the handle through the dirty check and ReloadOpenScene: the
+        // exact-match GetSceneByPath lookups those legs used previously
+        // disagreed with this scan on case-mismatched paths, silently skipping
+        // both the dirty-scene refusal and the reload.
+        private static Scene FindOpenScene(string assetPath)
         {
-            if (Path.GetExtension(assetPath ?? "").ToLowerInvariant() != ".unity") return false;
+            if (Path.GetExtension(assetPath ?? "").ToLowerInvariant() != ".unity") return default(Scene);
             for (var i = 0; i < SceneManager.sceneCount; i++)
             {
-                if (string.Equals(SceneManager.GetSceneAt(i).path, assetPath,
+                var candidate = SceneManager.GetSceneAt(i);
+                if (string.Equals(candidate.path, assetPath,
                     System.StringComparison.OrdinalIgnoreCase))
                 {
-                    return true;
+                    return candidate;
                 }
             }
-            return false;
+            return default(Scene);
         }
 
         // B-N21 / A-R3 — reload an already-loaded scene from disk so an
@@ -255,13 +270,22 @@ namespace UnityOpenMcpVerify.Fixes
         // the stale in-memory copy can still revert the on-disk relink on the
         // next save, which is exactly the hazard B-N21 set out to close — so
         // it must never hide behind a success result.
-        private static string ReloadOpenScene(string assetPath)
+        // The Scene handle comes from Apply's FindOpenScene scan (case-
+        // insensitive), NOT from a fresh exact-match GetSceneByPath lookup —
+        // a case-mismatched assetPath previously made this method early-return
+        // "nothing to reload" while Apply reported Success, leaving the stale
+        // in-memory copy to revert the on-disk relink on the next save.
+        private static string ReloadOpenScene(Scene scene)
         {
             try
             {
-                var scene = SceneManager.GetSceneByPath(assetPath);
                 if (!scene.IsValid() || !scene.isLoaded)
                     return null; // not actually loaded — nothing to reload
+
+                // Reopen via the scene's OWN recorded path — the canonical
+                // casing Unity tracks — so the reload targets exactly the
+                // scene that was matched case-insensitively.
+                var scenePath = scene.path;
 
                 bool wasActive = SceneManager.GetActiveScene() == scene;
 
@@ -296,15 +320,15 @@ namespace UnityOpenMcpVerify.Fixes
                     // real failure being reported.
                     if (createdPlaceholder && placeholder.IsValid())
                         EditorSceneManager.CloseScene(placeholder, true);
-                    return $"EditorSceneManager.CloseScene refused to close '{assetPath}'.";
+                    return $"EditorSceneManager.CloseScene refused to close '{scenePath}'.";
                 }
 
-                var reopened = EditorSceneManager.OpenScene(assetPath, OpenSceneMode.Additive);
+                var reopened = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
                 if (!reopened.IsValid() || !reopened.isLoaded)
                 {
                     // Keep the placeholder in this branch: with the target
                     // closed it may now be the only loaded scene.
-                    return $"EditorSceneManager.OpenScene did not reload '{assetPath}'.";
+                    return $"EditorSceneManager.OpenScene did not reload '{scenePath}'.";
                 }
 
                 if (createdPlaceholder && placeholder.IsValid())
@@ -322,7 +346,7 @@ namespace UnityOpenMcpVerify.Fixes
                     // placeholder above (rather than early-returning before it,
                     // as a prior version did) avoids leaving a stray empty
                     // Untitled scene lingering in the hierarchy on this path.
-                    return $"reloaded '{assetPath}' but could not restore it as the active scene.";
+                    return $"reloaded '{scenePath}' but could not restore it as the active scene.";
                 }
 
                 return null;
@@ -336,7 +360,7 @@ namespace UnityOpenMcpVerify.Fixes
         // V5 / B-N21: detect a prefab the Editor currently has open in a
         // Prefab Stage. Returns a non-null message describing why we refused,
         // or null if it is safe to edit the file on disk. (Open SCENES are no
-        // longer refused — see IsSceneOpen / ReloadOpenScene for the
+        // longer refused — see FindOpenScene / ReloadOpenScene for the
         // edit-and-reload path that handles them.)
         //
         // A16 / A-R2 — two layers:
@@ -616,15 +640,17 @@ namespace UnityOpenMcpVerify.Fixes
             //      (the common inline reference in .prefab/.unity/.mat YAML).
             //   2. A non-triple occurrence the triple regex does not cover:
             //      a negative/omitted local id, a `guid:` key on its own line
-            //      (a .meta Guid field, an Addressables-style `m_AssetGUID:`),
-            //      or any other shape the scanner's ExternalFileAndGuid flags.
+            //      (a .meta Guid field), an Addressables-style `m_AssetGUID:`
+            //      line (matched by its own pattern below — the `guid:` key
+            //      pattern is case-sensitive and cannot see `GUID:`), or any
+            //      other shape the scanner's ExternalFileAndGuid flags.
             // The previous code, when at least one TRIPLE matched, replaced only
             // triples and never fell back, so the non-triple occurrences were
             // left dangling while Success=true was reported — the next scan re-
             // flagged the same asset and a scan→apply_fix agent looped. The
-            // rewrite now ALWAYS runs the bare-guid pass over the triple-rewritten
-            // text (or the original when no triple matched / fileID was
-            // unresolvable), so every `guid: <brokenGuid>` occurrence is updated.
+            // rewrite now ALWAYS runs the bare-guid passes over the triple-
+            // rewritten text (or the original when no triple matched / fileID
+            // was unresolvable), so every occurrence is updated.
             var triplePattern = new Regex(
                 @"\{fileID:\s*(\d+),\s*guid:\s*" + Regex.Escape(brokenGuid) + @"\s*,\s*type:\s*(\d+)\s*\}",
                 RegexOptions.Compiled);
@@ -635,6 +661,18 @@ namespace UnityOpenMcpVerify.Fixes
             // non-triple occurrences after a triple rewrite.
             var guidPattern = new Regex(
                 @"(?<![\w])guid:\s*" + Regex.Escape(brokenGuid) + @"\b",
+                RegexOptions.Compiled);
+            // Addressables-style `m_AssetGUID: <guid>` lines carry the GUID on
+            // the m_AssetGUID key with no lowercase `guid:` token at all, so
+            // the case-sensitive guidPattern above can never match them (its
+            // literal is `guid:`; this key ends in `GUID:`). Without this
+            // pattern a dependencies/broken_dependency issue whose only
+            // occurrence is an m_AssetGUID line rewrote nothing and returned
+            // the misleading "may have already been resolved" no-op, looping a
+            // scan→apply_fix agent. Mirrors SharedRegex.AssetReferenceGuid's
+            // key shape.
+            var assetGuidPattern = new Regex(
+                @"m_AssetGUID:\s*" + Regex.Escape(brokenGuid) + @"\b",
                 RegexOptions.Compiled);
 
             int tripleReplaced = 0;
@@ -663,14 +701,17 @@ namespace UnityOpenMcpVerify.Fixes
                 }
             }
 
-            // B-N12 — always run the bare-guid pass on the (possibly triple-
+            // B-N12 — always run the bare-guid passes on the (possibly triple-
             // rewritten) text. A triple already rewrote its inline `guid:`
             // token to the target, so guidPattern naturally re-matches zero of
             // those; it ONLY catches the residual non-triple occurrences the
-            // triple pass left in place. Counting is done AFTER the triple
-            // rewrite so already-rewritten triples are not double-counted.
+            // triple pass left in place (m_AssetGUID lines are never triples).
+            // Counting is done AFTER the triple rewrite so already-rewritten
+            // triples are not double-counted.
             int guidReplaced = guidPattern.Matches(working).Count;
-            int replaced = tripleReplaced + guidReplaced;
+            int assetGuidReplaced = assetGuidPattern.Matches(working).Count;
+            int bareReplaced = guidReplaced + assetGuidReplaced;
+            int replaced = tripleReplaced + bareReplaced;
             if (replaced == 0)
             {
                 return new FixResult
@@ -681,9 +722,11 @@ namespace UnityOpenMcpVerify.Fixes
                 };
             }
 
-            string newContents = guidReplaced > 0
-                ? guidPattern.Replace(working, $"guid: {targetGuid}")
-                : working;
+            string newContents = working;
+            if (guidReplaced > 0)
+                newContents = guidPattern.Replace(newContents, $"guid: {targetGuid}");
+            if (assetGuidReplaced > 0)
+                newContents = assetGuidPattern.Replace(newContents, $"m_AssetGUID: {targetGuid}");
 
             try
             {
@@ -715,8 +758,8 @@ namespace UnityOpenMcpVerify.Fixes
             var countNote = replaced == 1
                 ? " (1 occurrence"
                 : $" ({replaced} occurrences";
-            countNote += tripleReplaced > 0 && guidReplaced > 0
-                ? $": {tripleReplaced} triple + {guidReplaced} bare-guid)"
+            countNote += tripleReplaced > 0 && bareReplaced > 0
+                ? $": {tripleReplaced} triple + {bareReplaced} bare-guid)"
                 : (tripleReplaced > 0 ? " triple)" : " bare-guid)");
 
             return new FixResult

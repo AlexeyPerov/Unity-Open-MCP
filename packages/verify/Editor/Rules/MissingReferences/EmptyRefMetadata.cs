@@ -82,24 +82,31 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             RegexOptions.Compiled);
 
         // Reuse SharedRegex.ScriptGuid for the script GUID (m_Script: {fileID: N, guid: <32hex>}).
-        private const int MetadataScanLines = 12;
 
         /// <summary>
         /// Build the anchor → metadata map for one asset's YAML. Walks the lines
         /// once, opening a new metadata entry on each `--- !u!<classId> &<anchor>`
         /// header and capturing the first occurrence of m_Name / m_GameObject /
-        /// m_Father / m_Script within the first few lines of each object (they
-        /// are always near the top of a Unity-serialized object). Returns a map
-        /// keyed by anchor fileID; entries with no useful fields are still
-        /// included (cheap, and a component with no m_GameObject ref is itself a
-        /// signal).</summary>
+        /// m_Father / m_Script anywhere before the next document header. An
+        /// earlier version capped the per-object scan at a fixed 12-line budget,
+        /// which missed m_Father (it comes AFTER m_Children — the 13th line even
+        /// with zero children on 2022.3-era transforms) and m_Name on GameObjects
+        /// with four or more components, silently truncating the transform paths
+        /// this map exists to resolve. The walk is single-pass either way; each
+        /// object stops early once every field its class can carry has been seen.
+        /// Returns a map keyed by anchor fileID; entries with no useful fields
+        /// are still included (cheap, and a component with no m_GameObject ref
+        /// is itself a signal).</summary>
         public static Dictionary<long, AnchorMetadata> Build(string[] lines, HashSet<long> declaredFileIDs)
         {
             var map = new Dictionary<long, AnchorMetadata>();
             if (lines == null) return map;
 
             AnchorMetadata current = null;
-            int scanBudget = 0;
+            // m_Father: {fileID: 0} is a legitimate value (a root transform),
+            // indistinguishable from "not captured" via FatherId alone — track
+            // "seen" separately so the completion check below can stop scanning.
+            bool fatherSeen = false;
 
             for (var i = 0; i < lines.Length; i++)
             {
@@ -113,17 +120,15 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                         int.TryParse(hm.Groups[1].Value, out var classId);
                         current = new AnchorMetadata { Anchor = anchor, ClassId = classId };
                         map[anchor] = current;
-                        scanBudget = MetadataScanLines;
+                        fatherSeen = false;
                         continue;
                     }
                     current = null;
                     continue;
                 }
 
-                if (current == null || scanBudget <= 0) continue;
-                // A blank line or a dedent to column 0 ends the object's
-                // interesting header region; stop scanning to save work.
-                if (line.Length == 0) { scanBudget--; continue; }
+                if (current == null) continue;
+                if (line.Length == 0) continue;
 
                 if (current.Name == null && current.ClassId == ClassIdGameObject)
                 {
@@ -143,13 +148,14 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                     }
                 }
 
-                if (current.FatherId == 0
+                if (!fatherSeen
                     && (current.ClassId == ClassIdTransform || current.ClassId == ClassIdRectTransform))
                 {
                     var fm = FatherRef.Match(line);
                     if (fm.Success && long.TryParse(fm.Groups[1].Value, out var fatherId))
                     {
                         current.FatherId = fatherId;
+                        fatherSeen = true;
                     }
                 }
 
@@ -162,10 +168,33 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                     }
                 }
 
-                scanBudget--;
+                // Stop scanning this object once every field its class can
+                // carry has been captured — the remaining body lines (large
+                // arrays, curves, m_LocalRotation noise) cannot add anything.
+                if (IsComplete(current, fatherSeen))
+                    current = null;
             }
 
             return map;
+        }
+
+        // True when every metadata field the object's class can carry has been
+        // captured, so the per-object scan can stop early. Classes outside the
+        // four we model only ever contribute an m_GameObject back-reference.
+        private static bool IsComplete(AnchorMetadata meta, bool fatherSeen)
+        {
+            switch (meta.ClassId)
+            {
+                case ClassIdGameObject:
+                    return meta.Name != null;
+                case ClassIdTransform:
+                case ClassIdRectTransform:
+                    return meta.GameObjectId != 0 && fatherSeen;
+                case ClassIdMonoBehaviour:
+                    return meta.GameObjectId != 0 && meta.ScriptGuid != null;
+                default:
+                    return meta.GameObjectId != 0;
+            }
         }
 
         /// <summary>

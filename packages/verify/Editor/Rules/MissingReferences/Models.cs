@@ -27,6 +27,19 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
         public string GuidAssetPath { get; set; }
         public bool FileIDExistsInTargetAsset { get; set; }
         public string HolderName { get; set; }
+
+        // feedback-fable-31-07 §6 — suppress the fileID legs of this reference
+        // while keeping the GUID leg live. Set for (a) external refs to the
+        // conventional prefab-root fileID 100100000 (rarely surfaced by
+        // LoadAllAssetsAtPath but always resolvable in the editor) and (b)
+        // refs inside a PrefabInstance m_Modification / m_SourcePrefab block
+        // (they target the source prefab's stripped/internal ids, valid by
+        // construction). ResolveReferences forces both fileID resolutions to
+        // "exists" for these refs so no missing_fileid* classification fires —
+        // but the GUID must still resolve: a deleted source prefab is a real
+        // missing_guid Error, which the original whole-reference skip dropped.
+        public bool SuppressFileIDChecks { get; set; }
+
         public int WarningLevel { get; private set; }
 
         public void UpdateWarningLevel()

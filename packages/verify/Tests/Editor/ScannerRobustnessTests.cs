@@ -462,6 +462,64 @@ namespace UnityOpenMcpVerify.Tests
                 $"Got: {string.Join(", ", missingFile.Select(i => i.IssueCode))}");
         }
 
+        // feedback-fable-31-07 §6 follow-up — the whitelists above must
+        // suppress only the FILEID classification, never the GUID leg. The
+        // first implementation `continue`d BEFORE GUID resolution, so a
+        // `{fileID: 100100000, guid: <g>, type: 3}` root ref and every ref
+        // inside an m_Modification / m_SourcePrefab block were dropped from
+        // the scan entirely: a DELETED source prefab produced ZERO
+        // missing_guid issues where v0.7.0 reported an Error. Pin that a
+        // dangling source-prefab GUID still surfaces as missing_guid while
+        // the fileID legs stay whitelisted (zero missing_fileid).
+        [UnityTest]
+        public System.Collections.IEnumerator MissingReferences_DanglingSourcePrefabGuid_StillReported()
+        {
+            var rule = new MissingReferencesRule();
+            var prefabPath = FixtureRoot + "/PrefabModBlockDangling.prefab";
+
+            // Same construct shape as the test above, but the source GUID does
+            // NOT resolve (as if the source prefab was deleted).
+            var danglingGuid = "deadbeefdeadbeefdeadbeefdeadbeef";
+            Assume.That(string.IsNullOrEmpty(AssetDatabase.GUIDToAssetPath(danglingGuid)), Is.True,
+                "the synthetic GUID must not resolve in this project");
+
+            var yaml = "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n" +
+                "--- !u!1 &100100000 GameObject\n" +
+                "  m_ObjectHideFlags: 0\n" +
+                "  m_Name: PrefabModBlockDangling\n" +
+                "--- !u!4 &2000000000 Transform\n" +
+                "  m_GameObject: {fileID: 100100000}\n" +
+                "  m_LocalPosition: {x: 0, y: 0, z: 0}\n" +
+                "  m_Father: {fileID: 0}\n" +
+                "--- !u!1001 &3000000000 PrefabInstance\n" +
+                "  m_Modification:\n" +
+                "    m_TransformParent: {fileID: 0}\n" +
+                "    m_Modifications:\n" +
+                "    - target: {fileID: 5550000, guid: " + danglingGuid + ", type: 3}\n" +
+                "      propertyPath: m_Name\n" +
+                "      value: Nested\n" +
+                "  m_SourcePrefab: {fileID: 100100000, guid: " + danglingGuid + ", type: 3}\n";
+            EnsureDirectory(Path.GetDirectoryName(prefabPath));
+            File.WriteAllText(prefabPath, yaml);
+            AssetDatabase.ImportAsset(prefabPath, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { prefabPath });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var missingGuid = sink.Where(i => i.IssueCode.StartsWith("missing_guid")).ToList();
+            Assert.Greater(missingGuid.Count, 0,
+                "a dangling source-prefab GUID must be reported as missing_guid even though its " +
+                "fileID legs (prefab root 100100000 / modification-block refs) are whitelisted. " +
+                $"Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+
+            var missingFile = sink.Where(i => i.IssueCode.StartsWith("missing_fileid")).ToList();
+            Assert.AreEqual(0, missingFile.Count,
+                "the fileID legs must stay suppressed — only the GUID leg surfaces. " +
+                $"Got: {string.Join(", ", missingFile.Select(i => i.IssueCode))}");
+        }
+
         // feedback-01-08-glm §10 — a .unity scene DECLARES every serialized
         // object via a `--- !u!T &NNN` header, but AssetDatabase.LoadAllAssetsAt
         // Path only surfaces the scene root + a tiny subset, NOT every header.

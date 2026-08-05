@@ -785,6 +785,59 @@ namespace UnityOpenMcpVerify.Tests
             }
         }
 
+        // B-N12 follow-up — an Addressables-style `m_AssetGUID: <guid>` line
+        // carries the GUID with NO lowercase `guid:` key at all, so the
+        // case-sensitive bare-guid pattern could never match it: a
+        // broken_dependency issue whose only occurrence was an m_AssetGUID
+        // line rewrote nothing and Apply returned the misleading "may have
+        // already been resolved" no-op — looping a scan→apply_fix agent. The
+        // rewrite now runs a dedicated m_AssetGUID pass (mirroring
+        // SharedRegex.AssetReferenceGuid).
+        [Test]
+        public void RewriteGuid_AddressablesAssetGuidLine_Rewritten()
+        {
+            var tempDir = System.IO.Path.GetTempPath();
+            var fixturePath = tempDir + "unity_open_mcp_relink_asset_guid.asset";
+            var brokenGuid = "56565656565656565656565656565656";
+            var targetGuid = "78787878787878787878787878787878";
+
+            try
+            {
+                // An AssetReference-holding ScriptableObject shape: the ONLY
+                // occurrence of the broken GUID is the m_AssetGUID line.
+                var yaml = "%YAML 1.1\n"
+                    + "%TAG !u! tag:unity3d.com,2011:\n"
+                    + "--- !u!114 &11400000\n"
+                    + "MonoBehaviour:\n"
+                    + "  m_Name: AddressableHolder\n"
+                    + "  reference:\n"
+                    + "    m_AssetGUID: " + brokenGuid + "\n"
+                    + "    m_SubObjectName: \n";
+
+                System.IO.File.WriteAllText(fixturePath, yaml);
+
+                var issueId = IssueKey.Build(
+                    "dependencies", VerifySeverity.Error,
+                    fixturePath, "broken_dependency:" + brokenGuid);
+
+                var result = fix.Apply(issueId, targetGuid);
+
+                Assert.IsTrue(result.Success,
+                    $"Apply must rewrite the m_AssetGUID occurrence, not no-op. Got: {result.Description}");
+
+                var rewritten = System.IO.File.ReadAllText(fixturePath);
+                Assert.IsTrue(rewritten.Contains($"m_AssetGUID: {targetGuid}"),
+                    "the m_AssetGUID line must be rewritten to the target GUID. Rewritten: " + rewritten);
+                Assert.IsFalse(rewritten.Contains(brokenGuid),
+                    "the broken GUID must be entirely gone after Apply. Rewritten: " + rewritten);
+            }
+            finally
+            {
+                if (System.IO.File.Exists(fixturePath))
+                    System.IO.File.Delete(fixturePath);
+            }
+        }
+
         // -------------------------------------------------------------------
         // T2.3 — Bare issueCode (no GUID suffix) still works (backward compat)
         // -------------------------------------------------------------------

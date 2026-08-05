@@ -21,6 +21,14 @@ namespace UnityOpenMcpVerify.Batch
         public static void Run()
         {
             var args = Environment.GetCommandLineArgs();
+            // Resolve the operation BEFORE the try so a crash still reports
+            // WHICH operation was running. The previous envelope passed the
+            // error code into the `operation` field ("unhandled_exception"),
+            // so consumers lost the real operation name exactly when they
+            // needed it to route the failure.
+            var toolArgs = ExtractToolArgs(args);
+            var operation = toolArgs.Length > 0 ? toolArgs[0] : "unknown";
+
             int exitCode;
             string json;
 
@@ -34,7 +42,9 @@ namespace UnityOpenMcpVerify.Batch
             {
                 Debug.LogError($"[VerifyBatchEntry] Unhandled exception: {e}");
                 exitCode = ExitFail;
-                json = ErrorJson("unhandled_exception", e.Message);
+                // Same envelope shape as Fail(operation, message): the real
+                // operation in `operation`, the error code + detail in `error`.
+                json = ErrorJson(operation, $"unhandled_exception: {e.Message}");
             }
 
             Console.WriteLine(OutputBegin);

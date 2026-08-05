@@ -211,22 +211,34 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                         // inside prefabs. It is rarely returned by
                         // LoadAllAssetsAtPath, so an external ref to it read as
                         // missing_fileid:<guid>:100100000 on every nested
-                        // prefab instance. It always resolves in the editor;
-                        // whitelist it as existing in the target asset.
-                        if (guidValid && localIdValid && localFileID == PrefabFileIds.RootGameObject)
-                            continue;
-
-                        // feedback-fable-31-07 §6 (b) — skip external refs that
-                        // live inside a PrefabInstance m_Modification /
+                        // prefab instance. It always resolves in the editor
+                        // WHEN the target prefab exists, so only the fileID
+                        // legs are whitelisted (ResolveReferences forces them
+                        // to "exists").
+                        //
+                        // feedback-fable-31-07 §6 (b) — same for external refs
+                        // inside a PrefabInstance m_Modification /
                         // m_SourcePrefab block. These target:/value:/source:
                         // refs point at the source prefab's stripped objects;
-                        // they are valid by construction (Unity resolves them at
-                        // load) but their fileIDs are not main-asset ids. Emitting
-                        // them only ever produced false positives.
-                        if (isPrefabModRef)
-                            continue;
+                        // their fileIDs are valid by construction (Unity
+                        // resolves them at load) and are not main-asset ids,
+                        // so emitting fileID issues for them only ever produced
+                        // false positives.
+                        //
+                        // Both whitelists suppress ONLY the fileID legs. The
+                        // reference itself stays in the scan so the GUID leg is
+                        // still validated below — the original whole-reference
+                        // `continue` dropped `{fileID: 100100000, guid: <g>}`
+                        // and modification-block refs entirely, so a DELETED
+                        // source prefab produced zero missing_guid issues where
+                        // v0.7.0 reported an Error.
+                        var suppressFileIdChecks = isPrefabModRef
+                            || (guidValid && localIdValid && localFileID == PrefabFileIds.RootGameObject);
 
-                        var referenceData = new ExternalReferenceRegistry(localIdValid, guidValid, localFileID, externalGuid, i);
+                        var referenceData = new ExternalReferenceRegistry(localIdValid, guidValid, localFileID, externalGuid, i)
+                        {
+                            SuppressFileIDChecks = suppressFileIdChecks
+                        };
 
                         if (guidValid)
                         {
@@ -420,6 +432,18 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
                 foreach (var registry in asset.RefsData.ExternalReferences)
                 {
+                    // feedback-fable-31-07 §6 — whitelisted fileID legs
+                    // (prefab-root 100100000 / modification-block refs): force
+                    // both fileID resolutions to "exists" so no missing_fileid*
+                    // classification fires. The GUID leg was already resolved
+                    // during parse and still drives missing_guid.
+                    if (registry.SuppressFileIDChecks)
+                    {
+                        registry.FileIDExistsInAssets = true;
+                        registry.FileIDExistsInTargetAsset = true;
+                        continue;
+                    }
+
                     if (registry.FileIDValid)
                     {
                         registry.FileIDExistsInAssets = scopedFileIDs.Contains(registry.FileID) ||
