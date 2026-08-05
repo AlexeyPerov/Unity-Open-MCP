@@ -89,6 +89,19 @@ if (HELP) {
   process.exit(0);
 }
 
+// Reject unknown "--" flags instead of silently dropping them (mirrors
+// switch-project-version.mjs). Anything unrecognized used to fall through the
+// exact includes() checks above AND the positional filter below, so a typo
+// like `--trio-onl --yes` released BOTH the trio and the Hub — pushing the
+// irreversible hub tag with confirmation suppressed.
+const KNOWN_FLAGS = new Set(["--dry-run", "--yes", "--trio-only", "--hub-only", "--help"]);
+const unknownFlags = argv.filter((a) => a.startsWith("--") && !KNOWN_FLAGS.has(a));
+if (unknownFlags.length > 0) {
+  console.error(`Unknown option(s): ${unknownFlags.join(", ")}`);
+  usage();
+  process.exit(1);
+}
+
 if (TRIO_ONLY && HUB_ONLY) {
   console.error("--trio-only and --hub-only are mutually exclusive.");
   process.exit(2);
