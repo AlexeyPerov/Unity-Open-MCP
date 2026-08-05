@@ -167,35 +167,41 @@ pub struct SizesDone {
 /// Stream per-root sizes to the frontend as each root completes, sizing
 /// roots in parallel across the blocking thread pool. Returns
 /// immediately; results arrive via `sizes://progress` and the run closes
-/// with `sizes://done`.
+/// with `sizes://done`. Returns `Err` only when the sizing thread could
+/// not be spawned — in that case no events will ever fire, so the
+/// rejected invoke is the frontend's signal to stop waiting.
 ///
 /// Unlike `get_project_sizes` (batch, single return), this never blocks
 /// boot: the frontend kicks it off fire-and-forget and updates a keyed
 /// reactive map per event, so each project row flips to its size the
 /// moment its root is counted rather than waiting on the slowest root.
 #[tauri::command]
-pub fn stream_project_sizes(app: AppHandle, paths: Vec<String>) {
+pub fn stream_project_sizes(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
     let count = paths.len();
     let app_handle = app.clone();
     std::thread::Builder::new()
         .name("hub-sizes".to_string())
         .spawn(move || {
             let started = Instant::now();
-            // Size roots in parallel. `compute_size` owns no shared
-            // mutable state (its `visited` set is created fresh per
-            // root inside `compute_project_size`), so the threads never
-            // race. `scope` joins every worker before we emit `done`,
-            // guaranteeing no in-flight sizes are dropped.
-            let results = scope_parallel_sizes(&paths);
-            for (path, size) in results {
+            // Size roots in parallel and emit `sizes://progress` from
+            // inside each worker the moment a root finishes, so the
+            // frontend paints sizes incrementally instead of receiving
+            // them in a burst after the slowest root. `compute_size`
+            // owns no shared mutable state (its `visited` set is
+            // created fresh per root inside `compute_project_size`), so
+            // the threads never race; `AppHandle` is `Send + Sync` so
+            // emitting from the scoped workers is safe. `scope` joins
+            // every worker before we emit `done`, guaranteeing no
+            // in-flight progress events land after `sizes://done`.
+            scope_parallel_sizes(&paths, |path, size| {
                 let _ = app_handle.emit(
                     "sizes://progress",
                     &SizesProgress {
-                        path,
+                        path: path.to_string(),
                         size,
                     },
                 );
-            }
+            });
             let elapsed_ms = started.elapsed().as_millis() as u64;
             let _ = app_handle.emit(
                 "sizes://done",
@@ -206,12 +212,15 @@ pub fn stream_project_sizes(app: AppHandle, paths: Vec<String>) {
             );
             log::info!("stream_project_sizes: {} paths in {}ms", count, elapsed_ms);
         })
-        // A spawn failure is non-fatal: the frontend keeps the
-        // `loading` flag up only until `sizes://done` arrives, so on a
-        // rare thread-creation failure it would spin until teardown.
-        // Log and let it be — the next load (e.g. adding a project)
-        // re-attaches.
-        .ok();
+        // A spawn failure means neither `sizes://progress` nor
+        // `sizes://done` will ever fire, so the frontend's `loading`
+        // flag would spin until teardown. Log AND return the error so
+        // the store's `catch` on the invoke fires and clears `loading`.
+        .map_err(|e| {
+            log::warn!("stream_project_sizes: failed to spawn hub-sizes thread: {}", e);
+            format!("failed to spawn sizing thread: {}", e)
+        })?;
+    Ok(())
 }
 
 /// Size a single root (pure helper, reused by the parallel driver and
@@ -228,10 +237,16 @@ fn compute_project_size(path: &str) -> (String, u64) {
 }
 
 /// Size every root in parallel using a scoped thread pool bounded by the
-/// number of CPUs. Returns `(path, size)` pairs in input order so the
-/// `sizes://progress` stream is deterministic (tests rely on order, and
-/// a stable order makes the drawer log readable).
-fn scope_parallel_sizes(paths: &[String]) -> Vec<(String, u64)> {
+/// number of CPUs. `on_size` is invoked from inside the worker thread
+/// right after each root finishes — this is what makes the streamed
+/// command actually incremental (each `sizes://progress` fires the
+/// moment its root is counted, not after the join). Returns `(path,
+/// size)` pairs in input order (tests rely on the deterministic return
+/// order; the callback order is completion order by design).
+fn scope_parallel_sizes<F>(paths: &[String], on_size: F) -> Vec<(String, u64)>
+where
+    F: Fn(&str, u64) + Sync,
+{
     if paths.is_empty() {
         return Vec::new();
     }
@@ -244,13 +259,16 @@ fn scope_parallel_sizes(paths: &[String]) -> Vec<(String, u64)> {
     let worker_count = paths.len().min(max_threads);
     let chunks: Vec<Vec<String>> = chunk_paths(paths, worker_count);
 
+    let on_size = &on_size;
     std::thread::scope(|s| {
         let mut handles = Vec::with_capacity(chunks.len());
         for chunk in chunks {
             let handle = s.spawn(move || {
                 let mut out: Vec<(String, u64)> = Vec::with_capacity(chunk.len());
                 for path in chunk {
-                    out.push(compute_project_size(&path));
+                    let (path, size) = compute_project_size(&path);
+                    on_size(&path, size);
+                    out.push((path, size));
                 }
                 out
             });
@@ -459,7 +477,22 @@ mod tests {
         }
 
         let batch = compute_project_sizes(&paths);
-        let streamed = scope_parallel_sizes(&paths);
+        // Collect callback invocations to prove per-root delivery: the
+        // streamed command relies on `on_size` firing once per root
+        // from inside the workers (that is what `sizes://progress`
+        // hangs off), so every root must be reported exactly once.
+        let seen: std::sync::Mutex<Vec<(String, u64)>> = std::sync::Mutex::new(Vec::new());
+        let streamed = scope_parallel_sizes(&paths, |path, size| {
+            seen.lock().unwrap().push((path.to_string(), size));
+        });
+
+        // The callback saw every root exactly once (completion order is
+        // nondeterministic, so compare as sorted sets).
+        let mut seen = seen.into_inner().unwrap();
+        seen.sort();
+        let mut expected_pairs = streamed.clone();
+        expected_pairs.sort();
+        assert_eq!(seen, expected_pairs);
 
         // Same length and input order.
         assert_eq!(streamed.len(), paths.len());
@@ -476,7 +509,7 @@ mod tests {
 
     #[test]
     fn scope_parallel_sizes_empty() {
-        assert!(scope_parallel_sizes(&[]).is_empty());
+        assert!(scope_parallel_sizes(&[], |_, _| {}).is_empty());
     }
 
     #[test]

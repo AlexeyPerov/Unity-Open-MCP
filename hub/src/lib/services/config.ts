@@ -2062,9 +2062,25 @@ export type LaunchForVerifyError =
       projectPath: string;
     }
   /** H36: post-launch persist of projects.json failed (read-only / full
-   *  config volume). Unity may already be running, but the bookkeeping
-   *  was not recorded to disk. */
-  | { kind: "persistFailed"; projectId: string; message: string };
+   *  config volume). Unity IS already running (the spawn preceded the
+   *  persist), but the bookkeeping was not recorded to disk.
+   *
+   *  B-N16 mirror of `LaunchError.persistFailed`: `pid`, the post-launch
+   *  `project` entry, and the effective `bridgePort` are carried so the
+   *  wizard treats this as SUCCESS-WITH-WARNING — record the pid, surface
+   *  the warning, and continue into the bridge `/ping` poll (retrying the
+   *  launch instead would dead-end on `alreadyRunning`). */
+  | {
+      kind: "persistFailed";
+      projectId: string;
+      message: string;
+      /** PID of the Unity process that DID spawn. */
+      pid?: number;
+      /** Post-launch entry (in-memory bookkeeping applied; disk stale). */
+      project?: ProjectEntry;
+      /** Effective bridge port used for the launch. */
+      bridgePort?: number;
+    };
 
 export interface BridgePingResult {
   port: number;

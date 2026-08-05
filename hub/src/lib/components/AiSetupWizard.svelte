@@ -1421,6 +1421,48 @@
       );
       await pollBridgeUntilReady(result.bridgePort);
     } catch (e) {
+      // B-N16 mirror of the ProjectsTab launch path — a `persistFailed`
+      // carrying a `pid` means Unity DID spawn; only the projects.json
+      // bookkeeping write failed (read-only / full config volume). Treat
+      // it as success-with-warning: record the pid, surface the persist
+      // warning, and continue into the bridge poll. Marking the launch
+      // "failed" here would dead-end the wizard — a retry hits the
+      // backend's `alreadyRunning` guard while Unity is running.
+      const persistWarn =
+        !launched &&
+        e !== null &&
+        typeof e === "object" &&
+        (e as { kind?: unknown }).kind === "persistFailed" &&
+        typeof (e as { pid?: unknown }).pid === "number"
+          ? (e as Extract<LaunchForVerifyError, { kind: "persistFailed" }>)
+          : null;
+      if (persistWarn && persistWarn.pid != null) {
+        launched = true;
+        step5LaunchPid = persistWarn.pid;
+        const warning = describeLaunchForVerifyError(e);
+        step5Error = warning;
+        S.appendErrorLog(`AI Setup: Step 5 persist warning: ${warning}`);
+        const port = persistWarn.bridgePort ?? step5BridgePort;
+        if (port != null) {
+          step5BridgePort = port;
+          step5Items = { ...step5Items, launch: "ok", compile: "running" };
+          S.appendDrawerLog(
+            `AI Setup: launched Unity (pid ${persistWarn.pid}) with bridge port ${port} for ${wizardProjectName} — launch bookkeeping did not persist`,
+          );
+          try {
+            await pollBridgeUntilReady(port);
+          } catch (pollErr) {
+            const msg = pollErr instanceof Error ? pollErr.message : String(pollErr);
+            S.appendErrorLog(`AI Setup: bridge poll failed: ${msg}`);
+            step5Items = { ...step5Items, compile: "failed", ping: "failed" };
+            step5BridgeStatus = { kind: "failed", message: msg };
+          }
+          return;
+        }
+        // No port known (should not happen — the backend carries the
+        // effective port on this variant): fall through to the
+        // launched-but-unverified marking below.
+      }
       const message = describeLaunchForVerifyError(e);
       step5Error = message;
       S.appendErrorLog(`AI Setup: Step 5 launch failed: ${message}`);

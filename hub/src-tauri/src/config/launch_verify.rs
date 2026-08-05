@@ -247,8 +247,37 @@ pub enum LaunchForVerifyError {
     /// `lastLaunchAt`, frecency) was NOT recorded to disk — surfaced as
     /// an error instead of silently swallowed so the wizard learns the
     /// config volume is unwritable.
+    ///
+    /// B-N16 mirror: on this (launch-for-verify) path Unity has ALWAYS
+    /// already spawned when the variant fires, so the spawned `pid`, the
+    /// post-launch `project` entry (with the in-memory `lastLaunchPid` /
+    /// frecency bump the backend still applied), and the effective
+    /// `bridge_port` are carried alongside the error. The wizard treats
+    /// a `persistFailed` carrying a `pid` as SUCCESS-WITH-WARNING: it
+    /// records the pid, surfaces the persist warning, and continues into
+    /// the bridge `/ping` poll instead of dead-ending (a retry would hit
+    /// the `AlreadyRunning` guard while Unity is running).
     #[serde(rename_all = "camelCase")]
-    PersistFailed { project_id: String, message: String },
+    PersistFailed {
+        project_id: String,
+        message: String,
+        /// PID of the Unity process that DID spawn. `Option` only to
+        /// keep the wire shape aligned with `LaunchError::PersistFailed`
+        /// (whose refresh path has no pid); on this path it is always
+        /// `Some`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pid: Option<u32>,
+        /// The post-launch ProjectEntry the backend applied in memory
+        /// (the on-disk file is stale, but the live session reflects
+        /// the launch).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        project: Option<crate::config::schemas::ProjectEntry>,
+        /// Effective bridge port used for the launch, so the wizard can
+        /// keep polling `/ping` even though the success result (which
+        /// normally carries the port) was never returned.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bridge_port: Option<u16>,
+    },
 }
 
 impl std::fmt::Display for LaunchForVerifyError {
@@ -524,16 +553,34 @@ fn launch_for_verify_inner(
         // apply the same stamp to the fresh live state here (memory only)
         // — the current session must reflect the launch even though the
         // on-disk file is stale.
+        let mut failed_entry: Option<crate::config::schemas::ProjectEntry> = None;
         {
             let mut guard = state.projects.lock().unwrap();
             if let Some(p) = guard.projects.iter_mut().find(|p| p.id == params.project_id) {
                 stamp(p);
+                failed_entry = Some(p.clone());
             }
         }
+        // If the entry vanished mid-launch (a concurrent remove landed
+        // during the spawn window), Unity is running regardless: carry
+        // the pre-launch clone with the stamp applied so the wizard
+        // still gets the pid/frecency (mirrors `launch.rs`).
+        let failed_entry = failed_entry.unwrap_or_else(|| {
+            let mut p = project.clone();
+            stamp(&mut p);
+            p
+        });
         return Err(InnerLaunchForVerifyError {
             typed: LaunchForVerifyError::PersistFailed {
                 project_id: params.project_id.clone(),
                 message: e.to_string(),
+                // B-N16 mirror — Unity already spawned; carry the PID,
+                // the post-launch entry, and the effective bridge port
+                // so the wizard treats this as success-with-warning and
+                // proceeds to the `/ping` poll.
+                pid: Some(pid),
+                project: Some(failed_entry),
+                bridge_port: Some(effective_port),
             },
             project_name,
             project_path: project_path_str,
@@ -959,6 +1006,26 @@ mod tests {
         let err = LaunchForVerifyError::PortInvalid { port: 0 };
         let json = serde_json::to_string(&err).unwrap();
         assert!(json.contains("\"portInvalid\""));
+    }
+
+    // B-N16 mirror: `persistFailed` carries the spawned pid + effective
+    // bridge port so the wizard treats it as success-with-warning and
+    // keeps polling. The wire keys are camelCase and `None` fields are
+    // omitted (keeps parity with `LaunchError::PersistFailed`).
+    #[test]
+    fn launch_for_verify_persist_failed_carries_pid_and_port() {
+        let err = LaunchForVerifyError::PersistFailed {
+            project_id: "p".to_string(),
+            message: "read-only volume".to_string(),
+            pid: Some(4321),
+            project: None,
+            bridge_port: Some(20123),
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"persistFailed\""));
+        assert!(json.contains("\"pid\":4321"));
+        assert!(json.contains("\"bridgePort\":20123"));
+        assert!(!json.contains("\"project\""), "None project must be omitted, got {json}");
     }
 
     #[test]
