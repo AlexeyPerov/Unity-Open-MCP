@@ -856,6 +856,23 @@ export async function dependenciesOffline(
     ? await buildReverseEdgeGraph(opts.projectRoot)
     : null;
 
+  // If the target was resolved by GUID only and its .meta lookup failed to
+  // produce a path, try once more against the reverse-edge graph's path→guid
+  // index (the graph builder reads every asset's .meta once). This catches
+  // the realistic case: the caller passed `guid` without `asset_path`, the
+  // target's .meta DOES exist in the project, but the earlier
+  // buildGUIDIndex resolution raced or missed it. Without a resolved path,
+  // the self-reference filter (`edge.assetPath === targetPath`) is a no-op
+  // and the queried asset appears in its own reverse-deps / impact closure.
+  if (targetPath === "" && reverseEdgeGraph) {
+    for (const [path, ownGuid] of reverseEdgeGraph.pathToGuid) {
+      if (ownGuid === targetGuid) {
+        targetPath = path;
+        break;
+      }
+    }
+  }
+
   const reverseEdges: ReverseEdge[] = reverseEdgeGraph
     ? findReferencesFromGraph(reverseEdgeGraph.graph, targetGuid, targetPath)
     : (await findReferencesOffline({
@@ -957,24 +974,32 @@ function collectForwardEdges(parsed: ParsedAsset): ForwardEdge[] {
   // on obj.type and on whether the line declares an m_Script / m_SourcePrefab
   // / generic guid: field, accumulating into three per-kind buffers that are
   // concatenated at the end. The concatenation order (prefab_source, then
-  // script, then pptr) preserves the exact edge ordering the previous
-  // three-pass implementation produced, so the forwardDependencies output
-  // stays byte-identical. The shared `seen` set dedupes within each kind
-  // (a guid can appear as both a prefab_source and a pptr edge — different
-  // seen keys, same as before).
+  // script, then pptr) preserves the edge ordering of the previous three-pass
+  // implementation.
+  //
+  // Dedup note: the `seen` set is checked with `.has()` BEFORE `.add()`.
+  // Earlier code wrote `if (seen.add(key))` / `if (!seen.add(key)) continue`,
+  // but `Set.prototype.add` returns the Set itself (always truthy), so those
+  // forms never deduped — a GUID repeated on N lines yielded N edges. A
+  // PrefabInstance's base-prefab GUID appears on the m_SourcePrefab line AND
+  // on every m_Modifications target line (often 10+), so one logical base
+  // reference inflated to that many duplicate pptr edges.
   const prefabEdges: ForwardEdge[] = [];
   const scriptEdges: ForwardEdge[] = [];
   const pptrEdges: ForwardEdge[] = [];
   const seen = new Set<string>();
+  // GUIDs already captured as a prefab_source edge. These are skipped in the
+  // pptr line scan so a variant's base prefab is reported once (as
+  // prefab_source), not again as a pptr edge from each m_Modifications target.
+  const prefabSourceGuids = new Set<string>();
 
   for (const obj of parsed.objects) {
     // 1. PrefabInstance.m_SourcePrefab — the base-prefab edge of a variant.
-    //    Read once via readGUIDField (the previous pass-1 scanner); the line
-    //    scan below still picks up target: GUIDs inside m_Modifications as
-    //    pptr edges, so variant overrides still count.
     if (obj.type === "PrefabInstance") {
       const sourceGuid = readGUIDField(obj.lines, "m_SourcePrefab");
-      if (sourceGuid !== "" && seen.add(`prefab:${sourceGuid}`)) {
+      if (sourceGuid !== "" && !seen.has(`prefab:${sourceGuid}`)) {
+        seen.add(`prefab:${sourceGuid}`);
+        prefabSourceGuids.add(sourceGuid);
         prefabEdges.push({ guid: sourceGuid, assetPath: "", kind: "prefab_source", resolved: false });
       }
     }
@@ -983,24 +1008,25 @@ function collectForwardEdges(parsed: ParsedAsset): ForwardEdge[] {
     //    parsed object already carries scriptGUID (extracted during
     //    finishObject), so no line re-scan is needed for this kind.
     if (obj.type === "MonoBehaviour" && obj.scriptGUID !== "") {
-      if (seen.add(`script:${obj.scriptGUID}`)) {
+      if (!seen.has(`script:${obj.scriptGUID}`)) {
+        seen.add(`script:${obj.scriptGUID}`);
         scriptEdges.push({ guid: obj.scriptGUID, assetPath: "", kind: "script", resolved: false });
       }
     }
 
     // 3. Every other guid: field on every object — material refs, asset refs,
-    //    animation clips, etc. m_Script lines are excluded (handled above);
-    //    the m_SourcePrefab field's GUID is captured as a prefab_source edge
-    //    in branch 1, but a `guid:` token appearing on the m_SourcePrefab
-    //    line would ALSO match here — the original code had the same
-    //    overlap, deduped via the per-kind seen key (prefab: vs pptr:), so
-    //    the same guid legitimately produces both edges. The line.includes
-    //    fast-reject mirrors the previous pass-3 loop.
+    //    animation clips, etc. m_Script lines are excluded (handled above as
+    //    the script kind). A guid already captured as a prefab_source edge is
+    //    also skipped here so a variant's base prefab is a single forward
+    //    edge, not duplicated across the m_Modifications target lines.
     for (const line of obj.lines) {
       if (!line.includes("guid:")) continue;
       if (line.includes("m_Script:")) continue;
       for (const g of findGUIDs(line)) {
-        if (!seen.add(`pptr:${g}`)) continue;
+        if (prefabSourceGuids.has(g)) continue;
+        const key = `pptr:${g}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
         pptrEdges.push({ guid: g, assetPath: "", kind: "pptr", resolved: false });
       }
     }
@@ -1028,7 +1054,10 @@ function resolveForwardEdges(
     if (path !== undefined) {
       edge.assetPath = path;
       edge.resolved = true;
-    } else if (brokenSeen.add(edge.guid)) {
+    } else if (!brokenSeen.has(edge.guid)) {
+      // `.has()` before `.add()`: `Set.add` returns the Set (truthy), so the
+      // prior `brokenSeen.add(...)` form never deduped broken GUIDs.
+      brokenSeen.add(edge.guid);
       broken.push(edge.guid);
     }
   }
@@ -1173,6 +1202,16 @@ async function buildReverseEdgeGraph(
  * semantics (skip self-references; one entry per referencing asset). Pure
  * Map.get — no I/O. The graph is keyed by lowercased guid; the target guid
  * is already lowercased by dependenciesOffline's resolution path.
+ *
+ * Self-reference filtering: an edge is a self-reference when its referencing
+ * asset IS the target. The primary check is `edge.assetPath === targetPath`
+ * (cheap, exact). A secondary guid check (`edge.guid === targetGuid`) catches
+ * the case where the caller's targetPath resolution raced — but only when the
+ * referencing asset's own-guid was captured during the graph build (i.e. its
+ * .meta was readable). When the asset has no readable .meta, edge.guid is ""
+ * and the asset is genuinely unidentifiable; dependenciesOffline resolves
+ * targetPath from the graph's pathToGuid index before this filter runs to
+ * keep that case rare.
  */
 function findReferencesFromGraph(
   graph: Map<string, ReverseEdge[]>,
@@ -1183,7 +1222,8 @@ function findReferencesFromGraph(
   if (!list) return [];
   const out: ReverseEdge[] = [];
   for (const edge of list) {
-    if (edge.assetPath === targetPath) continue; // self-reference
+    if (edge.assetPath === targetPath) continue; // self-reference (path match)
+    if (edge.guid === targetGuid) continue;      // self-reference (guid match)
     out.push(edge);
   }
   return out;

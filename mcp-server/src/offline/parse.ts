@@ -37,7 +37,11 @@ import { applyPrefabNameOverrides } from "./overrides.js";
 export function parseAsset(data: string): ParsedAsset {
   const objects: ParsedObject[] = [];
   const byID = new Map<string, ParsedObject>();
-  const lines = data.split("\n");
+  // Normalize CRLF/CR to LF. Unity YAML authored on Windows carries "\r\n";
+  // without normalization, every line keeps a trailing "\r" and downstream
+  // shape checks (e.g. scanObjectTypeLine's `line.endsWith(":")`) silently
+  // fail, leaving every object's type empty and its known fields unpopulated.
+  const lines = data.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
 
   let current: ParsedObject | null = null;
 

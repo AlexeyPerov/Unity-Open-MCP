@@ -260,13 +260,20 @@ impl FileSnapshot {
 }
 
 /// Apply the upgrade to disk. Returns the previous and new bundle versions
-/// on success. On any error, all touched files are restored from the
-/// snapshot and the typed error is returned.
+/// plus the captured file snapshots on success. On any error, all touched
+/// files are restored from the snapshot and the typed error is returned.
+///
+/// The snapshots are returned so a caller that performs a *later* undo
+/// (e.g. `upgrade_unity` rolling back after its own `projects.json` persist
+/// fails) can restore the exact pre-upgrade bytes via `rollback(&snapshots)`
+/// instead of re-deriving state from `projects.json` — which may itself be
+/// the thing that broke, and which may carry a stale/empty `unity_version`
+/// that would otherwise be written back as a literal "0.0.0".
 fn apply_upgrade(
     project_path: &Path,
     new_version: &str,
     new_bundle: &str,
-) -> Result<(String, String), UpgradeUnityError> {
+) -> Result<(String, String, Vec<FileSnapshot>), UpgradeUnityError> {
     let project_settings = project_path.join("ProjectSettings");
     let version_path = project_settings.join("ProjectVersion.txt");
     let manager_path = project_settings.join("ProjectManager.asset");
@@ -382,7 +389,7 @@ fn apply_upgrade(
         .and_then(read_bundle_version)
         .unwrap_or_else(|| "0.0.0".to_string());
 
-    Ok((previous_bundle, new_bundle.to_string()))
+    Ok((previous_bundle, new_bundle.to_string(), snapshots))
 }
 
 /// Best-effort rollback. A second failure here is logged but never
@@ -570,9 +577,9 @@ pub fn upgrade_unity(
     // Apply the upgrade to disk. On any error we return without touching
     // `projects.json` so the GUI state and the on-disk state stay in
     // lock-step (the on-disk state is already rolled back at this point).
-    let (previous_bundle_for_log, new_bundle_for_log) =
+    let (previous_bundle_for_log, new_bundle_for_log, upgrade_snapshots) =
         match apply_upgrade(&project_path, &target_version, &next_bundle) {
-            Ok(pair) => pair,
+            Ok(triple) => triple,
             Err(err) => {
                 let tagged = tag_error(err, &params.project_id, &project.path);
                 return Err(tagged);
@@ -602,20 +609,13 @@ pub fn upgrade_unity(
     if let Err(e) = persist_result {
         // Best-effort rollback of the on-disk file changes. The user has
         // not yet seen the success state, so undoing the file edits
-        // keeps the project in a known-good shape.
-        // Note: we do not have the snapshot in scope here, but the
-        // `apply_upgrade` call already cleaned up after itself; the
-        // remaining state to undo is the new bundle / version bytes. We
-        // re-apply with the *previous* values to keep the on-disk state
-        // consistent with the still-stale projects.json.
-        let _ = apply_upgrade(
-            &project_path,
-            project
-                .unity_version
-                .as_deref()
-                .unwrap_or("0.0.0"),
-            &current_bundle,
-        );
+        // keeps the project in a known-good shape. We restore the exact
+        // pre-upgrade bytes captured by `apply_upgrade` rather than
+        // re-deriving state from `projects.json` — `projects.json` may
+        // itself be the thing that just failed to persist, and a stale or
+        // missing `unity_version` there would otherwise be written back as
+        // a literal "0.0.0" into ProjectVersion.txt (bricking the project).
+        rollback(&upgrade_snapshots);
         return Err(UpgradeUnityError::PersistFailed {
             project_id: params.project_id.clone(),
             message: e.to_string(),
@@ -862,7 +862,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         make_project(dir.path(), "2022.3.48f1", Some("1.0.0"));
 
-        let (prev, next) = apply_upgrade(dir.path(), "6000.0.1f1", "1.0.1").unwrap();
+        let (prev, next, _snapshots) = apply_upgrade(dir.path(), "6000.0.1f1", "1.0.1").unwrap();
         assert_eq!(prev, "1.0.0");
         assert_eq!(next, "1.0.1");
 
@@ -890,7 +890,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         make_project(dir.path(), "2022.3.48f1", None);
 
-        let (prev, next) = apply_upgrade(dir.path(), "6000.0.1f1", "0.0.1").unwrap();
+        let (prev, next, _snapshots) = apply_upgrade(dir.path(), "6000.0.1f1", "0.0.1").unwrap();
         assert_eq!(prev, "0.0.0");
         assert_eq!(next, "0.0.1");
 
@@ -934,6 +934,46 @@ mod tests {
             UpgradeUnityError::ProjectVersionUnreadable { .. }
                 | UpgradeUnityError::IoError { .. }
         ));
+    }
+
+    #[test]
+    fn apply_upgrade_snapshots_restore_exact_pre_upgrade_bytes() {
+        // C1 regression: upgrade_unity's persist-failure rollback previously
+        // re-derived the version from projects.json (which could carry a
+        // stale/None unity_version) and wrote "0.0.0" into ProjectVersion.txt.
+        // The fix returns the snapshots captured by apply_upgrade so the
+        // caller can call rollback(&snapshots) and restore the exact original
+        // bytes. This test verifies that contract on the no-bundle case
+        // (the shape that produced "0.0.0").
+        let dir = tempfile::tempdir().unwrap();
+        // Legacy project with NO ProjectManager.asset — mirrors a walk-up
+        // entry whose unity_version is None (the "0.0.0" trigger condition).
+        make_project(dir.path(), "2022.3.48f1", None);
+        let version_path = dir
+            .path()
+            .join("ProjectSettings")
+            .join("ProjectVersion.txt");
+        let original_version = fs::read_to_string(&version_path).unwrap();
+
+        // Apply the upgrade (succeeds on disk), then simulate a persist
+        // failure by rolling back via the returned snapshots.
+        let (_prev, _next, snapshots) =
+            apply_upgrade(dir.path(), "6000.0.1f1", "1.0.1").unwrap();
+        rollback(&snapshots);
+
+        let restored = fs::read_to_string(&version_path).unwrap();
+        assert_eq!(
+            restored, original_version,
+            "ProjectVersion.txt restored to exact pre-upgrade bytes (not \"0.0.0\")"
+        );
+        assert!(
+            !restored.contains("0.0.0"),
+            "no \"0.0.0\" leaked into ProjectVersion.txt on rollback"
+        );
+        assert!(
+            restored.contains("2022.3.48f1"),
+            "original version restored"
+        );
     }
 
     #[test]

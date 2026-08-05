@@ -1949,6 +1949,90 @@ test("dependenciesOffline sets forwardSkipped for a non-YAML asset", async () =>
   }
 });
 
+// M5 (audit) — collectForwardEdges previously used `seen.add(key)` as a
+// boolean membership check, but Set.prototype.add returns the Set (always
+// truthy), so NO dedup happened. A PrefabInstance's base-prefab GUID appears
+// on the m_SourcePrefab line AND on every m_Modifications target line, so one
+// logical base reference inflated to N forward edges. Verified against a real
+// prefab (one base → 17 edges). The fix dedupes by guid and excludes a guid
+// already captured as prefab_source from the pptr scan, so a variant's base
+// prefab is a single forward edge.
+test("M5: a PrefabInstance base-prefab GUID is one forward edge, not one per m_Modifications target", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-m5-dedup-"));
+  try {
+    await setupDependencyProject(tmp);
+    const result = await dependenciesOffline({
+      assetPath: "Assets/Prefabs/PlayerVariant.prefab",
+      projectRoot: tmp,
+    });
+    // The variant references its base prefab (basePrefabGuid) via both the
+    // m_SourcePrefab line and the single m_Modifications target line in the
+    // fixture. It must be a single prefab_source edge — NOT a prefab_source
+    // plus a duplicate pptr edge for each target line.
+    const baseEdges = result.forwardDependencies.filter(
+      (e) => e.guid === "cafe0000000000000000000000000002",
+    );
+    assert.equal(
+      baseEdges.length,
+      1,
+      `base prefab appears exactly once in forward edges: ${JSON.stringify(baseEdges)}`,
+    );
+    assert.equal(baseEdges[0]!.kind, "prefab_source", "the single edge is prefab_source");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// M6 (audit) — when `dependencies` is called with only `guid` (no asset_path)
+// the target's path is resolved from its .meta. If that resolution returns ""
+// (a race, or the .meta read failed on the first pass), the self-reference
+// filter `edge.assetPath === targetPath` was a no-op and an asset referencing
+// its own GUID appeared in its own reverse-deps / impact. The fix re-resolves
+// targetPath from the reverse-edge graph's path→guid index before filtering.
+// This test uses the realistic shape: the target's .meta EXISTS, the query is
+// guid-only, and the asset references its own guid.
+test("M6: a self-referencing asset does not appear in its own reverse deps / impact when queried by GUID only", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-m6-selfref-"));
+  try {
+    const selfGuid = "11111111111111111111111111111111";
+    await mkdir(join(tmp, "Assets", "Self"), { recursive: true });
+    await writeFile(
+      join(tmp, "Assets", "Self", "SelfRef.prefab"),
+      `%YAML 1.1
+--- !u!1 &100
+GameObject:
+  m_Name: SelfRef
+--- !u!23 &300
+MeshRenderer:
+  m_Material: {fileID: 0, guid: ${selfGuid}, type: 2}
+`,
+    );
+    // The .meta EXISTS — the realistic case where a guid-only query should
+    // still be able to identify the target asset on disk for self-filtering.
+    await writeFile(join(tmp, "Assets", "Self", "SelfRef.prefab.meta"), `guid: ${selfGuid}\n`);
+
+    const result = await dependenciesOffline({
+      guid: selfGuid,
+      projectRoot: tmp,
+      includeImpact: true,
+    });
+    const reversePaths = result.reverseDependencies.map((e) => e.assetPath);
+    assert.ok(
+      !reversePaths.includes("Assets/Self/SelfRef.prefab"),
+      `self asset NOT in its own reverse deps: ${JSON.stringify(reversePaths)}`,
+    );
+    if (result.impact) {
+      const impactPaths = result.impact.affected.map((a) => a.assetPath);
+      assert.ok(
+        !impactPaths.includes("Assets/Self/SelfRef.prefab"),
+        `self asset NOT in its own impact closure: ${JSON.stringify(impactPaths)}`,
+      );
+    }
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 // M5 (round-2 review) — the non-impact reverse-edge path must NOT silently cap
 // at the inner default of 100. Previously dependenciesOffline called
 // findReferencesOffline WITHOUT forwarding maxResults, so the inner lookup
@@ -2757,11 +2841,10 @@ test("L2: buildGuidScriptAndNameIndex collects script names alongside guid+scrip
 test("H6: collectForwardEdges output is byte-stable across runs and ordered by kind (prefab_source, script, pptr)", async () => {
   // PlayerVariant.prefab from setupDependencyProject has one PrefabInstance
   // (m_SourcePrefab → basePrefabGuid) AND a target: GUID inside its
-  // m_Modifications (also basePrefabGuid). The previous 3-pass collectForward-
-  // Edges produced: [prefab_source(base), pptr(base)]. The single-pass
-  // refactor must produce the same edge set in the same kind order. This is
-  // the golden-output gate for T3.1 — the edge roster is the byte-identical
-  // acceptance bar.
+  // m_Modifications (also basePrefabGuid). A guid already captured as a
+  // prefab_source edge is NOT re-emitted as a pptr edge from the
+  // m_Modifications target lines (one logical base-prefab reference = one
+  // forward edge). This is the golden-output gate for T3.1.
   const tmp = await mkdtemp(join(tmpdir(), "offline-plan3-forward-"));
   try {
     await setupDependencyProject(tmp);
@@ -2771,17 +2854,16 @@ test("H6: collectForwardEdges output is byte-stable across runs and ordered by k
     });
     const edges = result.forwardDependencies;
     assert.ok(edges.length > 0, `forward edges present: ${JSON.stringify(edges)}`);
-    // First edge MUST be prefab_source (the previous pass-1 emitted it first).
+    // First (and only) edge MUST be prefab_source (the base prefab). The
+    // m_Modifications target line carries the SAME guid, so it dedupes against
+    // the prefab_source edge rather than producing a duplicate pptr edge.
     assert.equal(edges[0].kind, "prefab_source", "prefab_source kind first");
     assert.ok(
       edges[0].assetPath.endsWith("Player.prefab"),
       `prefab_source resolves to base prefab: ${edges[0].assetPath}`,
     );
-    // No script edge here (no MonoBehaviour). Verify at least one pptr edge
-    // exists from the m_Modifications target line (same guid, deduped into
-    // one pptr entry).
-    const pptrEdges = edges.filter((e) => e.kind === "pptr");
-    assert.ok(pptrEdges.length >= 1, `pptr edge(s) present: ${JSON.stringify(pptrEdges)}`);
+    const baseGuidEdges = edges.filter((e) => e.guid === "cafe0000000000000000000000000002");
+    assert.equal(baseGuidEdges.length, 1, `base guid appears exactly once: ${JSON.stringify(baseGuidEdges)}`);
     // Deterministic across two runs (single-pass must be byte-stable).
     const second = await dependenciesOffline({
       assetPath: "Assets/Prefabs/PlayerVariant.prefab",
@@ -2849,13 +2931,18 @@ MonoBehaviour:
       kinds.indexOf("script") < kinds.indexOf("pptr"),
       `pptr after script: ${JSON.stringify(kinds)}`,
     );
-    // The base guid appears as BOTH a prefab_source edge AND a pptr edge
-    // (the m_SourcePrefab line contains guid:, so the pptr scan catches it
-    // too — same behavior as the previous 3-pass implementation).
+    // The base guid appears ONLY as a prefab_source edge — the m_SourcePrefab
+    // line's guid is excluded from the pptr scan so a variant's base prefab is
+    // a single forward edge (not duplicated as both prefab_source and pptr).
+    // The mat guid is the standalone pptr edge; the script guid is the
+    // MonoBehaviour's m_Script edge.
     const guidsAsSet = new Set(result.forwardDependencies.map((e) => e.guid));
-    assert.ok(guidsAsSet.has(baseGuid), "base guid present");
+    assert.ok(guidsAsSet.has(baseGuid), "base guid present (as prefab_source only)");
     assert.ok(guidsAsSet.has(scriptGuid), "script guid present");
     assert.ok(guidsAsSet.has(matGuid), "mat guid present");
+    const baseEdges = result.forwardDependencies.filter((e) => e.guid === baseGuid);
+    assert.equal(baseEdges.length, 1, `base guid emitted once: ${JSON.stringify(baseEdges)}`);
+    assert.equal(baseEdges[0].kind, "prefab_source", "base guid is prefab_source, not also pptr");
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
@@ -3024,6 +3111,54 @@ test("H8: buildHierarchy caches on ParsedAsset — second call returns the same 
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
+});
+
+// C2 (audit) — Unity YAML authored on Windows carries CRLF line endings.
+// parseAsset previously split on "\n" without normalizing, so every line
+// kept a trailing "\r"; scanObjectTypeLine's `line.endsWith(":")` guard
+// failed for "GameObject:\r" and EVERY object's type was left empty,
+// dropping componentIDs / gameObjectID / scriptGUID / fatherTransformID.
+// The parser silently returned a structurally empty model with no error.
+test("C2: parseAsset populates object type + known fields on CRLF (Windows-authored) YAML", async () => {
+  const { parseAsset } = await import("./offline/parse.js");
+  // A minimal GameObject + Transform + MonoBehaviour, serialized with CRLF.
+  // Every line ends with "\r\n" — the Windows Unity Editor's default output.
+  const crlf = [
+    "%YAML 1.1",
+    "--- !u!1 &100",
+    "GameObject:",
+    "  m_Component:",
+    "  - component: {fileID: 200}",
+    "  - component: {fileID: 300}",
+    "  m_Name: Player",
+    "--- !u!4 &200",
+    "Transform:",
+    "  m_GameObject: {fileID: 100}",
+    "  m_Father: {fileID: 0}",
+    "--- !u!114 &300",
+    "MonoBehaviour:",
+    "  m_GameObject: {fileID: 100}",
+    "  m_Script: {fileID: 11500000, guid: aaaa, type: 3}",
+    "",
+  ].join("\r\n");
+
+  const parsed = parseAsset(crlf);
+  const go = parsed.byID.get("100");
+  const tr = parsed.byID.get("200");
+  const mb = parsed.byID.get("300");
+  assert.ok(go, "GameObject parsed");
+  assert.ok(tr, "Transform parsed");
+  assert.ok(mb, "MonoBehaviour parsed");
+  // These are all populated by finishObject's type switch — which only runs
+  // when obj.type is set. On CRLF-without-normalization they were all "".
+  assert.equal(go!.type, "GameObject", "GameObject type set");
+  assert.equal(tr!.type, "Transform", "Transform type set");
+  assert.equal(mb!.type, "MonoBehaviour", "MonoBehaviour type set");
+  assert.deepEqual(go!.componentIDs, ["200", "300"], "GameObject componentIDs populated");
+  assert.equal(tr!.gameObjectID, "100", "Transform.gameObjectID populated");
+  assert.equal(tr!.fatherTransformID, "0", "Transform.fatherTransformID populated");
+  assert.equal(mb!.gameObjectID, "100", "MonoBehaviour.gameObjectID populated");
+  assert.equal(mb!.scriptGUID, "aaaa", "MonoBehaviour.scriptGUID populated");
 });
 
 test("H8: objectPath consults the cache and returns the same path as a fresh flatten", async () => {

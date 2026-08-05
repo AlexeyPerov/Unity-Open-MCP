@@ -125,36 +125,14 @@ export interface FdProbe {
 // Platform-specific probe implementations.
 // ---------------------------------------------------------------------------
 
-/** macOS `lsof -p <pid>` scanner. Returns the line count (one line per fd). */
-function probeMacos(pid: number): FdCountResult {
-  let stdout: string;
-  try {
-    stdout = execFileSync("lsof", ["-p", String(pid)], {
-      encoding: "utf8",
-      timeout: FD_PROBE_TIMEOUT_MS,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    // lsof exits non-zero when the PID is gone. Treat that as not_found.
-    if (/no such file|exit code: 1/i.test(message)) {
-      return {
-        count: null,
-        method: "lsof",
-        reason: "not_found",
-        message: `lsof reported no process for PID ${pid}.`,
-      };
-    }
-    return {
-      count: null,
-      method: "lsof",
-      reason: "lsof_failed",
-      message: `lsof failed for PID ${pid}: ${message}`,
-    };
-  }
-  // `lsof -p <pid>` prints a header line ("COMMAND PID USER FD TYPE ...") then
-  // one line per open fd. Subtract the header. An empty/blank stdout means the
-  // PID vanished between the spawn and the read — treat as not_found.
+/**
+ * Parse the stdout of a successful `lsof -p <pid>` run into an fd count.
+ * Pure (no I/O) so it can be unit-tested without spawning lsof. lsof prints
+ * a header line ("COMMAND PID USER FD TYPE ...") then one line per open fd;
+ * the count is the non-empty line count minus the header. Empty stdout means
+ * the PID vanished between spawn and read.
+ */
+export function parseLsofStdout(stdout: string, pid: number): FdCountResult {
   const lines = stdout.split(/\r?\n/).filter((l) => l.length > 0);
   if (lines.length === 0) {
     return {
@@ -171,6 +149,64 @@ function probeMacos(pid: number): FdCountResult {
     method: "lsof",
     approximate: false,
   };
+}
+
+/**
+ * Classify a failed `lsof -p <pid>` invocation. Pure (no I/O). `lsof` exits
+ * non-zero for several reasons: the PID is gone (the common case), but also
+ * privilege boundaries / SIP-protected handles — and in those cases it still
+ * prints FD rows to stdout before exiting 1. Node's `execFileSync` attaches
+ * that captured stdout to the error object as `err.stdout`; when present and
+ * non-empty, parse it instead of reporting not_found. Only map to not_found
+ * when there is no usable stdout AND the message indicates the PID is truly
+ * absent — a bare "exit code: 1" is ambiguous (privilege errors also exit 1).
+ */
+export function classifyLsofError(
+  err: unknown,
+  pid: number,
+): FdCountResult {
+  const message = err instanceof Error ? err.message : String(err);
+  const capturedStdout =
+    err && typeof err === "object" && "stdout" in err
+      ? String((err as { stdout: unknown }).stdout)
+      : "";
+  const capturedLines = capturedStdout.split(/\r?\n/).filter((l) => l.length > 0);
+  if (capturedLines.length > 0) {
+    return {
+      count: Math.max(0, capturedLines.length - 1),
+      method: "lsof",
+      approximate: false,
+    };
+  }
+  if (/no such file|no process|not found/i.test(message)) {
+    return {
+      count: null,
+      method: "lsof",
+      reason: "not_found",
+      message: `lsof reported no process for PID ${pid}.`,
+    };
+  }
+  return {
+    count: null,
+    method: "lsof",
+    reason: "lsof_failed",
+    message: `lsof failed for PID ${pid}: ${message}`,
+  };
+}
+
+/** macOS `lsof -p <pid>` scanner. Returns the line count (one line per fd). */
+function probeMacos(pid: number): FdCountResult {
+  let stdout: string;
+  try {
+    stdout = execFileSync("lsof", ["-p", String(pid)], {
+      encoding: "utf8",
+      timeout: FD_PROBE_TIMEOUT_MS,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch (err) {
+    return classifyLsofError(err, pid);
+  }
+  return parseLsofStdout(stdout, pid);
 }
 
 /** Linux `/proc/<pid>/fd` directory entry count (no shell-out). */

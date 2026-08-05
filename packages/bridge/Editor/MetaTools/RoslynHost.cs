@@ -60,6 +60,18 @@ namespace UnityOpenMcpBridge.MetaTools
             _cacs = null;
             _cachedReferences = null;
             _cachedReferenceAssemblyCount = -1;
+            // Detach any previously registered fallback resolver and clear its
+            // one-shot latch. Without this, a re-install (e.g. to a different
+            // RoslynDirOverride, or after an atomic dir swap deleted the old
+            // install dir) leaves the AppDomain.AssemblyResolve handler
+            // permanently pinned to a stale roslynDir, and the guard below
+            // makes RegisterFallbackResolver a no-op so it never re-binds.
+            if (_fallbackResolveHandler != null)
+            {
+                AppDomain.CurrentDomain.AssemblyResolve -= _fallbackResolveHandler;
+                _fallbackResolveHandler = null;
+            }
+            _fallbackResolverRegistered = false;
             Initialize();
         }
 
@@ -167,20 +179,24 @@ namespace UnityOpenMcpBridge.MetaTools
         }
 
         private static bool _fallbackResolverRegistered;
+        // Stored so Reinitialize can detach the prior handler before
+        // re-registering against a (possibly different) roslynDir.
+        private static ResolveEventHandler _fallbackResolveHandler;
 
         /// <summary>
         /// Scoped AppDomain.AssemblyResolve backstop for the downloaded Roslyn
         /// fallback dir: responds only for simple names that exist as
         /// <c>&lt;dir&gt;/&lt;name&gt;.dll</c>, so it can never hijack unrelated binds.
         /// Registered once per domain, only after the fallback dir actually
-        /// loaded.
+        /// loaded. Reinitialize() detaches a previously registered handler so a
+        /// re-install to a different dir re-binds to the fresh path.
         /// </summary>
         private static void RegisterFallbackResolver(string roslynDir)
         {
             if (_fallbackResolverRegistered) return;
             _fallbackResolverRegistered = true;
 
-            AppDomain.CurrentDomain.AssemblyResolve += (_, args) =>
+            _fallbackResolveHandler = (_, args) =>
             {
                 try
                 {
@@ -193,6 +209,7 @@ namespace UnityOpenMcpBridge.MetaTools
                     return null;
                 }
             };
+            AppDomain.CurrentDomain.AssemblyResolve += _fallbackResolveHandler;
         }
 
         /// <summary>

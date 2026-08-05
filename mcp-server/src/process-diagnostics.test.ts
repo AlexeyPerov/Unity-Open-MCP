@@ -11,6 +11,8 @@ import {
   computeFdHeadroom,
   analyzeFdTrend,
   setFdProbeForTest,
+  parseLsofStdout,
+  classifyLsofError,
   FD_CEILING,
   FD_WARN_RATIO,
   FD_CRITICAL_RATIO,
@@ -331,4 +333,60 @@ test("real probe on Linux reads the current process's /proc/self/fd entry count"
   } finally {
     restore();
   }
+});
+
+// ---------------------------------------------------------------------------
+// H2 (audit) — lsof stdout / error classification.
+// `lsof -p <pid>` exits non-zero for privilege boundaries / SIP-protected
+// handles WHILE still printing FD rows to stdout. Node's execFileSync attaches
+// that stdout to the error object as `err.stdout`. Previously the probe
+// mapped ANY "exit code: 1" message to not_found, discarding the captured
+// stdout and silently degrading resource_pressure to "unknown" on macOS.
+// These tests exercise the pure parsers/classifier that probeMacos delegates
+// to, so no real lsof spawn is required.
+// ---------------------------------------------------------------------------
+
+test("H2: parseLsofStdout counts FD rows (non-empty lines minus header)", () => {
+  // Header + 3 FD rows.
+  const out = "COMMAND   PID USER   FD   TYPE\nUnity    1234 user   0r   REG\nUnity    1234 user   1w   REG\nUnity    1234 user   2u   CHR\n";
+  const r = parseLsofStdout(out, 1234);
+  assert.equal(r.count, 3);
+  assert.equal(r.method, "lsof");
+  assert.equal(r.approximate, false);
+});
+
+test("H2: parseLsofStdout on empty stdout reports not_found", () => {
+  const r = parseLsofStdout("", 1234);
+  assert.equal(r.count, null);
+  assert.equal(r.reason, "not_found");
+});
+
+test("H2: classifyLsofError parses captured stdout when lsof exited 1 with output (privilege/SIP case)", () => {
+  // The key regression: lsof exits 1 but still printed FD rows. The old code
+  // matched /exit code: 1/i and returned not_found, hiding the live process.
+  const err = Object.assign(new Error("Command failed: lsof -p 1234\nexit code: 1"), {
+    stdout: "COMMAND   PID USER   FD   TYPE\nUnity    1234 user   0r   REG\nUnity    1234 user   1w   REG\n",
+  });
+  const r = classifyLsofError(err, 1234);
+  assert.equal(r.count, 2, "captured stdout parsed — not hidden behind exit code 1");
+  assert.equal(r.method, "lsof");
+  assert.equal(r.approximate, false);
+});
+
+test("H2: classifyLsofError maps to not_found only when stdout is empty AND the PID is truly absent", () => {
+  // A genuinely-dead PID: no stdout, message indicates the process is gone.
+  const err = Object.assign(new Error("lsof: 99999: no such file"), { stdout: "" });
+  const r = classifyLsofError(err, 99999);
+  assert.equal(r.count, null);
+  assert.equal(r.reason, "not_found");
+});
+
+test("H2: classifyLsofError keeps ambiguous exit-1-with-no-stdout as lsof_failed (not silent not_found)", () => {
+  // exit code 1 with no captured stdout and no "no such process" wording:
+  // ambiguous — surface as lsof_failed so the caller sees the real reason.
+  const err = Object.assign(new Error("Command failed: lsof -p 1234\nexit code: 1"), { stdout: "" });
+  const r = classifyLsofError(err, 1234);
+  assert.equal(r.count, null);
+  assert.equal(r.reason, "lsof_failed");
+  assert.match(r.message ?? "", /lsof failed for PID 1234/);
 });
