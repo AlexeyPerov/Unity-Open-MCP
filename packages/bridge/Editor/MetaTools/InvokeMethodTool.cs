@@ -45,8 +45,16 @@ namespace UnityOpenMcpBridge.MetaTools
                     "Use 'unity_open_mcp_find_members' to discover available types.");
             }
 
-            var bindingFlags = BindingFlags.Public | BindingFlags.FlattenHierarchy;
-            bindingFlags |= isStatic ? BindingFlags.Static : BindingFlags.Instance;
+            // feedback #1 (2026-08-06) — reflection lookup uses BOTH Static and
+            // Instance flags, regardless of the is_static selector. Previously
+            // the flags were mutually exclusive (Static only when is_static was
+            // explicitly true), so invoking a static method on a static class
+            // without is_static resolved with Instance-only flags, missed every
+            // static member, and reported "Available methods: Equals,
+            // GetHashCode, GetType, ToString". The is_static flag is still
+            // consulted below to decide whether to instantiate/resolve a target
+            // — it no longer gates which methods reflection can see.
+            var bindingFlags = BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.FlattenHierarchy;
 
             // M16 Plan 6 — overload + generic-arg resolution. Legacy callers
             // pass neither generic_arg_types nor arg_type_names; the previous
@@ -68,12 +76,25 @@ namespace UnityOpenMcpBridge.MetaTools
             }
             else
             {
-                method = type.GetMethod(methodName, bindingFlags);
+                // Combined Static|Instance flags can make GetMethod throw
+                // AmbiguousMatchException when a name exists in both static and
+                // instance form; resolve explicitly by selecting the candidate
+                // that matches the is_static selector, falling back to the
+                // first. (feedback #1 — static methods must be resolvable
+                // without the caller setting is_static.)
+                try
+                {
+                    method = type.GetMethod(methodName, bindingFlags);
+                }
+                catch (AmbiguousMatchException)
+                {
+                    method = ResolveByName(type, methodName, bindingFlags, isStatic);
+                }
                 if (method == null)
                     return ToolDispatchResult.Fail("method_not_found",
                         $"Method '{methodName}' not found on type '{type.FullName}'. " +
-                        $"Available methods: {string.Join(", ", type.GetMethods(bindingFlags).Take(10).Select(m => m.Name))}" +
-                        (type.GetMethods(bindingFlags).Length > 10 ? "..." : ""));
+                        $"Available methods: {string.Join(", ", type.GetMethods(bindingFlags).Select(m => (m.IsStatic ? "static " : "") + m.Name).Distinct().Take(10))}" +
+                        (type.GetMethods(bindingFlags).Select(m => m.Name).Distinct().Count() > 10 ? "..." : ""));
 
                 // Generic method with explicit type args: bind them now so the
                 // parameter types resolve correctly for arg conversion below.
@@ -190,6 +211,26 @@ namespace UnityOpenMcpBridge.MetaTools
             }
 
             return null;
+        }
+
+        // feedback #1 — disambiguate by name when GetMethod throws
+        // AmbiguousMatchException (a method name exists in both static and
+        // instance form under the combined Static|Instance flags). Prefer the
+        // candidate whose static-ness matches the is_static selector; fall back
+        // to the first match so the call is still deterministic.
+        private static MethodInfo ResolveByName(Type type, string methodName, BindingFlags bindingFlags, bool isStatic)
+        {
+            MethodInfo[] candidates;
+            try { candidates = type.GetMethods(bindingFlags); }
+            catch { return null; }
+            MethodInfo fallback = null;
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                if (candidates[i].Name != methodName) continue;
+                if (candidates[i].IsStatic == isStatic) return candidates[i];
+                fallback = fallback ?? candidates[i];
+            }
+            return fallback;
         }
 
         // M16 Plan 6 — pick the overload whose parameter types match

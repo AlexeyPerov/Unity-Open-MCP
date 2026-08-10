@@ -2601,6 +2601,72 @@ test("route: restart_editor kills the Editor and reports the killed PID when sig
   });
 });
 
+// feedback #2 (2026-08-06) — the instance-lock PID is authoritative and must
+// win over the process scan (which could return an AssetImportWorker child).
+// Here the scan returns a *different* PID than the lock; the kill must target
+// the lock PID. process.pid is always alive, so the lock's liveness check
+// passes. Dry-run asserts pidSource + wouldKillPid; the confirmed path asserts
+// the killer receives the lock PID.
+test("route: restart_editor prefers the instance-lock PID over the process scan (dry-run + confirm)", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "uomcp-restart-lockpref-"));
+  const sandboxDir = await mkdtemp(join(tmpdir(), "uomcp-restart-lockpref-home-"));
+  const prevHome = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE;
+  process.env.HOME = sandboxDir;
+  process.env.USERPROFILE = sandboxDir;
+  try {
+    await setupProject(tmp);
+    await plantEditorLog(tmp, FD_EXHAUSTION_LOG);
+    // Lock names process.pid (this test process, always alive) as the editor.
+    await plantInstanceLock(sandboxDir, tmp, process.pid);
+    // Scan returns a DIFFERENT pid (simulating an AssetImportWorker child).
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 5555, projectPath: tmp }];
+      },
+    });
+    let killCall: { pid: number; graceMs: number } | null = null;
+    const restoreKiller = setProcessKillerForTest({
+      async kill(pid, graceMs) {
+        killCall = { pid, graceMs };
+        return { terminated: true, pid, method: "sigterm", elapsedMs: 100 };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      // Dry-run: lock PID wins, source reported, scan PID not chosen.
+      const dry = await router.route("unity_open_mcp_restart_editor", {});
+      const dryBody = parseBody(dry);
+      assert.equal(dryBody.wouldKillPid, process.pid);
+      assert.equal(dryBody.pidSource, "instance_lock");
+
+      // Confirmed: the killer receives the lock PID, not the scan's 5555.
+      const result = await router.route("unity_open_mcp_restart_editor", {
+        confirm: true,
+      });
+      const body = parseBody(result);
+      assert.equal(result.isError, false);
+      assert.equal(body.pid, process.pid);
+      const captured = killCall as { pid: number; graceMs: number } | null;
+      assert.ok(
+        captured !== null && captured.pid === process.pid,
+        "killer dispatched with the lock PID, not the scan PID",
+      );
+    } finally {
+      restoreKiller();
+      restoreScan();
+    }
+  } finally {
+    process.env.HOME = prevHome;
+    process.env.USERPROFILE = prevUserProfile;
+  }
+});
+
 // --- restart_editor: surfaces dirty scenes when the bridge is still reachable ---
 
 test("route: restart_editor surfaces dirtyScenesWarning when the bridge reports unsaved scenes", async () => {

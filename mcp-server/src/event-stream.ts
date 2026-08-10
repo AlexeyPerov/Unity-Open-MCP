@@ -40,7 +40,7 @@ export interface PullResult {
   dropped: number;
   /** Whether the SSE reader is currently connected. */
   connected: boolean;
-  /** Whether this pull started the subscription (first call). */
+  /** Whether this pull started the subscription (first call by THIS subscriber). */
   started: boolean;
   /** Last reconnect failure reason, when `connected` is false. */
   lastError: string | null;
@@ -60,6 +60,18 @@ export class BridgeEventStream {
   // True after stop() so the pump's finally/catch know not to schedule a
   // reconnect for the AbortError they observe when the stream is torn down.
   private stopped = false;
+
+  // feedback #8 (2026-08-10) — per-subscriber read cursors over the shared
+  // queue. The bridge SSE reader is a single process-wide subscription (one
+  // queue), but each `pull_events` caller can name its own subscriber id.
+  // Without a per-subscriber cursor every caller drained the SAME FIFO queue,
+  // so a fresh subscriber name replayed the entire accumulated backlog
+  // (sometimes hours of history across editor restarts) instead of returning
+  // `started:true` with empty events as the contract promises. `cursors` maps
+  // a subscriber id → its next-read index into `queue`; a brand-new subscriber
+  // is initialised to the current queue tail (the high-water mark) so it only
+  // sees events emitted AFTER its first pull.
+  private readonly cursors: Map<string, number> = new Map();
 
   constructor(
     private readonly baseUrl: string,
@@ -223,6 +235,15 @@ export class BridgeEventStream {
     if (excess > 0) {
       this.queue.splice(0, excess);
       this.dropped += excess;
+      // feedback #8 — eviction shifts every queue index down by `excess`. Keep
+      // per-subscriber cursors valid by subtracting the same amount (floored at
+      // 0); a cursor that pointed at an evicted event simply re-aligns to the
+      // new head, so the subscriber sees the oldest surviving event next.
+      if (this.cursors.size > 0) {
+        for (const [id, pos] of this.cursors) {
+          this.cursors.set(id, Math.max(0, pos - excess));
+        }
+      }
     }
   }
 
@@ -243,23 +264,55 @@ export class BridgeEventStream {
     return out;
   }
 
-  /** One-shot pull: start the subscription if needed and drain. */
-  pull(maxEvents: number): PullResult {
-    const started = this.ensureSubscription();
-    const events = this.drain(maxEvents);
-    // L4 — `dropped` counts queue overflows. It is surfaced as a per-pull
-    // value (how many events were lost since the last pull), so reset it to 0
-    // once it has been reported. A polling agent that re-pulls must see 0 when
-    // nothing new overflowed, not the same stale total forever — otherwise it
-    // cannot tell a single old overflow from continuous loss.
+  /** One-shot pull: start the subscription if needed and drain.
+   *
+   * feedback #8 — passing an explicit `subscriberId` selects a per-subscriber
+   * read cursor over the shared queue. A brand-new named subscriber is
+   * initialised to the current queue tail, so its FIRST pull returns
+   * `started:true` with an empty event list — it only sees events emitted
+   * after it subscribed (no backlog replay). A returning named subscriber
+   * resumes from its saved cursor. Omitting `subscriberId` preserves the
+   * legacy shared-cursor behaviour (drain whatever has accumulated), used by
+   * callers that do not name a subscriber. */
+  pull(maxEvents: number, subscriberId?: string): PullResult {
+    const subStarted = this.ensureSubscription();
+
+    // Legacy shared-cursor path: no per-subscriber cursor, drain the whole
+    // queue as before. Existing callers (and the overflow tests) rely on the
+    // first pull returning whatever has accumulated.
+    if (!subscriberId || subscriberId.length === 0) {
+      const events = this.drain(maxEvents);
+      const dropped = this.dropped;
+      this.dropped = 0;
+      return {
+        subscriberId: this.subscriberId,
+        events,
+        dropped,
+        connected: this.connected,
+        started: subStarted,
+        lastError: this.lastError,
+      };
+    }
+
+    // Named-subscriber path: a fresh subscriber starts at the high-water mark
+    // (queue tail); history before its first pull is NOT replayed. `started`
+    // reflects THIS subscriber's first pull.
+    const isNew = !this.cursors.has(subscriberId);
+    if (isNew) this.cursors.set(subscriberId, this.queue.length);
+
+    const cap = maxEvents > 0 && maxEvents <= 1000 ? maxEvents : 100;
+    const from = this.cursors.get(subscriberId) ?? this.queue.length;
+    const available = this.queue.slice(from, from + cap);
+    this.cursors.set(subscriberId, from + available.length);
+
     const dropped = this.dropped;
     this.dropped = 0;
     return {
-      subscriberId: this.subscriberId,
-      events,
+      subscriberId,
+      events: available,
       dropped,
       connected: this.connected,
-      started,
+      started: isNew || subStarted,
       lastError: this.lastError,
     };
   }
@@ -281,6 +334,9 @@ export class BridgeEventStream {
     this.connected = false;
     this.queue = [];
     this.dropped = 0;
+    // feedback #8 — drop per-subscriber cursors so a post-stop pull re-initialises
+    // each subscriber at the (now empty) high-water mark.
+    this.cursors.clear();
   }
 
   get isConnected(): boolean {

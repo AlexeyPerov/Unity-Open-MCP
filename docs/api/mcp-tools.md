@@ -250,6 +250,13 @@ Beyond scalar types, it resolves:
 - **`Vector2` / `Vector3` / `Vector4` / `Color` / `Quaternion`** — pass a string
   array form (`"[1,2,3]"`) or object form (`"{x:1,y:2,z:3}"`).
 
+Static methods resolve without `is_static: true` — the reflection lookup uses
+both `Static` and `Instance` flags, so a `public static string Run()` on a
+`static class` is found by `{type_name, method_name}` alone. `is_static` only
+selects whether to instantiate/resolve a target (it no longer gates which
+methods reflection can see). The `method_not_found` error lists the visible
+candidates (prefixed `static ` for static members).
+
 ### `unity_senses_run_tests`
 
 Results are retrieved by the server polling a results file under
@@ -262,6 +269,15 @@ filter, not a failure (`test_class` maps to NUnit `groupNames`, a partial/group
 match). To run a single test method deterministically, invoke the test class or
 method directly via `unity_open_mcp_invoke_method` — NUnit assertion failures
 come back verbatim in the error.
+
+A run that is aborted before its results land — superseded by a newer run,
+aborted when play mode is entered mid-EditMode-run, or cancelled by a domain
+reload — writes a terminal `test-results-<runId>.json` with
+`status: "aborted"` and a `reason` (`superseded_by_run` | `playmode_entered`),
+so a polling agent always sees a final state instead of timing out in silence.
+Unknown parameter keys are rejected with `validation_error` (the bridge
+validates body keys against the declared parameter names, mirroring the MCP
+schema's `additionalProperties: false`).
 
 ### `unity_senses_visual_compare`
 

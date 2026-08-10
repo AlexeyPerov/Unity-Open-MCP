@@ -49,6 +49,10 @@ namespace UnityOpenMcpBridge.Screenshot
                     case "game":
                         png = ScreenshotService.CaptureGameViewBytes(width, height);
                         break;
+                    // feedback #5 — composed view: full player frame (all cameras + Overlay UI).
+                    case "composed":
+                        png = ScreenshotService.CaptureComposedViewBytes(width, height);
+                        break;
                     case "isolated":
                         if (string.IsNullOrEmpty(object_path))
                             return ErrorJson("missing_parameter",
@@ -63,7 +67,7 @@ namespace UnityOpenMcpBridge.Screenshot
                         break;
                     default:
                         return ErrorJson("validation_error",
-                            $"Unknown view '{view}'. Use 'scene', 'game', or 'isolated'.");
+                            $"Unknown view '{view}'. Use 'scene', 'game', 'composed', or 'isolated'.");
                 }
 
                 return BuildSuccessJson(view, width, height, png);

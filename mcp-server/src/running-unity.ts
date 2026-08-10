@@ -122,6 +122,27 @@ export function isUnityCommandLine(commandLine: string): boolean {
   return name === "Unity";
 }
 
+/**
+ * `true` when the command line identifies a Unity **worker** process
+ * (AssetImportWorker / batch import worker), not the interactive editor.
+ * Unity spawns these as children with `-batchMode -parentPid
+ * -name AssetImportWorker0 … -projectPath <same project>`; their executable
+ * basename is still `Unity`, so they pass `isUnityCommandLine` and pollute the
+ * PID scan. feedback #2 (2026-08-06): `restart_editor` / `resource_pressure`
+ * targeted an AssetImportWorker instead of the main editor on fd-exhaustion
+ * because the worker appeared first in the scan. Detecting workers here (rather
+ * than at the call sites) hardens every caller at once.
+ */
+export function isAssetImportWorker(commandLine: string): boolean {
+  // Unity passes the worker label via `-name AssetImportWorker*` (the bridge's
+  // own ReadNameArg parses the same flag). The label carries a trailing index
+  // (AssetImportWorker0), so match the prefix without a `\b` after "Worker"
+  // (a digit is a word char and would defeat `\b`). Also catch `-importWorker`,
+  // which older Unity releases used for the same purpose.
+  return /-name\s+AssetImportWorker/.test(commandLine) ||
+    /(^|\s)-importWorker(\s|$)/.test(commandLine);
+}
+
 function trimMatching(value: string, ...chars: string[]): string {
   let s = value;
   while (s.length > 0) {
@@ -255,6 +276,9 @@ export function parsePsOutput(stdout: string): RunningUnity[] {
     const pid = Number.parseInt(pidStr, 10);
     if (!Number.isInteger(pid) || pid <= 0) continue;
     if (!isUnityCommandLine(rest)) continue;
+    // feedback #2 — exclude AssetImportWorker children; they share the
+    // project path but are never the interactive editor we want to act on.
+    if (isAssetImportWorker(rest)) continue;
     const projectPath = parseProjectPathArg(splitArgs(rest));
     out.push({
       pid,
@@ -281,6 +305,8 @@ export function parsePowerShellLines(stdout: string): RunningUnity[] {
     const rest = trimmed.slice(bar + 1);
     const pid = Number.parseInt(pidStr, 10);
     if (!Number.isInteger(pid) || pid <= 0) continue;
+    // feedback #2 — exclude AssetImportWorker children on Windows too.
+    if (rest.length > 0 && rest !== "null" && isAssetImportWorker(rest)) continue;
     const projectPath =
       rest.length === 0 || rest === "null"
         ? null
@@ -419,4 +445,41 @@ export function findUnityForProject(
     }
   }
   return null;
+}
+
+/**
+ * Read the full command line of a live process by PID. Cross-platform best
+ * effort: macOS/Linux via `ps -p <pid> -o command=`, Windows via a PowerShell
+ * `Get-CimInstance Win32_Process` lookup. Returns `null` on any failure (ps
+ * missing, PID gone, parse error) — never throws.
+ *
+ * feedback #2 (2026-08-06): `restart_editor`'s dry-run now surfaces the
+ * resolved process's command line so a PID misattribution (e.g. killing an
+ * AssetImportWorker instead of the main editor) is visible before confirm.
+ */
+export function readProcessCommandLine(pid: number): string | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const platform = process.platform as UnityScanPlatform;
+  try {
+    if (platform === "win32") {
+      const script =
+        "Get-CimInstance Win32_Process -Filter \"ProcessId=" + pid + "\" | " +
+        "ForEach-Object { Write-Output $_.CommandLine }";
+      const stdout = execFileSync(
+        "powershell",
+        ["-NoProfile", "-NonInteractive", "-Command", script],
+        { encoding: "utf8", windowsHide: true },
+      );
+      const line = stdout.trim();
+      return line.length > 0 ? line : null;
+    }
+    // macOS + Linux share the `ps -p <pid> -o command=` form.
+    const stdout = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+      encoding: "utf8",
+    });
+    const line = stdout.trim();
+    return line.length > 0 ? line : null;
+  } catch {
+    return null;
+  }
 }

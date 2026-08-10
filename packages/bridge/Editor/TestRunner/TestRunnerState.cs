@@ -51,21 +51,40 @@ namespace UnityOpenMcpBridge.TestRunner
             public TestRunnerApi Api;
             public TestCallbacks Callbacks;
             public string RunId;
+            public string Mode;
         }
 
         static TestRunnerState()
         {
             AssemblyReloadEvents.afterAssemblyReload += OnAfterAssemblyReload;
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
+            // feedback #7 — entering play mode aborts any in-flight EditMode
+            // run (the framework does not deliver its onFinished). Without a
+            // terminal file the polling agent sees silence until the TTL sweep
+            // (an hour later). Write an aborted file so the agent sees a final
+            // state. PlayMode runs are not aborted by this transition.
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+        }
+
+        private static void OnPlayModeStateChanged(PlayModeStateChange state)
+        {
+            // Only the EnteringPlayMode edge aborts an EditMode run. EditMode
+            // runs are synchronous on the main thread and cannot survive a
+            // play-mode entry; their onFinished never fires.
+            if (state != PlayModeStateChange.ExitingEditMode) return;
+            DrainActiveCallbacks("playmode_entered");
         }
 
         /// <summary>Track a freshly registered (api, callbacks) pair so a leaked
         /// instance can be unregistered later. Called AFTER
         /// api.RegisterCallbacks(callbacks).</summary>
         internal static void RegisterActive(TestRunnerApi api, TestCallbacks callbacks, string runId)
+            => RegisterActive(api, callbacks, runId, null);
+
+        internal static void RegisterActive(TestRunnerApi api, TestCallbacks callbacks, string runId, string mode)
         {
             if (api == null || callbacks == null) return;
-            ActiveRegistry.Add(new ActiveCallbacks { Api = api, Callbacks = callbacks, RunId = runId });
+            ActiveRegistry.Add(new ActiveCallbacks { Api = api, Callbacks = callbacks, RunId = runId, Mode = mode });
         }
 
         /// <summary>Remove a pair from the registry (its onFinished fired). Does
@@ -81,7 +100,12 @@ namespace UnityOpenMcpBridge.TestRunner
         /// <summary>Unregister + destroy every pair still in the registry. Only
         /// leaks reach here: a pair whose onFinished fired already removed
         /// itself. Safe to call when the registry is empty.</summary>
-        internal static void DrainActiveCallbacks()
+        /// <param name="reason">feedback #7 — when non-null, each swept run also
+        /// gets a terminal `aborted` file so a polling agent sees a final state
+        /// instead of silence. `null` suppresses the write (used by the
+        /// beforeAssemblyReload drain, where the domain is ending and a pending
+        /// PlayMode run is expected to resume).</param>
+        internal static void DrainActiveCallbacks(string reason = null)
         {
             if (ActiveRegistry.Count == 0) return;
             // Iterate over a snapshot — UnregisterActive mutates the list.
@@ -96,6 +120,15 @@ namespace UnityOpenMcpBridge.TestRunner
                 if (entry.Api != null)
                 {
                     try { Object.DestroyImmediate(entry.Api); } catch { }
+                }
+                // feedback #7 — leave a terminal file so the poller stops
+                // waiting. Only when a reason is supplied (superseded by a new
+                // run, or play mode entered); the beforeAssemblyReload drain
+                // passes null because a resumable PlayMode run should NOT be
+                // marked aborted.
+                if (reason != null && !string.IsNullOrEmpty(entry.RunId))
+                {
+                    TestRunnerService.WriteAbortedFile(entry.RunId, entry.Mode, reason);
                 }
             }
         }
@@ -160,6 +193,32 @@ namespace UnityOpenMcpBridge.TestRunner
                 if (File.Exists(path)) File.Delete(path);
             }
             catch { }
+        }
+
+        // feedback #7 — when a new run starts, any OTHER run's lingering
+        // test-pending-*.json marker belongs to a run that will never produce
+        // results (the single-run model supersedes it; or it crashed / was
+        // force-quit and the TTL sweep would only clear it an hour later).
+        // Write a terminal `aborted` file for each so a polling agent sees a
+        // final state. The new run's own marker is left untouched.
+        internal static void AbortOtherPendingRuns(string currentRunId)
+        {
+            try
+            {
+                if (!Directory.Exists(TestRunnerService.StatusDir)) return;
+                foreach (var file in Directory.GetFiles(TestRunnerService.StatusDir, "test-pending-*.json"))
+                {
+                    var json = File.ReadAllText(file);
+                    var runId = JsonBody.GetString(json, "runId");
+                    if (string.IsNullOrEmpty(runId) || runId == currentRunId) continue;
+                    var playMode = JsonBody.GetBool(json, "playMode", true);
+                    TestRunnerService.WriteAbortedFile(runId, playMode ? "PlayMode" : "EditMode", "superseded_by_run");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[TestRunnerState] AbortOtherPendingRuns error: {ex.Message}");
+            }
         }
 
         private static void OnAfterAssemblyReload()

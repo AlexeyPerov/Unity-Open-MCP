@@ -55,7 +55,35 @@ namespace UnityOpenMcpBridge.Screenshot
 
                 var wasOpenBefore = window.position.width > 0 && window.position.height > 0;
 
-                var (png, platformLimited) = CaptureWindowPng(window, width, height);
+#if !UNITY_EDITOR_WIN
+                // feedback #6 (2026-08-07) — on macOS/Linux the screen-readback
+                // path reads from the current active render target, which during
+                // a bridge dispatch (EditorApplication.update) is bound to NO
+                // window's backbuffer. The requested rect is always out of
+                // bounds, producing a solid-color frame that the tool reported
+                // as status:ok. Rather than ship a known-broken capture, return
+                // a structured not_supported with the native-alternative hint.
+                return ErrorJson("not_supported",
+                    "screenshot_window capture is not supported on macOS/Linux: the " +
+                    "editor-window backbuffer is not bound during bridge dispatch, so " +
+                    "Texture2D.ReadPixels reads out-of-bounds and produces a blank frame. " +
+                    "Use the OS screen-capture tool instead (macOS: " +
+                    "`screencapture -l<windowid>` / CGWindowListCreateImage; Linux: a " +
+                    "Wayland/X11 screenshot helper), or use screenshot {view:\"composed\"} " +
+                    "to capture the rendered Game view including UI.");
+#else
+                var (png, captureW, captureH, isSolid) = CaptureWindowPng(window, width, height);
+
+                // feedback #6 — validate the frame before declaring success. A
+                // blank/solid-color capture (readback raced the window's repaint
+                // or the window was occluded) must surface as an error, not ok.
+                if (isSolid)
+                {
+                    return ErrorJson("blank_capture",
+                        $"Captured frame for window '{window.titleContent.text}' is a uniform " +
+                        "solid color — the window backbuffer was not bound or the window was " +
+                        "occluded during capture. Ensure the window is visible and retry.");
+                }
 
                 var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
                 var safeName = SanitizeForPath(window_title ?? window.GetType().Name);
@@ -65,7 +93,8 @@ namespace UnityOpenMcpBridge.Screenshot
                 System.IO.Directory.CreateDirectory(ScreenshotService.OutputDir);
                 System.IO.File.WriteAllBytes(outPath, png);
 
-                return BuildSuccessJson(window, width, height, outPath, platformLimited, wasOpenBefore);
+                return BuildSuccessJson(window, captureW, captureH, outPath, true, wasOpenBefore);
+#endif
             }
             catch (System.Exception e)
             {
@@ -188,41 +217,20 @@ namespace UnityOpenMcpBridge.Screenshot
 
         // ---- capture ----
 
-        private static (byte[] png, bool platformLimited) CaptureWindowPng(
+        // feedback #6 — returns the actual captured dimensions and a solid-color
+        // flag so the caller can validate the frame before declaring success and
+        // report the real file size (not the requested maxes). Windows-only now:
+        // macOS/Linux return not_supported at the dispatch layer.
+        private static (byte[] png, int captureW, int captureH, bool isSolid) CaptureWindowPng(
             EditorWindow window, int width, int height)
-        {
-#if UNITY_EDITOR_WIN
-            // Full-fidelity path: Win32 PrintWindow. Unity does not expose the
-            // dock-window HWND through public API, so resolving it reliably across
-            // editor layouts requires EnumChildWindows over the main window — left
-            // as a follow-up. On Windows we currently route through the same
-            // readback path and set platformLimited: true so agents know the
-            // fidelity limit; the PrintWindow full-fidelity integration is the
-            // documented Windows-only fidelity limit in the current model.
-            var png = CaptureViaScreenReadback(window, width, height);
-            return (png, true);
-#else
-            // macOS / Linux: best-effort screen-rect readback. The window must be
-            // visible (not occluded) for the read to contain real UI pixels.
-            var png = CaptureViaScreenReadback(window, width, height);
-            return (png, true);
-#endif
-        }
-
-        // Cross-platform fallback. Reads the window's screen rect via
-        // Texture2D.ReadPixels. Works reliably only when the window is visible
-        // (not occluded); the caller sets platformLimited: true.
-        private static byte[] CaptureViaScreenReadback(EditorWindow window, int width, int height)
         {
             var rect = window.position;
 
-            // Ensure the window has been laid out and repainted so ReadPixels
-            // has real UI to read (not a stale framebuffer region).
-            window.Show();
+            // feedback #6 — Repaint (without Show()) so a docked window's layout
+            // is not disturbed; Show() could reposition a docked window and the
+            // tool advertises read-only intent.
             window.Repaint();
-            // Allow the repaint to land before reading pixels. A short sleep is
-            // acceptable here because this runs on the main thread inside a
-            // direct-response tool dispatch; the cost is bounded by the layout.
+            // Allow the repaint to land before reading pixels.
             System.Threading.Thread.Sleep(50);
 
             var captureW = Mathf.Min(Mathf.Max((int)rect.width, 1), width);
@@ -237,21 +245,38 @@ namespace UnityOpenMcpBridge.Screenshot
             {
                 tex = new Texture2D(captureW, captureH, TextureFormat.RGBA32, false);
                 // Screen origin is bottom-left; GUI rect origin is top-left.
-                // ReadPixels takes a Rect in screen space (origin bottom-left).
                 tex.ReadPixels(
                     new Rect(rect.x, Screen.height - rect.y - captureH, captureW, captureH),
                     0, 0);
                 tex.Apply();
-                return ImageConversion.EncodeToPNG(tex);
+                var isSolid = IsSolidColor(tex);
+                return (ImageConversion.EncodeToPNG(tex), captureW, captureH, isSolid);
             }
             finally
             {
-                // B28 — DestroyImmediate must run on every path. The tool stays
-                // callable, so a throw from ReadPixels/Apply/EncodeToPNG would
-                // otherwise leak a new Texture2D on each retry.
                 if (tex != null) Object.DestroyImmediate(tex);
                 RenderTexture.active = prevActive;
             }
+        }
+
+        // feedback #6 — detect a uniform/solid-color frame (the signature of an
+        // occluded window or an unbound backbuffer read). Samples every pixel
+        // and returns true when they all match the first within a small epsilon.
+        private static bool IsSolidColor(Texture2D tex)
+        {
+            if (tex == null) return true;
+            var pixels = tex.GetPixels32();
+            if (pixels.Length == 0) return true;
+            var first = pixels[0];
+            const byte eps = 4;
+            for (int i = 1; i < pixels.Length; i++)
+            {
+                var p = pixels[i];
+                if (System.Math.Abs(p.r - first.r) > eps ||
+                    System.Math.Abs(p.g - first.g) > eps ||
+                    System.Math.Abs(p.b - first.b) > eps) return false;
+            }
+            return true;
         }
 
         // ---- helpers ----

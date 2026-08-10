@@ -35,13 +35,18 @@ export const pullEvents = makeTool(
             description:
               "Maximum events to return per call. Additional buffered events are counted in `dropped`.",
           },
-          // Hidden-but-documented: an explicit subscriber id lets a long-lived
-          // agent session resume across MCP server restarts. Defaults to a
-          // server-scoped id; callers normally omit it.
+          // feedback #8 — an explicit subscriber id gives the caller its OWN
+          // read cursor over the shared queue: a fresh subscriber's first call
+          // returns started:true with NO events (its cursor starts at the current
+          // high-water mark, so history is not replayed). A returning subscriber
+          // resumes from its saved cursor. Omit to drain the shared queue
+          // (legacy behaviour). Use a distinct id per agent session.
           subscriber: {
             type: "string",
             description:
-              "Optional subscriber id to resume a prior subscription (defaults to a server-scoped id).",
+              "Optional subscriber id. A NEW id starts a fresh read cursor at the current " +
+              "high-water mark (no backlog replay); a returning id resumes from its saved " +
+              "cursor. Omit to drain the shared queue.",
           },
         },
   },

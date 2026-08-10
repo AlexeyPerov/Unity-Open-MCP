@@ -135,9 +135,12 @@ namespace UnityOpenMcpBridge
             if (string.IsNullOrEmpty(code)) return DenyResult.Allow();
             return Match(code, GetOrCompileCSharp(ResolveCSharpPatterns(settingsPatterns)),
                 "execute_csharp",
-                "Use a scoped typed tool (apply_fix, reserialize, invoke_method) instead of a raw snippet, " +
+                "Use a scoped typed tool instead of a raw snippet " +
+                "(unity_open_mcp_assets_delete for AssetDatabase.DeleteAsset, apply_fix, reserialize, invoke_method), " +
                 "unity_senses_run_tests for test execution, " +
-                "or retry with gate: \"off\" and confirm_bypass: true to proceed and accept the risk.");
+                "or retry with gate: \"off\" and confirm_bypass: true to proceed and accept the risk. " +
+                "Note: this is a text-only scan of the snippet source; a destructive call nested inside " +
+                "another method is not detected.");
         }
 
         // Evaluate a menu_path against the menu deny list. Same bypass contract.

@@ -99,6 +99,35 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual("execution_error", result.ErrorCode);
             StringAssert.Contains("not loaded", result.ErrorMessage ?? "");
         }
+
+        // feedback #1 (2026-08-06) — invoking a static method on a static class
+        // WITHOUT is_static must resolve. Previously the lookup used
+        // Instance-only flags when is_static was omitted, so every static
+        // member was invisible and the tool reported only the System.Object
+        // inherited members. Run() is parameterless so the static-branch needs
+        // no target.
+        [Test]
+        public static void Execute_StaticMethod_OnStaticClass_WithoutIsStatic_Resolves()
+        {
+            var result = InvokeMethodTool.Execute(
+                "{\"type_name\":\"UnityOpenMcpBridge.Tests.InvokeMethodArgProbe\"," +
+                "\"assembly_name\":\"com.alexeyperov.unity-open-mcp-bridge.Editor.Tests\"," +
+                "\"method_name\":\"Run\"}");
+            Assert.IsTrue(result.Success, result.ErrorMessage ?? "");
+            StringAssert.Contains("ran", result.Output ?? "");
+        }
+
+        // feedback #1 — the method_not_found error should list static candidates
+        // (prefixed "static "), proving the combined flags reach them.
+        [Test]
+        public static void Execute_UnknownMethod_ListsStaticCandidatesInError()
+        {
+            var result = InvokeMethodTool.Execute(
+                "{\"type_name\":\"UnityEngine.Vector3\",\"method_name\":\"DefinitelyNotAMethod\"}");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("method_not_found", result.ErrorCode);
+            StringAssert.Contains("static Distance", result.ErrorMessage ?? "");
+        }
     }
 
     /// <summary>Static helpers used by the GameObject-arg test above so a
@@ -108,5 +137,9 @@ namespace UnityOpenMcpBridge.Tests
     public static class InvokeMethodArgProbe
     {
         public static string NameOf(GameObject go) => go == null ? "<null>" : go.name;
+
+        // feedback #1 — a static method on a static class, reachable without
+        // is_static after the BindingFlags fix.
+        public static string Run() => "ran";
     }
 }

@@ -27,7 +27,7 @@ import { getKnownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
 import { PORT_ENV_VAR } from "./constants.js";
-import { findUnityForProject } from "./running-unity.js";
+import { findUnityForProject, readProcessCommandLine } from "./running-unity.js";
 
 // M31-optimizations Plan 1 / L14 — opt-in route-logging gate. Resolved once at
 // module load into a boolean; the per-dispatch log sites read the boolean
@@ -1113,7 +1113,15 @@ export class ToolRouter implements Router {
         ? Math.min(args.max_events, 1000)
         : 50;
 
-    const result = this.eventStream.pull(maxEvents);
+    // feedback #8 — forward the caller-supplied subscriber id so each agent
+    // session gets its own read cursor (a fresh subscriber starts at the
+    // current high-water mark and does not replay the shared queue's backlog).
+    const subscriber =
+      typeof args.subscriber === "string" && args.subscriber.length > 0
+        ? args.subscriber
+        : undefined;
+
+    const result = this.eventStream.pull(maxEvents, subscriber);
     return {
       content: [{ type: "text", text: JSON.stringify(result) }],
       isError: false,
@@ -1962,22 +1970,39 @@ export class ToolRouter implements Router {
       }
     }
 
-    // 2. Resolve the live Unity PID via the process scan (same primitive
-    //    bridge_status uses for cold-Safe-Mode detection). The bridge may
-    //    already be down (it dies on fd-exhaustion), so we cannot rely on
-    //    the instance lock's pid alone.
+    // 2. Resolve the live Unity PID. feedback #2 (2026-08-06): the instance
+    //    lock's `pid` is authoritative — the bridge only writes it from the
+    //    main interactive editor (it early-returns in worker/batch processes),
+    //    while the process scan could return an AssetImportWorker child that
+    //    shares the project path. Prefer the lock PID when it is live; fall
+    //    back to the scan (which now also excludes AssetImportWorker children)
+    //    only when no live lock PID exists.
     let pid: number | null = null;
-    try {
-      const proc = findUnityForProject(this.projectPath);
-      pid = proc ? proc.pid : null;
-    } catch {
-      pid = null;
+    let pidSource: "instance_lock" | "process_scan" | null = null;
+    const lockPid = this.resolveLiveEditorPid();
+    if (lockPid !== undefined) {
+      pid = lockPid;
+      pidSource = "instance_lock";
+    } else {
+      try {
+        const proc = findUnityForProject(this.projectPath);
+        if (proc) {
+          pid = proc.pid;
+          pidSource = "process_scan";
+        }
+      } catch {
+        pid = null;
+      }
     }
 
     // 3. Dry-run branch: confirm was false/absent. Return the diagnosis +
     //    the PID the tool WOULD kill, with no side effect. Lets an agent
-    //    preview before committing.
+    //    preview before committing. feedback #2: include the PID source and
+    //    the resolved process's command line so a misattribution (e.g. an
+    //    AssetImportWorker child) is visible before confirm.
     if (!confirm) {
+      const processCommandLine =
+        pid !== null ? readProcessCommandLine(pid) : null;
       return sourceResult(
         {
           action: "restart_editor",
@@ -1986,13 +2011,17 @@ export class ToolRouter implements Router {
           signaturePresent,
           ...(signatureSource !== null ? { signatureSource } : {}),
           ...(pid !== null ? { wouldKillPid: pid } : {}),
+          ...(pidSource !== null ? { pidSource } : {}),
+          ...(processCommandLine !== null ? { processCommandLine } : {}),
           ...(logWarning !== null ? { warning: logWarning } : {}),
           projectPath: this.projectPath,
           message:
             "Dry-run preview. Pass confirm: true to actually terminate the " +
             "hung Unity Editor. Only do so after read_compile_errors " +
             "confirms an editor_fd_exhaustion issue — killing the Editor " +
-            "can destroy unsaved scene work and in-flight asset imports.",
+            "can destroy unsaved scene work and in-flight asset imports. " +
+            "Verify processCommandLine targets the main editor, not an " +
+            "AssetImportWorker child.",
         },
         "local",
       );
@@ -2175,18 +2204,24 @@ export class ToolRouter implements Router {
   private async routeResourcePressure(
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
-    // 1. Resolve the PID. An explicit pid arg wins; otherwise scan for the
-    //    live Unity process for this project (same primitive bridge_status
-    //    uses). The probe must NOT depend on the bridge.
+    // 1. Resolve the PID. An explicit pid arg wins; otherwise prefer the
+    //    instance-lock PID (authoritative main editor — feedback #2) and fall
+    //    back to the process scan (which excludes AssetImportWorker children).
+    //    The probe must NOT depend on the bridge.
     let pid: number | null = null;
     if (typeof args.pid === "number" && Number.isInteger(args.pid) && args.pid > 0) {
       pid = args.pid;
     } else {
-      try {
-        const proc = findUnityForProject(this.projectPath);
-        pid = proc ? proc.pid : null;
-      } catch {
-        pid = null;
+      const lockPid = this.resolveLiveEditorPid();
+      if (lockPid !== undefined) {
+        pid = lockPid;
+      } else {
+        try {
+          const proc = findUnityForProject(this.projectPath);
+          pid = proc ? proc.pid : null;
+        } catch {
+          pid = null;
+        }
       }
     }
     if (pid === null) {

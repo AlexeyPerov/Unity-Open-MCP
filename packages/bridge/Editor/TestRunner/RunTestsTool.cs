@@ -142,7 +142,14 @@ namespace UnityOpenMcpBridge.TestRunner
                 // longer drains — its caller drains once before the marker
                 // loop), starting a NEW run is exactly the point where sweeping
                 // leftovers is legitimate.
-                TestRunnerState.DrainActiveCallbacks();
+                //
+                // feedback #7 — pass "superseded_by_run" so each swept run also
+                // gets a terminal `aborted` file: previously a superseded run
+                // left only a lingering test-pending marker and a polling agent
+                // saw silence forever. Also sweep OTHER pending markers from
+                // prior runs (crashed/force-quit) the same way.
+                TestRunnerState.DrainActiveCallbacks("superseded_by_run");
+                TestRunnerState.AbortOtherPendingRuns(runId);
 
                 // Re-resolve api inside the deferred call: TestRunnerApi is a
                 // ScriptableObject and must be created on the main thread (which
@@ -150,7 +157,7 @@ namespace UnityOpenMcpBridge.TestRunner
                 // onFinished callback can destroy it.
                 api = ScriptableObject.CreateInstance<TestRunnerApi>();
                 api.RegisterCallbacks(callbacks);
-                TestRunnerState.RegisterActive(api, callbacks, runId);
+                TestRunnerState.RegisterActive(api, callbacks, runId, mode);
                 try
                 {
                     api.Execute(new ExecutionSettings(filter));

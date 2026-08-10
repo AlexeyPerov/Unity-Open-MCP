@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   parseProjectPathArg,
   isUnityCommandLine,
+  isAssetImportWorker,
   splitArgs,
   splitArgsWindows,
   parsePsOutput,
@@ -200,6 +201,38 @@ test("parsePsOutput: ignores blank and unparseable lines", () => {
   assert.deepEqual(parsePsOutput(sample), []);
 });
 
+// feedback #2 (2026-08-06) — AssetImportWorker children share the project
+// path but must never be returned by the scan; restart_editor /
+// resource_pressure targeted a worker instead of the main editor.
+test("parsePsOutput: excludes AssetImportWorker children", () => {
+  const sample = [
+    "92746 /Applications/Unity/Hub/Editor/6000.0.1f1/Unity.app/Contents/MacOS/Unity -projectPath /Users/me/MyGame",
+    "8422 /Applications/Unity/Hub/Editor/6000.0.1f1/Unity.app/Contents/MacOS/Unity -batchMode -parentPid 92746 -name AssetImportWorker0 -projectPath /Users/me/MyGame",
+  ].join("\n");
+  const found = parsePsOutput(sample);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].pid, 92746);
+});
+
+test("isAssetImportWorker: detects -name AssetImportWorker0", () => {
+  assert.ok(
+    isAssetImportWorker(
+      "/Applications/Unity/.../Unity -batchMode -parentPid 92746 -name AssetImportWorker0 -projectPath /p",
+    ),
+  );
+});
+
+test("isAssetImportWorker: detects legacy -importWorker flag", () => {
+  assert.ok(isAssetImportWorker("Unity -importWorker -projectPath /p"));
+});
+
+test("isAssetImportWorker: false for the main editor", () => {
+  assert.equal(
+    isAssetImportWorker("Unity -projectPath /Users/me/MyGame"),
+    false,
+  );
+});
+
 // ----- parsePowerShellLines -----
 
 test("parsePowerShellLines: extracts pid + path", () => {
@@ -219,6 +252,17 @@ test("parsePowerShellLines: keeps pid when CommandLine is null", () => {
 
 test("parsePowerShellLines: skips blank and unparseable", () => {
   assert.deepEqual(parsePowerShellLines("\n   \nnot-a-pid|Unity.exe\n"), []);
+});
+
+// feedback #2 — worker exclusion on Windows too.
+test("parsePowerShellLines: excludes AssetImportWorker children", () => {
+  const sample = [
+    '92746|Unity.exe -projectPath "C:\\Users\\me\\MyGame"',
+    '8422|Unity.exe -batchMode -parentPid 92746 -name AssetImportWorker0 -projectPath "C:\\Users\\me\\MyGame"',
+  ].join("\n");
+  const found = parsePowerShellLines(sample);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].pid, 92746);
 });
 
 // ---------------------------------------------------------------------------

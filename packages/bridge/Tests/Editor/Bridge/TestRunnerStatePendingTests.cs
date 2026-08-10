@@ -178,5 +178,96 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(TestRunnerState.IsPendingStale(0, 1_000_000_000L),
                 "absent createdAt (0) must be treated as fresh, not stale");
         }
+
+        // -------------------------------------------------------------------
+        // feedback #7 (2026-08-07) — an aborted run must leave a TERMINAL file
+        // so a polling agent sees a final state instead of silence. A new run
+        // starting (or play mode entered mid-EditMode-run) sweeps other runs'
+        // pending markers and writes an `aborted` results file for each. The
+        // poller in live-client.ts consumes test-results-*.json regardless of
+        // status, so `aborted` surfaces as a parseable terminal body.
+        // -------------------------------------------------------------------
+
+        private static void ClearResults(string runId)
+        {
+            try
+            {
+                var path = TestRunnerService.ResultsFilePath(runId);
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch { }
+        }
+
+        [Test]
+        public void WriteAbortedFile_WritesTerminalAbortedStatusAndClearsPending()
+        {
+            var runId = RunId("abort");
+            try
+            {
+                // Seed a pending marker (the swept run had one) + no results yet.
+                TestRunnerState.MarkPending(runId, "A", null, null, null,
+                    playMode: false, includePasses: true);
+                Assert.IsTrue(File.Exists(TestRunnerService.PendingFilePath(runId)),
+                    "precondition: pending marker exists");
+
+                TestRunnerService.WriteAbortedFile(runId, "EditMode", "superseded_by_run");
+
+                var resultsPath = TestRunnerService.ResultsFilePath(runId);
+                Assert.IsTrue(File.Exists(resultsPath),
+                    "an aborted run must write a terminal results file");
+                var json = File.ReadAllText(resultsPath);
+                StringAssert.Contains("\"status\":\"aborted\"", json);
+                StringAssert.Contains("\"reason\":\"superseded_by_run\"", json);
+                StringAssert.Contains("\"mode\":\"EditMode\"", json);
+                // The pending marker must be cleared so a later reload does not
+                // reattach a finished run.
+                Assert.IsFalse(File.Exists(TestRunnerService.PendingFilePath(runId)),
+                    "aborted file must clear the pending marker");
+            }
+            finally
+            {
+                ClearResults(runId);
+                Clear(runId);
+            }
+        }
+
+        [Test]
+        public void AbortOtherPendingRuns_AbortsOtherRuns_LeavesCurrentAlone()
+        {
+            var current = RunId("cur");
+            var other = RunId("oth");
+            try
+            {
+                // Two pending markers: the new (current) run + a stale one from
+                // a prior crashed run.
+                TestRunnerState.MarkPending(current, "A", null, null, null,
+                    playMode: false, includePasses: true);
+                TestRunnerState.MarkPending(other, "A", null, null, null,
+                    playMode: true, includePasses: true);
+
+                TestRunnerState.AbortOtherPendingRuns(current);
+
+                // The other run gets a terminal aborted file + its marker gone.
+                Assert.IsTrue(File.Exists(TestRunnerService.ResultsFilePath(other)),
+                    "the swept run must get a terminal aborted file");
+                var otherJson = File.ReadAllText(TestRunnerService.ResultsFilePath(other));
+                StringAssert.Contains("\"status\":\"aborted\"", otherJson);
+                Assert.IsFalse(File.Exists(TestRunnerService.PendingFilePath(other)),
+                    "the swept run's pending marker must be cleared");
+
+                // The current run's marker is untouched (it's about to start).
+                Assert.IsTrue(File.Exists(TestRunnerService.PendingFilePath(current)),
+                    "the current run's pending marker must survive");
+                Assert.IsFalse(File.Exists(TestRunnerService.ResultsFilePath(current)),
+                    "the current run must not get an aborted file");
+            }
+            finally
+            {
+                ClearResults(current);
+                Clear(current);
+                ClearResults(other);
+                Clear(other);
+            }
+        }
     }
 }

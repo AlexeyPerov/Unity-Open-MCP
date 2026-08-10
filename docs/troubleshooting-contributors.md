@@ -39,6 +39,33 @@ failed to reload). See
 and
 `mcp-server/src/instance-discovery.ts` (`classifyInstance`).
 
+### Editor must be foregrounded for long agent sessions (macOS)
+
+**Symptom:** Over a long headless agent session the bridge's `/ping` keeps
+answering, but POST tool calls (`execute_csharp`, `editor_status`, …) hang on
+body read, and `resource_pressure` eventually reports `critical` fd usage even
+without manual domain reloads.
+
+**Why:** When the Unity Editor window is not frontmost on macOS, its main thread
+sleeps in `_BlockUntilNextEventMatchingListInModeWithFilter` and the bridge's
+`EditorApplication.update` queue stops ticking. With no focus, heavy imports
+(~200 new assets) can exhaust the fd budget of a freshly started editor before
+a single manual reload; the IOSelector then stops accepting new sockets while
+`/ping`'s listener survives, producing the "GET answers, POST hangs" signature.
+
+**Recovery / prevention:**
+
+1. Keep the Unity window in the foreground for unattended long sessions, or
+   `osascript -e 'tell application "Unity" to activate'` to wake it.
+2. Watch fd pressure with `unity_open_mcp_resource_pressure` — its `trend`
+   field flags a monotonic climb (leak in progress) before the ceiling trips.
+   On `critical`, save scene work and restart via the Hub before the next
+   domain reload wedges the editor.
+3. If the editor is already wedged (`read_compile_errors` reports an
+   `editor_fd_exhaustion` issue), use `unity_open_mcp_restart_editor`
+   (`confirm: true`) to terminate the **main** editor PID — the tool prefers the
+   instance-lock PID and excludes `AssetImportWorker` children from the scan.
+
 ## `InitTestScene*` modal after test runs
 
 **Symptom:** After `scripts/mcp-full-test.mjs` (Band G /

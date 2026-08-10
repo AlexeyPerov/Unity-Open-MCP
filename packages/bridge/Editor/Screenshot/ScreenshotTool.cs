@@ -44,6 +44,13 @@ namespace UnityOpenMcpBridge.Screenshot
                     case "game":
                         filePath = ScreenshotService.CaptureGameView(width, height);
                         break;
+                    // feedback #5 (2026-08-07) — the player's composite frame:
+                    // every camera by depth + Screen-Space Overlay canvases (in
+                    // play mode). Use this to verify UI edits; `game` renders
+                    // only Camera.main and silently omits Overlay UI.
+                    case "composed":
+                        filePath = ScreenshotService.CaptureComposedView(width, height);
+                        break;
                     case "isolated":
                         if (string.IsNullOrEmpty(object_path))
                             return ErrorJson("missing_parameter",
@@ -58,7 +65,7 @@ namespace UnityOpenMcpBridge.Screenshot
                         break;
                     default:
                         return ErrorJson("validation_error",
-                            $"Unknown view '{view}'. Use 'scene', 'game', or 'isolated'.");
+                            $"Unknown view '{view}'. Use 'scene', 'game', 'composed', or 'isolated'.");
                 }
 
                 return BuildSuccessJson(view, width, height, filePath);

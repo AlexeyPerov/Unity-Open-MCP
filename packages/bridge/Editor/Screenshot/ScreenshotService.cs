@@ -61,6 +61,49 @@ namespace UnityOpenMcpBridge.Screenshot
             return RenderCameraToPng(cam, width, height);
         }
 
+        // feedback #5 (2026-08-07) — the player's composite frame: every enabled
+        // camera rendered by ascending depth into one target (so depth-stacked
+        // cameras + clear-flags compose as they would on screen), PLUS Screen-
+        // Space Overlay canvases captured via ScreenCapture in play mode. The
+        // existing `game` view only renders Camera.main, so Overlay UI and multi-
+        // camera compositions were silently absent — a frame that looked valid
+        // but missed the UI an agent was asked to verify.
+        //
+        // play mode: ScreenCapture.CaptureScreenshotAsTexture() reads the actual
+        // rendered Game view backbuffer (all cameras by depth + every Canvas,
+        // including Screen-Space Overlay that no camera renders). edit mode:
+        // Overlay canvases do not render at all (no player loop), so we fall back
+        // to depth-ordered camera compositing — still strictly better than
+        // Camera.main-only for multi-camera scenes.
+        public static string CaptureComposedView(int width, int height)
+        {
+            return WritePng(CaptureComposedViewBytes(width, height), PathStamp("composed"));
+        }
+
+        public static byte[] CaptureComposedViewBytes(int width, int height)
+        {
+            if (Application.isPlaying)
+            {
+                // CaptureScreenshotAsTexture grabs the last rendered frame's
+                // backbuffer (all cameras + Overlay UI). The overload taking a
+                // resolution scales the capture; passing the exact size avoids a
+                // resize. Reads back synchronously from the GPU backbuffer.
+                var captured = ScreenCapture.CaptureScreenshotAsTexture();
+                try
+                {
+                    return TextureToPngScaled(captured, width, height);
+                }
+                finally
+                {
+                    Object.DestroyImmediate(captured);
+                }
+            }
+
+            // edit mode — no player loop, so Overlay canvases cannot render.
+            // Composite every enabled camera in ascending depth order.
+            return RenderAllCamerasByDepth(width, height);
+        }
+
         // M20 Plan 1 / T20.1.1 — render from an arbitrary camera pose without
         // moving the scene/game camera. A transient Camera is positioned at the
         // requested pose, renders to a RenderTexture, then is destroyed. The
@@ -210,6 +253,119 @@ namespace UnityOpenMcpBridge.Screenshot
             Directory.CreateDirectory(OutputDir);
             File.WriteAllBytes(outPath, png);
             return outPath;
+        }
+
+        // feedback #5 — encode a captured Texture2D to PNG, scaling it to the
+        // requested size when the backbuffer resolution differs (ScreenCapture
+        // returns the screen's native resolution). Uses RenderTexture + a
+        // scaled Graphics.Blit so the output matches the caller's width/height.
+        private static byte[] TextureToPngScaled(Texture src, int width, int height)
+        {
+            if (src == null)
+                throw new InvalidOperationException("Captured frame was empty.");
+
+            // Fast path: native size already matches.
+            if (src.width == width && src.height == height)
+            {
+                var tmp = new Texture2D(width, height, CaptureFormat, CaptureMipChain);
+                var prevActive = RenderTexture.active;
+                try
+                {
+                    var rt = RenderTexture.GetTemporary(width, height, 0);
+                    Graphics.Blit(src, rt);
+                    RenderTexture.active = rt;
+                    tmp.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                    tmp.Apply();
+                    var png = ImageConversion.EncodeToPNG(tmp);
+                    RenderTexture.ReleaseTemporary(rt);
+                    return png;
+                }
+                finally
+                {
+                    Object.DestroyImmediate(tmp);
+                    RenderTexture.active = prevActive;
+                }
+            }
+
+            // Scale path.
+            var scaled = new Texture2D(width, height, CaptureFormat, CaptureMipChain);
+            var prevActiveScale = RenderTexture.active;
+            try
+            {
+                var rt = RenderTexture.GetTemporary(width, height, 0);
+                Graphics.Blit(src, rt);
+                RenderTexture.active = rt;
+                scaled.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                scaled.Apply();
+                var png = ImageConversion.EncodeToPNG(scaled);
+                RenderTexture.ReleaseTemporary(rt);
+                return png;
+            }
+            finally
+            {
+                Object.DestroyImmediate(scaled);
+                RenderTexture.active = prevActiveScale;
+            }
+        }
+
+        // feedback #5 — render every enabled Camera in ascending depth order
+        // into a single RenderTexture, mirroring how Unity composites the frame.
+        // The first camera clears; subsequent cameras render on top (depth test
+        // resolves overlaps by depth). Each camera's targetTexture is swapped and
+        // restored, so the scene's cameras are left untouched.
+        private static byte[] RenderAllCamerasByDepth(int width, int height)
+        {
+            var cameras = SceneQuery.FindAllOfType<Camera>();
+            if (cameras == null || cameras.Length == 0)
+                throw new InvalidOperationException("No camera found in the scene.");
+
+            // Enabled, depth-sorted ascending (Unity renders low-depth first).
+            var sorted = new System.Collections.Generic.List<Camera>(cameras.Length);
+            for (int i = 0; i < cameras.Length; i++)
+            {
+                var c = cameras[i];
+                if (c != null && c.isActiveAndEnabled && c.tag != "Untagged_editor_only")
+                    sorted.Add(c);
+            }
+            if (sorted.Count == 0)
+                throw new InvalidOperationException("No enabled camera found in the scene.");
+            sorted.Sort((a, b) => a.depth.CompareTo(b.depth));
+
+            var rt = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
+            var prevActive = RenderTexture.active;
+            var prevTargets = new System.Collections.Generic.List<KeyValuePair<Camera, RenderTexture>>(sorted.Count);
+            try
+            {
+                RenderTexture.active = rt;
+                for (int i = 0; i < sorted.Count; i++)
+                {
+                    var cam = sorted[i];
+                    prevTargets.Add(new KeyValuePair<Camera, RenderTexture>(cam, cam.targetTexture));
+                    cam.targetTexture = rt;
+                    cam.Render();
+                }
+
+                var tex = new Texture2D(width, height, CaptureFormat, CaptureMipChain);
+                tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                tex.Apply();
+                var png = ImageConversion.EncodeToPNG(tex);
+                Object.DestroyImmediate(tex);
+                return png;
+            }
+            finally
+            {
+                for (int i = 0; i < prevTargets.Count; i++)
+                {
+                    try { prevTargets[i].Key.targetTexture = prevTargets[i].Value; }
+                    catch { /* camera destroyed mid-capture */ }
+                }
+                RenderTexture.active = prevActive;
+                if (rt != null)
+                {
+                    rt.Release();
+                    Object.DestroyImmediate(rt);
+                }
+            }
         }
 
         // Render an existing Camera to PNG bytes. The camera's targetTexture is

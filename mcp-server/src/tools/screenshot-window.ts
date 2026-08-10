@@ -3,21 +3,27 @@ import { makeTool } from "./schema-fragments.js";
 
 // M20 Plan 1 / T20.1.2 — Editor window screenshot. Captures any EditorWindow
 // (Console, Hierarchy, Inspector, Project, Scene, Game, or a custom window).
-// Full-fidelity capture via the Win32 PrintWindow API is Windows-only; on
-// macOS/Linux a best-effort screen-rect readback is used and the response
-// carries platformLimited: true so the agent knows the capture may be partial
-// when the window is occluded. Returns the saved PNG file path.
+// feedback #6 (2026-08-07): on macOS/Linux the screen-readback path reads from
+// an unbound backbuffer during bridge dispatch and produces a blank frame, so
+// the tool now returns a structured `not_supported` error there (use the OS
+// screen-capture tool, or screenshot {view:"composed"} for the rendered Game
+// view). On Windows a screen-rect readback is used and a post-capture
+// solid-color check rejects blank frames with a `blank_capture` error instead
+// of reporting status:ok. `resolution` reports the actual capture size.
 export const screenshotWindow = makeTool(
   "unity_senses_screenshot_window",
   "Capture a Unity Editor window (Console, Hierarchy, Inspector, Project, " +
-    "Scene, Game, or any custom EditorWindow) to a PNG file. Full-fidelity " +
-    "capture (occlusion-proof, no focus stealing) is Windows-only via the " +
-    "Win32 PrintWindow API; on macOS/Linux a best-effort screen-rect readback " +
-    "is used and the response carries platformLimited: true, so the capture " +
-    "may be partial or stale when the window is hidden behind others. Provide " +
-    "either window_title (visible tab text, e.g. \"Console\") or window_type " +
-    "(EditorWindow type name, e.g. \"UnityEditor.ConsoleWindow\"). Returns " +
-    "the saved PNG file path. Requires a live Unity Editor connection.",
+    "Scene, Game, or any custom EditorWindow) to a PNG file. Windows-only: on " +
+    "macOS/Linux returns a `not_supported` error (the editor-window backbuffer " +
+    "is not bound during bridge dispatch, so a blank frame would result — use " +
+    "the OS screen-capture tool, or screenshot {view:\"composed\"} for the " +
+    "rendered Game view). On Windows a screen-rect readback is used; a blank/" +
+    "solid-color frame is rejected with a `blank_capture` error. `resolution` " +
+    "reports the ACTUAL capture size (clamped to the window's on-screen rect), " +
+    "not the requested maximum. Provide either window_title (visible tab text, " +
+    "e.g. \"Console\") or window_type (EditorWindow type name, e.g. " +
+    "\"UnityEditor.ConsoleWindow\"). Returns the saved PNG file path. Requires " +
+    "a live Unity Editor connection.",
   {
     properties: {
           window_title: {

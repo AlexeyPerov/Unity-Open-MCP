@@ -292,3 +292,114 @@ test("BridgeEventStream: under-capacity flood drops nothing", async () => {
     await stub.close();
   }
 });
+
+// ----- feedback #8 (2026-08-10): per-subscriber cursor (no backlog replay) -----
+
+/**
+ * Stub that emits `before` events, waits for the first pull to establish a
+ * subscriber cursor, then emits `after` events and ends. Used to prove a named
+ * subscriber's first pull returns empty (no backlog) and its second pull sees
+ * only the post-subscription events.
+ */
+function startBacklogStub(opts: {
+  before: number;
+  after: number;
+  firstPull: Promise<void>;
+}): Promise<StubHandle> {
+  return new Promise((resolve) => {
+    const server = createServer((_req: IncomingMessage, res: ServerResponse) => {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      const writeBatch = (start: number, count: number) => {
+        const blocks: string[] = [];
+        for (let i = 0; i < count; i++) {
+          blocks.push(
+            `event: log\ndata: {"seq":${start + i},"ts":"2026-08-10T00:00:00.000Z","type":"log","logType":"log","message":"e${start + i}"}\n\n`,
+          );
+        }
+        res.write(blocks.join(""));
+      };
+      writeBatch(0, opts.before);
+      // Once the test has pulled (cursor pinned at the tail), emit the after-batch.
+      opts.firstPull.then(() => {
+        writeBatch(opts.before, opts.after);
+        res.end();
+      });
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      resolve({
+        server,
+        port,
+        close: () => new Promise<void>((r) => server.close(() => r())),
+      });
+    });
+  });
+}
+
+test("BridgeEventStream: a NEW named subscriber's first pull returns empty (no backlog replay)", async () => {
+  // feedback #8 — before the fix, every caller drained one shared FIFO queue,
+  // so a fresh subscriber name replayed hours of accumulated history. The fix
+  // pins a new named subscriber's cursor at the current queue tail on its
+  // first pull, so it returns started:true + empty events.
+  let resolveFirstPull: () => void;
+  const firstPull = new Promise<void>((r) => {
+    resolveFirstPull = r;
+  });
+  const stub = await startBacklogStub({ before: 5, after: 3, firstPull });
+  try {
+    const stream = new BridgeEventStream(
+      `http://127.0.0.1:${stub.port}`,
+      "backlog-stream",
+    );
+    stream.ensureSubscription();
+    // Wait for the before-batch (5 events) to land.
+    await new Promise((r) => setTimeout(r, 150));
+
+    // First pull by a NEW named subscriber: cursor pinned at tail → empty.
+    const first = stream.pull(1000, "fresh-agent");
+    assert.equal(first.started, true, "first pull of a new subscriber starts it");
+    assert.equal(first.events.length, 0, "no backlog replay for a new subscriber");
+
+    // Let the stub emit the after-batch, then the second pull sees only those.
+    resolveFirstPull!();
+    await new Promise((r) => setTimeout(r, 150));
+    const second = stream.pull(1000, "fresh-agent");
+    assert.equal(second.started, false, "returning subscriber does not re-start");
+    assert.equal(second.events.length, 3, "only post-subscription events delivered");
+    stream.stop();
+  } finally {
+    await stub.close();
+  }
+});
+
+test("BridgeEventStream: two named subscribers get independent cursors", async () => {
+  // feedback #8 — each named subscriber must have its own cursor. Drain events
+  // for sub-A; sub-B subscribing later must still see the events emitted after
+  // ITS own first pull, not the events A already consumed.
+  const FLOOD = 3;
+  const stub = await startFloodStub(FLOOD);
+  try {
+    const stream = new BridgeEventStream(
+      `http://127.0.0.1:${stub.port}`,
+      "two-sub-stream",
+    );
+    stream.ensureSubscription();
+    await new Promise((r) => setTimeout(r, 150));
+
+    // sub-A drains the whole backlog (legacy-style, but via named cursor the
+    // first pull pins at the tail → empty too). The point: after sub-A pulls,
+    // sub-B's first pull is ALSO empty (independent cursor, not "A drained it").
+    const a = stream.pull(1000, "sub-a");
+    const b = stream.pull(1000, "sub-b");
+    assert.equal(a.events.length, 0, "sub-a first pull: no backlog");
+    assert.equal(b.events.length, 0, "sub-b first pull: no backlog (independent cursor)");
+    stream.stop();
+  } finally {
+    await stub.close();
+  }
+});

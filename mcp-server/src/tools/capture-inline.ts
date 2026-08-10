@@ -20,11 +20,12 @@ export const captureInline = makeTool(
     properties: {
           view: {
             type: "string",
-            enum: ["scene", "game", "isolated"],
+            enum: ["scene", "game", "composed", "isolated"],
             default: "scene",
             description:
-              "Capture target. 'scene' = Scene view camera, 'game' = main game " +
-              "camera, 'isolated' = clean 2x2 composite of one GameObject.",
+              "Capture target. 'scene' = Scene view camera, 'game' = Camera.main only " +
+              "(Overlay canvases NOT rendered), 'composed' = full player frame (all cameras " +
+              "by depth + Screen-Space Overlay UI), 'isolated' = clean 2x2 composite of one GameObject.",
           },
           width: {
             type: "integer",

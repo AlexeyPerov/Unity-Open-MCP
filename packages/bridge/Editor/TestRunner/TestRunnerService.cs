@@ -165,6 +165,52 @@ namespace UnityOpenMcpBridge.TestRunner
             }
         }
 
+        // feedback #7 (2026-08-07) — a run that is aborted before its onFinished
+        // fires (superseded by a new run, play mode entered mid-EditMode-run,
+        // domain reload) must leave a TERMINAL file so a polling agent sees a
+        // final state instead of silence. Previously DrainActiveCallbacks and the
+        // play-mode abort paths only unregistered/destroyed callbacks; the run's
+        // test-pending-*.json lingered until the next run swept it (or the TTL
+        // expired an hour later), and no test-results-*.json was ever written.
+        // This writer emits the same results path the poller already consumes;
+        // it reuses WriteErrorFile's shape so the MCP poller's isError path
+        // surfaces it without a schema change.
+        internal static void WriteAbortedFile(string runId, string mode, string reason)
+        {
+            try
+            {
+                Directory.CreateDirectory(StatusDir);
+                var sb = new StringBuilder(256);
+                sb.Append('{');
+                sb.Append("\"status\":\"aborted\",");
+                sb.Append("\"runId\":").Append(EscapeString(runId)).Append(',');
+                sb.Append("\"mode\":").Append(EscapeString(mode ?? "")).Append(',');
+                sb.Append("\"reason\":").Append(EscapeString(reason ?? "aborted"));
+                sb.Append('}');
+                File.WriteAllText(ResultsFilePath(runId), sb.ToString());
+                // A terminal file supersedes the pending marker — clear it so a
+                // later OnAfterAssemblyReload does not reattach a finished run.
+                ClearPendingFile(runId);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[TestRunner] Failed to write aborted file: {ex.Message}");
+            }
+        }
+
+        // feedback #7 — delete a pending marker by runId. Best-effort; the
+        // OnAfterAssemblyReload TTL sweep and ClearPending already cover the
+        // happy path, but an aborted run must not leave its own marker behind.
+        internal static void ClearPendingFile(string runId)
+        {
+            try
+            {
+                var path = PendingFilePath(runId);
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch { }
+        }
+
         internal static string BuildStartedJson(string runId, string mode)
         {
             var sb = new StringBuilder(128);

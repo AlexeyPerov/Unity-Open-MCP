@@ -10,80 +10,80 @@
   "unity_open_mcp_execute_csharp": {
     "description": "Compile and run a C# snippet in the Editor (Roslyn). Primary escape hatch — covers most Editor APIs without typed tools.",
     "inputSchema": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "code": {
-          "type": "string",
-          "description": "C# source. Use return x; to produce output. Required unless setup_roslyn is true."
-        },
-        "setup_roslyn": {
-          "type": "boolean",
-          "description": "Install the IL-only Roslyn compiler fallback and/or report its install status. Use when this tool fails with roslyn_unavailable (Unity 6000.x ships only ReadyToRun Roslyn images the editor's Mono runtime cannot load). Downloads ~15 MB of SHA-256-pinned packages from nuget.org into ~/.unity-open-mcp/roslyn — ask the user before triggering. Re-call with setup_roslyn: true to poll until status is 'installed'; combine with `code` to compile immediately once ready."
-        },
-        "usings": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Extra using directives beyond defaults (UnityEngine, UnityEditor, etc.)"
-        },
-        "object_ids": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Instance IDs (or full handle JSON) of live UnityEngine.Objects to inject into the snippet. Access them via Refs[index] or Ref<T>(index) in the code body. Instance IDs come from the 'objectId' field of object handles returned by other tools. Instance IDs change on domain reload."
-        },
-        "paths_hint": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Asset paths likely touched; drives scoped gate validation"
-        },
-        "read_only": {
-          "type": "boolean",
-          "default": false,
-          "description": "Hint that the snippet performs no asset writes (a pure-read probe: type lookup, SessionState read, console read). When true the paths_hint requirement is waived and the gate is skipped (no checkpoint/validate), so a read probe no longer needs a fake scope. This is a SCOPE HINT, not a safety boundary: the deny heuristic still applies (a snippet matching AssetDatabase.DeleteAsset / EditorApplication.Exit / etc. is still denied), and the bridge cannot statically prove the snippet writes nothing — only assert it does not need a scope."
-        },
-        "ignore_scene_dirty": {
-          "type": "boolean",
-          "default": false,
-          "description": "Bypass the active-scene dirty guard. By default a disruptive op (recompile / scene switch) is refused with scene_dirty when any loaded scene has unsaved changes, so Unity's native save modal never interrupts the flow. Set true to proceed and accept the risk of a native save prompt."
+          "description": "C# source. Use return x; to produce output. Required unless setup_roslyn is true.",
+          "type": "string"
         },
         "confirm_bypass": {
-          "type": "boolean",
           "default": false,
-          "description": "Bypass the deny heuristic for destructive patterns (EditorApplication.Exit, AssetDatabase.DeleteAsset, BuildPipeline.BuildPlayer, etc.). Requires gate: \"off\" as well — both flags must be set. The bypass is audited."
+          "description": "Bypass the deny heuristic for destructive patterns (EditorApplication.Exit, AssetDatabase.DeleteAsset, BuildPipeline.BuildPlayer, etc.). Requires gate: \"off\" as well — both flags must be set. The bypass is audited.",
+          "type": "boolean"
         },
         "gate": {
+          "default": "enforce",
           "enum": [
             "enforce",
             "warn",
             "off"
-          ],
-          "default": "enforce"
+          ]
         },
-        "timeout_ms": {
-          "type": "integer",
-          "default": 30000,
-          "minimum": 1000,
-          "maximum": 300000
+        "ignore_scene_dirty": {
+          "default": false,
+          "description": "Bypass the active-scene dirty guard. By default a disruptive op (recompile / scene switch) is refused with scene_dirty when any loaded scene has unsaved changes, so Unity's native save modal never interrupts the flow. Set true to proceed and accept the risk of a native save prompt.",
+          "type": "boolean"
         },
         "max_depth": {
-          "type": "integer",
           "default": 4,
+          "description": "Max recursion depth when serializing the returned object graph (default 4). Composite nodes deeper than this are stringified to bound payload size.",
           "minimum": 0,
-          "description": "Max recursion depth when serializing the returned object graph (default 4). Composite nodes deeper than this are stringified to bound payload size."
+          "type": "integer"
         },
         "max_items": {
-          "type": "integer",
           "default": 100,
+          "description": "Max items emitted per list/enumerable in the returned object graph (default 100). Truncated lists report a `truncated` count of the elided items.",
           "minimum": 0,
-          "description": "Max items emitted per list/enumerable in the returned object graph (default 100). Truncated lists report a `truncated` count of the elided items."
+          "type": "integer"
+        },
+        "object_ids": {
+          "description": "Instance IDs (or full handle JSON) of live UnityEngine.Objects to inject into the snippet. Access them via Refs[index] or Ref<T>(index) in the code body. Instance IDs come from the 'objectId' field of object handles returned by other tools. Instance IDs change on domain reload.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "paths_hint": {
+          "description": "Asset paths likely touched; drives scoped gate validation",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "read_only": {
+          "default": false,
+          "description": "Hint that the snippet performs no asset writes (a pure-read probe: type lookup, SessionState read, console read). When true the paths_hint requirement is waived and the gate is skipped (no checkpoint/validate), so a read probe no longer needs a fake scope. This is a SCOPE HINT, not a safety boundary: the deny heuristic still applies (a snippet matching AssetDatabase.DeleteAsset / EditorApplication.Exit / etc. is still denied), and the bridge cannot statically prove the snippet writes nothing — only assert it does not need a scope.",
+          "type": "boolean"
+        },
+        "setup_roslyn": {
+          "description": "Install the IL-only Roslyn compiler fallback and/or report its install status. Use when this tool fails with roslyn_unavailable (Unity 6000.x ships only ReadyToRun Roslyn images the editor's Mono runtime cannot load). Downloads ~15 MB of SHA-256-pinned packages from nuget.org into ~/.unity-open-mcp/roslyn — ask the user before triggering. Re-call with setup_roslyn: true to poll until status is 'installed'; combine with `code` to compile immediately once ready.",
+          "type": "boolean"
+        },
+        "timeout_ms": {
+          "default": 30000,
+          "maximum": 300000,
+          "minimum": 1000,
+          "type": "integer"
+        },
+        "usings": {
+          "description": "Extra using directives beyond defaults (UnityEngine, UnityEditor, etc.)",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
-      "additionalProperties": false
+      "type": "object"
     }
   },
   "unity_open_mcp_invoke_method": {
@@ -977,13 +977,13 @@
     }
   },
   "unity_senses_screenshot": {
-    "description": "Capture a screenshot from the Unity Editor. Supports three views: 'scene' (the Scene view), 'game' (the main camera / Game view), and 'isolated' (a clean 2x2 composite — Front/Right/Back/Top — of a single GameObject with layer culling and background choice). Returns the saved PNG file path. Requires a live Unity Editor connection.",
+    "description": "Capture a screenshot from the Unity Editor. Supports four views: 'scene' (the Scene view), 'game' (renders Camera.main only — NOT the full Game view; Screen-Space Overlay UI and multi-camera compositions are NOT included), 'composed' (the player's full composite frame — every camera by depth plus Screen-Space Overlay canvases; use this to verify UI edits), and 'isolated' (a clean 2x2 composite — Front/Right/Back/Top — of a single GameObject with layer culling and background choice). Returns the saved PNG file path. Requires a live Unity Editor connection.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "background": {
           "default": "skybox",
-          "description": "Background for 'isolated' view. Ignored for scene/game.",
+          "description": "Background for 'isolated' view. Ignored for scene/game/composed.",
           "enum": [
             "transparent",
             "solid",
@@ -1004,10 +1004,11 @@
         },
         "view": {
           "default": "scene",
-          "description": "Capture target. 'scene' = Scene view camera, 'game' = main game camera, 'isolated' = clean 2x2 composite of one GameObject.",
+          "description": "Capture target. 'scene' = Scene view camera, 'game' = Camera.main only (Overlay canvases and other cameras are NOT rendered — prefer 'composed' to verify UI), 'composed' = the player's full frame (all cameras by depth + Screen-Space Overlay UI; in play mode uses ScreenCapture, in edit mode composites enabled cameras by depth), 'isolated' = clean 2x2 composite of one GameObject.",
           "enum": [
             "scene",
             "game",
+            "composed",
             "isolated"
           ],
           "type": "string"
@@ -1364,10 +1365,11 @@
         },
         "view": {
           "default": "scene",
-          "description": "Capture target. 'scene' = Scene view camera, 'game' = main game camera, 'isolated' = clean 2x2 composite of one GameObject.",
+          "description": "Capture target. 'scene' = Scene view camera, 'game' = Camera.main only (Overlay canvases NOT rendered), 'composed' = full player frame (all cameras by depth + Screen-Space Overlay UI), 'isolated' = clean 2x2 composite of one GameObject.",
           "enum": [
             "scene",
             "game",
+            "composed",
             "isolated"
           ],
           "type": "string"
@@ -1383,84 +1385,8 @@
       "type": "object"
     }
   },
-  "unity_senses_visual_compare":   {
-    "description": "Visual regression compare. Capture a named reference snapshot from a view (scene / game / isolated), then compare later captures against it to check whether an edit visually broke anything. Returns pixelDiffPercent, mismatchedPixels, perceptualDistance (8x8 average-hash Hamming distance — tolerates minor anti-aliasing drift), and match (true when pixelDiffPercent <= sensitivity * 100). On a non-zero diff, returns an inline diff image (mismatched pixels highlighted red over the current frame) as an MCP image content block. Actions: 'save' (capture + store a named reference), 'compare' (capture + diff vs the named reference), 'list' (enumerate saved references), 'delete' (remove a reference). References persist under ~/.unity-open-mcp/screenshots/references/. Requires a live Unity Editor connection.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "action": {
-          "description": "save: capture + store a named reference. compare: capture + diff vs the named reference. list: enumerate saved references. delete: remove a named reference.",
-          "enum": [
-            "save",
-            "compare",
-            "list",
-            "delete"
-          ],
-          "type": "string"
-        },
-        "background": {
-          "default": "skybox",
-          "description": "Background for 'isolated' view. Ignored for scene/game.",
-          "enum": [
-            "transparent",
-            "solid",
-            "skybox"
-          ],
-          "type": "string"
-        },
-        "height": {
-          "default": 720,
-          "description": "Capture height in pixels. For 'isolated', this is per-quadrant.",
-          "maximum": 4096,
-          "minimum": 64,
-          "type": "integer"
-        },
-        "include_diff_image": {
-          "default": true,
-          "description": "[compare] When true (default) and the diff is non-zero, return the diff image (current frame with mismatched pixels set to red) as an inline MCP image content block. Set false to skip the image and receive metrics only.",
-          "type": "boolean"
-        },
-        "name": {
-          "description": "Reference name (required for save / compare / delete). Flat filename only — no path separators or traversal. Stored as <name>.png + <name>.meta.json.",
-          "type": "string"
-        },
-        "object_path": {
-          "description": "Required for 'isolated' view. Hierarchy path of the target GameObject (e.g. \"Player\" or \"Enemies/Goblin\").",
-          "type": "string"
-        },
-        "sensitivity": {
-          "default": 0.01,
-          "description": "[compare] Match threshold as a fraction of mismatched pixels (0–1). match is true when pixelDiffPercent <= sensitivity * 100. Default 0.01 = 1% pixel diff. Raise for noisier scenes (dynamic backgrounds, particle systems); 0 = require an exact match.",
-          "maximum": 1,
-          "minimum": 0,
-          "type": "number"
-        },
-        "view": {
-          "default": "game",
-          "description": "Capture target. 'scene' = Scene view camera, 'game' = main game camera (default — visual regression usually targets what the player sees), 'isolated' = clean 2x2 composite of one GameObject. Ignored for list / delete.",
-          "enum": [
-            "scene",
-            "game",
-            "isolated"
-          ],
-          "type": "string"
-        },
-        "width": {
-          "default": 1280,
-          "description": "Capture width in pixels. For 'isolated', this is per-quadrant. The compare resamples the current capture to the reference dimensions if they differ, so the diff is resolution-stable.",
-          "maximum": 4096,
-          "minimum": 64,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "action"
-      ],
-      "type": "object"
-    }
-  },
   "unity_senses_screenshot_window": {
-    "description": "Capture a Unity Editor window (Console, Hierarchy, Inspector, Project, Scene, Game, or any custom EditorWindow) to a PNG file. Full-fidelity capture (occlusion-proof, no focus stealing) is Windows-only via the Win32 PrintWindow API; on macOS/Linux a best-effort screen-rect readback is used and the response carries platformLimited: true, so the capture may be partial or stale when the window is hidden behind others. Provide either window_title (visible tab text, e.g. \"Console\") or window_type (EditorWindow type name, e.g. \"UnityEditor.ConsoleWindow\"). Returns the saved PNG file path. Requires a live Unity Editor connection.",
+    "description": "Capture a Unity Editor window (Console, Hierarchy, Inspector, Project, Scene, Game, or any custom EditorWindow) to a PNG file. Windows-only: on macOS/Linux returns a `not_supported` error (the editor-window backbuffer is not bound during bridge dispatch, so a blank frame would result — use the OS screen-capture tool, or screenshot {view:\"composed\"} for the rendered Game view). On Windows a screen-rect readback is used; a blank/solid-color frame is rejected with a `blank_capture` error. `resolution` reports the ACTUAL capture size (clamped to the window's on-screen rect), not the requested maximum. Provide either window_title (visible tab text, e.g. \"Console\") or window_type (EditorWindow type name, e.g. \"UnityEditor.ConsoleWindow\"). Returns the saved PNG file path. Requires a live Unity Editor connection.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1553,6 +1479,82 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    }
+  },
+  "unity_senses_visual_compare": {
+    "description": "Visual regression compare. Capture a named reference snapshot from a view (scene / game / isolated), then compare later captures against it to check whether an edit visually broke anything. Returns pixelDiffPercent, mismatchedPixels, perceptualDistance (8x8 average-hash Hamming distance — tolerates minor anti-aliasing drift), and match (true when pixelDiffPercent <= sensitivity * 100). On a non-zero diff, returns an inline diff image (mismatched pixels highlighted red over the current frame) as an MCP image content block. Actions: 'save' (capture + store a named reference), 'compare' (capture + diff vs the named reference), 'list' (enumerate saved references), 'delete' (remove a reference). References persist under ~/.unity-open-mcp/screenshots/references/. Requires a live Unity Editor connection.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "description": "save: capture + store a named reference. compare: capture + diff vs the named reference. list: enumerate saved references. delete: remove a named reference.",
+          "enum": [
+            "save",
+            "compare",
+            "list",
+            "delete"
+          ],
+          "type": "string"
+        },
+        "background": {
+          "default": "skybox",
+          "description": "Background for 'isolated' view. Ignored for scene/game.",
+          "enum": [
+            "transparent",
+            "solid",
+            "skybox"
+          ],
+          "type": "string"
+        },
+        "height": {
+          "default": 720,
+          "description": "Capture height in pixels. For 'isolated', this is per-quadrant.",
+          "maximum": 4096,
+          "minimum": 64,
+          "type": "integer"
+        },
+        "include_diff_image": {
+          "default": true,
+          "description": "[compare] When true (default) and the diff is non-zero, return the diff image (current frame with mismatched pixels set to red) as an inline MCP image content block. Set false to skip the image and receive metrics only.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Reference name (required for save / compare / delete). Flat filename only — no path separators or traversal. Stored as <name>.png + <name>.meta.json.",
+          "type": "string"
+        },
+        "object_path": {
+          "description": "Required for 'isolated' view. Hierarchy path of the target GameObject (e.g. \"Player\" or \"Enemies/Goblin\").",
+          "type": "string"
+        },
+        "sensitivity": {
+          "default": 0.01,
+          "description": "[compare] Match threshold as a fraction of mismatched pixels (0–1). match is true when pixelDiffPercent <= sensitivity * 100. Default 0.01 = 1% pixel diff. Raise for noisier scenes (dynamic backgrounds, particle systems); 0 = require an exact match.",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "view": {
+          "default": "game",
+          "description": "Capture target. 'scene' = Scene view camera, 'game' = main game camera (default — visual regression usually targets what the player sees), 'isolated' = clean 2x2 composite of one GameObject. Ignored for list / delete.",
+          "enum": [
+            "scene",
+            "game",
+            "isolated"
+          ],
+          "type": "string"
+        },
+        "width": {
+          "default": 1280,
+          "description": "Capture width in pixels. For 'isolated', this is per-quadrant. The compare resamples the current capture to the reference dimensions if they differ, so the diff is resolution-stable.",
+          "maximum": 4096,
+          "minimum": 64,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action"
+      ],
       "type": "object"
     }
   },
@@ -1653,7 +1655,7 @@
           "type": "integer"
         },
         "subscriber": {
-          "description": "Optional subscriber id to resume a prior subscription (defaults to a server-scoped id).",
+          "description": "Optional subscriber id. A NEW id starts a fresh read cursor at the current high-water mark (no backlog replay); a returning id resumes from its saved cursor. Omit to drain the shared queue.",
           "type": "string"
         }
       },

@@ -166,6 +166,22 @@ namespace UnityOpenMcpBridge
 
             try
             {
+                // feedback #7 (2026-08-07) — reject unknown top-level keys before
+                // extraction. Without this, a caller that passes camelCase keys
+                // the schema does not declare (e.g. testClass/playMode/filter to
+                // run_tests) silently runs with every unrecognized key dropped,
+                // so a filter typo executes a full assembly with no complaint.
+                // The MCP JSON-Schema layer already sets additionalProperties:
+                // false, but direct bridge dispatch (batch_execute body
+                // passthrough) bypasses that validation.
+                var unknown = FindUnknownKeys(entry, body);
+                if (unknown != null && unknown.Count > 0)
+                {
+                    return ToolDispatchResult.Fail("validation_error",
+                        $"Unknown parameter(s) for tool '{toolName}': {string.Join(", ", unknown)}. " +
+                        $"Allowed: {string.Join(", ", entry.Parameters.Select(p => char.ToLowerInvariant(p.Name[0]) + p.Name.Substring(1)))}.");
+                }
+
                 var args = ExtractArguments(entry, body);
                 if (args == null)
                     return ToolDispatchResult.Fail("missing_parameter", $"Required parameter missing for tool '{toolName}'");
@@ -188,6 +204,34 @@ namespace UnityOpenMcpBridge
             {
                 return ToolDispatchResult.Fail("execution_error", e.Message);
             }
+        }
+
+        // feedback #7 — enumerate top-level body keys not declared as parameters.
+        // Returns null when the body is absent/not an object (nothing to check);
+        // returns the list of unknown keys (possibly empty) otherwise. A
+        // parameter is "known" if its lowercased-first-char name matches a
+        // declared parameter name — mirrors the lookup key ExtractArguments
+        // uses, so the two never disagree.
+        private static List<string> FindUnknownKeys(BridgeToolEntry entry, string body)
+        {
+            if (string.IsNullOrEmpty(body)) return null;
+            var keys = JsonBody.GetObjectKeys(body);
+            if (keys == null || keys.Count == 0) return null;
+
+            var known = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < entry.Parameters.Length; i++)
+            {
+                var name = entry.Parameters[i].Name;
+                if (name.Length > 0)
+                    known.Add(char.ToLowerInvariant(name[0]) + name.Substring(1));
+            }
+
+            var unknown = new List<string>();
+            foreach (var key in keys)
+            {
+                if (!known.Contains(key)) unknown.Add(key);
+            }
+            return unknown;
         }
 
         private static object[] ExtractArguments(BridgeToolEntry entry, string body)
