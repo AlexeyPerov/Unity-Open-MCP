@@ -42,6 +42,20 @@ Default bind is loopback (`127.0.0.1`).
 - `error`: structured error object (on failure)
 - optional lifecycle/settle metadata for mutating tools
 
+## Request limits
+
+`POST /tools/{toolName}` request bodies are capped at 64 MB. A body that
+exceeds the cap — whether declared via `Content-Length` or streamed (chunked) —
+is rejected with HTTP `413` and the standard error envelope:
+
+```json
+{ "error": { "code": "request_too_large", "message": "Request body of N bytes exceeds the 67108864-byte limit." } }
+```
+
+Legitimate JSON tool arguments are kilobytes; the cap exists so a caller cannot
+OOM the Editor with an unbounded body. In `authMode: "none"` (local dev) any
+caller on the bind address can reach this path.
+
 ## Gate policy
 
 For a mutating tool, the bridge selects the effective gate mode in this order:

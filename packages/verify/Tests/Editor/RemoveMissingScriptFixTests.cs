@@ -147,6 +147,83 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         // -------------------------------------------------------------------
+        // FindOpenScene — case-insensitive open-scene resolution (regression)
+        // -------------------------------------------------------------------
+
+        // The regression: an exact-match `==` + GetSceneByPath lookup failed to
+        // recognise an already-open scene when assetPath's casing differed from
+        // Unity's canonical recorded path (macOS/Windows case-insensitive FS).
+        // wasOpen was then false → a duplicate additive copy was opened, saved
+        // (overwriting disk), and closed, leaving the originally-open scene
+        // stale so the user's next save reverted the fix. FindOpenScene compares
+        // OrdinalIgnoreCase so a case-mismatched query still resolves to the
+        // loaded handle. Tested platform-independently: we control the query
+        // string, the scene is genuinely loaded under its canonical path.
+        [UnityTest]
+        public System.Collections.IEnumerator FindOpenScene_MatchesCaseMismatchedPath()
+        {
+            var scenePath = FixtureRoot + "/CaseMismatch.unity";
+            yield return CreateEmptyScene(scenePath);
+
+            try
+            {
+                Assume.That(IsSceneOpen(scenePath), Is.True,
+                    "fixture scene must be loaded under its canonical path");
+
+                // Canonical query — always matches.
+                var canonical = RemoveMissingScriptFix.FindOpenScene(scenePath);
+                Assert.IsTrue(canonical.IsValid(),
+                    "FindOpenScene must match the canonical path");
+
+                // Case-mismatched query — the regression root cause. Exact-match
+                // GetSceneByPath fails (proof below); FindOpenScene must still
+                // resolve to the same loaded handle.
+                var mismatched = scenePath.ToUpperInvariant();
+                Assume.That(mismatched, Is.Not.EqualTo(scenePath),
+                    "uppercased path must differ from canonical for the test to be meaningful");
+
+                var resolved = RemoveMissingScriptFix.FindOpenScene(mismatched);
+                Assert.IsTrue(resolved.IsValid(),
+                    "FindOpenScene must match a case-mismatched path (OrdinalIgnoreCase)");
+                Assert.AreEqual(canonical.path, resolved.path,
+                    "resolved handle must be the same loaded scene");
+
+                // Proof that the OLD exact-match lookup disagrees — this is the
+                // call that returned an invalid scene on a case mismatch and
+                // caused the stale-revert. GetSceneByPath is exact-match only.
+                var exact = SceneManager.GetSceneByPath(mismatched);
+                Assert.IsFalse(exact.IsValid(),
+                    "GetSceneByPath is exact-match: a case mismatch must NOT resolve " +
+                    "(this is why FixScene now uses FindOpenScene instead)");
+            }
+            finally
+            {
+                CloseSceneIfOpen(scenePath);
+                if (AssetDatabase.LoadMainAssetAtPath(scenePath) != null)
+                    AssetDatabase.DeleteAsset(scenePath);
+                AssetDatabase.Refresh();
+            }
+        }
+
+        [Test]
+        public void FindOpenScene_NonUnityAsset_ReturnsInvalid()
+        {
+            // The extension guard short-circuits before scanning loaded scenes.
+            var resolved = RemoveMissingScriptFix.FindOpenScene("Assets/A.prefab");
+            Assert.IsFalse(resolved.IsValid(),
+                "FindOpenScene must only resolve .unity assets");
+        }
+
+        [Test]
+        public void FindOpenScene_NotLoadedPath_ReturnsInvalid()
+        {
+            var resolved = RemoveMissingScriptFix.FindOpenScene(
+                FixtureRoot + "/DoesNotExist.unity");
+            Assert.IsFalse(resolved.IsValid(),
+                "FindOpenScene must return invalid for a path that is not loaded");
+        }
+
+        // -------------------------------------------------------------------
         // Fixture helpers
         // -------------------------------------------------------------------
 

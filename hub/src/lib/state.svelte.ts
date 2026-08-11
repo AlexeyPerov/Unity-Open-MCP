@@ -75,29 +75,33 @@ class AppState {
   launchInfoNotice = $state<LaunchInfoNotice | null>(null);
 
   async confirm(title: string, message: string): Promise<boolean> {
+    // Re-entrancy guard: there is a single `confirmationResolve` field and a
+    // single modal, so only one confirmation can be in-flight at a time. If a
+    // prior confirm() is still awaiting its resolver when a second confirm()
+    // arrives, resolve the prior one as `false` (cancelled) BEFORE installing
+    // the new resolver. Without this the overwrite strands the first awaiter's
+    // promise forever (the modal can only settle one). The superseded call
+    // returns false; the new call takes over the modal.
+    if (this.confirmationResolve) {
+      const prev = this.confirmationResolve;
+      this.confirmationResolve = null;
+      prev(false);
+    }
+
     this.confirmationTitle = title;
     this.confirmationMessage = message;
     this.showConfirmationModal = true;
-    try {
-      return await new Promise<boolean>((resolve) => {
-        this.confirmationResolve = resolve;
-      });
-    } catch {
-      // A defensive catch so a throw from a derived effect (e.g. a
-      // misbehaving Svelte 5 subscriber) cannot leave the modal open
-      // with an unresolvable promise — the user would otherwise be
-      // "stuck forever" with a non-dismissable overlay.
-      return false;
-    } finally {
-      // Best-effort: if the promise was neither resolved nor rejected,
-      // make sure the modal state is cleared so the next `confirm()` is
-      // not stacked on top of a hidden one. `resolveConfirmation`
-      // already clears it, so this is a no-op in the normal path.
-      if (this.showConfirmationModal) {
-        this.showConfirmationModal = false;
-        this.confirmationResolve = null;
-      }
-    }
+    // The promise resolves either when resolveConfirmation() runs (user picks
+    // confirm/cancel) or when a later confirm() supersedes it (above). The
+    // executor only stores the resolver — it cannot throw — so no try/catch is
+    // needed, and a finally is actively harmful here: it would run on a
+    // microtask after a supersede and clobber the NEW call's modal state
+    // (showConfirmationModal=false, confirmationResolve=null), re-introducing
+    // the stuck-forever overlay. resolveConfirmation() already clears modal
+    // state, so there is nothing to clean up defensively.
+    return new Promise<boolean>((resolve) => {
+      this.confirmationResolve = resolve;
+    });
   }
 
   resolveConfirmation(result: boolean) {

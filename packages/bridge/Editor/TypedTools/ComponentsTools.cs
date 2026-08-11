@@ -389,7 +389,11 @@ namespace UnityOpenMcpBridge.TypedTools
             {
                 foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
                 {
-                    if (matches.Count >= maxResults) break;
+                    // `>` (not `>=`) lets the list grow to maxResults + 1 so the
+                    // truncated/limited computation below can ever be true — with
+                    // `>=` the count never exceeded maxResults and `truncated`
+                    // was unconditionally 0, falsely signalling an exhaustive list.
+                    if (matches.Count > maxResults) break;
                     var name = asm.GetName().Name;
                     if (!IsUnityFrameworkAssembly(name)) continue;
                     ScanAssembly(asm, query, seen, matches, maxResults);
@@ -398,16 +402,25 @@ namespace UnityOpenMcpBridge.TypedTools
 
             // Project MonoBehaviours — every NON-Unity loaded assembly that
             // defines types deriving from Component. Includes package assemblies.
-            if (includeProject && matches.Count < maxResults)
+            // `<=` (not `<`): run the project pass whenever we have not yet
+            // PROVEN overflow (matches.Count <= maxResults). With `<` a built-in
+            // pass that landed at exactly maxResults skipped the project pass and
+            // reported truncated:0 even when project components existed.
+            if (includeProject && matches.Count <= maxResults)
             {
                 foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
                 {
-                    if (matches.Count >= maxResults) break;
+                    if (matches.Count > maxResults) break;
                     if (IsUnityFrameworkAssembly(asm.GetName().Name)) continue;
                     ScanAssembly(asm, query, seen, matches, maxResults);
                 }
             }
 
+            // The scan guards above use `>` so matches may hold up to
+            // maxResults + 1 entries — exactly enough to tell "capped" (1) from
+            // "complete" (0). This is a flat, non-paged list, so a 1/0
+            // more-results signal is the honest contract (the exact tail count
+            // is unknowable without scanning every assembly to completion).
             int truncated = matches.Count > maxResults ? matches.Count - maxResults : 0;
             var limited = matches.Count > maxResults ? matches.GetRange(0, maxResults) : matches;
 
@@ -511,7 +524,9 @@ namespace UnityOpenMcpBridge.TypedTools
 
             foreach (var type in SafeGetTypes(asm))
             {
-                if (sink.Count >= maxResults) return;
+                // `>` mirrors the ListAll loop guards: let the sink reach
+                // maxResults + 1 so the caller's truncated check is reachable.
+                if (sink.Count > maxResults) return;
                 if (type == null) continue;
                 // Touching a broken type's metadata (e.g. a Roslyn/MSBuild type
                 // missing a transitive dependency) throws TypeLoadException at

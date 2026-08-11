@@ -261,6 +261,19 @@ export class BridgeEventStream {
     const cap = maxEvents > 0 && maxEvents <= 1000 ? maxEvents : 100;
     const out = this.queue.slice(0, cap);
     this.queue = this.queue.slice(cap);
+    // feedback #8 cursor fix-up, second site: `slice(cap)` removes `cap` items
+    // from the FRONT of the queue, shifting every index down — exactly like
+    // enqueue()'s eviction `splice(0, excess)`. The eviction path decrements
+    // every named-subscriber cursor; this legacy drain path did not, so a
+    // legacy `pull()` (no subscriber) interleaved with an active named
+    // subscriber left that subscriber's cursor pointing past the new tail and
+    // silently skipped/dropped the events the legacy pull drained. Mirror the
+    // eviction fix-up so both front-removal sites keep cursors valid.
+    if (cap > 0 && this.cursors.size > 0) {
+      for (const [id, pos] of this.cursors) {
+        this.cursors.set(id, Math.max(0, pos - cap));
+      }
+    }
     return out;
   }
 

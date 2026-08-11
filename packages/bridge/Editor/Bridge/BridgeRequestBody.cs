@@ -25,11 +25,43 @@ namespace UnityOpenMcpBridge
         // clamped a caller's explicit value below the advertised ceiling.
         internal const int MaxTimeoutMs = 600000;
 
+        // Hard cap on a single request body. Every mutating tool call flows
+        // through ReadRequestBody; without a bound a caller (or a buggy MCP
+        // server) could POST an arbitrarily large body and OOM the Editor. 64 MB
+        // is far above any legitimate JSON tool payload (argument bodies are
+        // kilobytes) while putting a ceiling on per-request heap allocation.
+        // In the default `authMode: none` (local dev) any caller on the bind
+        // address can reach this path, so the bound matters even on loopback.
+        internal const long MaxRequestBodyBytes = 64L * 1024 * 1024;
+
         internal static string ReadRequestBody(HttpListenerRequest request)
         {
             using var stream = request.InputStream;
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            return reader.ReadToEnd();
+
+            // Fast pre-check when the client declared a length (most requests
+            // do). ContentLength64 is -1 for chunked transfers, so this only
+            // short-circuits the obvious case; the streaming copy below is the
+            // real bound that also covers chunked encoding.
+            if (request.ContentLength64 > MaxRequestBodyBytes)
+                throw new BridgeRequestBodyTooLargeException(request.ContentLength64, MaxRequestBodyBytes);
+
+            // Copy raw bytes with a hard cap, then decode once. Capping bytes
+            // (not chars) bounds heap precisely regardless of UTF-8 width — a
+            // char-based cap would admit up to 4x the limit for multibyte input.
+            long declared = request.ContentLength64;
+            int initialCap = (int)Math.Clamp(declared > 0 ? declared : 0, 0, MaxRequestBodyBytes);
+            using var ms = new MemoryStream(initialCap);
+            var buffer = new byte[8192];
+            long total = 0;
+            int read;
+            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                total += read;
+                if (total > MaxRequestBodyBytes)
+                    throw new BridgeRequestBodyTooLargeException(total, MaxRequestBodyBytes);
+                ms.Write(buffer, 0, read);
+            }
+            return Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
         }
 
         internal static int ExtractTimeoutMs(string body)
@@ -102,5 +134,14 @@ namespace UnityOpenMcpBridge
             if (string.IsNullOrEmpty(assetPath)) return null;
             return new[] { assetPath };
         }
+    }
+
+    // Raised by BridgeRequestBody.ReadRequestBody when a request body exceeds
+    // MaxRequestBodyBytes. Caught at the single dispatch call site to produce a
+    // 413 response instead of letting an unbounded ReadToEnd OOM the Editor.
+    internal sealed class BridgeRequestBodyTooLargeException : System.Exception
+    {
+        internal BridgeRequestBodyTooLargeException(long observedLength, long maxBytes)
+            : base($"Request body of {observedLength} bytes exceeds the {maxBytes}-byte limit.") { }
     }
 }

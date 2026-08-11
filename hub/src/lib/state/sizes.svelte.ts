@@ -32,6 +32,12 @@ class SizesStore {
 
   private progressUnlisten: UnlistenFn | null = null;
   private doneUnlisten: UnlistenFn | null = null;
+  /**
+   * Set by teardown() and cleared by load(). Guards the attach() await window:
+   * if teardown() runs while attach() is awaiting `listen(...)`, the just-
+   * acquired listeners are released instead of stored, so they do not leak.
+   */
+  private closed = false;
 
   /** Read a single project's size, or `0` while unsized. */
   get(path: string): number {
@@ -48,6 +54,9 @@ class SizesStore {
    */
   async load(paths: string[]): Promise<void> {
     if (paths.length === 0) return;
+    // New cycle: allow attach() to commit listeners. (teardown() may have set
+    // `closed` on a prior tab destroy; a re-mount + load starts fresh.)
+    this.closed = false;
     await this.attach();
     this.loading = true;
     try {
@@ -102,6 +111,17 @@ class SizesStore {
         );
       }),
     ]);
+    // teardown() is a sync `void` the Projects tab fires from onDestroy
+    // WITHOUT awaiting attach(). If it ran during the `await listen(...)`
+    // above, detach() was a no-op (the fields were still null at the top of
+    // attach), so releasing these listeners NOW — instead of storing them — is
+    // the only way to avoid leaking sizes://progress and sizes://done handlers
+    // that would fire `sizeMap` updates for the life of the app.
+    if (this.closed) {
+      a();
+      b();
+      return;
+    }
     this.progressUnlisten = a;
     this.doneUnlisten = b;
   }
@@ -120,6 +140,9 @@ class SizesStore {
    * so a navigating-away tab does not leak handlers.
    */
   teardown(): void {
+    // Signal any in-flight attach() to release (not store) the listeners it is
+    // about to acquire. See attach() for the race this closes.
+    this.closed = true;
     void this.detach();
     this.loading = false;
   }

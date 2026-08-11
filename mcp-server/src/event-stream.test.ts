@@ -403,3 +403,64 @@ test("BridgeEventStream: two named subscribers get independent cursors", async (
     await stub.close();
   }
 });
+
+// ----- cursor fix-up for the legacy drain() path (second front-removal site) -----
+
+test("BridgeEventStream: a legacy pull() between a named subscriber's pulls does not skip its events", async () => {
+  // The feedback-#8 named-subscriber cursor is an index into the shared queue.
+  // Both enqueue()'s overflow eviction AND the legacy drain() remove items
+  // from the FRONT of the queue, shifting every index down. The eviction path
+  // decrements cursors to compensate; drain() did not, so a legacy pull() (no
+  // subscriber) interleaved between a named subscriber's pulls left its cursor
+  // pointing past the new tail and silently dropped the events it was owed.
+  //
+  // Scenario: queue=[e0,e1,e2]; sub "x" pins cursor at the tail (3) and pulls
+  // empty. queue grows to [e0,e1,e2,e3,e4]. A legacy pull(2) drains e0,e1
+  // → queue=[e2,e3,e4]. sub "x" must still see exactly [e3,e4] (its owed
+  // tail), not skip them because its cursor stayed at 3 while the queue shrank.
+  let resolveFirstPull: () => void;
+  const firstPull = new Promise<void>((r) => {
+    resolveFirstPull = r;
+  });
+  const stub = await startBacklogStub({ before: 3, after: 2, firstPull });
+  try {
+    const stream = new BridgeEventStream(
+      `http://127.0.0.1:${stub.port}`,
+      "legacy-drain-stream",
+    );
+    stream.ensureSubscription();
+    // Wait for the before-batch (e0,e1,e2) to land.
+    await new Promise((r) => setTimeout(r, 150));
+
+    // sub "x" subscribes: cursor pinned at the tail (3) → first pull empty.
+    const first = stream.pull(1000, "x");
+    assert.equal(first.events.length, 0, "new subscriber: no backlog");
+
+    // Release the after-batch (e3,e4); queue grows to 5 entries.
+    resolveFirstPull!();
+    await new Promise((r) => setTimeout(r, 150));
+
+    // A legacy pull() with NO subscriber drains 2 from the FRONT (e0,e1).
+    const legacy = stream.pull(2);
+    assert.equal(legacy.events.length, 2, "legacy pull drains 2 from the front");
+
+    // sub "x" must still see exactly [e3,e4] — the events after its
+    // subscription. Without the drain() cursor fix-up its cursor stayed at 3
+    // while the queue shrank to [e2,e3,e4], so slice(3) returned [] and e3,e4
+    // were silently lost.
+    const second = stream.pull(1000, "x");
+    assert.equal(
+      second.events.length,
+      2,
+      "named subscriber sees its owed events after a legacy drain",
+    );
+    assert.deepEqual(
+      second.events.map((e) => e.message),
+      ["e3", "e4"],
+      "no events skipped or duplicated after the legacy front-drain",
+    );
+    stream.stop();
+  } finally {
+    await stub.close();
+  }
+});

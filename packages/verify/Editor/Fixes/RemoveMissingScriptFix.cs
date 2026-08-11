@@ -131,21 +131,35 @@ namespace UnityOpenMcpVerify.Fixes
             // disrupt the editor's currently-active scene, and close what we
             // opened in a finally block. A scene the user already had open
             // stays open; a scene we opened ourselves is closed after the fix.
-            var wasOpen = false;
-            for (var i = 0; i < SceneManager.sceneCount; i++)
-            {
-                if (SceneManager.GetSceneAt(i).path == assetPath)
-                {
-                    wasOpen = true;
-                    break;
-                }
-            }
+            //
+            // Case-insensitive open-scene resolution (matching
+            // RelinkBrokenGuidFix.FindOpenScene): macOS/Windows default to
+            // case-insensitive filesystems, so an assetPath whose casing
+            // differs from Unity's canonical recorded path must still be
+            // recognised as already-open. The previous exact `==` +
+            // GetSceneByPath lookups failed the detection on a case mismatch,
+            // so wasOpen was false, we opened a DUPLICATE additive copy, saved
+            // it (overwriting the file on disk), and closed the duplicate —
+            // leaving the user's originally-open scene stale so their next
+            // save silently reverted the fix. FindOpenScene returns the actual
+            // loaded handle (compared OrdinalIgnoreCase) and we operate on
+            // THAT handle rather than a fresh exact-match GetSceneByPath that
+            // disagrees on a case-mismatched path.
+            //
+            // Unlike RelinkBrokenGuidFix this path does NOT refuse a dirty open
+            // scene: it edits the live in-memory scene and calls SaveScene,
+            // which writes the COMBINED state (the user's edits plus the fix)
+            // rather than reloading from disk. There is no discard hazard, so
+            // a dirty-scene refusal would only dead-end the common interactive
+            // case (the user almost always has the scene open).
+            var openScene = FindOpenScene(assetPath);
+            bool wasOpen = openScene.IsValid();
 
             Scene scene;
             try
             {
                 scene = wasOpen
-                    ? SceneManager.GetSceneByPath(assetPath)
+                    ? openScene
                     : EditorSceneManager.OpenScene(assetPath, OpenSceneMode.Additive);
             }
             catch (System.Exception e)
@@ -200,6 +214,33 @@ namespace UnityOpenMcpVerify.Fixes
             foreach (Transform child in go.transform)
                 total += RemoveMissingScriptsRecursive(child.gameObject);
             return total;
+        }
+
+        // The loaded scene (active or additive) whose path matches assetPath,
+        // compared OrdinalIgnoreCase so a path that differs only in case
+        // (macOS/Windows default to case-insensitive filesystems) is still
+        // recognised as open. Returns default(Scene) (IsValid() == false) when
+        // no loaded scene matches. Mirrors RelinkBrokenGuidFix.FindOpenScene so
+        // both scene-mutating fixes share the same open-scene identity rule.
+        //
+        // Internal (not private) so the edit-mode tests can exercise the
+        // case-insensitive resolution directly — the regression only manifests
+        // on case-insensitive filesystems, so a path-argument unit test is the
+        // platform-independent way to pin it.
+        internal static Scene FindOpenScene(string assetPath)
+        {
+            if (Path.GetExtension(assetPath ?? "").ToLowerInvariant() != ".unity")
+                return default(Scene);
+            for (var i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var candidate = SceneManager.GetSceneAt(i);
+                if (string.Equals(candidate.path, assetPath,
+                    System.StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+            }
+            return default(Scene);
         }
     }
 }

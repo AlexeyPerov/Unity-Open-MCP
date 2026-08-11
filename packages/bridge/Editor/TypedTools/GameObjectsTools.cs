@@ -254,9 +254,13 @@ namespace UnityOpenMcpBridge.TypedTools
                     {
                         CollectMatches(root, matches, nameContains, tagFilter, componentFilter);
                     }
-                    if (matches.Count >= maxResults) break;
+                    // `>` (not `>=`) lets matches reach maxResults + 1 so the
+                    // truncated check below can ever be true — otherwise the
+                    // count never exceeded maxResults and `truncated` was
+                    // always 0, falsely signalling an exhaustive list.
+                    if (matches.Count > maxResults) break;
                 }
-                if (matches.Count >= maxResults) break;
+                if (matches.Count > maxResults) break;
             }
 
             int truncated = 0;

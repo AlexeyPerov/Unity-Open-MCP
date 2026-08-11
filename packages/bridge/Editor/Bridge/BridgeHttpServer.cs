@@ -799,7 +799,20 @@ namespace UnityOpenMcpBridge
 
         private static void HandleToolDispatch(HttpListenerContext context, string toolName)
         {
-            var body = BridgeRequestBody.ReadRequestBody(context.Request);
+            string body;
+            try
+            {
+                body = BridgeRequestBody.ReadRequestBody(context.Request);
+            }
+            catch (BridgeRequestBodyTooLargeException ex)
+            {
+                // 413 Payload Too Large — a body past the cap is rejected before
+                // any tool dispatch so it cannot OOM the Editor. The standard
+                // { error: { code, message } } envelope keeps the shape callers
+                // already parse for tool_not_found / not_found.
+                BridgeHttpResponse.SendJsonError(context, 413, "request_too_large", ex.Message);
+                return;
+            }
             var timeoutMs = BridgeRequestBody.ExtractTimeoutMs(body);
             var activity = BridgeActivityRecorder.CurrentActivity;
 
