@@ -71,7 +71,8 @@
         },
         "timeout_ms": {
           "default": 30000,
-          "maximum": 300000,
+          "description": "Hard cap 55000 ms — values above a typical MCP host request timeout (~60s) are unreachable: the host aborts the tools/call first (opaque -32001 transport error, no structured envelope), while the snippet keeps running on Unity's main thread. The route clamps to this cap server-side regardless (and reports the clamp) so a client that does not validate still gets a clean `timeout` envelope with agentNextSteps. For long work (full recompiles, heavy imports), split into smaller steps or use run_tests (which has an async job-poll shape) instead of one big blocking call. Default 30000.",
+          "maximum": 55000,
           "minimum": 1000,
           "type": "integer"
         },
@@ -1663,7 +1664,7 @@
     }
   },
   "unity_open_mcp_read_compile_errors": {
-    "description": "Read C# compiler errors AND package/assembly red flags AND an Editor hang signal directly from Unity's Editor.log (offline, no bridge, no Unity spawn). Returns structured CSxxxx compiler errors (file/line/code/message) PLUS an `issues` list of red flags with per-issue `kind` + `hint`: assembly_resolution (Mono.Cecil unresolved-assembly failures — the classic package-version / Unity-version mismatch, e.g. ProBuilder 5.x on Unity 6), package_deprecated ([Package Manager] <id> is deprecated), package_manager_error (conflict / resolution errors), and editor_fd_exhaustion (the Editor hung mid-build after hitting an internal Mono/Unity file-descriptor limit — NOT a code error; the hint carries restart instructions). Use this when: (a) the bridge is unreachable after a recompile — a 'bridge_compile_failed' response points here, or ping returns connected:false unexpectedly; (b) Unity showed a 'package update' / incompatibility popup; (c) you suspect a package is too old for the current Editor; (d) the Editor appears hung after heavy automation (many recompiles) with no compile errors to explain it — editor_fd_exhaustion is the likely cause and only a restart recovers it. Works even when the bridge assembly itself is broken, because it reads the log file the Editor writes independently of the bridge. Check `unhealthy` first; when true, scan `headline` for a one-line triage then drill into `errors` and `issues`. When the response carries `staleLogSuspected: true`, the cited source files were edited more recently than Editor.log — the error block may reference on-disk code you have already fixed (Unity's incremental compiler no-op'd the recompile). Force a genuine recompile via unity_open_mcp_reimport_package (local package) or unity_open_mcp_compile_check before trusting the errors. When the response carries `staleAssembly: true`, at least one Assets/**/*.cs source is newer than the newest Library/ScriptAssemblies/*.dll — the running assembly predates the latest source, so a no_errors_found signal CANNOT be trusted until the assembly is rebuilt. Call unity_open_mcp_recompile_scripts (deterministic force-recompile) then re-read compile errors.",
+    "description": "Read C# compiler errors AND package/assembly red flags AND an Editor hang signal directly from Unity's Editor.log (offline, no bridge, no Unity spawn). Returns structured CSxxxx compiler errors (file/line/code/message) PLUS an `issues` list of red flags with per-issue `kind` + `hint`: assembly_resolution (Mono.Cecil unresolved-assembly failures — the classic package-version / Unity-version mismatch, e.g. ProBuilder 5.x on Unity 6), package_deprecated ([Package Manager] <id> is deprecated), package_manager_error (conflict / resolution errors), and editor_fd_exhaustion (the Editor hung mid-build after hitting an internal Mono/Unity file-descriptor limit — NOT a code error; the hint carries restart instructions). Use this when: (a) the bridge is unreachable after a recompile — a 'bridge_compile_failed' response points here, or ping returns connected:false unexpectedly; (b) Unity showed a 'package update' / incompatibility popup; (c) you suspect a package is too old for the current Editor; (d) the Editor appears hung after heavy automation (many recompiles) with no compile errors to explain it — editor_fd_exhaustion is the likely cause and only a restart recovers it. Works even when the bridge assembly itself is broken, because it reads the log file the Editor writes independently of the bridge. Check `unhealthy` first; when true, scan `headline` for a one-line triage then drill into `errors` and `issues`. When the response carries `staleLogSuspected: true`, the cited source files were edited more recently than Editor.log — the error block may reference on-disk code you have already fixed (Unity's incremental compiler no-op'd the recompile). Force a genuine recompile via unity_open_mcp_reimport_package (local package) or unity_open_mcp_compile_check before trusting the errors. When the response carries `staleAssembly: true`, at least one Assets/**/*.cs source is newer than the newest Library/ScriptAssemblies/*.dll — the running assembly predates the latest source, so a no_errors_found signal CANNOT be trusted until the assembly is rebuilt. Call unity_open_mcp_recompile_scripts (deterministic force-recompile; it is in the typed-editor group — activate with manage_tools(action:\"activate\", group:\"typed-editor\") first) then re-read compile errors.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -10738,6 +10739,337 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    }
+  },
+  "unity_open_mcp_inputsim_pointer": {
+    "description": "Simulate a uGUI pointer interaction on a named GameObject or screen point during play mode, via the EventSystem + ExecuteEvents. Resolution precedence: object_id (a handle from scene_get_data / inputsim_probe) > target (name or slash-path, with duplicate detection + partial-path match) > screen_x/screen_y (raycasts through EventSystem.current). The response reports `interactable`, `blockedBy`, and (for drag) `dropTarget`/`dropLanded` so a click on a disabled button or behind a modal is never a silent ok. Play-mode only — refuses with `play_mode_required` otherwise; pair with editor_set_state to enter play mode and inputsim_step to advance frames before a screenshot. Gate-free. Requires com.unity.ugui.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "description": "Pointer action. click = down+up+click (IPointerClickHandler); double_click = two triples with clickCount incrementing (so handlers reading eventData.clickCount==2 fire); press = pointer down only; release = pointer up only; hover = pointer Enter ONLY (so tooltip/highlight state can be screenshotted); hover_exit = pointer Exit (the pair); submit = ISubmitHandler (keyboard-style activate); drag = pointerDown → beginDrag → drag×N → pointerUp → drop (on the to-point target) → endDrag, matching uGUI's release order, with IDropHandler fired on the drop target.",
+          "enum": [
+            "click",
+            "double_click",
+            "press",
+            "release",
+            "hover",
+            "hover_exit",
+            "submit",
+            "drag"
+          ],
+          "type": "string"
+        },
+        "button": {
+          "default": "left",
+          "description": "Pointer button reported in PointerEventData. Default 'left'.",
+          "enum": [
+            "left",
+            "right",
+            "middle"
+          ],
+          "type": "string"
+        },
+        "drag_steps": {
+          "default": 8,
+          "description": "Number of interpolated move events between drag endpoints. Each step runs a full EventSystem.RaycastAll, so this is capped at 100 to bound main-thread cost. The full begin/drag×N/pointerUp/drop/endDrag sequence dispatches in one frame (use inputsim_step afterward to let drag-driven tweens settle). Default 8.",
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "from_target": {
+          "description": "Drag start — target name/path. When supplied, takes precedence over from_x/from_y; passing BOTH forms returns `both_endpoint_forms` (the explicit, non-silent precedence rule).",
+          "type": "string"
+        },
+        "from_x": {
+          "description": "Drag start — screen X (alternative to from_target).",
+          "type": "number"
+        },
+        "from_y": {
+          "description": "Drag start — screen Y (alternative to from_target).",
+          "type": "number"
+        },
+        "object_id": {
+          "description": "InstanceId of the GameObject to dispatch on (from scene_get_data or inputsim_probe). The most reliable addressing when names are ambiguous. Wins over target and screen_x/screen_y. On Unity 6000.5+ this is an EntityId; pass it as a JSON number (safe up to 2^53).",
+          "type": "number"
+        },
+        "screen_x": {
+          "description": "Screen X (pixels) for the screen-point fallback path. Raycasts through EventSystem.current.RaycastAll and dispatches to the top hit. Pair with screen_y; omitted when object_id/target is given.",
+          "type": "number"
+        },
+        "screen_y": {
+          "description": "Screen Y (pixels) for the screen-point fallback path. Pair with screen_x.",
+          "type": "number"
+        },
+        "target": {
+          "description": "GameObject name ('StartButton') or slash-path ('Canvas/Panel/StartButton'). Path matching is trailing-segment aware, so 'Panel/Button' matches a nested prefab without knowing the scene root. When a name matches more than one active object the tool returns `ambiguous_target` with candidate paths — pass the full path or an object_id. Dispatched directly via ExecuteEvents.ExecuteHierarchy, so it fires even if the target is occluded (the response `blockedBy` field reports that case).",
+          "type": "string"
+        },
+        "to_target": {
+          "description": "Drag end / drop site — target name/path. When supplied, takes precedence over to_x/to_y; passing BOTH returns `both_endpoint_forms`. The drop target receives IDropHandler.OnDrop.",
+          "type": "string"
+        },
+        "to_x": {
+          "description": "Drag end — screen X (alternative to to_target).",
+          "type": "number"
+        },
+        "to_y": {
+          "description": "Drag end — screen Y (alternative to to_target).",
+          "type": "number"
+        },
+        "view": {
+          "default": "game",
+          "description": "Reserved for a future scene-view path; currently only the game view (Camera.main / canvas camera) is used to resolve screen points. Default 'game'.",
+          "enum": [
+            "game",
+            "scene"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  "unity_open_mcp_inputsim_key": {
+    "description": "Queue a keyboard event through the Input System (Keyboard.current) during play mode. Covers gameplay reading Keyboard.current / Key enum / InputAction.performed. `key` accepts a Unity Key enum name ('Space', 'W', 'LeftArrow', 'Digit1') or a single character ('a', '1'). POLLING vs CALLBACK: without `advance_frames`, down+up process in a single InputSystem.Update and no MonoBehaviour.Update runs between them — so polling code (wasPressedThisFrame) CANNOT see a `tap`/`hold`; only callback-driven InputAction.performed fires. Pass `advance_frames` ≥ 1 to pump that many player-loop frames between down and up so polling code observes the press (or split into `down` → inputsim_step → `up`). `up` releases ALL held keys (the named key + mods + anything held by a prior `down`), since per-key release would require cross-call state. Play-mode only — refuses with `play_mode_required` otherwise. Gate-free. Requires com.unity.inputsystem. Does NOT cover legacy UnityEngine.Input.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "description": "down = key pressed (queued, processed next InputSystem.Update); up = release ALL held keys (see tool description); tap = down+up (only visible to callback-driven input unless advance_frames ≥ 1); hold = down+up after advancing frames (so Hold interactions with a duration threshold can fire).",
+          "enum": [
+            "down",
+            "up",
+            "tap",
+            "hold"
+          ],
+          "type": "string"
+        },
+        "advance_frames": {
+          "default": 0,
+          "description": "Pump this many player-loop frames (EditorApplication.Step) BETWEEN down and up so polling game code observes the press. 0 (default) keeps the old single-update behavior (only callback-driven input sees it). Cap 60. For polling input (wasPressedThisFrame) pass ≥ 1.",
+          "maximum": 60,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "alt": {
+          "default": false,
+          "description": "Also hold Left Alt. Default false.",
+          "type": "boolean"
+        },
+        "ctrl": {
+          "default": false,
+          "description": "Also hold Left Ctrl. Default false.",
+          "type": "boolean"
+        },
+        "duration_ms": {
+          "default": 100,
+          "description": "Recorded hold duration in milliseconds (for action='hold'). The real held-time gate is the number of advanced frames, not wall-clock — pair with advance_frames for Input System Hold interactions. Default 100.",
+          "type": "integer"
+        },
+        "key": {
+          "description": "Unity Key enum name ('Space', 'W', 'LeftArrow', 'Digit1', 'F1') OR a single character ('a', '1', '!'). Resolved case-insensitively against UnityEngine.InputSystem.LowLevel.Key first, then as a character key.",
+          "type": "string"
+        },
+        "shift": {
+          "default": false,
+          "description": "Also hold Left Shift. Default false.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "key"
+      ],
+      "type": "object"
+    }
+  },
+  "unity_open_mcp_inputsim_touch": {
+    "description": "Queue a touch / swipe event sequence through the Input System (Touchscreen.current) during play mode. `tap` = press+release at a point; `swipe` = press at from_, move across `steps` interpolated points, release at to_; `press`/`release` = single-phase control. POLLING vs CALLBACK: without `advance_frames`, all touch phases process in a single InputSystem.Update — so polling code (per-frame primaryTouch.delta, gesture recognizers) sees a collapsed jump, not a real swipe. Pass `advance_frames` ≥ 1 to advance a frame after each Moved phase so the swipe unfolds across real frames for polling code. Callback-driven InputAction.performed fires either way. Endpoints resolve target-first (object_id/name/path → screen point) or accept screen_x/screen_y directly. NOTE: target resolution here uses a plain GameObject.Find name/path match (no ambiguity detection or partial-path matching — that lives in the uGUI-gated inputsim_pointer, and this tool compiles against the Input System package only); prefer an object_id or a full unique path for the target. Play-mode only — refuses with `play_mode_required` otherwise. Gate-free. Requires com.unity.inputsystem.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "description": "tap = press+release at one point; swipe = press at from_, move across `steps` interpolated points, release at to_; press = touch down only; release = touch up only.",
+          "enum": [
+            "tap",
+            "swipe",
+            "press",
+            "release"
+          ],
+          "type": "string"
+        },
+        "advance_frames": {
+          "default": 0,
+          "description": "Pump this many player-loop frames (EditorApplication.Step) AFTER each Moved phase so the swipe unfolds across real frames for polling code (per-frame delta, gesture recognizers). 0 (default) collapses all phases into one update — only callback-driven input sees it then. Cap 60.",
+          "maximum": 60,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "duration_ms": {
+          "default": 200,
+          "description": "Swipe total duration in milliseconds (recorded). Default 200.",
+          "type": "integer"
+        },
+        "finger": {
+          "default": 0,
+          "description": "Touch finger index (0–9) for multi-touch. Default 0.",
+          "maximum": 9,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "from_target": {
+          "description": "Swipe start — target name/path (alternative to from_x/from_y).",
+          "type": "string"
+        },
+        "from_x": {
+          "description": "Swipe start — screen X (alternative to from_target).",
+          "type": "number"
+        },
+        "from_y": {
+          "description": "Swipe start — screen Y (alternative to from_target).",
+          "type": "number"
+        },
+        "screen_x": {
+          "description": "Screen X (pixels) for tap/press/release. Pair with screen_y.",
+          "type": "number"
+        },
+        "screen_y": {
+          "description": "Screen Y (pixels) for tap/press/release. Pair with screen_x.",
+          "type": "number"
+        },
+        "steps": {
+          "default": 10,
+          "description": "Number of interpolated move events in a swipe. Capped at 100 to bound main-thread cost (each step can run advance_frames × Step). Default 10.",
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "target": {
+          "description": "GameObject to tap/press/release — name or hierarchy path. Resolved to a screen point via the active camera. Omit when using screen_x/screen_y.",
+          "type": "string"
+        },
+        "to_target": {
+          "description": "Swipe end — target name/path (alternative to to_x/to_y).",
+          "type": "string"
+        },
+        "to_x": {
+          "description": "Swipe end — screen X (alternative to to_target).",
+          "type": "number"
+        },
+        "to_y": {
+          "description": "Swipe end — screen Y (alternative to to_target).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  "unity_open_mcp_inputsim_step": {
+    "description": "Advance the Unity play-mode player loop by N frames, then return. Pump the frames synchronously via EditorApplication.Step (each Step runs one full Update/FixedUpdate/coroutines/render cycle inline). Use between an input injection (inputsim_pointer / _key / _touch) and a screenshot so gameplay code, tweens, and animations actually run before you look — and so polling game code (`wasPressedThisFrame`, per-frame touch delta) can observe a press/swipe injected with inputsim_key/_touch (which otherwise process in a single InputSystem.Update and are invisible to polling). Play-mode only — refuses with `play_mode_required` otherwise (Step is a no-op in edit mode). Gate-free (writes no assets). Cap 60 frames per call to bound dispatch cost; for longer advances, call repeatedly.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "frames": {
+          "default": 1,
+          "description": "Number of player-loop frames to advance. Default 1. Hard cap 60 to bound dispatch cost (each frame is a full Update cycle). 0 is allowed and useful as a pure settle tick (one QueuePlayerLoopUpdate).",
+          "maximum": 60,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "settle_ms": {
+          "default": 0,
+          "description": "Optional extra wall-clock settle in milliseconds AFTER stepping, as a single QueuePlayerLoopUpdate (lets one more render tick land before a screenshot). Default 0 (no extra tick).",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [],
+      "type": "object"
+    }
+  },
+  "unity_open_mcp_inputsim_probe": {
+    "description": "List active uGUI interactables (objects with IPointer*Handler / IDragHandler / IDropHandler / ISubmitHandler / Selectable) so an agent can build a click plan without guessing names. Each entry carries: hierarchy path, name, instanceId (pass it to inputsim_pointer.object_id for unambiguous targeting), screen rect, interactable (false when the Selectable or an ancestor CanvasGroup disables it), and occluded (true when something else raycast-hits in front of the element's center — play mode only). Read-only; works in edit mode and play mode. The intended loop: probe → inputsim_pointer (object_id) → inputsim_step → screenshot. Requires com.unity.ugui.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "description": "Opaque pagination cursor from a previous response's pagination.next_cursor. Omit on the first call.",
+          "type": "string"
+        },
+        "page_size": {
+          "default": 50,
+          "description": "Max entries per page. Default 50, hard cap 200.",
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "scene": {
+          "description": "Optional loaded-scene name filter — only enumerate interactables in this scene. Omit to enumerate across all loaded scenes.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    }
+  },
+  "unity_open_mcp_inputsim_pointer3d": {
+    "description": "Simulate a world-space / legacy mouse interaction during play mode by raycasting from the screen point through Camera.main and SendMessage-ing the OnMouseDown / OnMouseUp / OnMouseUpAsButton / OnMouseDrag magic methods on the hit collider. Reaches physics gameplay and old-Input-Manager code that inputsim_pointer (uGUI ExecuteEvents) cannot — the only way to drive world-space gameplay in a project running the legacy Input Manager. Resolution: object_id > target > screen_x/screen_y (same as inputsim_pointer). Play-mode only — refuses with `play_mode_required` otherwise. Gate-free. Requires a tagged MainCamera in the scene.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "description": "click = OnMouseDown + OnMouseUpAsButton + OnMouseUp; down = OnMouseDown; up = OnMouseUp; drag = OnMouseDown + OnMouseDrag×drag_steps + OnMouseUp (requires to_x/to_y).",
+          "enum": [
+            "click",
+            "down",
+            "up",
+            "drag"
+          ],
+          "type": "string"
+        },
+        "drag_steps": {
+          "default": 8,
+          "description": "Number of OnMouseDrag calls between from and to (action: drag). Capped at 100 to bound main-thread cost. Default 8.",
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "object_id": {
+          "description": "InstanceId of a GameObject used to refine the screen point (its center is raycast). The actual target is whatever the ray hits at that point. Wins over target and screen_x/screen_y.",
+          "type": "number"
+        },
+        "screen_x": {
+          "description": "Screen X (pixels) to raycast from. Pair with screen_y.",
+          "type": "number"
+        },
+        "screen_y": {
+          "description": "Screen Y (pixels) to raycast from. Pair with screen_x.",
+          "type": "number"
+        },
+        "target": {
+          "description": "GameObject name/path used to refine the screen point. Alternative to object_id/screen.",
+          "type": "string"
+        },
+        "to_x": {
+          "description": "Drag end — screen X (action: drag only). Pair with to_y.",
+          "type": "number"
+        },
+        "to_y": {
+          "description": "Drag end — screen Y (action: drag only). Pair with to_x.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "action"
+      ],
       "type": "object"
     }
   }
