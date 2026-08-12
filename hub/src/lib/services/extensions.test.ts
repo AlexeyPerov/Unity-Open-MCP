@@ -28,6 +28,7 @@ test("EMBEDDED_DOMAINS lists all shipped domains with stable tool-group ids", ()
     [...domains].sort(),
     [
       "animation",
+      "inputsimulation",
       "inputsystem",
       "navigation",
       "particle_system",
@@ -49,11 +50,11 @@ test("EMBEDDED_DOMAINS lists all shipped domains with stable tool-group ids", ()
 test("installableEmbeddedDomains excludes built-in module domains", () => {
   const installable = installableEmbeddedDomains();
   // Nav + Input + ProBuilder + Splines + Timeline + Tilemap + ShaderGraph +
-  // VFX are real UPM packages. Cinemachine is reflection-gated and
-  // deliberately absent; Memory Profiler ships as a `memoryprofiler` group
-  // but its tool is a sense (unity_senses_*), not a typed-editor domain, so
-  // it is not in EMBEDDED_DOMAINS.
-  assert.equal(installable.length, 8);
+  // VFX + Input Simulation (uGUI) are real UPM packages. Cinemachine is
+  // reflection-gated and deliberately absent; Memory Profiler ships as a
+  // `memoryprofiler` group but its tool is a sense (unity_senses_*), not a
+  // typed-editor domain, so it is not in EMBEDDED_DOMAINS.
+  assert.equal(installable.length, 9);
   const upmIds = installable.map((d) => d.upmDependency).sort();
   assert.deepEqual(upmIds, [
     "com.unity.2d.tilemap",
@@ -63,6 +64,7 @@ test("installableEmbeddedDomains excludes built-in module domains", () => {
     "com.unity.shadergraph",
     "com.unity.splines",
     "com.unity.timeline",
+    "com.unity.ugui",
     "com.unity.visualeffectgraph",
   ]);
   for (const d of installable) {

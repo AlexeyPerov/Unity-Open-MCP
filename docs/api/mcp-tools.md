@@ -45,7 +45,8 @@ definitions live in `mcp-server/src/tools/`.
   ScriptableObjects, asmdefs, build, and project settings.
 - **Embedded domains** — navigation, input, ProBuilder, particles, animation,
   splines, lighting, audio, UI, constraints, terrain, Cinemachine, Timeline,
-  Tilemap, Shader Graph, VFX Graph, Memory Profiler, and 2D art.
+  Tilemap, Shader Graph, VFX Graph, Memory Profiler, 2D art, and input
+  simulation (play-mode click/swipe/drag).
 - **Discovery** — capabilities, rules, skill generation, and tool-group
   management.
 - **Unity Hub control** — editor discovery, release listing, installs, modules,
@@ -68,6 +69,7 @@ a multi-step workflow. For session groups, see [Tool groups](tool-groups.md).
 | Typed editor | Create scene `Assets/Scenes/Level1.unity`, add a Player cube, and parent a Camera under it. |
 | Embedded domains | Activate `cinemachine` and create a follow camera for the Player. |
 | Agent senses | Run Play Mode tests for the Combat assembly and capture a Game-view screenshot on failure. |
+| Game testing | Probe the UI for interactables, enter play mode, click the Start button by id, advance a few frames, then screenshot to confirm the level loaded. |
 | Tool groups | Reset tool groups, then activate only `core` and `gate-and-verify`. |
 | Batch mutations | In one batch: create ten empty GameObjects named `Enemy_1`…`Enemy_10` under an `Enemies` parent. |
 | Verify / CI | Create a verify baseline for this project, then report any new blocking issues since the last baseline. |

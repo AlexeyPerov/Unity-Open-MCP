@@ -479,6 +479,26 @@ import { batchExecute } from "./batch-execute.js";
 // refuses when the editor_fd_exhaustion signature is absent.
 import { restartEditor } from "./restart-editor.js";
 import { resourcePressure } from "./resource-pressure.js";
+// Input simulation — play-mode game-testing surface. uGUI pointer dispatch
+// (EventSystem + ExecuteEvents, compile-gated on com.unity.ugui via
+// UNITY_OPEN_MCP_EXT_INPUTSIM_UGUI) + Input System device events (keyboard +
+// touch, compile-gated on com.unity.inputsystem via UNITY_OPEN_MCP_EXT_INPUTSIM_IS).
+// The workhorse for "click/swipe/drag a named object" during play mode. All
+// three are gate-free (IsMutating=false — input writes no assets; same model as
+// editor_set_state) and play-mode-only (refuse with play_mode_required).
+// Lives in the `input-simulation` group (hidden until activated via
+// manage_tools). Target-first resolution with a screen-point fallback.
+import { inputsimPointer } from "./inputsim-pointer.js";
+import { inputsimKey } from "./inputsim-key.js";
+import { inputsimTouch } from "./inputsim-touch.js";
+// feedback-input.md additions: frame advance (step), interactable discovery
+// (probe), and legacy/3D world-space pointer (pointer3d). step unblocks the
+// documented down→advance→up workflow and the "interact then look" loop; probe
+// makes the surface self-sufficient (probe → click by id → step → screenshot);
+// pointer3d reaches OnMouseDown/physics gameplay the uGUI tool cannot.
+import { inputsimStep } from "./inputsim-step.js";
+import { inputsimProbe } from "./inputsim-probe.js";
+import { inputsimPointer3d } from "./inputsim-pointer3d.js";
 
 // M27 Plan 4 — batch_execute ships as a core meta-tool so agents can always
 // discover it. It is the agent ergonomics counterpart to the M26 headless batch
@@ -492,6 +512,14 @@ export const M27_PLAN4_TOOLS: Tool[] = [batchExecute];
 // agent can warn the operator to save + restart while the bridge is healthy).
 // Both are always-visible meta-tools (no group assignment); local-routed.
 export const M31_PLAN3_TOOLS: Tool[] = [restartEditor, resourcePressure];
+
+// Input simulation — play-mode game-testing surface (uGUI pointer dispatch +
+// Input System keyboard/touch device events). Three tools sharing the
+// `input-simulation` group. The pointer tool compiles when com.unity.ugui is
+// present; the key/touch tools compile when com.unity.inputsystem is present
+// (the bridge surfaces the compiled subset via GET /tools). All gate-free,
+// play-mode-only.
+export const INPUTSIM_TOOLS: Tool[] = [inputsimPointer, inputsimKey, inputsimTouch, inputsimStep, inputsimProbe, inputsimPointer3d];
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -1166,4 +1194,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M26_PLAN2_HUB_TOOLS,
   ...M27_PLAN4_TOOLS,
   ...M31_PLAN3_TOOLS,
+  ...INPUTSIM_TOOLS,
 ];

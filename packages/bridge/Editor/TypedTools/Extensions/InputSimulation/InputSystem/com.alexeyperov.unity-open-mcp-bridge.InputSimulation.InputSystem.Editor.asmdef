@@ -1,0 +1,28 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-bridge.InputSimulation.InputSystem.Editor",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.InputSimulation",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "UnityEngine.UI",
+    "Unity.InputSystem"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "UNITY_OPEN_MCP_EXT_INPUTSIM_IS"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.inputsystem",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_INPUTSIM_IS"
+    }
+  ],
+  "noEngineReferences": false
+}

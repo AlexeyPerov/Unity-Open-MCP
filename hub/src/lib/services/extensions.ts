@@ -231,6 +231,27 @@ export const EMBEDDED_DOMAINS: readonly EmbeddedDomain[] = [
       "unity_open_mcp_vfx_block_edit",
     ],
   },
+  {
+    // Input simulation — play-mode game-testing surface. The pointer tool
+    // (uGUI) compiles with com.unity.ugui (the dependency surfaced here); the
+    // keyboard/touch tools additionally require com.unity.inputsystem (already
+    // surfaced by the inputsystem entry above). Two independent sub-asmdefs.
+    domain: "inputsimulation",
+    displayName: "Input Simulation",
+    description:
+      "Play-mode input simulation: uGUI pointer click/drag + Input System keyboard/touch device events.",
+    upmDependency: "com.unity.ugui",
+    defaultVersion: "2.0.0",
+    builtin: false,
+    toolIds: [
+      "unity_open_mcp_inputsim_pointer",
+      "unity_open_mcp_inputsim_key",
+      "unity_open_mcp_inputsim_touch",
+      "unity_open_mcp_inputsim_step",
+      "unity_open_mcp_inputsim_probe",
+      "unity_open_mcp_inputsim_pointer3d",
+    ],
+  },
 ] as const;
 
 /**

@@ -326,6 +326,26 @@ export const TOOL_GROUPS: ToolGroup[] = [
     defaultEnabled: false,
   },
   {
+    id: "input-simulation",
+    description:
+      "Play-mode input simulation surface — uGUI pointer dispatch " +
+      "(inputsim_pointer: click / drag / hover / submit on a named GameObject " +
+      "or screen point via EventSystem + ExecuteEvents) + Input System device " +
+      "events (inputsim_key keyboard, inputsim_touch touch / swipe) + frame " +
+      "advance (inputsim_step) + interactable discovery (inputsim_probe) + " +
+      "3D / legacy world-space pointer (inputsim_pointer3d, OnMouseDown + " +
+      "Physics.Raycast). The workhorse for 'click/swipe/drag a named object' " +
+      "while testing a game in the Editor. The intended loop: probe → click by " +
+      "object_id → step → screenshot. The uGUI tools compile when com.unity.ugui " +
+      "is present (UNITY_OPEN_MCP_EXT_INPUTSIM_UGUI); the keyboard/touch tools " +
+      "compile when com.unity.inputsystem is present (UNITY_OPEN_MCP_EXT_INPUTSIM_IS). " +
+      "All gate-free (input writes no assets — same model as editor_set_state) " +
+      "and play-mode-only except probe (read-only, works in edit mode too). Pair " +
+      "with editor_set_state (enter play mode) and the agent-senses screenshot / " +
+      "visual_compare / read_console surface to close the loop.",
+    defaultEnabled: false,
+  },
+  {
     id: "agent-senses",
     description:
       "Agent senses surface (run_tests, screenshot variants, capture_inline, " +
@@ -943,6 +963,19 @@ assign("unity-hub-control", [
   "unity_open_mcp_hub_install_modules",
   "unity_open_mcp_hub_get_install_path",
   "unity_open_mcp_hub_set_install_path",
+]);
+
+// --- input-simulation (play-mode game-testing surface) ----------------------
+// uGUI pointer dispatch (com.unity.ugui-gated in the bridge) + Input System
+// keyboard/touch device events (com.unity.inputsystem-gated). All gate-free,
+// play-mode-only. The compiled subset is reconciled from GET /tools.
+assign("input-simulation", [
+  "unity_open_mcp_inputsim_pointer",
+  "unity_open_mcp_inputsim_key",
+  "unity_open_mcp_inputsim_touch",
+  "unity_open_mcp_inputsim_step",
+  "unity_open_mcp_inputsim_probe",
+  "unity_open_mcp_inputsim_pointer3d",
 ]);
 
 // ---------------------------------------------------------------------------

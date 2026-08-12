@@ -156,6 +156,21 @@ namespace UnityOpenMcpBridge
                 upmDependency: "com.unity.visualeffectgraph",
                 typeProbe: "UnityEngine.VFX.VisualEffectAsset, Unity.VisualEffectGraph.Runtime",
                 builtin: false),
+            // Input simulation — play-mode game-testing surface. The pointer
+            // tool (uGUI EventSystem + ExecuteEvents) compiles with com.unity.ugui
+            // (the dependency surfaced here); the keyboard/touch tools
+            // additionally require com.unity.inputsystem (whose presence is
+            // already surfaced by the input-system authoring entry above). Two
+            // independent sub-asmdefs ship the halves; the bridge reconciles
+            // the compiled subset via GET /tools.
+            new EmbeddedDomain(
+                group: "input-simulation",
+                domain: "inputsimulation",
+                displayName: "Input Simulation",
+                description: "Play-mode input simulation: uGUI pointer click/drag, 3D/legacy physics pointer, probe, frame step, and Input System keyboard/touch device events.",
+                upmDependency: "com.unity.ugui",
+                typeProbe: "UnityEngine.EventSystems.EventSystem, UnityEngine.UI",
+                builtin: false),
         };
 
         /// <summary>Enumerate the installable (non-builtin) domains.</summary>

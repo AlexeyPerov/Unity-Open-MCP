@@ -62,6 +62,7 @@ For group visibility, auto-activation rules, and tool contracts, see
 | Shader Graph | `shadergraph` | `com.unity.shadergraph` | **Auto** when package installed |
 | VFX Graph | `vfx` | `com.unity.visualeffectgraph` | **Auto** when package installed |
 | Memory Profiler | `memoryprofiler` | `com.unity.memoryprofiler` | **Auto** when package installed |
+| Input Simulation | `input-simulation` | `com.unity.ugui` (pointer) + `com.unity.inputsystem` (keyboard/touch, optional) | Manual |
 
 **Manual** — call `manage_tools(action="activate", group="…")` before the
 group's tools appear in `ListTools`.
