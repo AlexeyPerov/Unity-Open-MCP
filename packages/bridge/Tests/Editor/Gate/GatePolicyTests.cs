@@ -296,6 +296,69 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         // -------------------------------------------------------------------
+        // feedback.md issue 5 — play-mode short-circuit
+        // -------------------------------------------------------------------
+
+        // In play mode the verify scan never settles (the scene graph is
+        // animating), which previously hung the dispatch and trained agents to
+        // set gate:"off" globally. The fix: short-circuit to a skipped result
+        // with SkippedReason="play_mode" — run the mutation, skip validation,
+        // keep the gate honest about why it did not validate.
+        [Test]
+        public void Execute_PlayMode_ShortCircuitsWithPlayModeReason()
+        {
+            var wasPlaying = BridgeSession.IsPlaying;
+            BridgeSession.SetPlayingForTest(true);
+            try
+            {
+                var result = GatePolicy.Execute(
+                    GateMode.Enforce,
+                    new[] { "Assets/__MCPTest_PlayMode.assets" },
+                    () => ToolDispatchResult.Ok("{\"touched\":[\"Assets/__MCPTest_PlayMode.assets\"]}"));
+
+                // The mutation ran.
+                Assert.IsTrue(result.Mutation.Success, "mutation must still execute in play mode.");
+                // Gate did NOT run (no checkpoint/validate/delta).
+                Assert.IsFalse(result.GateRan, "gate must short-circuit in play mode, not run validate.");
+                Assert.AreEqual(GateOutcome.Skipped, result.Outcome,
+                    "play-mode skip is a Skipped outcome (mutation succeeded).");
+                // The honesty signal.
+                Assert.AreEqual("play_mode", result.SkippedReason,
+                    "SkippedReason must be play_mode so the agent knows why validation was skipped.");
+                // agentNextSteps explains the skip.
+                Assert.IsNotNull(result.AgentNextSteps);
+                StringAssert.Contains("play mode", result.AgentNextSteps[0]);
+            }
+            finally
+            {
+                BridgeSession.SetPlayingForTest(wasPlaying);
+            }
+        }
+
+        [Test]
+        public void Execute_EditMode_RunsGateNormally_NoSkipReason()
+        {
+            // The default (edit mode) path must NOT set SkippedReason when the
+            // gate is skipped only because paths_hint is empty — that's a
+            // different skip, distinct from the play-mode short-circuit.
+            var wasPlaying = BridgeSession.IsPlaying;
+            BridgeSession.SetPlayingForTest(false);
+            try
+            {
+                var result = GatePolicy.Execute(
+                    GateMode.Enforce,
+                    null, // empty paths_hint → skipped, but NOT play_mode
+                    () => ToolDispatchResult.Ok("{}"));
+                Assert.IsNull(result.SkippedReason,
+                    "Edit-mode empty-paths skip must not carry a play_mode reason.");
+            }
+            finally
+            {
+                BridgeSession.SetPlayingForTest(wasPlaying);
+            }
+        }
+
+        // -------------------------------------------------------------------
         // helpers
         // -------------------------------------------------------------------
 

@@ -527,5 +527,24 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_settings_set_time",
             "unity_open_mcp_settings_set_quality_level"
         };
+
+        // Tools that expose an ad-hoc `read_only` body field (parsed via
+        // JsonBody.GetBool), used by the dispatcher to (a) waive the paths_hint
+        // requirement when read_only:true and (b) advertise the read_only exit
+        // in the paths_hint error envelope. execute_csharp is NOT a
+        // [BridgeTool]-registered tool (it is dispatched by the hand-written
+        // switch in BridgeHttpServer), so this cannot be derived from the
+        // registry's ParameterInfo metadata — this set IS the source of truth.
+        // Add a tool here when it gains a read_only parameter, and both call
+        // sites update automatically. (feedback minor — was a scattered
+        // magic-string `toolName == "unity_open_mcp_execute_csharp"` check that
+        // silently failed to advertise read_only for the next tool to gain it.)
+        internal static readonly HashSet<string> ReadOnlyParamTools = new()
+        {
+            "unity_open_mcp_execute_csharp",
+        };
+
+        internal static bool ExposesReadOnlyParam(string toolName)
+            => ReadOnlyParamTools.Contains(toolName);
     }
 }

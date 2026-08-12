@@ -26,7 +26,7 @@ import { generateSkill } from "./skill/generate-skill.js";
 import { getKnownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
-import { PORT_ENV_VAR } from "./constants.js";
+import { PORT_ENV_VAR, TYPED_EDITOR_ACTIVATE_INSTRUCTION } from "./constants.js";
 import { findUnityForProject, readProcessCommandLine } from "./running-unity.js";
 
 // M31-optimizations Plan 1 / L14 — opt-in route-logging gate. Resolved once at
@@ -956,7 +956,8 @@ export class ToolRouter implements Router {
           ? `${errors.length} error(s) in Editor.log, but the log appears ` +
             "STALE or authored by a different Unity — these errors may NOT " +
             "apply to the running editor. Do NOT act on them until a genuine " +
-            "recompile (unity_open_mcp_recompile_scripts) confirms them."
+            "recompile (unity_open_mcp_recompile_scripts, in the typed-editor " +
+            `group — ${TYPED_EDITOR_ACTIVATE_INSTRUCTION} first) confirms them.`
           : health.headline,
         ...(errorsMayNotApply ? { logVerdict } : {}),
         errorCount: errors.length,

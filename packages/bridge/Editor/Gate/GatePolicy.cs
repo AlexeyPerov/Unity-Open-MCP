@@ -117,6 +117,13 @@ namespace UnityOpenMcpBridge
         // False (the common case) means the compile settled or was never
         // relevant to this mutation.
         public bool CompilePending;
+        // feedback.md issue 5 — machine-readable reason the gate was skipped.
+        // Currently only "play_mode" (the gate short-circuits checkpoint/validate
+        // during play mode because the scene graph is animating and the verify
+        // scan never settles, which previously hung the request queue and trained
+        // agents to set gate:"off" globally). Null on every other skip path.
+        // Emitted in the envelope as skippedReason next to skipped:true.
+        public string SkippedReason;
     }
 
     public static class GatePolicy
@@ -159,6 +166,32 @@ namespace UnityOpenMcpBridge
                     GateRan = false,
                     Outcome = noPathResult.Success ? GateOutcome.Skipped : GateOutcome.Failed,
                     GateFailed = !noPathResult.Success
+                };
+            }
+
+            // feedback.md issue 5 — play-mode short-circuit. In play mode the
+            // scene graph is animating, so the verify scan (checkpoint → validate
+            // → delta) never settles and the dispatch hangs until the request
+            // timeout — which previously trained agents to set gate:"off" globally
+            // for the rest of the session (46% of execute_csharp calls in the
+            // sweep). Instead: run the mutation, skip validation, and report an
+            // honest skippedReason:"play_mode" so the gate stays on for the edit-
+            // mode calls that follow. BridgeSession.IsPlaying is a volatile bool
+            // refreshed every EditorApplication.update tick (thread-safe to read).
+            if (BridgeSession.IsPlaying)
+            {
+                var playResult = mutation();
+                var steps = playResult.Success
+                    ? new[] { "Validation skipped: editor is in play mode (the scene graph is animating; the verify scan does not settle). Re-run in edit mode for a verified result." }
+                    : null;
+                return new GateDispatchResult
+                {
+                    Mutation = playResult,
+                    GateRan = false,
+                    Outcome = playResult.Success ? GateOutcome.Skipped : GateOutcome.Failed,
+                    GateFailed = !playResult.Success,
+                    SkippedReason = "play_mode",
+                    AgentNextSteps = steps
                 };
             }
 

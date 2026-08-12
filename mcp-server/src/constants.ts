@@ -69,6 +69,29 @@ export const BRIDGE_MIN_TIMEOUT_MS = 1_000;
 export const BRIDGE_MAX_TIMEOUT_MS = 600_000;
 
 /**
+ * Server-side cap applied to an explicit `timeout_ms` on the synchronous bridge
+ * POST path (live-client `postToolFetch`). Values above a typical MCP host
+ * request timeout (~60s) are unreachable: the host aborts the tools/call with an
+ * opaque -32001 transport error before the bridge can return its structured
+ * `timeout` envelope, while the snippet keeps running on Unity's main thread.
+ * Clamping here keeps the call inside the host's window so the agent always
+ * receives a structured response. The schema `maximum` is client-side validation
+ * only; this is the enforcement that catches clients that do not validate.
+ * (feedback S2)
+ */
+export const BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS = 55_000;
+
+/**
+ * Shared activation instruction for `recompile_scripts`, which lives in the
+ * `typed-editor` group (not enabled by default). Three call sites embed this
+ * verbatim in tool/route descriptions (tool-router, read-compile-errors,
+ * unity-log); centralizing the exact manage_tools invocation stops the three
+ * from drifting. The surrounding prose stays site-specific. (feedback minor)
+ */
+export const TYPED_EDITOR_ACTIVATE_INSTRUCTION =
+  "activate with manage_tools(action:\"activate\", group:\"typed-editor\")";
+
+/**
  * The npm package the MCP server is published as, pinned to the shared
  * trio version (`unity-open-mcp@X.Y.Z`) for the `npx -y` invocation.
  * Pinning (not `@latest`) keeps the MCP server aligned with the bridge /

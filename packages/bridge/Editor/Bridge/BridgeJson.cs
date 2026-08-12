@@ -300,7 +300,10 @@ namespace UnityOpenMcpBridge
                 if (result.CheckpointId != null)
                     sb.Append(",\"checkpointId\":\"").Append(EscapeStringContent(result.CheckpointId)).Append("\"");
                 sb.Append(",\"skipped\":true,\"outcome\":\"").Append(result.Outcome.ToWireString());
-                sb.Append("\",\"validation\":null,\"delta\":null");
+                // feedback.md issue 5 — machine-readable skip reason (play_mode).
+                sb.Append("\",\"skippedReason\":");
+                sb.Append(result.SkippedReason == null ? "null" : ("\"" + EscapeStringContent(result.SkippedReason) + "\""));
+                sb.Append(",\"validation\":null,\"delta\":null");
             }
             else
             {
@@ -648,19 +651,32 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
-        internal static string BuildPathsHintErrorEnvelope(string toolName, string gateMode)
+        // feedback.md issue 2 — advertise the read_only exit when the tool exposes
+        // it (only execute_csharp does today). Without this, agents learn to invent
+        // a plausible-looking paths_hint scope for read probes rather than asserting
+        // read_only, which is worse for the gate than the truthful assertion.
+        internal static string BuildPathsHintErrorEnvelope(string toolName, string gateMode, bool toolExposesReadOnly = false)
         {
-            var sb = new StringBuilder(512);
+            var sb = new StringBuilder(640);
             sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"paths_hint_required\",\"message\":\"");
             sb.Append("Mutating tool '");
             sb.Append(EscapeStringContent(toolName));
             sb.Append("' requires a non-empty 'paths_hint' array. ");
             sb.Append("Provide asset paths likely to be affected (e.g. [\\\"Assets/Prefabs/Player.prefab\\\"]) so the gate can scope validation correctly. ");
             sb.Append("There is no whole-project fallback — explicit paths are mandatory.");
+            if (toolExposesReadOnly)
+                sb.Append(" If the snippet performs no asset writes, pass read_only: true to waive this requirement.");
             sb.Append("\"}},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
-            sb.Append("\",\"skipped\":true,\"validation\":null,\"delta\":null}");
+            // feedback minor — carry skippedReason + outcome so this gate envelope
+            // matches the shape of the main envelope (the gate builder above),
+            // which emits skippedReason alongside skipped. Without it the `gate`
+            // object has two shapes depending on which builder produced it.
+            sb.Append("\",\"skipped\":true,\"skippedReason\":\"paths_hint_required\",\"outcome\":\"skipped\",\"validation\":null,\"delta\":null}");
             sb.Append(",\"logs\":[]");
-            sb.Append(",\"agentNextSteps\":[\"Add 'paths_hint' with at least one asset path before retrying.\"]}");
+            sb.Append(",\"agentNextSteps\":[\"Add 'paths_hint' with at least one asset path before retrying.\"");
+            if (toolExposesReadOnly)
+                sb.Append(",\"For read-only probes (no asset writes), pass read_only: true instead of paths_hint.\"");
+            sb.Append("]}");
             return sb.ToString();
         }
 

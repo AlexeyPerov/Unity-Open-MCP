@@ -21,6 +21,7 @@ import { existsSync, openSync, readSync, fstatSync, closeSync, statSync, readdir
 import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { TYPED_EDITOR_ACTIVATE_INSTRUCTION } from "./constants.js";
 
 export type UnityLogPlatform = "win32" | "darwin" | "linux";
 
@@ -574,7 +575,12 @@ export function detectStaleAssembly(projectRoot: string | null | undefined): Sta
       "compiler likely no-op'd a recompile, so the running assembly predates the " +
       "latest source). Do NOT trust a no_errors_found signal until the assembly is " +
       "rebuilt: call unity_open_mcp_recompile_scripts to force a deterministic " +
-      "recompile, then re-read compile errors.",
+      "recompile, then re-read compile errors. " +
+      // feedback.md issue 6 — recompile_scripts is in the typed-editor group,
+      // which is NOT default-enabled; the hint must say how to reach it, not just
+      // name it, or the agent falls back to hand-rolled AssetDatabase.Refresh.
+      "recompile_scripts is in the typed-editor group (not on by default): " +
+      `${TYPED_EDITOR_ACTIVATE_INSTRUCTION}, then call recompile_scripts.`,
   };
 }
 

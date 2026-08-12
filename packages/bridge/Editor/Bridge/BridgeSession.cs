@@ -73,6 +73,15 @@ namespace UnityOpenMcpBridge
             _isCompiling = value;
         }
 
+        // feedback.md issue 5 — same pattern as SetCompilingForTest: lets a unit
+        // test pin the play-mode flag so the gate's play-mode short-circuit can
+        // be exercised without entering actual play mode. Production never calls
+        // this (the update tick owns the flag).
+        internal static void SetPlayingForTest(bool value)
+        {
+            _isPlaying = value;
+        }
+
         public static bool IsInitialized => _initialized;
     }
 }

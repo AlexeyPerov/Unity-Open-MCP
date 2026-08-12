@@ -425,5 +425,36 @@ namespace UnityOpenMcpBridge.Tests
             }
             return sb.ToString();
         }
+
+        // ============ feedback.md issue 2 — paths_hint_required + read_only ============
+
+        // execute_csharp exposes read_only; when the tool has it, the
+        // paths_hint_required envelope must offer the read_only exit so agents
+        // stop inventing fabricated scopes for read probes.
+        [Test]
+        public static void BuildPathsHintErrorEnvelope_ExposesReadOnly_ForExecuteCsharp()
+        {
+            var json = BridgeJson.BuildPathsHintErrorEnvelope(
+                "unity_open_mcp_execute_csharp", "enforce", toolExposesReadOnly: true);
+            StringAssert.Contains("read_only: true", json,
+                "The envelope must mention read_only: true for execute_csharp.");
+            // agentNextSteps has BOTH the paths_hint step and the read_only step.
+            StringAssert.Contains("paths_hint", json);
+            StringAssert.Contains("read-only probes", json,
+                "The second agentNextSteps entry must name the read-only probe exit.");
+        }
+
+        [Test]
+        public static void BuildPathsHintErrorEnvelope_NoReadOnlyClause_ForToolsWithoutIt()
+        {
+            // invoke_method / execute_menu / etc. do NOT expose read_only — the
+            // envelope must stay unchanged (no misleading read_only suggestion).
+            var json = BridgeJson.BuildPathsHintErrorEnvelope(
+                "unity_open_mcp_invoke_method", "enforce", toolExposesReadOnly: false);
+            Assert.IsFalse(json.Contains("read_only"),
+                "Tools without a read_only parameter must not advertise it.");
+            Assert.IsFalse(json.Contains("read-only probes"),
+                "No read-only agentNextSteps entry for tools without the flag.");
+        }
     }
 }

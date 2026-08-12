@@ -42,15 +42,19 @@ namespace UnityOpenMcpBridge
         private static readonly string[] DefaultCSharpPatterns =
         {
             // Editor / playmode exit — no verify signal possible after these.
-            @"EditorApplication\.Exit",
-            @"Application\.Quit",
+            // feedback.md issue 4 — anchored at the call site with \s*\( so the
+            // bare `EditorApplication\.Exit` prefix no longer matches the routine,
+            // reversible `ExitPlaymode` / `ExitPlaymodeAndSaveAssets` members.
+            // Same anchoring applied defensively to the other call-shaped entries.
+            @"EditorApplication\.Exit\s*\(",
+            @"Application\.Quit\s*\(",
             // Bulk asset deletion — destroys work the gate can't scope.
-            @"AssetDatabase\.DeleteAsset",
+            @"AssetDatabase\.DeleteAsset\s*\(",
             // Unbounded full-project builds. The build API itself is allowed
             // (legitimate in CI), but only when the caller has explicitly opted
             // out of the gate below; the default deny keeps a stray agent from
             // kicking off a multi-minute build.
-            @"BuildPipeline\.BuildPlayer",
+            @"BuildPipeline\.BuildPlayer\s*\(",
             // Filesystem nukes under Assets/ — the verify gate runs on asset
             // GUIDs, a raw Directory.Delete leaves dangling references the gate
             // would only catch as missing-reference noise.

@@ -52,6 +52,42 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(r.Allowed);
         }
 
+        // feedback.md issue 4 — the bare `EditorApplication\.Exit` pattern
+        // prefix-matched the routine, reversible `ExitPlaymode` member, denying a
+        // play-mode toggle as if it were an Editor quit. The anchored pattern
+        // (`EditorApplication\.Exit\s*\(`) must still block the real Exit() call
+        // but allow ExitPlaymode / ExitPlaymodeAndSaveAssets.
+        [Test]
+        public void CSharp_Defaults_AllowExitPlaymode()
+        {
+            var r = BridgeDenyList.EvaluateCSharp(
+                "EditorApplication.ExitPlaymode();", null, bypass: false);
+            Assert.IsTrue(r.Allowed,
+                "ExitPlaymode is a routine, reversible play-mode toggle and must NOT be denied. " +
+                "Got deny pattern: " + r.MatchedPattern);
+        }
+
+        [Test]
+        public void CSharp_Defaults_AllowExitPlaymodeAndSaveAssets()
+        {
+            var r = BridgeDenyList.EvaluateCSharp(
+                "EditorApplication.ExitPlaymodeAndSaveAssets();", null, bypass: false);
+            Assert.IsTrue(r.Allowed,
+                "ExitPlaymodeAndSaveAssets must NOT be denied by the Exit() pattern.");
+        }
+
+        [Test]
+        public void CSharp_Defaults_AllowAssetDatabaseDeleteAssetsInsideOtherCall()
+        {
+            // Regression: the anchored `DeleteAsset\s*\(` pattern must not be
+            // defeated by a member named DeleteAsset appearing as a substring of
+            // an unrelated call. (Defensive — the anchor targets the call site.)
+            var r = BridgeDenyList.EvaluateCSharp(
+                "EditorUtility.DisplayDialog(\"DeleteAsset?\", \"yes\", \"no\");", null, bypass: false);
+            Assert.IsTrue(r.Allowed,
+                "DisplayDialog mentioning DeleteAsset must not be denied; the anchor targets the call.");
+        }
+
         [Test]
         public void CSharp_Defaults_BlockDirectoryDeleteUnderAssets()
         {

@@ -948,7 +948,7 @@ namespace UnityOpenMcpBridge
                         bool skipPathsHint = reserializeAllPathsInvalid
                             || (toolName == "unity_open_mcp_execute_menu"
                                 && ExecuteMenuTool.IsReadOnlyMenu(JsonBody.GetString(body, "menu_path")))
-                            || (toolName == "unity_open_mcp_execute_csharp"
+                            || (BridgeToolClassification.ExposesReadOnlyParam(toolName)
                                 && JsonBody.GetBool(body, "read_only"));
 
                         if (!skipPathsHint)
@@ -959,7 +959,7 @@ namespace UnityOpenMcpBridge
                                 activity.ErrorCode = "paths_hint_required";
                                 activity.DurationMs = sw.ElapsedMilliseconds;
                             }
-                            BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildPathsHintErrorEnvelope(toolName, effectiveGateMode));
+                            BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildPathsHintErrorEnvelope(toolName, effectiveGateMode, BridgeToolClassification.ExposesReadOnlyParam(toolName)));
                             return;
                         }
                     }

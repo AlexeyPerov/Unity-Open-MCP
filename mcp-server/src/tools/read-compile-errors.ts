@@ -1,5 +1,6 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { makeTool } from "./schema-fragments.js";
+import { TYPED_EDITOR_ACTIVATE_INSTRUCTION } from "../constants.js";
 
 // Offline, filesystem-only tool: reads the tail of Unity's Editor.log and
 // extracts BOTH C# compiler errors AND package / assembly-level red flags AND
@@ -72,8 +73,9 @@ export const readCompileErrors = makeTool(
     "source is newer than the newest Library/ScriptAssemblies/*.dll — the " +
     "running assembly predates the latest source, so a no_errors_found signal " +
     "CANNOT be trusted until the assembly is rebuilt. Call " +
-    "unity_open_mcp_recompile_scripts (deterministic force-recompile) then " +
-    "re-read compile errors.",
+    "unity_open_mcp_recompile_scripts (deterministic force-recompile; it is in " +
+    `the typed-editor group — ${TYPED_EDITOR_ACTIVATE_INSTRUCTION} first) ` +
+    "then re-read compile errors.",
   {
     properties: {
           tail_bytes: {
