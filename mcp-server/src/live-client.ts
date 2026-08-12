@@ -20,6 +20,8 @@ import type { InstanceClassification, InstanceLock } from "./instance-discovery.
 import {
   bridgeBaseUrl,
   BRIDGE_DEFAULT_TIMEOUT_MS,
+  BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS,
+  BRIDGE_MIN_TIMEOUT_MS,
   PORT_ENV_VAR,
   PROJECT_PATH_ENV_VAR,
 } from "./constants.js";
@@ -756,8 +758,23 @@ export class LiveClient implements Router {
     args: Record<string, unknown>,
     retryOn503: boolean,
   ): Promise<CallToolResult | CompileRepostSentinel> {
-    const timeoutMs =
+    const requestedTimeoutMs =
       typeof args.timeout_ms === "number" ? args.timeout_ms : 60_000;
+    // feedback S2 — clamp below a typical MCP host request timeout (~60s) so the
+    // bridge returns its structured `timeout` envelope before the host aborts the
+    // tools/call with an opaque -32001. The schema `maximum` is client-side
+    // validation only; this is the server-side enforcement that catches clients
+    // that do not validate. The clamped value is forwarded to the bridge (so its
+    // own processing deadline agrees) and used for the fetch deadline below.
+    const timeoutMs = Math.min(
+      Math.max(requestedTimeoutMs, BRIDGE_MIN_TIMEOUT_MS),
+      BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS,
+    );
+    const wasClamped = requestedTimeoutMs > timeoutMs;
+    // Forward the clamped value so the bridge times out at the same boundary.
+    const forwardedArgs = wasClamped
+      ? { ...args, timeout_ms: timeoutMs }
+      : args;
     // Floor the client fetch timeout at the bridge's own default wait + slack
     // so the client never aborts before the bridge has had a chance to return
     // its timeout envelope. Without this floor, a small/absent timeout_ms
@@ -774,7 +791,7 @@ export class LiveClient implements Router {
       {
         method: "POST",
         headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify(args),
+        body: JSON.stringify(forwardedArgs),
       },
       fetchTimeout,
     );
@@ -801,7 +818,24 @@ export class LiveClient implements Router {
       });
     }
 
-    return this.shapeToolResult(toolName, res);
+    const result = await this.shapeToolResult(toolName, res);
+    // Surface the clamp so the agent learns why a large timeout_ms did not hold.
+    if (wasClamped) {
+      const content = Array.isArray(result.content)
+        ? [...result.content]
+        : [{ type: "text" as const, text: "" }];
+      content.push({
+        type: "text",
+        text:
+          `Note: timeout_ms ${requestedTimeoutMs} was clamped to ${timeoutMs} ms — ` +
+          `values above ~${Math.floor(BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS / 1000)}s exceed a typical ` +
+          `MCP host request timeout and would be aborted with an opaque transport error ` +
+          `before the bridge could return a structured timeout envelope. For long work, ` +
+          `split into smaller steps.`,
+      });
+      return { ...result, content };
+    }
+    return result;
   }
 
   /**

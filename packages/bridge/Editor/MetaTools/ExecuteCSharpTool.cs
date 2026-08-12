@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -332,10 +333,40 @@ namespace UnityOpenMcpBridge.MetaTools
 
         // internal so the EditMode suite can pin the B39 source-level contract
         // (Refs declared as a public static field) without a live Roslyn install.
+        //
+        // feedback.md issue 1 — two fixes folded in:
+        //   (a) Hoist leading `using X;` directives out of the body into the
+        //       file-scope directive list. A snippet that opens with `using
+        //       UnityEditor;` previously landed inside Run() and was parsed as a
+        //       using STATEMENT (CS0210/CS0118), not a directive. Distinguish a
+        //       directive from a using-statement by the absence of `(` before
+        //       the `;`. Only LEADING using lines are hoisted — a `using` after
+        //       the first real statement is a genuine using-statement and errors
+        //       normally (correctly).
+        //   (b) Emit `#line <N> "snippet"` immediately before the body and
+        //       `#line default` after, so Roslyn reports (line,col) in the
+        //       caller's snippet coordinates, not wrapper-relative. `<N>` is the
+        //       1-based index of the first retained body line in the caller's
+        //       source — i.e. it accounts for the using/blank lines the hoist
+        //       stripped, so an error on the caller's first real statement
+        //       reports at the caller's own line number, not line 1. (feedback S1)
         internal static string BuildSource(string code, string[] usings)
         {
-            var sb = new StringBuilder(code.Length + usings.Length * 30 + 280);
+            // (a) Hoist leading using directives. Returns the cleaned body and the
+            // 1-based source line of its first retained line (for the #line map).
+            var hoistedUsings = HoistLeadingUsings(code, out var cleanedBody, out var firstRetainedLine);
+
+            // Merge: caller usings + hoisted, deduped (case-insensitive on the
+            // namespace token), preserving first-seen order.
+            var allUsings = new List<string>(usings.Length + hoistedUsings.Count);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var u in usings)
+                if (seen.Add(u)) allUsings.Add(u);
+            foreach (var u in hoistedUsings)
+                if (seen.Add(u)) allUsings.Add(u);
+
+            var sb = new StringBuilder(cleanedBody.Length + allUsings.Count * 30 + 320);
+            foreach (var u in allUsings)
                 sb.AppendLine($"using {u};");
             sb.AppendLine();
             sb.AppendLine("namespace UnityOpenMcpSnippet {");
@@ -348,12 +379,89 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.AppendLine("      return Refs[index] as T;");
             sb.AppendLine("    }");
             sb.AppendLine("    public static object Run() {");
-            sb.AppendLine($"      {code}");
+            // (b) #line directive so compiler errors report snippet-relative
+            // coordinates. `firstRetainedLine` is the caller's 1-based line for
+            // the first line of cleanedBody, so the hoisted using/blank lines do
+            // not shift reported errors toward 1. The hidden region keeps the
+            // wrapper lines out of stack traces too; `"snippet"` names the body
+            // so a debugger / stack trace shows "snippet", not the wrapper class.
+            sb.AppendLine($"#line {firstRetainedLine} \"snippet\"");
+            sb.AppendLine(cleanedBody);
+            sb.AppendLine("#line default");
             sb.AppendLine("      return null;");
             sb.AppendLine("    }");
             sb.AppendLine("  }");
             sb.AppendLine("}");
             return sb.ToString();
+        }
+
+        // Pull leading `using <ns>;` lines out of the body. A using DIRECTIVE has
+        // no `(` between `using` and `;`; a using STATEMENT is `using ( ... )` or
+        // `using var x = ...`. Only directives at the very top of the snippet
+        // (before any other statement) are hoisted — matches what the caller
+        // meant. Returns the namespace tokens (without the `using`/`;`), sets
+        // `cleaned` to the body with those lines stripped, and `firstRetainedLine`
+        // to the 1-based index of the first retained line in the caller's source
+        // (so the #line directive in BuildSource maps errors to caller coordinates).
+        private static List<string> HoistLeadingUsings(string code, out string cleaned, out int firstRetainedLine)
+        {
+            var hoisted = new List<string>();
+            if (string.IsNullOrEmpty(code)) { cleaned = code ?? ""; firstRetainedLine = 1; return hoisted; }
+
+            var lines = code.Replace("\r\n", "\n").Split('\n');
+            int i = 0;
+            for (; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                var trimmed = line.Trim();
+                if (trimmed.Length == 0) continue; // blank lines between usings are OK
+
+                // `using <ns>;` directive — no `(` before the `;`.
+                if (trimmed.StartsWith("using ", StringComparison.Ordinal) && trimmed.EndsWith(";"))
+                {
+                    var inner = trimmed.Substring(6, trimmed.Length - 7).Trim(); // between "using " and ";"
+                    // Reject using-statements: `(...)`, `var x = ...`, `Type x = ...`.
+                    // A directive's inner is a single namespace token (dots allowed).
+                    if (inner.IndexOf('(') >= 0) break;
+                    if (inner.IndexOf('=') >= 0) break;
+                    if (inner.Length == 0) break;
+                    // A namespace token: letters, digits, dots, underscores.
+                    bool valid = true;
+                    foreach (var c in inner)
+                    {
+                        if (!(char.IsLetterOrDigit(c) || c == '.' || c == '_')) { valid = false; break; }
+                    }
+                    if (!valid) break;
+                    hoisted.Add(inner);
+                }
+                else
+                {
+                    break; // first non-using, non-blank line ends hoisting
+                }
+            }
+
+            if (hoisted.Count == 0) { cleaned = code; firstRetainedLine = 1; return hoisted; }
+
+            // Rebuild the body without the hoisted leading lines (keep trailing
+            // blank lines that preceded the first real statement). Track the
+            // 1-based index of the first retained line so the #line directive
+            // reports caller-relative coordinates. (feedback S1)
+            var rest = new StringBuilder(code.Length);
+            bool seenReal = false;
+            firstRetainedLine = 1;
+            for (int j = i; j < lines.Length; j++)
+            {
+                if (!seenReal && lines[j].Trim().Length == 0) continue; // drop leading blanks
+                if (!seenReal)
+                {
+                    seenReal = true;
+                    firstRetainedLine = j + 1; // 1-based index of the first retained line
+                }
+                if (rest.Length > 0) rest.Append('\n');
+                rest.Append(lines[j]);
+            }
+            cleaned = rest.ToString();
+            return hoisted;
         }
     }
 }

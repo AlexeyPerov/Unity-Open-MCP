@@ -1,5 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { BRIDGE_DEFAULT_TIMEOUT_MS, BRIDGE_MIN_TIMEOUT_MS } from "../constants.js";
+import { BRIDGE_DEFAULT_TIMEOUT_MS, BRIDGE_MIN_TIMEOUT_MS, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS } from "../constants.js";
 import { GATE_PROP, PATHS_HINT_TYPE, IGNORE_SCENE_DIRTY_BASE, CONFIRM_BYPASS_BASE, makeTool } from "./schema-fragments.js";
 
 export const executeCsharp = makeTool(
@@ -66,7 +66,18 @@ export const executeCsharp = makeTool(
             type: "integer",
             default: BRIDGE_DEFAULT_TIMEOUT_MS,
             minimum: BRIDGE_MIN_TIMEOUT_MS,
-            maximum: 300000,
+            maximum: BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS,
+            description:
+              `Hard cap ${BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS} ms — values above a ` +
+              "typical MCP host request timeout (~60s) are unreachable: the host " +
+              "aborts the tools/call first (opaque -32001 transport error, no " +
+              "structured envelope), while the snippet keeps running on Unity's " +
+              "main thread. The route clamps to this cap server-side regardless " +
+              "(and reports the clamp) so a client that does not validate still " +
+              "gets a clean `timeout` envelope with agentNextSteps. For long work " +
+              "(full recompiles, heavy imports), split into smaller steps or use " +
+              "run_tests (which has an async job-poll shape) instead of one big " +
+              "blocking call. Default 30000.",
           },
           max_depth: {
             type: "integer",

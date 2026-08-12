@@ -147,6 +147,93 @@ namespace UnityOpenMcpBridge.Tests
         {
             Assert.IsFalse(ExecuteCSharpTool.IsSnippetAssembly(null));
         }
+
+        // ============ feedback.md issue 1 — BuildSource hoist + #line ============
+
+        // feedback.md issue 1(a) — leading `using X;` directives must be hoisted
+        // to file scope. Without hoisting they land inside Run() and are parsed
+        // as using STATEMENTS (CS0210/CS0118), producing a cascade that never
+        // names the real cause.
+        [Test]
+        public static void BuildSource_HoistsLeadingUsingDirectives()
+        {
+            var src = ExecuteCSharpTool.BuildSource(
+                "using UnityEditor;\nusing UnityEngine;\n\nvar sb = new StringBuilder();\nreturn sb.ToString();",
+                new[] { "System.Text" });
+            // The hoisted `using UnityEditor;` must appear BEFORE the namespace
+            // (file scope), not inside Run().
+            var namespaceIdx = src.IndexOf("namespace UnityOpenMcpSnippet");
+            var usingUEIdx = src.IndexOf("using UnityEditor;");
+            Assert.Greater(usingUEIdx, 0, "using UnityEditor must be present in the source.");
+            Assert.Less(usingUEIdx, namespaceIdx,
+                "using UnityEditor must be hoisted to file scope (before the namespace), " +
+                "not emitted inside Run() where it would parse as a using-statement.");
+            // The body must NOT still contain the using line where it was — there
+            // must be exactly ONE `using UnityEditor;` in the source (the hoisted
+            // file-scope directive), so its first and last occurrences coincide.
+            var lastUsingInBody = src.LastIndexOf("using UnityEditor;");
+            Assert.AreEqual(usingUEIdx, lastUsingInBody,
+                "Sanity: exactly one `using UnityEditor;` — the hoisted directive. " +
+                "A second occurrence would mean the using was left inside Run().");
+        }
+
+        [Test]
+        public static void BuildSource_DedupsHoistedAgainstCallerUsings()
+        {
+            var src = ExecuteCSharpTool.BuildSource(
+                "using System.Text;\nreturn null;",
+                new[] { "System.Text" });
+            // System.Text appears once as a directive (deduped), not twice.
+            var count = System.Linq.Enumerable.Count(
+                src.Split('\n'), l => l.Trim() == "using System.Text;");
+            Assert.AreEqual(1, count,
+                "A using duplicated between the caller `usings` param and the body must dedupe to one directive.");
+        }
+
+        [Test]
+        public static void BuildSource_DoesNotHoistUsingStatement()
+        {
+            // A genuine `using ( ... )` statement (with parens) must NOT be
+            // hoisted — it's a resource scope, not a directive.
+            var src = ExecuteCSharpTool.BuildSource(
+                "using (var fs = new System.IO.FileStream(\"x\", System.IO.FileMode.Open)) { }\nreturn null;",
+                System.Array.Empty<string>());
+            var namespaceIdx = src.IndexOf("namespace UnityOpenMcpSnippet");
+            // No `using var fs` directive should appear at file scope before the namespace.
+            Assert.Less(namespaceIdx, src.IndexOf("var fs ="),
+                "The using-statement body must stay inside Run(), not hoisted.");
+        }
+
+        // feedback.md issue 1(b) — a #line directive must map compiler errors to
+        // snippet-relative coordinates. The body is preceded by `#line 1 "snippet"`
+        // and followed by `#line default`.
+        [Test]
+        public static void BuildSource_EmitsLineDirectiveAroundBody()
+        {
+            var src = ExecuteCSharpTool.BuildSource("return 42;", System.Array.Empty<string>());
+            StringAssert.Contains("#line 1 \"snippet\"", src,
+                "A #line directive must precede the body so compiler errors report snippet-relative lines.");
+            StringAssert.Contains("#line default", src,
+                "#line default must follow the body to restore wrapper line tracking.");
+        }
+
+        // feedback S1 — the interacting case (hoist + #line). When leading usings
+        // AND blank lines are stripped, the #line directive must carry the 1-based
+        // index of the FIRST RETAINED line, not 1 — otherwise an error on the
+        // caller's first real statement reports at line 1 instead of its true line.
+        // BuildSource_EmitsLineDirectiveAroundBody only covers the no-hoist case.
+        [Test]
+        public static void BuildSource_LineDirectiveAccountsForHoistedUsings()
+        {
+            // Caller lines (1-based): 1 using, 2 using, 3 using, 4 blank, 5 body.
+            var src = ExecuteCSharpTool.BuildSource(
+                "using UnityEditor;\nusing UnityEngine;\nusing System.Text;\n\nvar sb = new StringBuilder();\nreturn sb.ToString();",
+                new[] { "System.Text" });
+            // The first retained line is "var sb = ..." — the caller's line 5.
+            StringAssert.Contains("#line 5 \"snippet\"", src,
+                "The #line directive must map to the first retained body line (caller line 5), " +
+                "not line 1 — hoisted using/blank lines must not shift reported errors toward 1.");
+        }
     }
 }
 
