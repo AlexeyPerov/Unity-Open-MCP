@@ -7,6 +7,7 @@ import { AssetModelCache, isCompressible, routeCompressible } from "./compressib
 import { listAssetsOffline, findReferencesOffline, dependenciesOffline } from "./offline.js";
 import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES, detectStaleLog, detectStaleAssembly, parseLogAuthorship, compareLogAuthorship } from "./unity-log.js";
 import { summarizeProjectHealth, extractProjectHealthIssues } from "./project-health.js";
+import { countProjectAsmdefs, countAssembliesWithErrors } from "./asmdef-discovery.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
 import {
@@ -942,6 +943,20 @@ export class ToolRouter implements Router {
       (!!staleLog || authorshipCheck.versionMismatch);
     const status = errorsMayNotApply ? "stale_log" : logVerdict;
 
+    // specs/feedback.md 2026-08-12 — partial-compile signal. Unity compiles
+    // assemblies in dependency order; when an early assembly fails the pipeline
+    // may not reach dependent ones, so the reported errors can be a SUBSET of
+    // the true error set. When there are errors AND the project has multiple
+    // compile assemblies, surface asmdefCount + assembliesWithErrors +
+    // partialCompileLikely so an agent does not treat `errorCount` as final
+    // (this is exactly the trap that masked 6 errors behind 1 during the
+    // input-simulation review).
+    const asmdefs = countProjectAsmdefs(this.projectPath);
+    const partialCompileLikely = errors.length > 0 && asmdefs.count > 1;
+    const assembliesWithErrors = partialCompileLikely
+      ? countAssembliesWithErrors(errors.map((e) => e.file))
+      : 0;
+
     return sourceResult(
       {
         status,
@@ -962,6 +977,24 @@ export class ToolRouter implements Router {
         ...(errorsMayNotApply ? { logVerdict } : {}),
         errorCount: errors.length,
         errors,
+        // specs/feedback.md 2026-08-12 — present only when there are errors AND
+        // the project has multiple compile assemblies. Unity's dependency-ordered
+        // pipeline means these errors may be a subset; fixing them lets dependent
+        // assemblies compile and may surface more. Re-check until errorCount is 0.
+        ...(partialCompileLikely
+          ? {
+              partialCompileLikely: true,
+              asmdefCount: asmdefs.count,
+              // Distinct assemblies the reported errors span (null when none of
+              // the cited files mapped to an asmdef — e.g. global/package code).
+              assembliesWithErrors: assembliesWithErrors > 0 ? assembliesWithErrors : null,
+              partialCompileHint:
+                "Unity compiles assemblies in dependency order; the reported errors " +
+                "may be a SUBSET — once these are fixed, dependent assemblies that " +
+                "were not reached compile next and may surface additional errors. " +
+                "Re-check read_compile_errors after each fix until errorCount is 0.",
+            }
+          : {}),
         // Package / assembly issues from the same log tail. Empty when the
         // only red flags are compiler errors (the common case).
         issues: health.issues,

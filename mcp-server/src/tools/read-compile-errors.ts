@@ -75,7 +75,13 @@ export const readCompileErrors = makeTool(
     "CANNOT be trusted until the assembly is rebuilt. Call " +
     "unity_open_mcp_recompile_scripts (deterministic force-recompile; it is in " +
     `the typed-editor group — ${TYPED_EDITOR_ACTIVATE_INSTRUCTION} first) ` +
-    "then re-read compile errors.",
+    "then re-read compile errors. IMPORTANT — staged compilation: Unity compiles " +
+    "assemblies in dependency order, so when `errorCount` is small but the project " +
+    "has multiple assemblies (the response carries `partialCompileLikely: true` " +
+    "with `asmdefCount`/`assembliesWithErrors`), the reported errors may be a " +
+    "SUBSET — the failing assembly aborted the pipeline before dependent ones were " +
+    "reached. Do NOT treat `errorCount` as the complete picture; fix the reported " +
+    "errors and re-check until `errorCount` is 0.",
   {
     properties: {
           tail_bytes: {
