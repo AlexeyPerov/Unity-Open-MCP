@@ -1,5 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { BRIDGE_DEFAULT_TIMEOUT_MS, BRIDGE_MIN_TIMEOUT_MS } from "../constants.js";
+import { BRIDGE_DEFAULT_TIMEOUT_MS, BRIDGE_MIN_TIMEOUT_MS, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS } from "../constants.js";
 import { makeTool } from "./schema-fragments.js";
 
 export const editorStatus = makeTool(
@@ -15,7 +15,12 @@ export const editorStatus = makeTool(
             type: "integer",
             default: BRIDGE_DEFAULT_TIMEOUT_MS,
             minimum: BRIDGE_MIN_TIMEOUT_MS,
-            maximum: 300000,
+            // Aligned to the transport cap (feedback N1): the live POST path
+            // clamps timeout_ms to BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS anyway, so a
+            // higher advertised maximum would be a contract the transport does
+            // not honor. editor_status returns fast; this only bounds an
+            // explicit large request.
+            maximum: BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS,
           },
         },
   },

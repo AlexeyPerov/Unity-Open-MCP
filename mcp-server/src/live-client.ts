@@ -518,9 +518,18 @@ export class LiveClient implements Router {
     const readyError = await this.ensureReady();
     if (readyError) return readyError;
 
+    // feedback N1: the start POST just kicks off the run and returns
+    // {status:"started"} immediately; its timeout is NOT the poll budget (that
+    // is read directly from args.timeout_ms in pollTestResults). Strip
+    // timeout_ms from the start POST so it does not carry the poll budget and
+    // trip a misleading "timeout_ms was clamped" note on the early-return
+    // paths below (isError / unparseable body / non-started status), where the
+    // full poll budget would otherwise have been honored.
+    const startArgs = { ...args };
+    delete startArgs.timeout_ms;
     const startResult = await this.postTool(
       "unity_senses_run_tests",
-      args,
+      startArgs,
       true,
     );
 
@@ -758,8 +767,9 @@ export class LiveClient implements Router {
     args: Record<string, unknown>,
     retryOn503: boolean,
   ): Promise<CallToolResult | CompileRepostSentinel> {
-    const requestedTimeoutMs =
-      typeof args.timeout_ms === "number" ? args.timeout_ms : 60_000;
+    const rawTimeout = args.timeout_ms;
+    const explicitTimeout = typeof rawTimeout === "number";
+    const requestedTimeoutMs = explicitTimeout ? rawTimeout : 60_000;
     // feedback S2 — clamp below a typical MCP host request timeout (~60s) so the
     // bridge returns its structured `timeout` envelope before the host aborts the
     // tools/call with an opaque -32001. The schema `maximum` is client-side
@@ -819,8 +829,13 @@ export class LiveClient implements Router {
     }
 
     const result = await this.shapeToolResult(toolName, res);
-    // Surface the clamp so the agent learns why a large timeout_ms did not hold.
-    if (wasClamped) {
+    // Surface the clamp ONLY when the caller explicitly requested a timeout
+    // above the cap (feedback N1). When timeout_ms is absent the server default
+    // (60s) is silently clamped to the cap — there is no caller expectation to
+    // correct, and noting it on every default call (e.g. the run_tests start
+    // POST, which strips timeout_ms) would be noise. The clamped value is still
+    // forwarded to the bridge above regardless.
+    if (wasClamped && explicitTimeout) {
       const content = Array.isArray(result.content)
         ? [...result.content]
         : [{ type: "text" as const, text: "" }];

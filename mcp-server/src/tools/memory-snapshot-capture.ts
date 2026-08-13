@@ -1,4 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS } from "../constants.js";
 import { makeTool } from "./schema-fragments.js";
 
 // M20 Plan 7 / T20.7.3 — Memory Profiler snapshot capture. Compile-gated in
@@ -51,12 +52,17 @@ export const memorySnapshotCapture = makeTool(
             type: "integer",
             description:
               "Maximum milliseconds to wait for the callback-based capture to " +
-              "finish (default 60000, clamped to 300000). The capture blocks until " +
-              "the snapshot file is written; if it times out the tool returns " +
-              "memoryprofiler_capture_timeout.",
-            default: 60000,
+              "finish (default + maximum = the transport cap, ~55000 ms). The " +
+              "capture blocks until the snapshot file is written; if it times out " +
+              "the tool returns memoryprofiler_capture_timeout. The ceiling is the " +
+              "bridge transport cap (BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS): a single " +
+              "blocking tool call cannot run longer than a typical MCP host " +
+              "request timeout, so a snapshot that needs more than ~55s cannot " +
+              "complete in one call — run it manually from the Memory Profiler " +
+              "window (Window > Analysis > Memory Profiler) for very large heaps.",
+            default: BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS,
             minimum: 1000,
-            maximum: 300000,
+            maximum: BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS,
           },
         },
   },

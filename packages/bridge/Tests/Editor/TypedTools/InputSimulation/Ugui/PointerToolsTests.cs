@@ -170,6 +170,45 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
         }
 
         [Test]
+        public void FindByPath_RootAnchoredPathWinsOverCompetingTrailingMatch()
+        {
+            // feedback S7/N3: a unique root-anchored path must take precedence
+            // over a competing trailing-segment match, so it resolves instead of
+            // regressing to ambiguous_target. This is the regression the S7 fix
+            // exists to prevent.
+            //
+            //   root-anchored: Panel (scene root) / Button
+            //   trailing-only:  Prefab / Panel / Button   ("Panel/Button" matches
+            //                   as a trailing walk, but Panel is NOT a scene root)
+            // Query "Panel/Button" must resolve to the root-anchored Button.
+            var rootPanel = new GameObject("Panel"); // scene root (no parent)
+            var rootBtn = new GameObject("Button");
+            rootBtn.transform.SetParent(rootPanel.transform, false);
+
+            var prefab = new GameObject("Prefab");
+            var nestedPanel = new GameObject("Panel");
+            nestedPanel.transform.SetParent(prefab.transform, false);
+            var nestedBtn = new GameObject("Button");
+            nestedBtn.transform.SetParent(nestedPanel.transform, false);
+            try
+            {
+                var candidates = new List<string>();
+                var found = PointerTargets.FindByPath("Panel/Button", candidates);
+                Assert.IsNotNull(found,
+                    "Root-anchored path must take precedence and resolve, not be ambiguous.");
+                Assert.AreEqual(rootBtn, found,
+                    "The root-anchored Button must win over the nested trailing match.");
+                Assert.AreEqual(0, candidates.Count,
+                    "No ambiguity candidates when the root-anchored match is unique.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(rootPanel);
+                Object.DestroyImmediate(prefab);
+            }
+        }
+
+        [Test]
         public void ComputeInteractable_CanvasGroupFalseDisables()
         {
             // P2: a CanvasGroup with interactable=false on an ancestor must read as
@@ -199,6 +238,27 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
                     "Selectable.interactable=false must read as not interactable.");
             }
             finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void ComputeInteractable_DisabledAncestorSelectableDisablesChild()
+        {
+            // feedback S5/N3: the original finding was a CHILD (e.g. a Text
+            // label) under a DISABLED ancestor Button — not the Selectable on
+            // the target itself. ComputeInteractable must walk UP to the nearest
+            // ancestor Selectable and honor its IsInteractable()==false. The
+            // existing SelectableFalseDisables test puts the Button on the
+            // target; this one exercises the ancestor walk that was added.
+            var btn = new GameObject("AncestorBtn", typeof(Button));
+            btn.GetComponent<Button>().interactable = false;
+            var child = new GameObject("Label"); // carries no Selectable of its own
+            child.transform.SetParent(btn.transform, false);
+            try
+            {
+                Assert.IsFalse(PointerTargets.ComputeInteractable(child),
+                    "A child under a disabled ancestor Selectable must read as not interactable.");
+            }
+            finally { Object.DestroyImmediate(btn); }
         }
 
         [Test]

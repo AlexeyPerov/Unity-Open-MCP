@@ -281,7 +281,7 @@
       "properties": {
         "timeout_ms": {
           "default": 30000,
-          "maximum": 300000,
+          "maximum": 55000,
           "minimum": 1000,
           "type": "integer"
         }
@@ -10232,9 +10232,9 @@
           "type": "string"
         },
         "timeout_ms": {
-          "default": 60000,
-          "description": "Maximum milliseconds to wait for the callback-based capture to finish (default 60000, clamped to 300000). The capture blocks until the snapshot file is written; if it times out the tool returns memoryprofiler_capture_timeout.",
-          "maximum": 300000,
+          "default": 55000,
+          "description": "Maximum milliseconds to wait for the callback-based capture to finish (default + maximum = the transport cap, ~55000 ms). The capture blocks until the snapshot file is written; if it times out the tool returns memoryprofiler_capture_timeout. The ceiling is the bridge transport cap (BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS): a single blocking tool call cannot run longer than a typical MCP host request timeout, so a snapshot that needs more than ~55s cannot complete in one call — run it manually from the Memory Profiler window (Window > Analysis > Memory Profiler) for very large heaps.",
+          "maximum": 55000,
           "minimum": 1000,
           "type": "integer"
         }

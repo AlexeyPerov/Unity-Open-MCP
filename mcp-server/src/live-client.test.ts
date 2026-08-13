@@ -26,6 +26,7 @@ import {
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS } from "./constants.js";
 import { PingCache } from "./ping-cache.js";
 import { LiveClient, shouldRetryPostAfterFailure } from "./live-client.js";
 import { projectHash } from "./instance-discovery.js";
@@ -985,6 +986,148 @@ test("envelope shape: direct body (no mutation field) is returned verbatim, no l
     assert.equal(body.status, "ok");
     assert.equal(body.count, 7);
     assert.deepEqual(body.tags, ["Untagged", "Player"]);
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// feedback N1/N2 — the server-side timeout clamp (postToolFetch).
+// The clamp bounds timeout_ms below BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS so the
+// bridge returns its structured timeout envelope before a host aborts the
+// tools/call. The clamped value is forwarded to the bridge; a note is appended
+// to the result ONLY when the caller explicitly requested a timeout above the
+// cap (not when timeout_ms was absent and the server default was silently
+// clamped). These tests pin all four behaviors through the real POST path.
+// ---------------------------------------------------------------------------
+
+/**
+ * Idle /ping + a direct-body /tools/* handler that records the forwarded
+ * request body (so a test can prove what timeout_ms actually reached the
+ * bridge). Mirrors directBodyHandler plus body capture.
+ */
+function bodyCapturingIdleHandler(
+  seen: { timeoutMs?: number; body?: unknown },
+): (req: IncomingMessage, res: ServerResponse) => void {
+  return async (req, res) => {
+    if (req.url === "/ping") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          connected: true,
+          projectPath: REFRESH_PROJECT,
+          unityVersion: "6000.0.0f1",
+          bridgeVersion: "0.1.0",
+          mode: "live",
+          compiling: false,
+          isPlaying: false,
+        }),
+      );
+      return;
+    }
+    // /tools/{name} — capture the POST body's timeout_ms before responding.
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const raw = Buffer.concat(chunks).toString("utf8");
+    try {
+      seen.body = JSON.parse(raw) as { timeout_ms?: number };
+    } catch {
+      seen.body = raw;
+    }
+    seen.timeoutMs = (seen.body as { timeout_ms?: number } | undefined)?.timeout_ms;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok" }));
+  };
+}
+
+function clampNoteCount(result: CallToolResult): number {
+  if (!Array.isArray(result.content)) return 0;
+  return result.content.filter(
+    (c) => c.type === "text" && /was clamped/.test(c.text ?? ""),
+  ).length;
+}
+
+test("clamp: explicit timeout_ms above the cap is clamped, forwarded to the bridge, and noted once", async () => {
+  const s = makeSandbox();
+  const seen: { timeoutMs?: number; body?: unknown } = {};
+  try {
+    const bridge = await startBridgeStub(bodyCapturingIdleHandler(seen));
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+    const result = await client.route("unity_open_mcp_editor_get_tags", {
+      timeout_ms: 120_000,
+    });
+    // The clamped value is what reached the bridge.
+    assert.equal(
+      seen.timeoutMs,
+      BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS,
+      `expected the bridge to receive the cap (${BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS}), got ${seen.timeoutMs}`,
+    );
+    // Exactly one clamp note in the result.
+    assert.equal(
+      clampNoteCount(result),
+      1,
+      "an explicit above-cap timeout must surface exactly one clamp note",
+    );
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("clamp: explicit timeout_ms below the cap passes through unchanged with no note", async () => {
+  const s = makeSandbox();
+  const seen: { timeoutMs?: number; body?: unknown } = {};
+  try {
+    const bridge = await startBridgeStub(bodyCapturingIdleHandler(seen));
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+    const result = await client.route("unity_open_mcp_editor_get_tags", {
+      timeout_ms: 10_000,
+    });
+    assert.equal(seen.timeoutMs, 10_000, "below-cap value must reach the bridge verbatim");
+    assert.equal(clampNoteCount(result), 0, "no clamp note below the cap");
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("clamp: absent timeout_ms is silently clamped+forwarded but produces NO note", async () => {
+  // The server default (60s) exceeds the cap, so the value IS clamped and
+  // forwarded to the bridge — but the caller never requested a timeout, so
+  // there is no expectation to correct and no note (feedback N1). Without the
+  // explicit-gate this would note on every default call, including poll-based
+  // start POSTs.
+  const s = makeSandbox();
+  const seen: { timeoutMs?: number; body?: unknown } = {};
+  try {
+    const bridge = await startBridgeStub(bodyCapturingIdleHandler(seen));
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+    const result = await client.route("unity_open_mcp_editor_get_tags", {});
+    assert.equal(
+      seen.timeoutMs,
+      BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS,
+      "the clamped default still reaches the bridge so its deadline agrees",
+    );
+    assert.equal(clampNoteCount(result), 0, "no clamp note when timeout_ms was absent");
     await bridge.close();
   } finally {
     disposeSandbox(s);
