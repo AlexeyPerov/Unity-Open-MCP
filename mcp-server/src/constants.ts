@@ -98,7 +98,7 @@ export const TYPED_EDITOR_ACTIVATE_INSTRUCTION =
  * verify packages. Mirrors the C# `BridgeConstants.NpmPackage`. Kept in
  * sync by `scripts/sync-version.mjs`.
  */
-export const NPM_PACKAGE = "unity-open-mcp@0.9.0";
+export const NPM_PACKAGE = "unity-open-mcp@1.0.0";
 
 /**
  * Build the bridge base URL for a given port. Centralizes the loopback +

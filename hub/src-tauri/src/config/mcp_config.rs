@@ -103,7 +103,7 @@ fn resolve_index_for_mode(
 /// npm-based launch modes. Keeps the field non-empty (so the UI's
 /// "what did we resolve" line still reads cleanly) without
 /// inventing a fake filesystem path.
-const NPM_RESOLVED_LABEL: &str = "npm: unity-open-mcp@0.9.0";
+const NPM_RESOLVED_LABEL: &str = "npm: unity-open-mcp@1.0.0";
 
 /// MCP server key used in the parent config. Matches
 /// `MCP_SERVER_KEY` in `ai_toolkit.ts` and the spec
@@ -222,7 +222,7 @@ pub(crate) fn client_is_global(client: McpClientId) -> bool {
 /// flow). `LocalOverride` is the Step 4 advanced escape hatch
 /// for a custom `mcp-server/dist/index.js` path.
 ///
-/// - `Npx` — `command: npx, args: ["-y", "unity-open-mcp@0.9.0"]`.
+/// - `Npx` — `command: npx, args: ["-y", "unity-open-mcp@1.0.0"]`.
 ///   Resolves the published package from the npm cache; no
 ///   toolkit root required.
 /// - `Global` — `command: unity-open-mcp, args: []`. Assumes the
@@ -828,8 +828,8 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
         }),
         McpClientId::OpencodeGlobal | McpClientId::OpencodeProject => {
             // OpenCode's `command` is an array (argv form); prepend the
-            // resolved command so `npx -y unity-open-mcp@0.9.0` becomes
-            // `["npx", "-y", "unity-open-mcp@0.9.0"]` and
+            // resolved command so `npx -y unity-open-mcp@1.0.0` becomes
+            // `["npx", "-y", "unity-open-mcp@1.0.0"]` and
             // `node /path/index.js` stays a two-element array.
             let mut cmd_array = vec![Value::String(command)];
             if let Value::Array(arr) = args_value {
@@ -964,7 +964,7 @@ pub(crate) fn cline_settings_path(home: &Path) -> PathBuf {
 /// [mcp_servers.unity-open-mcp]
 /// enabled = true
 /// command = "npx"
-/// args = ["-y", "unity-open-mcp@0.9.0"]
+/// args = ["-y", "unity-open-mcp@1.0.0"]
 ///
 /// [mcp_servers.unity-open-mcp.env]
 /// UNITY_PROJECT_PATH = "..."
@@ -1135,7 +1135,7 @@ fn manual_root_for(params: &McpConfigParams) -> PathBuf {
 
 /// Render the `claude mcp add` command for the Claude Code
 /// client. Two env keys are required; the launch invocation is
-/// keyed off the launch mode — `npx -y unity-open-mcp@0.9.0`
+/// keyed off the launch mode — `npx -y unity-open-mcp@1.0.0`
 /// for the bundled package, `unity-open-mcp` for a global
 /// install, and `node <path>` for a local checkout.
 pub fn claude_mcp_add_command(
@@ -2152,7 +2152,7 @@ mod tests {
         assert_eq!(entry.get("command").unwrap(), "npx");
         let args = entry.get("args").unwrap().as_array().unwrap();
         assert_eq!(args[0], "-y");
-        assert_eq!(args[1], "unity-open-mcp@0.9.0");
+        assert_eq!(args[1], "unity-open-mcp@1.0.0");
         // Sentinel label, not a filesystem path.
         assert_eq!(plan.resolved_mcp_index, NPM_RESOLVED_LABEL);
     }
@@ -2446,7 +2446,7 @@ mod tests {
             McpLaunchMode::Npx,
             "/unused/local/index.js",
         );
-        assert!(cmd.contains("-- npx -y unity-open-mcp@0.9.0"));
+        assert!(cmd.contains("-- npx -y unity-open-mcp@1.0.0"));
         assert!(!cmd.contains("-- node "));
     }
 
