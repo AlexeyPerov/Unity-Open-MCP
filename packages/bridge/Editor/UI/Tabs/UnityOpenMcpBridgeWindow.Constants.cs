@@ -56,6 +56,12 @@ namespace UnityOpenMcpBridge
         private const string TooltipPing =
             "Send a GET /ping to the local listener to confirm it is responding. Useful after Start or when an agent reports a connection failure.";
 
+        // Intentionally a single static HttpClient (the .NET-recommended
+        // pattern — a per-call HttpClient exhausts sockets via TIME_WAIT).
+        // Used only for the localhost /ping in the Status tab; the connection
+        // pool reuses one loopback socket. NOT an fd-leak vector across domain
+        // reload: the AppDomain is torn down on reload and the runtime releases
+        // the underlying socket, so do not "fix" this by disposing it.
         private static readonly HttpClient SharedHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
     }
 }

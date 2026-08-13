@@ -129,14 +129,24 @@ namespace UnityOpenMcpBridge.Extensions.MemoryProfilerExt
             bool done = false;
             bool success = false;
             string reportedPath = null;
-            var reset = new ManualResetEvent(initialState: false);
+            // `using var` disposes the wait-handle on EVERY exit path (success,
+            // timeout, and both capture-throw branches). A ManualResetEvent owns
+            // a native kernel wait-handle (SafeWaitHandle) — the handle class
+            // that, accumulated across calls, exhausts Mono's kqueue fd budget
+            // and trips the Bee driver's "Could not register to wait for file
+            // descriptor N". Capture is async: the snapshot callback can fire on
+            // a LATER editor update after this method has already returned on
+            // timeout, so the callback's Set() must tolerate an already-disposed
+            // handle (ObjectDisposedException) rather than throw into Unity's
+            // update loop.
+            using var reset = new ManualResetEvent(initialState: false);
 
             Action<string, bool> callback = (path, result) =>
             {
                 reportedPath = path;
                 success = result;
                 done = true;
-                reset.Set();
+                try { reset.Set(); } catch (ObjectDisposedException) { /* disposed after a timeout return */ }
             };
 
             try
