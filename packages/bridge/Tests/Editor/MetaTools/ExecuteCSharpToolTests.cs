@@ -234,6 +234,39 @@ namespace UnityOpenMcpBridge.Tests
                 "The #line directive must map to the first retained body line (caller line 5), " +
                 "not line 1 — hoisted using/blank lines must not shift reported errors toward 1.");
         }
+
+        // review 2026-08-13 — the hoist only handled plain `using NS;`. Alias
+        // (`using Foo = Bar;`), global-qualified (`using global::NS;`), and
+        // `using static` directives still landed inside Run() and produced the
+        // CS0210/CS0118 cascade the hoist exists to prevent. These pin all three.
+
+        [Test]
+        public static void BuildSource_HoistsAliasUsing()
+        {
+            var src = ExecuteCSharpTool.BuildSource(
+                "using SB = System.Text.StringBuilder;\nvar sb = new SB();\nreturn sb.ToString();",
+                System.Array.Empty<string>());
+            var namespaceIdx = src.IndexOf("namespace UnityOpenMcpSnippet");
+            var aliasIdx = src.IndexOf("using SB = System.Text.StringBuilder;");
+            Assert.Greater(aliasIdx, 0, "alias using must be present.");
+            Assert.Less(aliasIdx, namespaceIdx,
+                "alias using must hoist to file scope, not stay inside Run().");
+            // Exactly once — not left behind in the body.
+            Assert.AreEqual(aliasIdx, src.LastIndexOf("using SB = System.Text.StringBuilder;"));
+        }
+
+        [Test]
+        public static void BuildSource_HoistsGlobalAndStaticUsings()
+        {
+            var src = ExecuteCSharpTool.BuildSource(
+                "using global::System.Text;\nusing static System.Math;\nreturn null;",
+                System.Array.Empty<string>());
+            var namespaceIdx = src.IndexOf("namespace UnityOpenMcpSnippet");
+            Assert.Less(src.IndexOf("using global::System.Text;"), namespaceIdx,
+                "global-qualified using must hoist to file scope.");
+            Assert.Less(src.IndexOf("using static System.Math;"), namespaceIdx,
+                "using static must hoist to file scope.");
+        }
     }
 }
 

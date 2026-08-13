@@ -53,16 +53,20 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             "parentLinkedComponent",
             "m_baseMaterial",
             // Common renderer / light / probe anchors that are routinely empty.
-            "m_Material",      // Renderer.sharedMaterial slot — empty is the default for UI.
             "m_ProbeAnchor",
             "m_LightmapParameters",
             "m_StaticBatchRoot",
         };
 
-        // The full property name for a few fields that are known-optional only in
-        // their exact form (no prefix overlap risk). Currently empty — the prefix
-        // set above covers the reported histogram. Kept for future exact matches.
-        private static readonly string[] KnownOptionalExact = Array.Empty<string>();
+        // Fields known-optional only in their EXACT form. `m_Material` (singular —
+        // the Renderer.sharedMaterial / UI Image material slot) is empty by
+        // default; but as a PREFIX it would also demote `m_Materials` (Renderer's
+        // material array) and `m_MaterialIndex`, whose emptiness is a real miswire
+        // (pink shader). So the singular slot lives here, matched exactly only.
+        private static readonly string[] KnownOptionalExact =
+        {
+            "m_Material",
+        };
 
         /// <summary>
         /// Classify an empty_local_ref site's severity. Returns Warning for

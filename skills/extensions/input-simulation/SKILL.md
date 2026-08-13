@@ -86,7 +86,7 @@ probe (edit mode OK) → click by object_id → step → screenshot
 
 // 2. Enter play mode + click by instanceId (unambiguous).
 { "state": "play" }                                          // editor_set_state
-{ "action": "click", "object_id": -10234 }                  // inputsim_pointer
+{ "action": "click", "object_id": "-10234" }                // inputsim_pointer (probe's instanceId; pass as a string, bare number also accepted)
 // → { "status":"ok", "target":"Canvas/MainMenu/StartButton",
 //     "interactable":true, "blockedBy":null,
 //     "dispatched":["pointerDown","pointerUp","pointerClick"] }
@@ -159,7 +159,7 @@ probe (edit mode OK) → click by object_id → step → screenshot
 | `play_mode_required` | Called outside play mode | `editor_set_state(state: "play")` first |
 | `no_event_system` | No `EventSystem` in the scene (pointer) | Add one (create via `ui_canvas_add`, or add an EventSystem GameObject) |
 | `target_not_found` | `target` matches no active GameObject | Check the name/path; `GameObject.Find` only matches active objects |
-| `ambiguous_target` | `target` matches >1 active GameObject (**`inputsim_pointer` only**) | Use the full path, a longer trailing segment, or `object_id` (candidates listed). `inputsim_key` / `inputsim_touch` resolve targets via raw `GameObject.Find` and do NOT detect ambiguity — see the asymmetry note below |
+| `ambiguous_target` | `target` matches >1 active GameObject (`inputsim_pointer`, `inputsim_pointer3d`, `inputsim_touch`) | Use the full path, a longer trailing segment, or `object_id` (candidates listed). `inputsim_key` takes no target |
 | `no_hit` | Screen point raycast hit nothing | Check the point is over a raycast-target element |
 | `both_endpoint_forms` | Both target and screen coords supplied for one drag endpoint | Pass one form per endpoint (target wins; this error makes it explicit) |
 | `no_target_or_screen_point` | Neither object_id, target, nor screen point given | Provide one |
@@ -169,14 +169,14 @@ probe (edit mode OK) → click by object_id → step → screenshot
 
 ## Limits
 
-- **Ambiguity detection is pointer-tool-only.** `inputsim_pointer` walks active
-  transforms and returns `ambiguous_target` (with candidates) when a name/path
-  matches more than one GameObject. `inputsim_key` and `inputsim_touch` resolve
-  their target via raw `GameObject.Find`, which returns an arbitrary first match
-  with no ambiguity signal — for those tools, prefer a unique name or `object_id`
-  to avoid silently hitting the wrong object. (The asmdef split puts the
-  ambiguity-aware `PointerTargets` in the uGUI half, so the key/touch tools do
-  not share it.)
+- **Ambiguity detection covers every tool that takes a `target`.** `inputsim_pointer`,
+  `inputsim_pointer3d`, and `inputsim_touch` all walk active transforms and return
+  `ambiguous_target` (with candidate paths) when a name/path matches more than one
+  GameObject — none silently returns an arbitrary first match. (`inputsim_pointer`
+  shares the uGUI half's `PointerTargets`; `inputsim_touch` carries its own
+  self-contained resolver so its sub-asmdef stays independent.) `inputsim_key`
+  takes no target. When a name is shared, prefer a unique path or an `object_id`
+  from `inputsim_probe`.
 - **uGUI drag is single-frame.** `begin/drag×N/pointerUp/drop/endDrag` dispatch
   in one frame. Use `inputsim_step` afterward to let drag-driven tweens settle.
 - **`hold` duration is the number of advanced frames, not wall-clock.** Pair

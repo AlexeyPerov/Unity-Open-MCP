@@ -178,10 +178,20 @@ namespace UnityOpenMcpBridge
                 }
                 catch (RegexMatchTimeoutException)
                 {
-                    // A pathological pattern that times out should not block
-                    // the dispatch path — fall through to allow, but the
-                    // operator can fix the pattern in settings.
-                    continue;
+                    // Fail closed. A deny-pattern match that times out is
+                    // indeterminate: it may be a destructive call (default
+                    // patterns) hitting pathologically complex input, or an
+                    // operator pattern with catastrophic backtracking. Silently
+                    // allowing the dispatch through is the less safe option, so
+                    // deny and name the pattern — the operator can simplify it
+                    // in settings, or retry with an explicit bypass to proceed.
+                    return DenyResult.Deny(
+                        cache.Source[i],
+                        $"{toolName} deny pattern '{cache.Source[i]}' timed out during matching " +
+                        "(catastrophic backtracking or pathologically complex input). The dispatch " +
+                        "is denied rather than allowed through unchecked. Simplify the pattern in " +
+                        "settings or retry with gate: \"off\" and confirm_bypass: true to proceed.",
+                        suggestion);
                 }
             }
             return DenyResult.Allow();

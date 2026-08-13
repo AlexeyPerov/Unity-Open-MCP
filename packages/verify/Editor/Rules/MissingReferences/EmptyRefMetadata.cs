@@ -107,6 +107,17 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             // indistinguishable from "not captured" via FatherId alone — track
             // "seen" separately so the completion check below can stop scanning.
             bool fatherSeen = false;
+            // Backstop line budget for UNMODELED classes (Mesh/Texture2D/
+            // AnimationClip/…). Their IsComplete needs GameObjectId, which they
+            // never carry, so without a budget the scan would walk every line of
+            // an arbitrarily large embedded document. Modeled classes (below) are
+            // exempt — a Transform's m_Father comes after m_Children, which can
+            // list hundreds of entries, so capping those would re-introduce the
+            // truncated-path bug the unbounded walk exists to fix. The only field
+            // an unmodeled class can contribute is an m_GameObject back-ref, which
+            // lives near the top, so a modest budget is safe.
+            const int maxLinesPerUnmodeledObject = 128;
+            int linesThisObject = 0;
 
             for (var i = 0; i < lines.Length; i++)
             {
@@ -121,6 +132,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                         current = new AnchorMetadata { Anchor = anchor, ClassId = classId };
                         map[anchor] = current;
                         fatherSeen = false;
+                        linesThisObject = 0;
                         continue;
                     }
                     current = null;
@@ -129,6 +141,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
                 if (current == null) continue;
                 if (line.Length == 0) continue;
+                linesThisObject++;
 
                 if (current.Name == null && current.ClassId == ClassIdGameObject)
                 {
@@ -171,12 +184,25 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                 // Stop scanning this object once every field its class can
                 // carry has been captured — the remaining body lines (large
                 // arrays, curves, m_LocalRotation noise) cannot add anything.
+                // Unmodeled classes never complete, so cap them at the budget
+                // above; modeled classes are uncapped (m_Father can follow a
+                // long m_Children list).
                 if (IsComplete(current, fatherSeen))
+                    current = null;
+                else if (!IsModeledClass(current.ClassId) && linesThisObject >= maxLinesPerUnmodeledObject)
                     current = null;
             }
 
             return map;
         }
+
+        // True for the four classes this map models in detail. Only unmodeled
+        // classes are subject to the per-object line budget.
+        private static bool IsModeledClass(int classId)
+            => classId == ClassIdGameObject
+               || classId == ClassIdTransform
+               || classId == ClassIdRectTransform
+               || classId == ClassIdMonoBehaviour;
 
         // True when every metadata field the object's class can carry has been
         // captured, so the per-object scan can stop early. Classes outside the

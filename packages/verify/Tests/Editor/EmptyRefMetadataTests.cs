@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using NUnit.Framework;
+using UnityOpenMcpVerify;
 using UnityOpenMcpVerify.Rules.MissingReferences;
 
 namespace UnityOpenMcpVerify.Tests
@@ -170,6 +171,49 @@ namespace UnityOpenMcpVerify.Tests
             // m_Father is {fileID: 0}, so the path is just the root name.
             var path = EmptyRefMetadata.ResolveTransformPath(4000, map);
             Assert.AreEqual("Root", path);
+        }
+    }
+
+    // review 2026-08-13 — `m_Material` (singular) is empty-by-default on UI
+    // Images and demotes to Info, but `m_Materials` (Renderer's material ARRAY)
+    // and `m_MaterialIndex` are real miswires (pink shader) and must stay
+    // Warning. The prefix match previously demoted all three.
+    [TestFixture]
+    public class EmptyRefClassifierTests
+    {
+        [Test]
+        public void Classify_PluralMaterials_OnBuiltIn_IsWarning()
+        {
+            var empty = new EmptyLocalFileIDRegistry(1, 100, "m_Materials");
+            Assert.AreEqual(VerifySeverity.Warning, EmptyRefClassifier.Classify(empty));
+        }
+
+        [Test]
+        public void Classify_MaterialIndex_OnBuiltIn_IsWarning()
+        {
+            var empty = new EmptyLocalFileIDRegistry(1, 100, "m_MaterialIndex");
+            Assert.AreEqual(VerifySeverity.Warning, EmptyRefClassifier.Classify(empty));
+        }
+
+        [Test]
+        public void Classify_SingularMaterial_OnBuiltIn_IsInfo()
+        {
+            var empty = new EmptyLocalFileIDRegistry(1, 100, "m_Material");
+            Assert.AreEqual(VerifySeverity.Info, EmptyRefClassifier.Classify(empty));
+        }
+
+        [Test]
+        public void Classify_SelectOnPrefix_OnBuiltIn_IsInfo()
+        {
+            var empty = new EmptyLocalFileIDRegistry(1, 100, "m_SelectOnUp");
+            Assert.AreEqual(VerifySeverity.Info, EmptyRefClassifier.Classify(empty));
+        }
+
+        [Test]
+        public void Classify_UnexpectedEmpty_OnBuiltIn_IsWarning()
+        {
+            var empty = new EmptyLocalFileIDRegistry(1, 100, "m_Father");
+            Assert.AreEqual(VerifySeverity.Warning, EmptyRefClassifier.Classify(empty));
         }
     }
 }

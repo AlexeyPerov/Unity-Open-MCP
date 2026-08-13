@@ -32,6 +32,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 // TouchPhase is ambiguous between UnityEngine.TouchPhase (engine) and
 // UnityEngine.InputSystem.TouchPhase (this domain). The TouchState struct's
 // `phase` field is the Input System one, so alias it here to keep the bare
@@ -356,10 +357,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             Vector2 fromPoint;
             if (!string.IsNullOrEmpty(fromTarget))
             {
-                var go = GameObject.Find(fromTarget);
-                if (go == null) return DeviceJson.Error("target_not_found",
-                    $"Swipe from_target '{fromTarget}' not found.");
-                fromPoint = ScreenPointOf(go);
+                if (!TryResolveTarget(fromTarget, out fromPoint, out var fromErr))
+                    return DeviceJson.Error(fromErr.Code, $"Swipe from_target — {fromErr.Message}");
             }
             else if (fromX.HasValue && fromY.HasValue)
             {
@@ -376,10 +375,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             if (toX.HasValue && toY.HasValue) toPoint = new Vector2(toX.Value, toY.Value);
             else if (!string.IsNullOrEmpty(toTarget))
             {
-                var go = GameObject.Find(toTarget);
-                if (go == null) return DeviceJson.Error("target_not_found",
-                    $"Swipe to_target '{toTarget}' not found.");
-                toPoint = ScreenPointOf(go);
+                if (!TryResolveTarget(toTarget, out toPoint, out var toErr))
+                    return DeviceJson.Error(toErr.Code, $"Swipe to_target — {toErr.Message}");
             }
             else toPoint = fromPoint;
 
@@ -443,7 +440,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         }
 
         // Resolve a screen point from target OR screen_x/screen_y. Target-first:
-        // GameObject by name/path → its screen point via the active camera.
+        // name/path → its screen point (via TryResolveTarget, with ambiguity
+        // detection), else explicit screen_x/screen_y.
         private static bool ResolvePoint(
             string target, float? sx, float? sy,
             out Vector2 point, out (string Code, string Message) err)
@@ -451,17 +449,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             point = default;
             err = default;
             if (!string.IsNullOrEmpty(target))
-            {
-                var go = GameObject.Find(target);
-                if (go == null)
-                {
-                    err = ("target_not_found",
-                        $"No active GameObject found for target '{target}'.");
-                    return false;
-                }
-                point = ScreenPointOf(go);
-                return true;
-            }
+                return TryResolveTarget(target, out point, out err);
             if (sx.HasValue && sy.HasValue)
             {
                 point = new Vector2(sx.Value, sy.Value);
@@ -470,6 +458,102 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             err = ("no_target_or_screen_point",
                 "Provide either `target` (name/path) or both `screen_x` and `screen_y`.");
             return false;
+        }
+
+        // Resolve a target by name or slash-path with ambiguity detection,
+        // mirroring inputsim_pointer's PointerTargets.FindByPath (root-anchored
+        // precedence, then trailing-segment match). Self-contained so this sub-
+        // asmdef stays independent of the uGUI one. Unlike GameObject.Find, never
+        // returns an arbitrary first match: 0 → target_not_found, >1 →
+        // ambiguous_target with candidate paths.
+        private static bool TryResolveTarget(
+            string target, out Vector2 point, out (string Code, string Message) err)
+        {
+            point = default;
+            err = default;
+            if (string.IsNullOrEmpty(target))
+            {
+                err = ("no_target_or_screen_point",
+                    "Provide either `target` (name/path) or both `screen_x` and `screen_y`.");
+                return false;
+            }
+
+            var parts = target.Split('/');
+            bool isPath = parts.Length > 1;
+            var matches = new List<GameObject>();
+            List<GameObject> anchored = isPath ? new List<GameObject>() : null;
+            foreach (var t in SceneQuery.FindActiveTransforms())
+            {
+                if (t == null) continue;
+                if (IsPathMatch(t, parts, isPath)) matches.Add(t.gameObject);
+                if (isPath && IsRootAnchoredMatch(t, parts)) anchored.Add(t.gameObject);
+            }
+            if (isPath && anchored != null && anchored.Count > 0) matches = anchored;
+
+            if (matches.Count == 0)
+            {
+                err = ("target_not_found",
+                    $"No active GameObject found for target '{target}'.");
+                return false;
+            }
+            if (matches.Count > 1)
+            {
+                var candidates = new List<string>(System.Math.Min(matches.Count, 12));
+                foreach (var m in matches)
+                {
+                    if (candidates.Count >= 12) break;
+                    candidates.Add(BuildPath(m));
+                }
+                err = ("ambiguous_target",
+                    $"Target '{target}' matches {matches.Count} active GameObjects: " +
+                    string.Join(", ", candidates) +
+                    ". Pass the full path or screen coordinates.");
+                return false;
+            }
+            point = ScreenPointOf(matches[0]);
+            return true;
+        }
+
+        // Trailing-segment path/name match (matches anywhere in the hierarchy).
+        private static bool IsPathMatch(Transform t, string[] parts, bool isPath)
+        {
+            if (!isPath) return t.gameObject.name == parts[0];
+            var cur = t;
+            for (int i = parts.Length - 1; i >= 0; i--)
+            {
+                if (cur == null) return false;
+                if (cur.gameObject.name != parts[i]) return false;
+                cur = cur.parent;
+            }
+            return true;
+        }
+
+        // Root-anchored exact match: trailing walk AND the topmost matched node
+        // is a scene root (no parent).
+        private static bool IsRootAnchoredMatch(Transform t, string[] parts)
+        {
+            var cur = t;
+            for (int i = parts.Length - 1; i >= 0; i--)
+            {
+                if (cur == null) return false;
+                if (cur.gameObject.name != parts[i]) return false;
+                cur = cur.parent;
+            }
+            return cur == null;
+        }
+
+        private static string BuildPath(GameObject go)
+        {
+            if (go == null) return "";
+            var sb = new System.Text.StringBuilder();
+            var t = go.transform;
+            while (t != null)
+            {
+                if (sb.Length > 0) sb.Insert(0, '/');
+                sb.Insert(0, t.name);
+                t = t.parent;
+            }
+            return sb.ToString();
         }
 
         private static Vector2 ScreenPointOf(GameObject go)
@@ -481,7 +565,10 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 Camera cam = null;
                 if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
                     cam = canvas.worldCamera != null ? canvas.worldCamera : Camera.main;
-                return RectTransformUtility.WorldToScreenPoint(cam, rt.position);
+                // Rect CENTER, not the pivot (matches inputsim_pointer's P4 fix) —
+                // the pivot's world position sits in a corner for off-pivot
+                // RectTransforms and can fall outside the visible art.
+                return RectTransformUtility.WorldToScreenPoint(cam, rt.TransformPoint(rt.rect.center));
             }
             var mainCam = Camera.main;
             return mainCam != null

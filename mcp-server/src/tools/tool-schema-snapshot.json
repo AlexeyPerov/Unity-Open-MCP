@@ -10745,10 +10745,13 @@
   "unity_open_mcp_inputsim_pointer": {
     "description": "Simulate a uGUI pointer interaction on a named GameObject or screen point during play mode, via the EventSystem + ExecuteEvents. Resolution precedence: object_id (a handle from scene_get_data / inputsim_probe) > target (name or slash-path, with duplicate detection + partial-path match) > screen_x/screen_y (raycasts through EventSystem.current). The response reports `interactable`, `blockedBy`, and (for drag) `dropTarget`/`dropLanded` so a click on a disabled button or behind a modal is never a silent ok. Play-mode only — refuses with `play_mode_required` otherwise; pair with editor_set_state to enter play mode and inputsim_step to advance frames before a screenshot. Gate-free. Requires com.unity.ugui.",
     "inputSchema": {
-      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "action"
+      ],
       "properties": {
         "action": {
-          "description": "Pointer action. click = down+up+click (IPointerClickHandler); double_click = two triples with clickCount incrementing (so handlers reading eventData.clickCount==2 fire); press = pointer down only; release = pointer up only; hover = pointer Enter ONLY (so tooltip/highlight state can be screenshotted); hover_exit = pointer Exit (the pair); submit = ISubmitHandler (keyboard-style activate); drag = pointerDown → beginDrag → drag×N → pointerUp → drop (on the to-point target) → endDrag, matching uGUI's release order, with IDropHandler fired on the drop target.",
+          "type": "string",
           "enum": [
             "click",
             "double_click",
@@ -10759,79 +10762,76 @@
             "submit",
             "drag"
           ],
-          "type": "string"
+          "description": "Pointer action. click = down+up+click (IPointerClickHandler); double_click = two triples with clickCount incrementing (so handlers reading eventData.clickCount==2 fire); press = pointer down only; release = pointer up only; hover = pointer Enter ONLY (so tooltip/highlight state can be screenshotted); hover_exit = pointer Exit (the pair); submit = ISubmitHandler (keyboard-style activate); drag = pointerDown → beginDrag → drag×N → pointerUp → drop (on the to-point target) → endDrag, matching uGUI's release order, with IDropHandler fired on the drop target."
+        },
+        "object_id": {
+          "type": "string",
+          "description": "InstanceId of the GameObject to dispatch on (from scene_get_data or inputsim_probe), as a quoted string. The most reliable addressing when names are ambiguous. Wins over target and screen_x/screen_y. On Unity 6000.5+ this is an EntityId that can exceed 2^53, so pass it as a string to stay precise (the bridge accepts a quoted string or a bare number)."
+        },
+        "target": {
+          "type": "string",
+          "description": "GameObject name ('StartButton') or slash-path ('Canvas/Panel/StartButton'). Path matching is trailing-segment aware, so 'Panel/Button' matches a nested prefab without knowing the scene root. When a name matches more than one active object the tool returns `ambiguous_target` with candidate paths — pass the full path or an object_id. Dispatched directly via ExecuteEvents.ExecuteHierarchy, so it fires even if the target is occluded (the response `blockedBy` field reports that case)."
+        },
+        "screen_x": {
+          "type": "number",
+          "description": "Screen X (pixels) for the screen-point fallback path. Raycasts through EventSystem.current.RaycastAll and dispatches to the top hit. Pair with screen_y; omitted when object_id/target is given."
+        },
+        "screen_y": {
+          "type": "number",
+          "description": "Screen Y (pixels) for the screen-point fallback path. Pair with screen_x."
+        },
+        "view": {
+          "type": "string",
+          "enum": [
+            "game",
+            "scene"
+          ],
+          "default": "game",
+          "description": "Reserved for a future scene-view path; currently only the game view (Camera.main / canvas camera) is used to resolve screen points. Default 'game'."
         },
         "button": {
-          "default": "left",
-          "description": "Pointer button reported in PointerEventData. Default 'left'.",
+          "type": "string",
           "enum": [
             "left",
             "right",
             "middle"
           ],
-          "type": "string"
+          "default": "left",
+          "description": "Pointer button reported in PointerEventData. Default 'left'."
         },
         "drag_steps": {
+          "type": "integer",
           "default": 8,
-          "description": "Number of interpolated move events between drag endpoints. Each step runs a full EventSystem.RaycastAll, so this is capped at 100 to bound main-thread cost. The full begin/drag×N/pointerUp/drop/endDrag sequence dispatches in one frame (use inputsim_step afterward to let drag-driven tweens settle). Default 8.",
-          "maximum": 100,
           "minimum": 1,
-          "type": "integer"
+          "maximum": 100,
+          "description": "Number of interpolated move events between drag endpoints. Each step runs a full EventSystem.RaycastAll, so this is capped at 100 to bound main-thread cost. The full begin/drag×N/pointerUp/drop/endDrag sequence dispatches in one frame (use inputsim_step afterward to let drag-driven tweens settle). Default 8."
         },
         "from_target": {
-          "description": "Drag start — target name/path. When supplied, takes precedence over from_x/from_y; passing BOTH forms returns `both_endpoint_forms` (the explicit, non-silent precedence rule).",
-          "type": "string"
+          "type": "string",
+          "description": "Drag start — target name/path. When supplied, takes precedence over from_x/from_y; passing BOTH forms returns `both_endpoint_forms` (the explicit, non-silent precedence rule)."
         },
         "from_x": {
-          "description": "Drag start — screen X (alternative to from_target).",
-          "type": "number"
+          "type": "number",
+          "description": "Drag start — screen X (alternative to from_target)."
         },
         "from_y": {
-          "description": "Drag start — screen Y (alternative to from_target).",
-          "type": "number"
-        },
-        "object_id": {
-          "description": "InstanceId of the GameObject to dispatch on (from scene_get_data or inputsim_probe). The most reliable addressing when names are ambiguous. Wins over target and screen_x/screen_y. On Unity 6000.5+ this is an EntityId; pass it as a JSON number (safe up to 2^53).",
-          "type": "number"
-        },
-        "screen_x": {
-          "description": "Screen X (pixels) for the screen-point fallback path. Raycasts through EventSystem.current.RaycastAll and dispatches to the top hit. Pair with screen_y; omitted when object_id/target is given.",
-          "type": "number"
-        },
-        "screen_y": {
-          "description": "Screen Y (pixels) for the screen-point fallback path. Pair with screen_x.",
-          "type": "number"
-        },
-        "target": {
-          "description": "GameObject name ('StartButton') or slash-path ('Canvas/Panel/StartButton'). Path matching is trailing-segment aware, so 'Panel/Button' matches a nested prefab without knowing the scene root. When a name matches more than one active object the tool returns `ambiguous_target` with candidate paths — pass the full path or an object_id. Dispatched directly via ExecuteEvents.ExecuteHierarchy, so it fires even if the target is occluded (the response `blockedBy` field reports that case).",
-          "type": "string"
+          "type": "number",
+          "description": "Drag start — screen Y (alternative to from_target)."
         },
         "to_target": {
-          "description": "Drag end / drop site — target name/path. When supplied, takes precedence over to_x/to_y; passing BOTH returns `both_endpoint_forms`. The drop target receives IDropHandler.OnDrop.",
-          "type": "string"
+          "type": "string",
+          "description": "Drag end / drop site — target name/path. When supplied, takes precedence over to_x/to_y; passing BOTH returns `both_endpoint_forms`. The drop target receives IDropHandler.OnDrop."
         },
         "to_x": {
-          "description": "Drag end — screen X (alternative to to_target).",
-          "type": "number"
+          "type": "number",
+          "description": "Drag end — screen X (alternative to to_target)."
         },
         "to_y": {
-          "description": "Drag end — screen Y (alternative to to_target).",
-          "type": "number"
-        },
-        "view": {
-          "default": "game",
-          "description": "Reserved for a future scene-view path; currently only the game view (Camera.main / canvas camera) is used to resolve screen points. Default 'game'.",
-          "enum": [
-            "game",
-            "scene"
-          ],
-          "type": "string"
+          "type": "number",
+          "description": "Drag end — screen Y (alternative to to_target)."
         }
       },
-      "required": [
-        "action"
-      ],
-      "type": "object"
+      "additionalProperties": false
     }
   },
   "unity_open_mcp_inputsim_key": {
@@ -11023,54 +11023,54 @@
   "unity_open_mcp_inputsim_pointer3d": {
     "description": "Simulate a world-space / legacy mouse interaction during play mode by raycasting from the screen point through Camera.main and SendMessage-ing the OnMouseDown / OnMouseUp / OnMouseUpAsButton / OnMouseDrag magic methods on the hit collider. Reaches physics gameplay and old-Input-Manager code that inputsim_pointer (uGUI ExecuteEvents) cannot — the only way to drive world-space gameplay in a project running the legacy Input Manager. Resolution: object_id > target > screen_x/screen_y (same as inputsim_pointer). Play-mode only — refuses with `play_mode_required` otherwise. Gate-free. Requires a tagged MainCamera in the scene.",
     "inputSchema": {
-      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "action"
+      ],
       "properties": {
         "action": {
-          "description": "click = OnMouseDown + OnMouseUpAsButton + OnMouseUp; down = OnMouseDown; up = OnMouseUp; drag = OnMouseDown + OnMouseDrag×drag_steps + OnMouseUp (requires to_x/to_y).",
+          "type": "string",
           "enum": [
             "click",
             "down",
             "up",
             "drag"
           ],
-          "type": "string"
-        },
-        "drag_steps": {
-          "default": 8,
-          "description": "Number of OnMouseDrag calls between from and to (action: drag). Capped at 100 to bound main-thread cost. Default 8.",
-          "maximum": 100,
-          "minimum": 1,
-          "type": "integer"
+          "description": "click = OnMouseDown + OnMouseUpAsButton + OnMouseUp; down = OnMouseDown; up = OnMouseUp; drag = OnMouseDown + OnMouseDrag×drag_steps + OnMouseUp (requires to_x/to_y)."
         },
         "object_id": {
-          "description": "InstanceId of a GameObject used to refine the screen point (its center is raycast). The actual target is whatever the ray hits at that point. Wins over target and screen_x/screen_y.",
-          "type": "number"
-        },
-        "screen_x": {
-          "description": "Screen X (pixels) to raycast from. Pair with screen_y.",
-          "type": "number"
-        },
-        "screen_y": {
-          "description": "Screen Y (pixels) to raycast from. Pair with screen_x.",
-          "type": "number"
+          "type": "string",
+          "description": "InstanceId of a GameObject used to refine the screen point (its center is raycast), as a quoted string. The actual target is whatever the ray hits at that point. Wins over target and screen_x/screen_y. Pass as a string to stay precise on Unity 6000.5+ where an EntityId can exceed 2^53 (the bridge accepts a quoted string or a bare number)."
         },
         "target": {
-          "description": "GameObject name/path used to refine the screen point. Alternative to object_id/screen.",
-          "type": "string"
+          "type": "string",
+          "description": "GameObject name/path used to refine the screen point. Alternative to object_id/screen."
+        },
+        "screen_x": {
+          "type": "number",
+          "description": "Screen X (pixels) to raycast from. Pair with screen_y."
+        },
+        "screen_y": {
+          "type": "number",
+          "description": "Screen Y (pixels) to raycast from. Pair with screen_x."
         },
         "to_x": {
-          "description": "Drag end — screen X (action: drag only). Pair with to_y.",
-          "type": "number"
+          "type": "number",
+          "description": "Drag end — screen X (action: drag only). Pair with to_y."
         },
         "to_y": {
-          "description": "Drag end — screen Y (action: drag only). Pair with to_x.",
-          "type": "number"
+          "type": "number",
+          "description": "Drag end — screen Y (action: drag only). Pair with to_x."
+        },
+        "drag_steps": {
+          "type": "integer",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Number of OnMouseDrag calls between from and to (action: drag). Capped at 100 to bound main-thread cost. Default 8."
         }
       },
-      "required": [
-        "action"
-      ],
-      "type": "object"
+      "additionalProperties": false
     }
   }
 }

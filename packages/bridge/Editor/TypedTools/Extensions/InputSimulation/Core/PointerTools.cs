@@ -74,13 +74,16 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                     "requires an EventSystem component (create one via ui_canvas_add " +
                     "or add an EventSystem GameObject).");
 
-            var inputButton = ParseButton(button);
+            var inputButton = TryParseButton(button);
+            if (!inputButton.HasValue)
+                return InputSimulationJson.Error("invalid_button",
+                    $"Unknown button '{button}'. Valid: left, right, middle.");
 
             if (action == "drag")
-                return DoDrag(inputButton, drag_steps, object_id,
+                return DoDrag(inputButton.Value, drag_steps, object_id,
                     from_target, from_x, from_y, to_target, to_x, to_y);
 
-            return DoSingle(action, inputButton, object_id, target, screen_x, screen_y);
+            return DoSingle(action, inputButton.Value, object_id, target, screen_x, screen_y);
         }
 
         // ===================================================================
@@ -524,14 +527,15 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             outcome.Dispatched.Add(name);
         }
 
-        private static PointerEventData.InputButton ParseButton(string button)
+        private static PointerEventData.InputButton? TryParseButton(string button)
         {
             if (string.IsNullOrEmpty(button)) return PointerEventData.InputButton.Left;
             switch (button.ToLowerInvariant())
             {
+                case "left": return PointerEventData.InputButton.Left;
                 case "right": return PointerEventData.InputButton.Right;
                 case "middle": return PointerEventData.InputButton.Middle;
-                default: return PointerEventData.InputButton.Left;
+                default: return null; // invalid_button — surfaced by the caller.
             }
         }
     }

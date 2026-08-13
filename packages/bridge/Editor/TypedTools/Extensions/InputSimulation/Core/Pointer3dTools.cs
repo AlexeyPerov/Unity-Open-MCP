@@ -129,20 +129,20 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                         if (!to_x.HasValue || !to_y.HasValue)
                             return InputSimulationJson.Error("no_drag_to",
                                 "3D drag requires to_x and to_y (the end screen point).");
-                        var to = new Vector2(to_x.Value, to_y.Value);
                         // feedback S6 — bound drag steps.
                         if (drag_steps < 1) drag_steps = 1;
                         if (drag_steps > 100) drag_steps = 100;
                         Send(hitGo, "OnMouseDown", dispatched);
-                        var prev = point;
-                        for (int i = 1; i <= drag_steps; i++)
-                        {
-                            float t = (float)i / drag_steps;
-                            var p = Vector2.Lerp(point, to, t);
-                            _ = prev; // OnMouseDrag carries no position arg; handlers read Input.mousePosition.
+                        // OnMouseDrag carries no position argument and handlers read
+                        // Input.mousePosition, which synthetic SendMessage dispatch
+                        // cannot move (that would require the OS-level injection this
+                        // tool exists to avoid). The to_x/to_y endpoint is therefore
+                        // recorded for API completeness but does not alter the
+                        // per-step dispatch — each OnMouseDrag fires on the press
+                        // target as if the mouse held still. For drags that must
+                        // convey motion, prefer inputsim_pointer (action: drag).
+                        for (int i = 0; i < drag_steps; i++)
                             Send(hitGo, "OnMouseDrag", dispatched);
-                            prev = p;
-                        }
                         Send(hitGo, "OnMouseUp", dispatched);
                         break;
                     }

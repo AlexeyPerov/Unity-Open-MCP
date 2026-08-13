@@ -951,10 +951,16 @@ export class ToolRouter implements Router {
     // partialCompileLikely so an agent does not treat `errorCount` as final
     // (this is exactly the trap that masked 6 errors behind 1 during the
     // input-simulation review).
-    const asmdefs = countProjectAsmdefs(this.projectPath);
-    const partialCompileLikely = errors.length > 0 && asmdefs.count > 1;
+    // Only walk for asmdefs when there are errors — the signal is only
+    // meaningful with errors, and countProjectAsmdefs stats the whole Assets/
+    // tree synchronously (memoized per project, but still skip it when unused).
+    const hasErrors = errors.length > 0;
+    const asmdefs = hasErrors
+      ? countProjectAsmdefs(this.projectPath)
+      : { count: 0, sample: [] as string[] };
+    const partialCompileLikely = hasErrors && asmdefs.count > 1;
     const assembliesWithErrors = partialCompileLikely
-      ? countAssembliesWithErrors(errors.map((e) => e.file))
+      ? countAssembliesWithErrors(errors.map((e) => e.file), this.projectPath)
       : 0;
 
     return sourceResult(
@@ -2833,7 +2839,8 @@ function pageSceneNodes(
   void roots;
   void rootGameObjects;
   void nodes;
-  void truncated;
+  // `truncated` is read at the source-truncated carry-through below, so it is
+  // not voided with the other intentionally-discarded scene fields.
   void moreHidden;
   void _existing;
 

@@ -382,16 +382,18 @@ namespace UnityOpenMcpBridge.MetaTools
             // (b) #line directive so compiler errors report snippet-relative
             // coordinates. `firstRetainedLine` is the caller's 1-based line for
             // the first line of cleanedBody, so the hoisted using/blank lines do
-            // not shift reported errors toward 1. The hidden region keeps the
-            // wrapper lines out of stack traces too; `"snippet"` names the body
-            // so a debugger / stack trace shows "snippet", not the wrapper class.
+            // not shift reported errors toward 1. A `#line hidden` region after
+            // the body keeps the wrapper tail (return null; + closing braces) out
+            // of stack traces / the debugger; `"snippet"` names the body so a
+            // debugger / stack trace shows "snippet", not the wrapper class.
             sb.AppendLine($"#line {firstRetainedLine} \"snippet\"");
             sb.AppendLine(cleanedBody);
-            sb.AppendLine("#line default");
+            sb.AppendLine("#line hidden");
             sb.AppendLine("      return null;");
             sb.AppendLine("    }");
             sb.AppendLine("  }");
             sb.AppendLine("}");
+            sb.AppendLine("#line default");
             return sb.ToString();
         }
 
@@ -420,16 +422,26 @@ namespace UnityOpenMcpBridge.MetaTools
                 if (trimmed.StartsWith("using ", StringComparison.Ordinal) && trimmed.EndsWith(";"))
                 {
                     var inner = trimmed.Substring(6, trimmed.Length - 7).Trim(); // between "using " and ";"
-                    // Reject using-statements: `(...)`, `var x = ...`, `Type x = ...`.
-                    // A directive's inner is a single namespace token (dots allowed).
+                    // Reject using-statements: `using (...)` (contains `(`) and
+                    // `using var x = ...` (a declaration). Everything else with a
+                    // directive-shaped inner is hoisted and re-emitted verbatim as
+                    // `using <inner>;`, which covers namespaces (`NS`), aliases
+                    // (`Foo = Bar.Baz`), global qualifiers (`global::NS`), and
+                    // `using static System.Math`.
                     if (inner.IndexOf('(') >= 0) break;
-                    if (inner.IndexOf('=') >= 0) break;
+                    if (inner.StartsWith("var ", StringComparison.Ordinal)) break;
                     if (inner.Length == 0) break;
-                    // A namespace token: letters, digits, dots, underscores.
+                    // A directive inner is namespace/type tokens plus the chars the
+                    // alias / global / static forms need (`=`, `:`, space).
                     bool valid = true;
                     foreach (var c in inner)
                     {
-                        if (!(char.IsLetterOrDigit(c) || c == '.' || c == '_')) { valid = false; break; }
+                        if (!(char.IsLetterOrDigit(c) || c == '.' || c == '_'
+                              || c == '=' || c == ':' || c == ' '))
+                        {
+                            valid = false;
+                            break;
+                        }
                     }
                     if (!valid) break;
                     hoisted.Add(inner);

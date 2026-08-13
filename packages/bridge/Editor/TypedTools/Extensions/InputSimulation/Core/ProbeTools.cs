@@ -51,7 +51,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             string cursor = null,
             string scene = null)
         {
-            if (page_size <= 0) page_size = DefaultPageSize;
+            if (page_size < 1) page_size = 1;
             if (page_size > MaxPageSize) page_size = MaxPageSize;
             int offset = ParseCursor(cursor);
 
@@ -225,9 +225,10 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 var cam = PointerTargets.CameraFor(go);
                 for (int i = 0; i < 4; i++)
                 {
-                    var sp = cam != null && cam.targetTexture == null && go.GetComponentInParent<Canvas>() is Canvas c && c.renderMode != RenderMode.ScreenSpaceOverlay
-                        ? RectTransformUtility.WorldToScreenPoint(cam, cs[i])
-                        : RectTransformUtility.WorldToScreenPoint(cam, cs[i]);
+                    // CameraFor already returns null for ScreenSpaceOverlay canvases
+                    // (RectTransformUtility treats null as overlay), so the world
+                    // corner maps straight to screen without an overlay branch.
+                    var sp = RectTransformUtility.WorldToScreenPoint(cam, cs[i]);
                     if (sp.x < minX) minX = sp.x;
                     if (sp.y < minY) minY = sp.y;
                     if (sp.x > maxX) maxX = sp.x;

@@ -114,3 +114,51 @@ test("countAssembliesWithErrors dedupes by owning assembly", () => {
     cleanup(p);
   }
 });
+
+// read_compile_errors' partial-compile signal passes compiler-error file paths,
+// which are PROJECT-RELATIVE ("Assets/Foo/Foo.cs"). Without the projectRoot
+// argument those resolved against process.cwd() and mapped to nothing — the
+// assembliesWithErrors field was silently always null in production. These pin
+// the projectRoot anchoring at both the single-file and the count level.
+test("nearestAsmdef anchors a relative path to projectRoot", () => {
+  const p = makeProject();
+  try {
+    assert.equal(
+      nearestAsmdef("Assets/Foo/Sub/Bar.cs", p.root),
+      join(p.root, "Assets", "Foo", "Foo.asmdef"),
+    );
+    // Absolute paths ignore projectRoot and still resolve.
+    assert.equal(
+      nearestAsmdef(join(p.root, "Assets", "Bar", "Bar.cs"), p.root),
+      join(p.root, "Assets", "Bar", "Bar.asmdef"),
+    );
+  } finally {
+    cleanup(p);
+  }
+});
+
+test("countAssembliesWithErrors anchors relative error paths to projectRoot", () => {
+  const p = makeProject();
+  try {
+    // Project-relative paths (the wire form compiler errors carry) must resolve
+    // against projectRoot: Foo + Foo/Sub dedupe to Foo, plus Bar = 2.
+    const relFiles = ["Assets/Foo/Foo.cs", "Assets/Foo/Sub/Bar.cs", "Assets/Bar/Bar.cs"];
+    assert.equal(countAssembliesWithErrors(relFiles, p.root), 2);
+  } finally {
+    cleanup(p);
+  }
+});
+
+test("countProjectAsmdefs memoizes per project path", () => {
+  const p = makeProject();
+  try {
+    // The walk stats the whole Assets/ tree synchronously; the memo returns the
+    // same result object for the same project path so repeat calls are free.
+    const a = countProjectAsmdefs(p.root);
+    const b = countProjectAsmdefs(p.root);
+    assert.equal(a.count, b.count);
+    assert.equal(a, b, "memoized result should be the same object reference");
+  } finally {
+    cleanup(p);
+  }
+});

@@ -32,11 +32,13 @@ export const inputsimPointer3d = makeTool(
           "(requires to_x/to_y).",
       },
       object_id: {
-        type: "number",
+        type: "string",
         description:
           "InstanceId of a GameObject used to refine the screen point (its center " +
-          "is raycast). The actual target is whatever the ray hits at that point. " +
-          "Wins over target and screen_x/screen_y.",
+          "is raycast), as a quoted string. The actual target is whatever the ray " +
+          "hits at that point. Wins over target and screen_x/screen_y. Pass as a " +
+          "string to stay precise on Unity 6000.5+ where an EntityId can exceed " +
+          "2^53 (the bridge accepts a quoted string or a bare number).",
       },
       target: {
         type: "string",

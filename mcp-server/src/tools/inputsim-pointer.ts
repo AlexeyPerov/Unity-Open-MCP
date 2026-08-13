@@ -53,12 +53,14 @@ export const inputsimPointer = makeTool(
           "fired on the drop target.",
       },
       object_id: {
-        type: "number",
+        type: "string",
         description:
           "InstanceId of the GameObject to dispatch on (from scene_get_data or " +
-          "inputsim_probe). The most reliable addressing when names are ambiguous. " +
-          "Wins over target and screen_x/screen_y. On Unity 6000.5+ this is an " +
-          "EntityId; pass it as a JSON number (safe up to 2^53).",
+          "inputsim_probe), as a quoted string. The most reliable addressing when " +
+          "names are ambiguous. Wins over target and screen_x/screen_y. On Unity " +
+          "6000.5+ this is an EntityId that can exceed 2^53, so pass it as a " +
+          "string to stay precise (the bridge accepts a quoted string or a bare " +
+          "number).",
       },
       target: {
         type: "string",
