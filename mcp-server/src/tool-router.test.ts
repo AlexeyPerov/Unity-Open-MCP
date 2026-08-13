@@ -3068,6 +3068,136 @@ test("route: resource_pressure is registered in ALL_TOOLS and always-visible", (
   );
 });
 
+// --- A: a chronically fd-heavy process does NOT cry wolf -------------------
+
+test("route: resource_pressure over_ceiling on a fresh fd-heavy process stays silent (pressureNote, no warning)", async () => {
+  // The user's scenario: a fresh Unity legitimately on thousands of OS fds.
+  // Pre-fix this read `critical` + `warning` on every call. Now it is the
+  // informational `over_ceiling` state with a `pressureNote` and NO warning.
+  await withTmp("router-rp-overceiling-", async (tmp) => {
+    await setupProject(tmp);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 7777, projectPath: tmp }];
+      },
+    });
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        return { count: 2000, method: "lsof", approximate: false };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_resource_pressure", {});
+      const body = parseBody(result);
+      assert.equal(body.state, "over_ceiling");
+      assert.equal(body.ceiling, 1024);
+      assert.equal(body.ceilingSource, "default");
+      assert.equal(body.warning, undefined, "no cry-wolf warning on a stable over-ceiling process");
+      assert.equal(body.agentNextSteps, undefined);
+      assert.ok(
+        typeof body.pressureNote === "string" && body.pressureNote.length > 0,
+        "informational pressureNote surfaces the lsof-over-count nuance",
+      );
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
+test("route: resource_pressure over_ceiling + RISING trend raises a warning", async () => {
+  // Over the proxy ceiling AND still climbing → genuine concern. The warning
+  // fires (level warn); it is not the imminent "critical" since lsof over-
+  // counts, but the operator should be told the climb is ongoing.
+  await withTmp("router-rp-overceiling-rising-", async (tmp) => {
+    await setupProject(tmp);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 7777, projectPath: tmp }];
+      },
+    });
+    // 2000 → 2050: monotonic, delta 50 (< 10% of 1024 → rising, not leaking).
+    const counts = [2000, 2050];
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        const next = counts.shift();
+        if (next === undefined) return { count: 2050, method: "lsof", approximate: false };
+        return { count: next, method: "lsof", approximate: false };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      await router.route("unity_open_mcp_resource_pressure", {}); // sample 1
+      const result = await router.route("unity_open_mcp_resource_pressure", {}); // sample 2
+      const body = parseBody(result);
+      assert.equal(body.state, "over_ceiling");
+      const warning = body.warning as { level?: string } | undefined;
+      assert.equal(warning!.level, "warn", "over_ceiling + rising → warn");
+      assert.ok(Array.isArray(body.agentNextSteps));
+      assert.equal(body.pressureNote, undefined, "no pressureNote when warning fires");
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
+// --- D: configurable fd ceiling via .unity-open-mcp/settings.json ----------
+
+test("route: resource_pressure honors resourcePressure.fdCeiling from settings.json", async () => {
+  // A project on a runtime whose internal ceiling differs from Mono's 1024
+  // (e.g. Unity 6 / CoreCLR) overrides it. Count 1700 against a configured
+  // 2048 ceiling → warn band (0.83); against the default 1024 → over_ceiling.
+  await withTmp("router-rp-configceiling-", async (tmp) => {
+    await setupProject(tmp);
+    await mkdir(join(tmp, ".unity-open-mcp"), { recursive: true });
+    await writeFile(
+      join(tmp, ".unity-open-mcp", "settings.json"),
+      JSON.stringify({ resourcePressure: { fdCeiling: 2048 } }),
+      "utf8",
+    );
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 7777, projectPath: tmp }];
+      },
+    });
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        return { count: 1700, method: "lsof", approximate: false };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_resource_pressure", {});
+      const body = parseBody(result);
+      assert.equal(body.ceiling, 2048);
+      assert.equal(body.ceilingSource, "config");
+      assert.equal(body.state, "warn", "1700/2048 ≈ 0.83 → warn under the configured ceiling");
+      const warning = body.warning as { level?: string } | undefined;
+      assert.equal(warning!.level, "warn");
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // M31-optimizations Plan 1 / H2 — live find_references single-parse pipeline.
 //
