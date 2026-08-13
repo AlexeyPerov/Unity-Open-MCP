@@ -13,7 +13,10 @@ import {
   setFdProbeForTest,
   parseLsofStdout,
   classifyLsofError,
-  FD_CEILING,
+  // Aliased back to FD_CEILING in tests: the pure-math cases below validate
+  // behavior against the DEFAULT ceiling (1024) — the parameterized-ceiling
+  // cases (D) are covered separately further down.
+  FD_CEILING_DEFAULT as FD_CEILING,
   FD_WARN_RATIO,
   FD_CRITICAL_RATIO,
   LAUNCH_CONTEXT_CAVEAT,
@@ -59,9 +62,13 @@ test("computeFdHeadroom: at the critical threshold → critical", () => {
   assert.equal(h.state, "critical");
 });
 
-test("computeFdHeadroom: above the ceiling → critical, headroom clamped at 0", () => {
+test("computeFdHeadroom: above the ceiling → over_ceiling (informational), headroom clamped at 0", () => {
+  // The OS-level count exceeded the Mono-ceiling proxy. This is INFORMATIONAL,
+  // not critical: lsof over-counts OS fds (mmap/assets/watchers) vs the
+  // IOSelector-registered descriptors that trip the hang. The router decides
+  // whether to alarm based on the TREND, not this absolute state.
   const h = computeFdHeadroom(FD_CEILING + 50);
-  assert.equal(h.state, "critical");
+  assert.equal(h.state, "over_ceiling");
   assert.equal(h.headroom, 0);
   assert.equal(h.pressureRatio, 1, "ratio clamped at 1.0");
 });
@@ -94,10 +101,60 @@ test("computeFdHeadroom: approximate (Windows) counts never warn — only critic
   assert.equal(criticalLevel.reliable, false);
 });
 
-test("FD_CEILING is 1024 (Mono internal ceiling, not OS soft limit)", () => {
+test("FD_CEILING_DEFAULT is 1024 (Mono internal ceiling, not OS soft limit)", () => {
   assert.equal(FD_CEILING, 1024);
   assert.equal(FD_WARN_RATIO, 0.8);
   assert.equal(FD_CRITICAL_RATIO, 0.9);
+});
+
+// ---------------------------------------------------------------------------
+// A + D — over_ceiling state + parameterized (configurable) ceiling.
+// ---------------------------------------------------------------------------
+
+test("A: computeFdHeadroom: a chronically fd-heavy process (5000 fds) → over_ceiling, not critical", () => {
+  // The user's scenario: a fresh Unity that legitimately sits on thousands of
+  // OS fds (mmap'd assets / file watchers). Pre-fix this read `critical` and
+  // cried wolf on every call. Now it is informational `over_ceiling`.
+  const h = computeFdHeadroom(5000);
+  assert.equal(h.state, "over_ceiling");
+  assert.equal(h.headroom, 0);
+  assert.equal(h.pressureRatio, 1);
+  assert.equal(h.reliable, true);
+});
+
+test("A: computeFdHeadroom: count exactly at the ceiling → over_ceiling (>= test)", () => {
+  assert.equal(computeFdHeadroom(FD_CEILING).state, "over_ceiling");
+  assert.equal(computeFdHeadroom(FD_CEILING - 1).state, "critical");
+});
+
+test("A: computeFdHeadroom: Windows approximate count over the ceiling → over_ceiling (not critical)", () => {
+  // Windows HandleCount is naturally high; an over-ceiling approximate count
+  // is informational too (no crying wolf on a naturally-high handle count).
+  const h = computeFdHeadroom(5000, true);
+  assert.equal(h.state, "over_ceiling");
+  assert.equal(h.reliable, false);
+});
+
+test("D: computeFdHeadroom scales states with a configured ceiling", () => {
+  // Same fd count, different ceiling: 1700/2048 = 0.83 → warn; 1700/1024 →
+  // over the default ceiling.
+  assert.equal(computeFdHeadroom(1700, false, 2048).state, "warn");
+  assert.equal(computeFdHeadroom(1700, false, 1024).state, "over_ceiling");
+  // The configured ceiling is echoed back in the result.
+  assert.equal(computeFdHeadroom(100, false, 2048).ceiling, 2048);
+});
+
+test("D: analyzeFdTrend leak threshold scales with the configured ceiling", () => {
+  // delta 150 fds, monotonic. Against the default 1024 ceiling the leak
+  // threshold is 102.4 → 150 ≥ it → leaking. Against a configured 2048
+  // ceiling the threshold is 204.8 → 150 < it → merely rising.
+  const climb = [
+    sample(1, 100, 600),
+    sample(2, 100, 675),
+    sample(3, 100, 750),
+  ]; // delta 150, monotonic
+  assert.equal(analyzeFdTrend(climb, 1024).state, "leaking");
+  assert.equal(analyzeFdTrend(climb, 2048).state, "rising");
 });
 
 // ---------------------------------------------------------------------------

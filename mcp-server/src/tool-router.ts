@@ -65,9 +65,9 @@ import {
   computeFdHeadroom,
   analyzeFdTrend,
   LAUNCH_CONTEXT_CAVEAT,
-  FD_CEILING,
   type FdCountResult,
 } from "./process-diagnostics.js";
+import { readFdCeiling } from "./project-settings.js";
 import {
   listInstalledEditors,
   fetchAvailableReleases,
@@ -2276,51 +2276,91 @@ export class ToolRouter implements Router {
       );
     }
 
-    // 2. Probe + record the sample. A failed probe still records a sample
+    // 2. Resolve the configured fd ceiling (default 1024, overridable per
+    //    project via `.unity-open-mcp/settings.json` for runtimes whose
+    //    internal limit differs from Mono's classic 1024). Read fresh —
+    //    resource_pressure is called rarely, and this lets an operator change
+    //    the setting without restarting the MCP server.
+    const { ceiling, source: ceilingSource } = readFdCeiling(this.projectPath);
+
+    // 3. Probe + record the sample. A failed probe still records a sample
     //    (count: null) so the trend detector sees the gap and does not
     //    interpolate across it.
     const probe = countFileDescriptors(pid);
     const count = probe.count;
-    const headroom = computeFdHeadroom(count, "approximate" in probe ? probe.approximate : false);
+    const approximate = "approximate" in probe ? probe.approximate : false;
+    const headroom = computeFdHeadroom(count, approximate, ceiling);
     const ts = Date.now();
     this.sessionState.recordFdSample({ ts, pid, count });
     const samples = this.sessionState.fdSamplesSnapshot();
-    const trend = analyzeFdTrend(samples);
+    const trend = analyzeFdTrend(samples, ceiling);
 
-    // 3. Build the response. The launchContextCaveat is always present so an
-    //    agent (and the operator) understands the Mono-ceiling-vs-OS-soft-
-    //    limit nuance. warningState is non-null only when there is something
-    //    to surface (warn/critical/leaking); ok+stable stays silent.
+    // 4. Decide whether to raise an operator warning. For an fd-heavy project
+    //    the OS-level count legitimately sits OVER the Mono-ceiling proxy on a
+    //    fresh healthy process (lsof counts mmap'd assets / file watchers /
+    //    FileStream handles that Mono's IOSelector never registers), so an
+    //    absolute `over_ceiling` state is NOT an alarm by itself — the
+    //    actionable signal there is the TREND. Alarm only on:
+    //    - a monotonic leak (always), or
+    //    - approaching the ceiling from below (warn/critical), or
+    //    - already over the proxy ceiling AND still climbing (rising).
+    //    A stable/no-history over-ceiling process gets a `pressureNote`
+    //    instead, so the agent is informed without crying wolf.
     const fdMethod = probe.method;
-    const approximate = "approximate" in probe ? probe.approximate : false;
     const probeReason = "reason" in probe ? probe.reason : null;
     const probeMessage = "message" in probe ? probe.message : null;
 
-    const warningState =
-      headroom.state === "warn" || headroom.state === "critical" || trend.state === "leaking"
-        ? {
-            level:
-              headroom.state === "critical"
-                ? "critical"
-                : trend.state === "leaking"
-                  ? "leaking"
-                  : "warn",
-            message:
-              headroom.state === "critical"
-                ? `Editor fd usage is at ${Math.round(headroom.pressureRatio * 100)}% of ` +
-                  `Mono's ${FD_CEILING}-descriptor ceiling — the next domain reload is ` +
-                  `likely to trip the Bee build-driver hang. Save scene work and restart ` +
-                  `Unity via the Hub now, before the Editor hangs.`
-                : trend.state === "leaking"
-                  ? `Editor fd usage is climbing monotonically across samples (leak in ` +
-                    `progress): trend delta ${trend.delta} over ${trend.sampleCount} ` +
-                    `sample(s). Save scene work and plan a restart before the count ` +
-                    `crosses the ${FD_CEILING}-descriptor ceiling.`
+    const overAndRising =
+      headroom.state === "over_ceiling" && trend.state === "rising";
+    const shouldWarn =
+      trend.state === "leaking" ||
+      headroom.state === "warn" ||
+      headroom.state === "critical" ||
+      overAndRising;
+
+    const warningState = shouldWarn
+      ? {
+          level:
+            headroom.state === "critical"
+              ? "critical"
+              : trend.state === "leaking"
+                ? "leaking"
+                : "warn",
+          message:
+            headroom.state === "critical"
+              ? `Editor fd usage is at ${Math.round(headroom.pressureRatio * 100)}% of ` +
+                `the ${ceiling}-descriptor ceiling — the next domain reload is ` +
+                `likely to trip the Bee build-driver hang. Save scene work and restart ` +
+                `Unity via the Hub now, before the Editor hangs.`
+              : trend.state === "leaking"
+                ? `Editor fd usage is climbing monotonically across samples (leak in ` +
+                  `progress): trend delta ${trend.delta} over ${trend.sampleCount} ` +
+                  `sample(s). Save scene work and plan a restart before the count ` +
+                  `crosses the ${ceiling}-descriptor ceiling.`
+                : overAndRising
+                  ? `Editor fd usage (${count}) is above the ${ceiling}-descriptor ` +
+                    `ceiling proxy and still climbing (trend rising, delta ` +
+                    `${trend.delta}). lsof over-counts OS fds vs the Mono-IOSelector ` +
+                    `descriptors that trip the hang, so this is a concern only if the ` +
+                    `climb continues — save scene work and plan a restart if it does.`
                   : `Editor fd usage is at ${Math.round(headroom.pressureRatio * 100)}% of ` +
-                    `Mono's ${FD_CEILING}-descriptor ceiling. Monitor the trend; if it ` +
-                    `keeps climbing across domain reloads, save scene work and restart ` +
-                    `Unity via the Hub before the Editor hangs.`,
-          }
+                    `the ${ceiling}-descriptor ceiling. Monitor the trend; if it keeps ` +
+                    `climbing across domain reloads, save scene work and restart Unity ` +
+                    `via the Hub before the Editor hangs.`,
+        }
+      : null;
+
+    // Informational (non-alarming) note for the over-ceiling-but-stable case.
+    const pressureNote =
+      !shouldWarn && headroom.state === "over_ceiling"
+        ? `OS-level fd count (${count}) is above the ${ceiling}-descriptor ceiling ` +
+          `proxy, but lsof / HandleCount count ALL OS file descriptors (mmap'd ` +
+          `assets, file watchers, regular FileStream handles) while only ` +
+          `Mono-IOSelector-registered descriptors (sockets/pipes under async IO) ` +
+          `count toward the real trip point. For an asset-heavy project this is ` +
+          `expected on a healthy process. Treat this as a concern ONLY if the trend ` +
+          `becomes rising/leaking — re-sample after the next domain reload to ` +
+          `establish one.`
         : null;
 
     return sourceResult(
@@ -2329,7 +2369,8 @@ export class ToolRouter implements Router {
         fdCount: count,
         fdMethod,
         approximate,
-        ceiling: FD_CEILING,
+        ceiling,
+        ceilingSource,
         headroom: headroom.headroom,
         pressureRatio: headroom.pressureRatio,
         state: headroom.state,
@@ -2360,6 +2401,7 @@ export class ToolRouter implements Router {
               ],
             }
           : {}),
+        ...(pressureNote !== null ? { pressureNote } : {}),
       },
       "local",
     );

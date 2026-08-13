@@ -32,9 +32,10 @@ definitions live in `mcp-server/src/tools/`.
   compile-error diagnosis (`read_compile_errors`), Editor fd-exhaustion
   recovery (`restart_editor` — requires explicit confirmation, refuses when
   the fd-exhaustion signature is absent), and proactive fd-usage prediction
-  (`resource_pressure` — headroom against Mono's ~1024 fd ceiling + leak-trend
-  detection). All local-routed; they act on the OS process and survive a dead
-  bridge.
+  (`resource_pressure` — headroom against the Mono fd ceiling (default ~1024,
+  configurable) + leak-trend detection; `over_ceiling` is informational for
+  fd-heavy projects so only a `leaking`/`rising` trend alarms). All
+  local-routed; they act on the OS process and survive a dead bridge.
 - **Gate and validation** — validation, checkpoints, deltas, references,
   dependencies, scans, baselines, regression checks, and targeted fixes.
 - **Asset intelligence** — reserialize plus structured asset read/search/list.

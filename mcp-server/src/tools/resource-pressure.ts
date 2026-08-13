@@ -34,16 +34,27 @@ export const resourcePressure = makeTool(
     "reachable — the bridge is what dies on fd-exhaustion. Resolves the live " +
     "Unity PID via the process scan (same as `bridge_status` cold-Safe-Mode " +
     "detection). Response fields: `fdCount` (null when the probe failed), " +
-    "`fdMethod`, `approximate` (Windows handle count), `ceiling` (fixed 1024), " +
-    "`headroom`, `pressureRatio`, `state` (`ok` | `warn` at ≥80% | `critical` " +
-    "at ≥90% | `unknown` when the probe failed), `trend` (`stable` | `rising` " +
-    "| `leaking` — monotonic climb across successive samples = leak in " +
-    "progress; absolute count alone is not enough), and `samples[]` (the " +
-    "session-scoped in-memory ring of recent samples for this PID — no disk " +
-    "cache). When `state` is warn/critical or `trend.state` is leaking, the " +
-    "agent should surface the risk to the operator and recommend saving scene " +
-    "work + restarting via the Hub before the next domain reload trips the " +
-    "ceiling. Use this after heavy automation (many recompiles / domain " +
+    "`fdMethod`, `approximate` (Windows handle count), `ceiling` (the resolved " +
+    "fd ceiling — default 1024, configurable per project), `ceilingSource` " +
+    "(`\"default\"` | `\"config\"` — whether `.unity-open-mcp/settings.json` " +
+    "`resourcePressure.fdCeiling` overrode the default), `headroom`, " +
+    "`pressureRatio`, `state` (`ok` | `warn` at ≥80% | `critical` at ≥90% | " +
+    "`over_ceiling` when the count already exceeds the ceiling proxy | " +
+    "`unknown` when the probe failed), `trend` (`stable` | `rising` | " +
+    "`leaking` — monotonic climb across successive samples = leak in progress; " +
+    "absolute count alone is not enough), and `samples[]` (the session-scoped " +
+    "in-memory ring of recent samples for this PID — no disk cache). " +
+    "IMPORTANT for fd-heavy projects: an asset-heavy Editor legitimately sits " +
+    "OVER the ceiling proxy on a fresh healthy process (lsof/HandleCount count " +
+    "ALL OS fds — mmap'd assets, file watchers, FileStream handles — while only " +
+    "Mono-IOSelector-registered descriptors trip the hang), so `over_ceiling` " +
+    "is INFORMATIONAL, not an alarm: when `state` is `over_ceiling` and the " +
+    "trend is stable/no-history the response carries a `pressureNote` instead " +
+    "of a `warning`, and you should watch the TREND, not the absolute. The " +
+    "agent should surface a `warning` (recommend saving scene work + planning a " +
+    "restart) when `state` is warn/critical, OR `trend.state` is " +
+    "leaking/rising — do NOT call `restart_editor` yet (the Editor is still " +
+    "healthy). Use this after heavy automation (many recompiles / domain " +
     "reloads) to catch fd growth across reloads. No disk cache — samples live " +
     "in the session store and are cleared on MCP-server restart.",
   {

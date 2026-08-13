@@ -43,8 +43,9 @@ and
 
 **Symptom:** Over a long headless agent session the bridge's `/ping` keeps
 answering, but POST tool calls (`execute_csharp`, `editor_status`, …) hang on
-body read, and `resource_pressure` eventually reports `critical` fd usage even
-without manual domain reloads.
+body read, and `resource_pressure` eventually reports an `over_ceiling` state
+with a `leaking`/`rising` trend (fd usage climbing toward/over the Mono
+ceiling) even without manual domain reloads.
 
 **Why:** When the Unity Editor window is not frontmost on macOS, its main thread
 sleeps in `_BlockUntilNextEventMatchingListInModeWithFilter` and the bridge's
@@ -59,8 +60,11 @@ a single manual reload; the IOSelector then stops accepting new sockets while
    `osascript -e 'tell application "Unity" to activate'` to wake it.
 2. Watch fd pressure with `unity_open_mcp_resource_pressure` — its `trend`
    field flags a monotonic climb (leak in progress) before the ceiling trips.
-   On `critical`, save scene work and restart via the Hub before the next
-   domain reload wedges the editor.
+   On a `leaking`/`rising` trend, or a `warn`/`critical` state (approaching
+   the ceiling from below), save scene work and restart via the Hub before the
+   next domain reload wedges the editor. A stable/no-history `over_ceiling`
+   state on an fd-heavy project is NOT an alarm (it carries a `pressureNote`) —
+   the trend is the signal there.
 3. If the editor is already wedged (`read_compile_errors` reports an
    `editor_fd_exhaustion` issue), use `unity_open_mcp_restart_editor`
    (`confirm: true`) to terminate the **main** editor PID — the tool prefers the

@@ -16,8 +16,9 @@
 //   that is the real trip point for the Bee build-driver hang. The OS
 //   `ulimit -n` soft limit is only a loose upper bound and is misleading on
 //   macOS: a GUI-launched Unity inherits `launchctl limit maxfiles`, not the
-//   MCP server's shell `ulimit`. So we measure headroom against the fixed
-//   Mono ceiling (FD_CEILING), not the variable OS limit.
+//   MCP server's shell `ulimit`. So we measure headroom against the Mono
+//   ceiling (default FD_CEILING_DEFAULT = 1024, configurable per project via
+//   `.unity-open-mcp/settings.json`), not the variable OS limit.
 //
 // Cross-platform probe:
 //   - macOS: `lsof -p <pid>` (no /proc on macOS). Bounded execFileSync
@@ -38,11 +39,19 @@ import { readdirSync } from "node:fs";
  * misleading for a GUI-launched Unity on macOS (it inherits `launchctl limit
  * maxfiles`, not the shell's ulimit). Documented in the tool response via
  * `launchContextCaveat`.
+ *
+ * This is the DEFAULT used when a project has not overridden the ceiling via
+ * `.unity-open-mcp/settings.json` (`resourcePressure.fdCeiling`). The actual
+ * ceiling applied to a sample is resolved by `readFdCeiling` in
+ * `project-settings.ts` and threaded into `computeFdHeadroom` /
+ * `analyzeFdTrend` so the math scales with the configured value (relevant for
+ * Unity 6 / CoreCLR runtimes whose internal ceiling may differ from Mono's
+ * classic 1024).
  */
-export const FD_CEILING = 1024;
+export const FD_CEILING_DEFAULT = 1024;
 
 /**
- * Headroom fraction (of FD_CEILING) at or below which the state is `warn`:
+ * Headroom fraction (of the resolved ceiling) at or below which the state is `warn`:
  * the Editor is approaching the Mono ceiling and an agent should surface the
  * trend so the operator can save + restart before the hang. ≥80% usage.
  */
@@ -96,16 +105,34 @@ export interface FdCountFailed {
 
 export type FdCountResult = FdCountOk | FdCountFailed;
 
-/** Coarse pressure state derived from `computeFdHeadroom`. */
-export type FdPressureState = "ok" | "warn" | "critical" | "unknown";
+/**
+ * Coarse pressure state derived from `computeFdHeadroom`.
+ *
+ * `over_ceiling` is informational, NOT an alarm: the OS-level fd count (from
+ * `lsof` / `/proc` / `HandleCount`) already exceeds the Mono-ceiling proxy, but
+ * `lsof` counts ALL OS file descriptors (mmap'd assets, file watchers, regular
+ * `FileStream` handles) while only descriptors registered with Mono's
+ * IOSelector count toward the real trip point. So an asset-heavy project can
+ * legitimately sit over the proxy ceiling on a fresh, healthy process. The
+ * actionable signal there is the TREND (`rising` / `leaking`), not the
+ * absolute. The router only raises an operator warning on `over_ceiling` when
+ * the trend is actively climbing; a stable/no-history over-ceiling process
+ * gets a `pressureNote` instead of a `warning`.
+ */
+export type FdPressureState =
+  | "ok"
+  | "warn"
+  | "critical"
+  | "over_ceiling"
+  | "unknown";
 
 /** Headroom metric against the Mono fd ceiling. */
 export interface FdHeadroom {
-  /** Open fds / FD_CEILING, clamped to [0, 1] when count is known. */
+  /** Open fds / ceiling, clamped to [0, 1] when count is known. */
   pressureRatio: number;
-  /** FD_CEILING - count, clamped at 0. */
+  /** ceiling - count, clamped at 0. */
   headroom: number;
-  /** The fixed ceiling (Mono ~1024). */
+  /** The resolved ceiling (Mono ~1024 default, configurable per project). */
   ceiling: number;
   state: FdPressureState;
   /** `false` when the underlying count was an approximation (Windows). */
@@ -380,7 +407,7 @@ export function countFileDescriptors(pid: number): FdCountResult {
 }
 
 /**
- * Pure headroom math against the fixed Mono fd ceiling. The OS soft limit
+ * Pure headroom math against the Mono fd ceiling. The OS soft limit
  * (`ulimit -n`) is intentionally NOT used — it is a loose upper bound and is
  * misleading for GUI-launched Unity on macOS (inherits `launchctl limit
  * maxfiles`, not the shell ulimit).
@@ -388,22 +415,41 @@ export function countFileDescriptors(pid: number): FdCountResult {
  * `null` count (probe failed) → `state: "unknown"` with `reliable: false`. An
  * agent must NOT treat "unknown" as "ok"; it should surface the trend (if any
  * prior samples exist) and tell the operator the live count could not be read.
+ *
+ * `over_ceiling` (count >= ceiling) is informational: the OS-level count
+ * exceeded the Mono-ceiling proxy, but `lsof` over-counts relative to the
+ * IOSelector-registered descriptors that actually trip the hang. The router
+ * decides whether to alarm based on the TREND, not this absolute state.
+ *
+ * @param ceiling the resolved fd ceiling (default {@link FD_CEILING_DEFAULT});
+ *   passed in by the router from `readFdCeiling` so the math scales with a
+ *   project-configured override.
  */
-export function computeFdHeadroom(count: number | null, approximate = false): FdHeadroom {
+export function computeFdHeadroom(
+  count: number | null,
+  approximate = false,
+  ceiling: number = FD_CEILING_DEFAULT,
+): FdHeadroom {
   if (count === null || !Number.isFinite(count)) {
     return {
       pressureRatio: 0,
-      headroom: FD_CEILING,
-      ceiling: FD_CEILING,
+      headroom: ceiling,
+      ceiling,
       state: "unknown",
       reliable: false,
     };
   }
   const clamped = Math.max(0, count);
-  const pressureRatio = Math.min(1, clamped / FD_CEILING);
-  const headroom = Math.max(0, FD_CEILING - clamped);
+  const pressureRatio = Math.min(1, clamped / ceiling);
+  const headroom = Math.max(0, ceiling - clamped);
   let state: FdPressureState;
-  if (approximate) {
+  if (clamped >= ceiling) {
+    // OS-level fd count already past the Mono-ceiling proxy. Informational,
+    // not an alarm — `lsof` over-counts (mmap/assets/watchers) vs the
+    // IOSelector-registered descriptors that trip the hang. The router keys
+    // the operator warning off the TREND for this state.
+    state = "over_ceiling";
+  } else if (approximate) {
     // Windows HandleCount is naturally higher than Unix fds — only flag
     // critical, never warn, so an agent does not over-react.
     state = pressureRatio >= FD_CRITICAL_RATIO ? "critical" : "ok";
@@ -417,7 +463,7 @@ export function computeFdHeadroom(count: number | null, approximate = false): Fd
   return {
     pressureRatio,
     headroom,
-    ceiling: FD_CEILING,
+    ceiling,
     state,
     reliable: !approximate,
   };
@@ -465,8 +511,15 @@ export interface FdTrend {
  * mix pre- and post-restart samples). A monotonic climb of ≥10% of the
  * ceiling across ≥3 samples is `leaking`; a non-monotonic climb is `rising`;
  * otherwise `stable`. Fewer than two usable samples → `no_history`.
+ *
+ * @param ceiling the resolved fd ceiling (default {@link FD_CEILING_DEFAULT});
+ *   the leak threshold scales with it so a project that configures a higher
+ *   ceiling (e.g. a CoreCLR runtime) does not flag normal growth as a leak.
  */
-export function analyzeFdTrend(samples: readonly FdSample[]): FdTrend {
+export function analyzeFdTrend(
+  samples: readonly FdSample[],
+  ceiling: number = FD_CEILING_DEFAULT,
+): FdTrend {
   if (samples.length === 0) {
     return { state: "no_history", delta: null, sampleCount: 0 };
   }
@@ -492,7 +545,7 @@ export function analyzeFdTrend(samples: readonly FdSample[]): FdTrend {
       break;
     }
   }
-  if (monotonic && delta >= FD_CEILING * 0.1) {
+  if (monotonic && delta >= ceiling * 0.1) {
     return { state: "leaking", delta, sampleCount: usable.length };
   }
   if (delta > 0) {
@@ -503,13 +556,19 @@ export function analyzeFdTrend(samples: readonly FdSample[]): FdTrend {
 
 /**
  * Caveat string surfaced in the resource_pressure response so an agent (and
- * the operator) understand the launch-context nuance: the Mono ceiling, not
- * the OS soft limit, is the trip point; a GUI-launched Unity inherits
- * `launchctl limit maxfiles` (macOS) rather than the shell's ulimit.
+ * the operator) understand the launch-context nuance: the Mono ceiling, not the
+ * OS soft limit, is the trip point; a GUI-launched Unity inherits
+ * `launchctl limit maxfiles` (macOS) rather than the shell's ulimit. The
+ * resolved ceiling applied to the sample is reported separately in the
+ * response's `ceiling` / `ceilingSource` fields.
  */
 export const LAUNCH_CONTEXT_CAVEAT =
-  "Headroom is measured against Mono's internal ~1024 file-descriptor ceiling " +
-  "(the real trip point for the Bee build-driver hang), NOT the OS soft limit " +
-  "(ulimit -n / launchctl limit maxfiles). A GUI-launched Unity inherits the " +
-  "desktop environment's file limit, not the MCP server's shell limit, so the " +
-  "OS soft limit is only a loose upper bound.";
+  "Headroom is measured against the Mono runtime's internal file-descriptor " +
+  "ceiling (default ~1024 — the real trip point for the Bee build-driver hang), " +
+  "NOT the OS soft limit (ulimit -n / launchctl limit maxfiles). A GUI-launched " +
+  "Unity inherits the desktop environment's file limit, not the MCP server's " +
+  "shell limit, so the OS soft limit is only a loose upper bound. The ceiling " +
+  "is configurable per project via `.unity-open-mcp/settings.json` " +
+  "(`resourcePressure.fdCeiling`) for runtimes whose internal limit differs " +
+  "from Mono's classic 1024 (e.g. Unity 6 / CoreCLR); the resolved value and " +
+  "its source are in the response's `ceiling` and `ceilingSource` fields.";

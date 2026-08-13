@@ -213,14 +213,23 @@ and never depend on a reachable bridge.
   the operator to relaunch via the Hub (the interactive-Editor launch recipe
   is not knowable from the server).
 - **`unity_open_mcp_resource_pressure`** (proactive). Sample the live Unity
-  process's fd usage and report headroom against Mono's internal ~1024 fd
-  ceiling — the real trip point, NOT the OS soft limit (`ulimit -n` /
-  `launchctl limit maxfiles`), which is only a loose upper bound and is
-  misleading for a GUI-launched Unity on macOS. Returns `state` (`ok` / `warn`
-  at ≥80% / `critical` at ≥90% / `unknown`), a `trend` (`stable` / `rising` /
-  `leaking` — a monotonic climb across successive samples is the leak
-  signature), and the session-scoped sample ring. No disk cache — samples are
-  in-memory and clear on server restart.
+  process's fd usage and report headroom against the Mono fd ceiling (default
+  ~1024 — the real trip point, NOT the OS soft limit `ulimit -n` /
+  `launchctl limit maxfiles`, which is only a loose upper bound and is
+  misleading for a GUI-launched Unity on macOS). Returns `state` (`ok` / `warn`
+  at ≥80% / `critical` at ≥90% / `over_ceiling` / `unknown`), a `trend`
+  (`stable` / `rising` / `leaking` — a monotonic climb across successive
+  samples is the leak signature), `ceiling` + `ceilingSource` (`"default"` vs
+  `"config"`), and the session-scoped sample ring. No disk cache — samples are
+  in-memory and clear on server restart. **Fd-heavy projects:** `over_ceiling`
+  is INFORMATIONAL, not an alarm — `lsof`/`HandleCount` count ALL OS fds
+  (mmap'd assets, file watchers, `FileStream` handles) while only
+  Mono-IOSelector-registered descriptors trip the hang, so an asset-heavy
+  Editor legitimately sits over the proxy ceiling on a fresh healthy process; a
+  stable/no-history `over_ceiling` carries a `pressureNote` (no `warning`), so
+  watch the **trend**, not the absolute. Override the ceiling for a runtime
+  whose internal limit differs from Mono's 1024 (e.g. Unity 6 / CoreCLR) via
+  `.unity-open-mcp/settings.json` (`resourcePressure.fdCeiling`).
 
 Use `resource_pressure` after heavy automation (many recompiles / domain
 reloads) to catch fd growth before the Editor hangs; escalate to
