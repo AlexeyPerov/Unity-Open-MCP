@@ -17,7 +17,7 @@
 // defaults, never throws.
 
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { resolve } from "node:path";
 
 import { STATUS_DIR_NAME } from "./constants.js";
 import { FD_CEILING_DEFAULT } from "./process-diagnostics.js";
@@ -53,9 +53,12 @@ export interface FdCeilingResolution {
 
 /**
  * Resolve the settings file path for a project root. Exported for tests.
+ * `resolve` (not `join`) anchors a RELATIVE project path against the server's
+ * cwd instead of producing a relative path that would be re-interpreted by
+ * later read calls — matching how every other project-rooted path is resolved.
  */
 export function settingsFilePath(projectPath: string): string {
-  return join(projectPath, STATUS_DIR_NAME, SETTINGS_FILE_NAME);
+  return resolve(projectPath, STATUS_DIR_NAME, SETTINGS_FILE_NAME);
 }
 
 /**

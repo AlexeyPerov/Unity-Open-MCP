@@ -51,6 +51,16 @@ import { readdirSync } from "node:fs";
 export const FD_CEILING_DEFAULT = 1024;
 
 /**
+ * Absolute cap on the leak-detection threshold. The threshold is 10% of the
+ * resolved ceiling, but a very high configured ceiling (e.g. a CoreCLR runtime
+ * that legitimately sits over the Mono proxy) would otherwise push it so high
+ * that a real monotonic climb is missed — a climb of this many descriptors is a
+ * clear leak signal regardless of the ceiling. Kicks in once the ceiling exceeds
+ * ~5000 (10% of 5000 = 500).
+ */
+export const FD_LEAK_DELTA_MAX = 500;
+
+/**
  * Headroom fraction (of the resolved ceiling) at or below which the state is `warn`:
  * the Editor is approaching the Mono ceiling and an agent should surface the
  * trend so the operator can save + restart before the hang. ≥80% usage.
@@ -496,9 +506,9 @@ export type FdTrendState =
 export interface FdTrend {
   state: FdTrendState;
   /**
-   * First-to-last delta in fd count (negative for a leak — the count grew).
-   * `null` when there are fewer than two samples with known counts for the
-   * same PID.
+   * First-to-last delta in fd count (positive for a leak — the count grew;
+   * negative when it shrank). `null` when there are fewer than two samples
+   * with known counts for the same PID.
    */
   delta: number | null;
   /** Number of samples used for the trend (same-PID, known-count). */
@@ -508,13 +518,18 @@ export interface FdTrend {
 /**
  * Pure trend detector over a sample list. Only considers samples with a known
  * count for the SAME pid (a Unity restart changes the PID; the trend must not
- * mix pre- and post-restart samples). A monotonic climb of ≥10% of the
- * ceiling across ≥3 samples is `leaking`; a non-monotonic climb is `rising`;
- * otherwise `stable`. Fewer than two usable samples → `no_history`.
+ * mix pre- and post-restart samples). A strictly non-decreasing climb of at
+ * least the leak threshold (10% of the ceiling, capped at
+ * {@link FD_LEAK_DELTA_MAX}) across ≥2 samples is `leaking`; any other
+ * net-positive first-to-last delta (a non-monotonic climb, or a monotonic climb
+ * below the threshold) is `rising`; otherwise `stable`. Fewer than two usable
+ * samples → `no_history`. `leaking` is the actionable signal; `rising` is drift.
  *
  * @param ceiling the resolved fd ceiling (default {@link FD_CEILING_DEFAULT});
- *   the leak threshold scales with it so a project that configures a higher
- *   ceiling (e.g. a CoreCLR runtime) does not flag normal growth as a leak.
+ *   the leak threshold scales with it (capped at {@link FD_LEAK_DELTA_MAX}) so a
+ *   project that configures a higher ceiling (e.g. a CoreCLR runtime) does not
+ *   flag normal growth as a leak — while a very high ceiling cannot blind the
+ *   detector to a real climb.
  */
 export function analyzeFdTrend(
   samples: readonly FdSample[],
@@ -535,9 +550,11 @@ export function analyzeFdTrend(
   const last = usable[usable.length - 1].count;
   const delta = last - first;
 
-  // `rising` = strictly non-decreasing across all usable samples (each step
-  // ≥ the previous). `leaking` = rising AND the total climb is ≥10% of the
-  // Mono ceiling (a meaningful leak, not measurement noise).
+  // `leaking` = strictly non-decreasing across all usable samples AND the total
+  // climb ≥ the leak threshold (10% of the ceiling, capped at FD_LEAK_DELTA_MAX)
+  // — a meaningful monotonic leak. `rising` = a net-positive first-to-last delta
+  // that does NOT qualify as a leak (non-monotonic, or a monotonic climb below
+  // the threshold) — drift / measurement noise, not actionable by itself.
   let monotonic = true;
   for (let i = 1; i < usable.length; i++) {
     if (usable[i].count < usable[i - 1].count) {
@@ -545,7 +562,8 @@ export function analyzeFdTrend(
       break;
     }
   }
-  if (monotonic && delta >= ceiling * 0.1) {
+  const leakThreshold = Math.min(ceiling * 0.1, FD_LEAK_DELTA_MAX);
+  if (monotonic && delta >= leakThreshold) {
     return { state: "leaking", delta, sampleCount: usable.length };
   }
   if (delta > 0) {

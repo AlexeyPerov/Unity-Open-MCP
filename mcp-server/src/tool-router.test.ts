@@ -3111,10 +3111,11 @@ test("route: resource_pressure over_ceiling on a fresh fd-heavy process stays si
   });
 });
 
-test("route: resource_pressure over_ceiling + RISING trend raises a warning", async () => {
-  // Over the proxy ceiling AND still climbing → genuine concern. The warning
-  // fires (level warn); it is not the imminent "critical" since lsof over-
-  // counts, but the operator should be told the climb is ongoing.
+test("route: resource_pressure over_ceiling + small RISING trend stays silent (pressureNote)", async () => {
+  // Over the proxy ceiling with only a `rising` (drift) trend is NOT a leak —
+  // `rising` fires on ordinary fd drift, so it must not cry wolf. The response
+  // carries the informational pressureNote and NO warning. Only a qualifying
+  // `leaking` trend (next test) alarms.
   await withTmp("router-rp-overceiling-rising-", async (tmp) => {
     await setupProject(tmp);
     const restoreScan = setUnityProcessScannerForTest({
@@ -3122,7 +3123,7 @@ test("route: resource_pressure over_ceiling + RISING trend raises a warning", as
         return [{ pid: 7777, projectPath: tmp }];
       },
     });
-    // 2000 → 2050: monotonic, delta 50 (< 10% of 1024 → rising, not leaking).
+    // 2000 → 2050: monotonic, delta 50 (< leak threshold of ~102 → rising).
     const counts = [2000, 2050];
     const restoreProbe = setFdProbeForTest({
       count() {
@@ -3132,19 +3133,53 @@ test("route: resource_pressure over_ceiling + RISING trend raises a warning", as
       },
     });
     try {
-      const router = makeRouter(
-        makeFakeLive(),
-        makeFakeBatch(),
-        tmp,
-        makeFakeEventStream(),
-      );
+      const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
       await router.route("unity_open_mcp_resource_pressure", {}); // sample 1
       const result = await router.route("unity_open_mcp_resource_pressure", {}); // sample 2
       const body = parseBody(result);
       assert.equal(body.state, "over_ceiling");
-      const warning = body.warning as { level?: string } | undefined;
-      assert.equal(warning!.level, "warn", "over_ceiling + rising → warn");
-      assert.ok(Array.isArray(body.agentNextSteps));
+      assert.equal(body.warning, undefined, "over_ceiling + rising (drift) must NOT warn");
+      assert.equal(typeof body.pressureNote, "string", "informational pressureNote present instead");
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
+test("route: resource_pressure over_ceiling + LEAKING trend raises a warning", async () => {
+  // Over the proxy ceiling AND a qualifying monotonic leak (delta ≥ the leak
+  // threshold) → genuine concern. The warning fires at level "leaking" and,
+  // because the count is already over the ceiling, the message says so ("already
+  // crossed") rather than "before it crosses".
+  await withTmp("router-rp-overceiling-leaking-", async (tmp) => {
+    await setupProject(tmp);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 7778, projectPath: tmp }];
+      },
+    });
+    // 2000 → 2200: monotonic, delta 200 (≥ ~102 threshold → leaking), both over ceiling.
+    const counts = [2000, 2200];
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        const next = counts.shift();
+        if (next === undefined) return { count: 2200, method: "lsof", approximate: false };
+        return { count: next, method: "lsof", approximate: false };
+      },
+    });
+    try {
+      const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
+      await router.route("unity_open_mcp_resource_pressure", {}); // sample 1
+      const result = await router.route("unity_open_mcp_resource_pressure", {}); // sample 2
+      const body = parseBody(result);
+      assert.equal(body.state, "over_ceiling");
+      const warning = body.warning as { level?: string; message?: string };
+      assert.equal(warning.level, "leaking", "over_ceiling + leaking → level leaking");
+      assert.ok(
+        warning.message!.includes("already crossed"),
+        "an over-ceiling leak message says the count already crossed the ceiling",
+      );
       assert.equal(body.pressureNote, undefined, "no pressureNote when warning fires");
     } finally {
       restoreProbe();

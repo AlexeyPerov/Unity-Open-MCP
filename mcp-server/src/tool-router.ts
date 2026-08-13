@@ -2305,24 +2305,22 @@ export class ToolRouter implements Router {
     //    the OS-level count legitimately sits OVER the Mono-ceiling proxy on a
     //    fresh healthy process (lsof counts mmap'd assets / file watchers /
     //    FileStream handles that Mono's IOSelector never registers), so an
-    //    absolute `over_ceiling` state is NOT an alarm by itself — the
-    //    actionable signal there is the TREND. Alarm only on:
-    //    - a monotonic leak (always), or
-    //    - approaching the ceiling from below (warn/critical), or
-    //    - already over the proxy ceiling AND still climbing (rising).
-    //    A stable/no-history over-ceiling process gets a `pressureNote`
-    //    instead, so the agent is informed without crying wolf.
+    //    absolute `over_ceiling` state is NOT an alarm by itself. Alarm only on:
+    //    - a monotonic leak (the actionable trend signal), or
+    //    - approaching the ceiling from below (warn/critical).
+    //    A merely `rising` or stable/no-history over-ceiling process gets a
+    //    `pressureNote` instead. `rising` is any net-positive delta that is NOT a
+    //    qualifying leak — it fires on ordinary drift, so it must NOT alarm on its
+    //    own (the prior over_ceiling+rising alarm re-cried wolf on every sample
+    //    after the first).
     const fdMethod = probe.method;
     const probeReason = "reason" in probe ? probe.reason : null;
     const probeMessage = "message" in probe ? probe.message : null;
 
-    const overAndRising =
-      headroom.state === "over_ceiling" && trend.state === "rising";
     const shouldWarn =
       trend.state === "leaking" ||
       headroom.state === "warn" ||
-      headroom.state === "critical" ||
-      overAndRising;
+      headroom.state === "critical";
 
     const warningState = shouldWarn
       ? {
@@ -2339,20 +2337,20 @@ export class ToolRouter implements Router {
                 `likely to trip the Bee build-driver hang. Save scene work and restart ` +
                 `Unity via the Hub now, before the Editor hangs.`
               : trend.state === "leaking"
-                ? `Editor fd usage is climbing monotonically across samples (leak in ` +
-                  `progress): trend delta ${trend.delta} over ${trend.sampleCount} ` +
-                  `sample(s). Save scene work and plan a restart before the count ` +
-                  `crosses the ${ceiling}-descriptor ceiling.`
-                : overAndRising
-                  ? `Editor fd usage (${count}) is above the ${ceiling}-descriptor ` +
-                    `ceiling proxy and still climbing (trend rising, delta ` +
-                    `${trend.delta}). lsof over-counts OS fds vs the Mono-IOSelector ` +
-                    `descriptors that trip the hang, so this is a concern only if the ` +
-                    `climb continues — save scene work and plan a restart if it does.`
-                  : `Editor fd usage is at ${Math.round(headroom.pressureRatio * 100)}% of ` +
-                    `the ${ceiling}-descriptor ceiling. Monitor the trend; if it keeps ` +
-                    `climbing across domain reloads, save scene work and restart Unity ` +
-                    `via the Hub before the Editor hangs.`,
+                ? headroom.state === "over_ceiling"
+                  ? `Editor fd usage (${count}) is ABOVE the ${ceiling}-descriptor ` +
+                    `ceiling and climbing monotonically (leak in progress): trend ` +
+                    `delta ${trend.delta} over ${trend.sampleCount} sample(s). The ` +
+                    `count has already crossed the ceiling proxy — save scene work ` +
+                    `and restart Unity via the Hub now.`
+                  : `Editor fd usage is climbing monotonically across samples (leak in ` +
+                    `progress): trend delta ${trend.delta} over ${trend.sampleCount} ` +
+                    `sample(s). Save scene work and plan a restart before the count ` +
+                    `crosses the ${ceiling}-descriptor ceiling.`
+                : `Editor fd usage is at ${Math.round(headroom.pressureRatio * 100)}% of ` +
+                  `the ${ceiling}-descriptor ceiling. Monitor the trend; if it keeps ` +
+                  `climbing across domain reloads, save scene work and restart Unity ` +
+                  `via the Hub before the Editor hangs.`,
         }
       : null;
 
@@ -2365,8 +2363,8 @@ export class ToolRouter implements Router {
           `Mono-IOSelector-registered descriptors (sockets/pipes under async IO) ` +
           `count toward the real trip point. For an asset-heavy project this is ` +
           `expected on a healthy process. Treat this as a concern ONLY if the trend ` +
-          `becomes rising/leaking — re-sample after the next domain reload to ` +
-          `establish one.`
+          `becomes a monotonic leak (leaking) — re-sample after the next domain ` +
+          `reload to establish one.`
         : null;
 
     return sourceResult(

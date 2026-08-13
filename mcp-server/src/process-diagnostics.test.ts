@@ -157,6 +157,19 @@ test("D: analyzeFdTrend leak threshold scales with the configured ceiling", () =
   assert.equal(analyzeFdTrend(climb, 2048).state, "rising");
 });
 
+test("D: analyzeFdTrend leak threshold is capped so a high ceiling cannot blind detection", () => {
+  // A very high configured ceiling (e.g. a CoreCLR runtime) must NOT push the
+  // leak threshold so high that a real monotonic climb is missed. delta 600,
+  // monotonic, against a 1M ceiling → threshold capped at FD_LEAK_DELTA_MAX
+  // (500) → 600 ≥ 500 → leaking. Without the cap the threshold would be 100000
+  // and this climb would be silently classified as `rising`.
+  const climb = [
+    sample(1, 100, 100000),
+    sample(2, 100, 100600),
+  ]; // delta 600, monotonic
+  assert.equal(analyzeFdTrend(climb, 1_000_000).state, "leaking");
+});
+
 // ---------------------------------------------------------------------------
 // analyzeFdTrend — leak detection across the session-scoped ring.
 // ---------------------------------------------------------------------------
