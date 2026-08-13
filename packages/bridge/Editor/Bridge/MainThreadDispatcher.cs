@@ -66,6 +66,14 @@ namespace UnityOpenMcpBridge
             // the AppDomain unloads (see _pendingDispatches).
             AssemblyReloadEvents.beforeAssemblyReload -= Shutdown;
             AssemblyReloadEvents.beforeAssemblyReload += Shutdown;
+            // Symmetric teardown on graceful quit: explicitly dispose the
+            // per-call Timer wait-handles instead of relying on process exit to
+            // reclaim them. The OS reclaims everything on exit anyway, but this
+            // keeps the "dispose on any teardown" contract uniform with the
+            // reload path and makes a future move to EnterPlayModeOptions
+            // (reload-disabled) safe.
+            EditorApplication.quitting -= Shutdown;
+            EditorApplication.quitting += Shutdown;
         }
 
         // feedback-fable-04-08 §2a — fail every outstanding dispatch's awaiter

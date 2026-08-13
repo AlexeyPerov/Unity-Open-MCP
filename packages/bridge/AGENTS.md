@@ -105,6 +105,37 @@ This file owns the three-way deterministic-port contract:
    See [Contributor troubleshooting](../../docs/troubleshooting-contributors.md#stale-heartbeat-vs-live-pid).
 7. States use `BridgeInstanceLock.State*`. `InstancesDirOverride` is test-only.
 
+## Domain-reload fd hygiene
+
+Long Editor sessions leak file-descriptor numbers across domain reloads until
+one crosses Mono's internal ~1024 IOSelector ceiling — the Bee build driver
+then raises `Could not register to wait for file descriptor N` and the Editor
+hangs mid-build (root cause `mono/mono#15931`, surfaced by
+`read_compile_errors` as `editor_fd_exhaustion`). The bridge tears down every
+fd-bearing resource in `AssemblyReloadEvents.beforeAssemblyReload` (the
+`feedback-fable-04-08 §2a` fix). Keep this contract intact:
+
+- `BridgeHttpServer.OnBeforeAssemblyReload` → `ForceStopListener(releaseLock:
+  false)` stops the `HttpListener`, aborts every in-flight `HttpListenerContext`
+  (`AbortInFlightContexts` — each owns an OS socket), resets the fair queue
+  (`BridgeRequestQueue.Reset`), and joins the listener thread. The on-disk
+  instance lock is retained (item 6 above).
+- `MainThreadDispatcher.Shutdown` (wired to BOTH `beforeAssemblyReload` AND
+  `EditorApplication.quitting`) fails every stranded dispatch and disposes its
+  per-call `System.Threading.Timer` — each Timer owns a native wait-handle
+  registered with Mono's IOSelector. Complete the `TaskCompletionSource` BEFORE
+  `Timer.Dispose()` (Dispose cancels the pending timeout callback; reversing
+  the order strands the awaiter). Guarded by `MainThreadDispatcherTests`.
+- **Rule:** any NEW fd-bearing resource (socket, `WaitHandle`/`ManualResetEvent`,
+  `Timer`, `FileSystemWatcher`, long-lived `FileStream`) MUST register a
+  `beforeAssemblyReload` teardown that releases the native handle BEFORE the
+  AppDomain unloads. Prefer `using`/`try-finally` for per-call handles.
+- The instance lock (`BridgeInstanceLock`) holds NO fd — it is an atomic
+  write-rename/delete file, never a held `FileStream`. Audit/heartbeat logs use
+  `File.AppendAllText`/`WriteAllText` (open-write-close per call), so they hold
+  no fd either. Do not add a cached `StreamWriter`/`StreamReader` field without
+  a matching teardown.
+
 ## UI
 
 - Single EditorWindow with peer tabs; new surfaces are tab sections. Tab enum
