@@ -7,7 +7,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, utimes } from "node:fs/promises";
 import { utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1988,6 +1988,241 @@ test("route: bridge_status cold Safe Mode — Unity process for a DIFFERENT proj
     } finally {
       restore();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// specs/feedback.md 2026-08-14 — bridge_status must not report a wedged Editor
+// as healthy.
+//
+// Two failure modes survive every signal the classifier trusts. In the field
+// report, bridge_status returned status "running" / classification "healthy" /
+// recoveryHint null in the SAME minute read_compile_errors reported
+// `unhealthy: true, issues: [editor_fd_exhaustion]`; and a modal dialog was
+// reported as `dead_bridge` with a "Unity is likely in Safe Mode" hint, sending
+// the agent to hunt a compile failure that did not exist.
+// ---------------------------------------------------------------------------
+
+/** The Bee build-driver hang signature, as Unity writes it into Editor.log. */
+const FD_EXHAUSTION_LOG_LINE =
+  "Unhandled exception during build: System.NotSupportedException: Could not " +
+  "register to wait for file descriptor 1194\n" +
+  "  at System.IOSelector.Add (System.IntPtr handle, System.IOSelectorJob job)\n";
+
+test("route: bridge_status reports wedged (fd exhaustion) instead of running", async () => {
+  await withTmp("router-bstatus-fdwedge-", async (tmp) => {
+    await setupProject(tmp);
+    await mkdir(join(tmp, "Logs"), { recursive: true });
+    await writeFile(join(tmp, "Logs", "Editor.log"), FD_EXHAUSTION_LOG_LINE);
+
+    // Every "healthy" signal present: connected, idle, listener answering.
+    const live = makePingFakeLive({
+      pingBody: { connected: true, compiling: false, mode: "live", unityVersion: "6000.0.80f1" },
+    });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+    const result = await router.route("unity_open_mcp_bridge_status", {});
+    const body = parseBody(result);
+    assert.equal(result.isError, false, "bridge_status still never errors");
+    assert.equal(body.status, "wedged");
+    assert.equal(body.ready, false);
+    const wedged = body.wedged as { reason: string; detail: string; logPath?: string };
+    assert.equal(wedged.reason, "editor_fd_exhaustion");
+    assert.equal(wedged.logPath, join(tmp, "Logs", "Editor.log"));
+    const hint = body.recoveryHint as { tool: string; reason: string } | null;
+    assert.ok(hint, "a wedged editor must carry a non-null recoveryHint");
+    assert.equal(hint!.tool, "unity_open_mcp_read_compile_errors");
+    assert.ok(
+      typeof body.nextStep === "string" && body.nextStep.includes("restart"),
+      "the fd-exhaustion next step must say the Editor has to be restarted",
+    );
+    // The instance-lock mirror keeps its own contract (no "wedged" token there).
+    assert.equal(body.classification, "gone");
+  });
+});
+
+test("route: bridge_status stays running when the log carries no wedge signature", async () => {
+  await withTmp("router-bstatus-nowedge-", async (tmp) => {
+    await setupProject(tmp);
+    await mkdir(join(tmp, "Logs"), { recursive: true });
+    await writeFile(join(tmp, "Logs", "Editor.log"), "Refreshing native plugins.\n");
+
+    const live = makePingFakeLive({
+      pingBody: { connected: true, compiling: false, mode: "live" },
+    });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+    const body = parseBody(await router.route("unity_open_mcp_bridge_status", {}));
+    assert.equal(body.status, "running");
+    assert.equal(body.wedged, undefined);
+    assert.equal(body.recoveryHint, null);
+  });
+});
+
+test("route: bridge_status reports main_thread_wedged, not dead_bridge, when /ping answers", async () => {
+  // A modal dialog freezes EditorApplication.update, so the heartbeat goes
+  // stale and classifyInstance says dead_bridge — but the HTTP listener runs on
+  // its own thread and keeps answering. A bridge assembly that actually failed
+  // to compile takes the listener down with it, so a reachable /ping rules out
+  // the Safe Mode diagnosis.
+  await withTmp("router-bstatus-modal-", async (tmp) => {
+    await setupProject(tmp);
+    const sandboxDir = await mkdtemp(join(tmpdir(), "uomcp-bstatus-modal-"));
+    const prevHome = process.env.HOME;
+    const prevUserProfile = process.env.USERPROFILE;
+    process.env.HOME = sandboxDir;
+    process.env.USERPROFILE = sandboxDir;
+    try {
+      const { projectHash } = await import("./instance-discovery.js");
+      const hash = projectHash(tmp);
+      const instancesDir = join(sandboxDir, ".unity-open-mcp", "instances");
+      await mkdir(instancesDir, { recursive: true });
+      const stale = new Date(Date.now() - 60_000).toISOString();
+      await writeFile(
+        join(instancesDir, `${hash}.json`),
+        JSON.stringify({
+          pid: process.pid,
+          port: 24678,
+          projectPath: tmp,
+          projectHash: hash,
+          startedAt: stale,
+          updatedAt: stale,
+          heartbeatAt: stale,
+          state: "reloading",
+          isPlaying: false,
+          isCompiling: false,
+          bridgeVersion: "1.0.0",
+          unityVersion: "6000.0.80f1",
+        }),
+      );
+
+      // The distinguishing signal: the listener STILL answers.
+      const live = makePingFakeLive({
+        pingBody: { connected: true, compiling: false, mode: "live", bridgeVersion: "1.0.0" },
+      });
+      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+      const body = parseBody(await router.route("unity_open_mcp_bridge_status", {}));
+      assert.equal(body.status, "wedged");
+      assert.notEqual(body.status, "dead_bridge");
+      const wedged = body.wedged as { reason: string };
+      assert.equal(wedged.reason, "main_thread_wedged");
+      const hint = body.recoveryHint as { tool: string; reason: string } | null;
+      assert.ok(hint);
+      assert.ok(
+        !hint!.reason.includes("Safe Mode"),
+        "a modal-dialog wedge must NOT be described as Safe Mode / a compile failure",
+      );
+      assert.ok(
+        typeof body.nextStep === "string" &&
+          body.nextStep.toLowerCase().includes("modal dialog") &&
+          body.nextStep.toLowerCase().includes("operator"),
+        "the next step must name the modal dialog and that an operator has to dismiss it",
+      );
+      // The lock's own verdict is preserved verbatim.
+      assert.equal(body.classification, "dead_bridge");
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = prevUserProfile;
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// specs/feedback.md 2026-08-14 — "these errors may predate your edits".
+//
+// Three consecutive read_compile_errors calls returned the same error block for
+// code that had already been fixed, with no staleness signal: Editor.log's FILE
+// mtime was fresh (unrelated asset imports keep appending) while the error
+// BLOCK inside it was old, so the staleLog heuristic could not fire.
+// ---------------------------------------------------------------------------
+
+test("route: read_compile_errors flags errors that predate the cited files' edits", async () => {
+  await withTmp("router-predate-", async (tmp) => {
+    await setupProject(tmp);
+    const scriptsDir = join(tmp, "Assets", "Scripts");
+    const asmDir = join(tmp, "Library", "ScriptAssemblies");
+    await mkdir(scriptsDir, { recursive: true });
+    await mkdir(asmDir, { recursive: true });
+
+    const dll = join(asmDir, "Assembly-CSharp.dll");
+    await writeFile(dll, "pe");
+    const src = join(scriptsDir, "Broken.cs");
+    await writeFile(src, "// fixed already");
+
+    await mkdir(join(tmp, "Logs"), { recursive: true });
+    const logPath = join(tmp, "Logs", "Editor.log");
+    await writeFile(
+      logPath,
+      "Assets/Scripts/Broken.cs(25,55): error CS0246: The type or namespace " +
+        "name 'Level' could not be found\n",
+    );
+
+    // The reported shape: the LOG is the freshest file on disk (imports keep
+    // appending), the DLL is older than the source, and the source has already
+    // been fixed. Only the DLL anchor can see that the errors are stale.
+    const old = new Date(Date.now() - 120_000);
+    const mid = new Date(Date.now() - 60_000);
+    await utimes(dll, old, old);
+    await utimes(src, mid, mid);
+
+    const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
+    const body = parseBody(
+      await router.route("unity_open_mcp_read_compile_errors", {}),
+    );
+
+    assert.equal(body.errorsMayPredateEdits, true);
+    assert.deepEqual(body.errorsMayPredateEditsFiles, ["Assets/Scripts/Broken.cs"]);
+    assert.ok(
+      typeof body.errorsMayPredateEditsHint === "string" &&
+        (body.errorsMayPredateEditsHint as string).includes("recompile"),
+      "the hint must point at forcing a recompile",
+    );
+    assert.ok(
+      typeof body.headline === "string" && (body.headline as string).includes("PREDATE"),
+      "the headline must carry the caveat, not only a sibling field",
+    );
+  });
+});
+
+test("route: read_compile_errors does not flag predating when the build is newer than the sources", async () => {
+  await withTmp("router-nopredate-", async (tmp) => {
+    await setupProject(tmp);
+    const scriptsDir = join(tmp, "Assets", "Scripts");
+    const asmDir = join(tmp, "Library", "ScriptAssemblies");
+    await mkdir(scriptsDir, { recursive: true });
+    await mkdir(asmDir, { recursive: true });
+
+    const src = join(scriptsDir, "Broken.cs");
+    await writeFile(src, "// still broken");
+    const dll = join(asmDir, "Assembly-CSharp.dll");
+    await writeFile(dll, "pe");
+
+    await mkdir(join(tmp, "Logs"), { recursive: true });
+    await writeFile(
+      join(tmp, "Logs", "Editor.log"),
+      "Assets/Scripts/Broken.cs(25,55): error CS0246: The type or namespace " +
+        "name 'Level' could not be found\n",
+    );
+
+    // A compile ran AFTER the edit — the errors are current.
+    const old = new Date(Date.now() - 120_000);
+    const recent = new Date(Date.now() - 1_000);
+    await utimes(src, old, old);
+    await utimes(dll, recent, recent);
+
+    const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
+    const body = parseBody(
+      await router.route("unity_open_mcp_read_compile_errors", {}),
+    );
+
+    assert.equal(body.errorsMayPredateEdits, undefined);
+    assert.ok(
+      typeof body.headline === "string" && !(body.headline as string).includes("PREDATE"),
+    );
   });
 });
 

@@ -444,6 +444,42 @@ namespace UnityOpenMcpBridge.Tests
                 "The second agentNextSteps entry must name the read-only probe exit.");
         }
 
+        // specs/feedback.md 2026-08-14 — with gate: "off" the envelope used to
+        // read as a contradiction: the gate was reported SKIPPED and the reason
+        // given was the missing argument the gate would have consumed. The
+        // requirement IS intentional beyond the gate (paths_hint is the declared
+        // mutation scope recorded in the audit trail), so the message must say
+        // so, and the skip reason must describe what actually happened — the
+        // request was refused before dispatch, so no gate ever ran.
+        [Test]
+        public static void BuildPathsHintErrorEnvelope_ExplainsTheGateOffRequirement()
+        {
+            var json = BridgeJson.BuildPathsHintErrorEnvelope(
+                "unity_open_mcp_execute_menu", "off");
+            StringAssert.Contains("even with gate", json,
+                "The message must say paths_hint is required even with gate: \"off\".");
+            StringAssert.Contains("audit trail", json,
+                "The message must name the consumer that survives gate: \"off\".");
+            StringAssert.Contains("refused before dispatch", json,
+                "The message must say nothing ran and no gate was evaluated.");
+        }
+
+        [Test]
+        public static void BuildPathsHintErrorEnvelope_SkippedReasonIsNotSelfReferential()
+        {
+            var json = BridgeJson.BuildPathsHintErrorEnvelope(
+                "unity_open_mcp_execute_menu", "off");
+            StringAssert.Contains("\"skippedReason\":\"request_rejected\"", json,
+                "The gate did not skip *because* paths_hint was missing — it never ran.");
+            Assert.IsFalse(json.Contains("\"skippedReason\":\"paths_hint_required\""),
+                "The self-referential skip reason must be gone.");
+            // Shape parity with the main gate envelope is preserved.
+            StringAssert.Contains("\"skipped\":true", json);
+            StringAssert.Contains("\"outcome\":\"skipped\"", json);
+            StringAssert.Contains("\"code\":\"paths_hint_required\"", json,
+                "The error CODE is unchanged — only the reasoning is corrected.");
+        }
+
         [Test]
         public static void BuildPathsHintErrorEnvelope_NoReadOnlyClause_ForToolsWithoutIt()
         {

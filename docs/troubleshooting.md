@@ -54,6 +54,17 @@ Valid range: **20000–29999**. Restart Unity after changing.
 **Symptom:** Offline tools (`list_assets`, `read_compile_errors`) work, but
 live tools time out. Errors mention **`dead_bridge`** or **`main_thread_blocked`**.
 
+> **A modal dialog is not a dead bridge.** When `bridge_status` reports
+> `status: "wedged"` with `wedged.reason: "main_thread_wedged"`, the HTTP
+> listener is still answering `/ping` while the editor heartbeat has stopped —
+> the signature of a modal dialog blocking Unity's message pump, not a failed
+> bridge assembly (which would take the listener down with it). There is no
+> compile error to hunt: dismiss the dialog in the Unity UI and queued calls
+> resume. Editor menus that open modals (material/scene converters, importer
+> prompts) are the usual trigger, whether reached through `execute_menu` or
+> `EditorApplication.ExecuteMenuItem` inside `execute_csharp`; prefer the
+> non-interactive API.
+
 ### Common causes
 
 - **Unsaved scene modals** — Unity's "Save scene?" / **"Scene(s) Have Been
@@ -212,6 +223,36 @@ opened under a pre-6000.5 Unity, the live editor writes the **global** log while
 the project log lingers. `read_compile_errors` now picks the **freshest** of the
 two (newest mtime) rather than preferring the project log on existence alone —
 reported as `logSource: "global_log_fresher"` when the global log wins.
+
+## `bridge_status` says `wedged` / `execute_csharp` fails with `editor_build_wedged`
+
+### What it means
+
+The Editor hit the Bee build driver's file-descriptor exhaustion
+(`System.NotSupportedException: Could not register to wait for file descriptor
+N`). The process, the heartbeat and `/ping` all keep working, so the Editor
+*looks* healthy — but it can no longer **build**:
+`Library/ScriptAssemblies/*.dll` freezes at one mtime while your edits keep
+landing on disk. Anything `execute_csharp` returns from that point is computed
+from the **previous** assembly.
+
+`bridge_status` folds the same `Editor.log` red-flag scan `read_compile_errors`
+runs into its own answer and reports `status: "wedged"` with
+`wedged.reason: "editor_fd_exhaustion"` plus a non-null `recoveryHint`, instead
+of the `running` / `healthy` it used to report in the same minute
+`read_compile_errors` reported `unhealthy: true`.
+
+`execute_csharp` / `invoke_method` refuse outright in this state
+(`error.code: "editor_build_wedged"`) rather than returning a successful-looking
+result — a stale answer that reads as success is worse than no answer.
+
+### Recovery
+
+A recompile will not clear it. Save scene work, then restart the Editor
+(`restart_editor` with `confirm: true`, or manually) and relaunch via the Hub.
+Discard any conclusion drawn from results returned after the Editor wedged.
+`resource_pressure` predicts the condition — sample it after heavy automation
+and watch the **trend**, not the absolute count.
 
 ## `restart_editor` refuses with `restart_signature_absent`
 

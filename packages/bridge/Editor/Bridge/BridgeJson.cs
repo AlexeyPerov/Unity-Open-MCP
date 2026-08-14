@@ -594,6 +594,38 @@ namespace UnityOpenMcpBridge
                     + "The editor may be wedged and unreachable — the HTTP timeout cannot self-heal a stuck main thread. "
                     + "Check editor_status / bridge_status before retrying, and do NOT simply raise timeout_ms. "
                     + "For test execution use unity_senses_run_tests (it is async and does not block).\"");
+                // specs/feedback.md 2026-08-12 — the code-level blockers above are
+                // not the only way a snippet wedges the main thread. An Editor menu
+                // that opens a MODAL dialog does it too, and that case behaves
+                // differently: every SUBSEQUENT call times out as well, /ping keeps
+                // answering (it is served off the listener thread), and
+                // bridge_status reports a false dead_bridge / Safe Mode. Naming it
+                // here stops the agent from chasing a compile failure that does not
+                // exist, and from retrying a call that cannot possibly succeed.
+                sb.Append(",\"If the snippet called EditorApplication.ExecuteMenuItem (or any API that opens a modal "
+                    + "dialog — material/scene converters, importer prompts, EditorUtility.DisplayDialog), the modal is "
+                    + "holding Unity's main thread and EVERY subsequent call will time out too. This cannot self-heal and "
+                    + "no tool can dismiss it: an operator must close the dialog in the Unity UI, then calls resume. "
+                    + "bridge_status reports this as status 'wedged' with reason 'main_thread_wedged' — do not read it as a "
+                    + "compile failure. Prefer the non-interactive API over ExecuteMenuItem.\"");
+            }
+            else if (toolName == "unity_open_mcp_execute_menu")
+            {
+                // specs/feedback.md 2026-08-14 — `Assets/Refresh` timed out twice
+                // while in fact completing both times. A blind retry of an
+                // authoring menu can double-write assets, so the envelope must say
+                // "verify, do not retry" and point at the two real causes of a
+                // menu that never returns.
+                sb.Append("\"The menu may still be RUNNING — a timeout here is a wait that elapsed, not a failure. "
+                    + "Assets/Refresh after an importer version bump reimports the whole content tree and routinely "
+                    + "outlasts the default 30s. Confirm the outcome with editor_status (poll isCompiling) or an asset "
+                    + "probe; do NOT blindly retry, because re-running an authoring menu can double-write assets.\"");
+                sb.Append(",\"If the menu is legitimately slow, re-run it with a larger timeout_ms rather than retrying at "
+                    + "the default.\"");
+                sb.Append(",\"If the menu opens a MODAL dialog (material/scene converters, importer prompts), it is now "
+                    + "holding Unity's main thread and every subsequent call will time out too. No tool can dismiss it — "
+                    + "an operator must close it in the Unity UI. bridge_status reports this as status 'wedged' with "
+                    + "reason 'main_thread_wedged'. Prefer the non-interactive API over the menu.\"");
             }
             else
             {
@@ -655,15 +687,30 @@ namespace UnityOpenMcpBridge
         // it (only execute_csharp does today). Without this, agents learn to invent
         // a plausible-looking paths_hint scope for read probes rather than asserting
         // read_only, which is worse for the gate than the truthful assertion.
+        //
+        // specs/feedback.md 2026-08-14 — the envelope used to read as a
+        // contradiction with `gate: "off"`: it said the gate was SKIPPED and gave
+        // the reason as the missing argument the gate would have consumed. Both
+        // halves are corrected here. The requirement IS intentional beyond the
+        // gate — `paths_hint` is the declared mutation scope recorded in the audit
+        // trail (BridgeAuditRecorder.RecordGateRun) regardless of gate mode, and
+        // per packages/bridge/AGENTS.md "no whole-project fallback" it stays
+        // mandatory — so the message now says so instead of implying the gate is
+        // the only consumer. And the skip reason becomes `request_rejected`: the
+        // gate did not skip *because* paths_hint was missing, it never ran at all
+        // because the request was refused before dispatch.
         internal static string BuildPathsHintErrorEnvelope(string toolName, string gateMode, bool toolExposesReadOnly = false)
         {
-            var sb = new StringBuilder(640);
+            var sb = new StringBuilder(768);
             sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"paths_hint_required\",\"message\":\"");
             sb.Append("Mutating tool '");
             sb.Append(EscapeStringContent(toolName));
             sb.Append("' requires a non-empty 'paths_hint' array. ");
-            sb.Append("Provide asset paths likely to be affected (e.g. [\\\"Assets/Prefabs/Player.prefab\\\"]) so the gate can scope validation correctly. ");
-            sb.Append("There is no whole-project fallback — explicit paths are mandatory.");
+            sb.Append("Provide the asset paths this call is likely to affect (e.g. [\\\"Assets/Prefabs/Player.prefab\\\"]). ");
+            sb.Append("This is REQUIRED even with gate: \\\"off\\\" — paths_hint is the declared mutation scope recorded in the ");
+            sb.Append("audit trail, not only the gate's validation scope, so turning the gate off does not waive it. ");
+            sb.Append("There is no whole-project fallback — explicit paths are mandatory. ");
+            sb.Append("The request was refused before dispatch: nothing ran, and no gate was evaluated.");
             if (toolExposesReadOnly)
                 sb.Append(" If the snippet performs no asset writes, pass read_only: true to waive this requirement.");
             sb.Append("\"}},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
@@ -671,9 +718,9 @@ namespace UnityOpenMcpBridge
             // matches the shape of the main envelope (the gate builder above),
             // which emits skippedReason alongside skipped. Without it the `gate`
             // object has two shapes depending on which builder produced it.
-            sb.Append("\",\"skipped\":true,\"skippedReason\":\"paths_hint_required\",\"outcome\":\"skipped\",\"validation\":null,\"delta\":null}");
+            sb.Append("\",\"skipped\":true,\"skippedReason\":\"request_rejected\",\"outcome\":\"skipped\",\"validation\":null,\"delta\":null}");
             sb.Append(",\"logs\":[]");
-            sb.Append(",\"agentNextSteps\":[\"Add 'paths_hint' with at least one asset path before retrying.\"");
+            sb.Append(",\"agentNextSteps\":[\"Add 'paths_hint' with at least one asset path and retry — it is required for every mutating call, including gate: \\\"off\\\".\"");
             if (toolExposesReadOnly)
                 sb.Append(",\"For read-only probes (no asset writes), pass read_only: true instead of paths_hint.\"");
             sb.Append("]}");

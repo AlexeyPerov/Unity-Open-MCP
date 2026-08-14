@@ -95,6 +95,10 @@ namespace UnityOpenMcpBridge.MetaTools
             if (string.IsNullOrEmpty(LastInitError))
                 LastInitError = "Roslyn directory not found in Unity installation";
 
+            // The ONE Roslyn warning per domain: every candidate failed, so C#
+            // execution is genuinely unavailable and the operator has to act.
+            // Per-candidate failures stay silent (see TryLoadRoslyn) — a skipped
+            // candidate followed by a working one is not a problem to report.
             Debug.LogWarning($"[Unity Open MCP Bridge] {LastInitError}");
             return false;
         }
@@ -132,12 +136,20 @@ namespace UnityOpenMcpBridge.MetaTools
             // the deps-load loop that silently swallows every R2R failure).
             if (IsReadyToRunImage(codeAnalysisPath))
             {
+                // specs/feedback.md 2026-08-14 — record, do NOT log. Skipping an
+                // R2R candidate is only interesting if EVERY candidate then fails;
+                // on Unity 6000.x the IL-only fallback (the last candidate) loads
+                // right after, so the warning described a non-problem. It fired on
+                // every domain reload and, via the per-call `logs[]` capture,
+                // reappeared in every execute_csharp response for the rest of the
+                // session (~90 tokens x ~40 calls of one already-resolved fact).
+                // Initialize() logs LastInitError once when all candidates fail,
+                // which is the only case an operator needs to see.
                 LastInitError = $"Roslyn candidate '{roslynDir}' ships ReadyToRun (R2R) images " +
                     "the editor's Mono runtime cannot load (Microsoft.CodeAnalysis.dll). Skipping; " +
                     "on editors with no Mono-loadable Roslyn (Unity 6000.x) install the IL-only " +
                     "fallback via execute_csharp {\"setup_roslyn\":true} or the Unity menu " +
                     "'Tools > Unity Open MCP Bridge - Install Roslyn Fallback'.";
-                Debug.LogWarning($"[Unity Open MCP Bridge] {LastInitError}");
                 return false;
             }
 
@@ -172,8 +184,10 @@ namespace UnityOpenMcpBridge.MetaTools
             {
                 _ca = null;
                 _cacs = null;
+                // Same rule as the R2R skip above: a candidate that fails to load
+                // is only worth reporting when no later candidate succeeds.
+                // Initialize() emits LastInitError in exactly that case.
                 LastInitError = $"Roslyn init failed for {roslynDir}: {e.Message}";
-                Debug.LogWarning($"[Unity Open MCP Bridge] {LastInitError}");
                 return false;
             }
         }

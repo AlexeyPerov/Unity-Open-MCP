@@ -5,6 +5,8 @@ import type { PingCache, PingSnapshot } from "./ping-cache.js";
 import type { BridgeToolsInventory } from "./bridge-tools-cache.js";
 import { BridgeToolsCache } from "./bridge-tools-cache.js";
 import { StaleAssemblyCache } from "./stale-assembly-cache.js";
+import { EditorWedgeCache, scanForFdExhaustion } from "./editor-wedge.js";
+import type { FdExhaustionScan } from "./editor-wedge.js";
 import { detectStaleAssembly } from "./unity-log.js";
 import { deriveIsError } from "./gate-error.js";
 import { readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
@@ -267,6 +269,9 @@ export class LiveClient implements Router {
    * settle so a reload that rebuilt the assembly clears a cached stale signal.
    */
   private staleAssemblyCache: StaleAssemblyCache;
+  /** specs/feedback.md 2026-08-14 — short-TTL cache for the fd-exhaustion
+   *  wedge scan behind the `editor_build_wedged` guard. */
+  private editorWedgeCache: EditorWedgeCache;
   private dismissEnabled: boolean;
   private dismissTimeoutMs: number;
   private dismissIntervalMs: number;
@@ -323,6 +328,7 @@ export class LiveClient implements Router {
     this.pingCache = pingCache;
     this.bridgeToolsCache = new BridgeToolsCache();
     this.staleAssemblyCache = new StaleAssemblyCache();
+    this.editorWedgeCache = new EditorWedgeCache();
     this.authToken = authToken;
     this.projectPath = projectPath;
     this.retry = readRetryTunables();
@@ -924,6 +930,49 @@ export class LiveClient implements Router {
     ) {
       const staleAsm = this.resolveStaleAssembly();
       if (staleAsm != null && staleAsm.staleAssembly) {
+        // specs/feedback.md 2026-08-14 — a stale assembly plus a wedged build
+        // driver is not a footnote, it is an execution-integrity failure. In
+        // the reported session `Library/ScriptAssemblies/Game.dll` froze at one
+        // mtime while edits kept landing; execute_csharp went on executing the
+        // PREVIOUS assembly and returning successful-looking results computed
+        // from pre-edit code, which were believed and acted on. `_staleDomain`
+        // alone did not stop that — it sits next to `mutation.success: true`
+        // and is easy to skim past. When the log confirms the driver is dead
+        // (editor_fd_exhaustion), the result CANNOT be trusted and no
+        // recompile will fix it without a restart: fail the call outright.
+        const wedge = this.resolveEditorWedge();
+        if (wedge.present) {
+          return makeErrorResult({
+            code: "editor_build_wedged",
+            message:
+              `'${toolName}' executed against a STALE assembly and its result must ` +
+              "not be trusted. The Editor hit the Bee build-driver file-descriptor " +
+              "exhaustion (editor_fd_exhaustion in " +
+              `${wedge.logPath ?? "Editor.log"}), so Library/ScriptAssemblies has ` +
+              "stopped updating: your C# edits are on disk but were never compiled, " +
+              "and the snippet ran against the pre-edit code. Newer-than-DLL " +
+              `sources: ${staleAsm.newerSources.join(", ")}. This does NOT ` +
+              "self-heal and a recompile will not clear it — save scene work and " +
+              "restart the Editor (unity_open_mcp_restart_editor with confirm: " +
+              "true, or manually), then re-run. Discard any conclusion drawn from " +
+              "results returned since the Editor wedged.",
+          });
+        }
+        // Not wedged: the assembly is merely stale (an incremental no-op), which
+        // a recompile fixes. Promote the signal to a top-level `staleAssembly` +
+        // `warning` so it is not read as an optional annotation, keeping
+        // `_staleDomain` for the evidence detail.
+        parsed.staleAssembly = true;
+        const staleWarning =
+          `RESULT MAY BE WRONG — '${toolName}' ran against a stale assembly. ` +
+          staleAsm.hint;
+        // Prepend rather than overwrite: no bridge tool emits a top-level
+        // `warning` on these two today, but clobbering one if it ever does
+        // would trade one silent-wrong-answer bug for another.
+        parsed.warning =
+          typeof parsed.warning === "string" && parsed.warning.length > 0
+            ? `${staleWarning} ${parsed.warning}`
+            : staleWarning;
         parsed._staleDomain = {
           hint: staleAsm.hint,
           newerSources: staleAsm.newerSources,
@@ -1288,6 +1337,7 @@ export class LiveClient implements Router {
     // caches stay consistent.)
     this.bridgeToolsCache.invalidate();
     this.staleAssemblyCache.invalidate();
+    this.editorWedgeCache.invalidate();
 
     // Dead bridge assembly — not recoverable by waiting. Fail fast so the
     // agent can fetch compile errors instead of hanging on /ping.
@@ -1583,6 +1633,7 @@ export class LiveClient implements Router {
             // execute_csharp / invoke_method re-scans against fresh DLLs.
             this.bridgeToolsCache.invalidate();
             this.staleAssemblyCache.invalidate();
+            this.editorWedgeCache.invalidate();
             return null;
           }
         } catch {
@@ -1792,6 +1843,40 @@ export class LiveClient implements Router {
     const fresh = detectStaleAssembly(this.projectPath);
     this.staleAssemblyCache.record(fresh);
     return fresh;
+  }
+
+  /**
+   * specs/feedback.md 2026-08-14 — resolve the `editor_fd_exhaustion` wedge
+   * signal for the `editor_build_wedged` guard, behind the same short-TTL
+   * caching discipline as the stale-assembly scan.
+   *
+   * Only reached when the stale-assembly check has ALREADY fired, so the log
+   * read costs nothing on the healthy path. The signature is terminal (the
+   * Editor never recovers on its own), so a cached "present" can never be a
+   * false positive that outlives the condition.
+   */
+  private resolveEditorWedge(): FdExhaustionScan {
+    const cached = this.editorWedgeCache.get();
+    if (cached !== null) return cached;
+    const fresh = scanForFdExhaustion(this.projectPath, this.resolveLiveEditorPid());
+    this.editorWedgeCache.record(fresh);
+    return fresh;
+  }
+
+  /**
+   * The live Unity PID from the instance lock, when one is recorded and alive.
+   * Feeds the log-rotation fallback in {@link resolveEditorLogPath} so the
+   * wedge scan reads the file the live editor is actually writing.
+   */
+  private resolveLiveEditorPid(): number | undefined {
+    if (!this.projectPath) return undefined;
+    try {
+      const lock = readInstanceLock(this.projectPath);
+      if (lock && lock.pid && isPidAlive(lock.pid)) return lock.pid;
+    } catch {
+      /* unreadable lock — the resolver's default path is fine */
+    }
+    return undefined;
   }
 
   /**

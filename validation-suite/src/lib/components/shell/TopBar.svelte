@@ -9,6 +9,7 @@
       case "compiling": return "Bridge · compiling";
       case "stopped": return "Bridge · stopped";
       case "dead_bridge": return "Bridge · dead";
+      case "wedged": return "Editor · wedged";
       case "cli_missing": return "CLI · missing";
       default: return "Bridge · ?"; // unknown / never probed
     }
@@ -240,6 +241,10 @@
     background: var(--hub-text-placeholder);
   }
   .bridge-dead_bridge .bridge-dot {
+    background: #f87171;
+    box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.2);
+  }
+  .bridge-wedged .bridge-dot {
     background: #f87171;
     box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.2);
   }

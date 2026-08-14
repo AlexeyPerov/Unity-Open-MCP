@@ -21,7 +21,7 @@ import { existsSync, openSync, readSync, fstatSync, closeSync, statSync, readdir
 import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { TYPED_EDITOR_ACTIVATE_INSTRUCTION } from "./constants.js";
+import { toolHintReference } from "./tool-hint.js";
 
 export type UnityLogPlatform = "win32" | "darwin" | "linux";
 
@@ -455,8 +455,17 @@ export function detectStaleLog(
       "after the log's most recent write (Unity's incremental compiler likely " +
       "no-op'd a recompile of the broken assembly, so the error block may no " +
       "longer apply). Force a genuine recompile before trusting these errors: " +
-      "call unity_open_mcp_reimport_package on the affected local package, or " +
-      "unity_open_mcp_compile_check to spawn a fresh headless recompile.",
+      // specs/feedback.md 2026-08-14 (hint regression) — ONE recommended path
+      // per situation, and every named tool carries its activation call via
+      // toolHintReference. This used to name reimport_package/compile_check
+      // while the stale-ASSEMBLY hint (and the tool description) named
+      // recompile_scripts, so description and runtime hint prescribed
+      // different tools for the same "force a real recompile" need.
+      `call ${toolHintReference("unity_open_mcp_recompile_scripts")} for a ` +
+      "deterministic force-recompile, then re-read compile errors. With the " +
+      "Editor closed (or unreachable), " +
+      `${toolHintReference("unity_open_mcp_compile_check")} spawns a fresh ` +
+      "headless recompile instead.",
   };
 }
 
@@ -574,14 +583,81 @@ export function detectStaleAssembly(projectRoot: string | null | undefined): Sta
       "newer than the newest Library/ScriptAssemblies/*.dll (Unity's incremental " +
       "compiler likely no-op'd a recompile, so the running assembly predates the " +
       "latest source). Do NOT trust a no_errors_found signal until the assembly is " +
-      "rebuilt: call unity_open_mcp_recompile_scripts to force a deterministic " +
-      "recompile, then re-read compile errors. " +
       // feedback.md issue 6 — recompile_scripts is in the typed-editor group,
-      // which is NOT default-enabled; the hint must say how to reach it, not just
-      // name it, or the agent falls back to hand-rolled AssetDatabase.Refresh.
-      "recompile_scripts is in the typed-editor group (not on by default): " +
-      `${TYPED_EDITOR_ACTIVATE_INSTRUCTION}, then call recompile_scripts.`,
+      // which is NOT default-enabled; the hint must say how to reach it, not
+      // just name it, or the agent falls back to hand-rolled
+      // AssetDatabase.Refresh. specs/feedback.md 2026-08-14 — the activation
+      // suffix regressed once when it was hand-appended here; it now comes
+      // from toolHintReference so no site can drop it.
+      `rebuilt: call ${toolHintReference("unity_open_mcp_recompile_scripts")} ` +
+      "to force a deterministic recompile, then re-read compile errors.",
   };
+}
+
+// ---------------------------------------------------------------------------
+// specs/feedback.md 2026-08-14 — "errors that predate my edits".
+//
+// detectStaleLog compares each cited source's mtime against Editor.log's FILE
+// mtime. That comparison cannot catch the reported case: Unity keeps appending
+// to Editor.log for unrelated reasons (asset imports, shader compiles), so the
+// file is fresh while the error BLOCK inside it is old. Anchoring on the block
+// itself is not possible either — Unity writes no timestamp on or around a
+// compile block, so there is nothing in the log to compare against.
+//
+// The anchor that DOES exist is the built assembly set: a cited source newer
+// than the newest `Library/ScriptAssemblies/*.dll` proves no compile has
+// COMPLETED since that file was edited, so the error block necessarily comes
+// from an earlier compile. This is the same evidence detectStaleAssembly
+// collects (it scans all of `Assets/`); this helper narrows it to the files
+// the reported errors actually cite, which is what the agent is about to
+// re-read.
+// ---------------------------------------------------------------------------
+
+export interface ErrorsPredateEditsResult {
+  /** Cited source files (project-relative) newer than the newest built DLL. */
+  files: string[];
+  /** Newest `Library/ScriptAssemblies/*.dll` mtime in epoch ms. */
+  dllMtimeMs: number;
+}
+
+/**
+ * Decide whether the reported compiler errors predate the on-disk edits to the
+ * files they cite.
+ *
+ * Returns `null` when the question cannot be answered (no project root, no
+ * built DLL mtime, no cited file resolvable inside the project) or when every
+ * cited file is older than the newest built assembly — i.e. a compile has run
+ * since the edits and the errors are current. Never throws.
+ */
+export function detectErrorsPredatingEdits(
+  citedFiles: ReadonlyArray<string>,
+  projectRoot: string | null | undefined,
+  dllMtimeMs: number | undefined,
+): ErrorsPredateEditsResult | null {
+  if (!projectRoot || dllMtimeMs === undefined) return null;
+
+  const files: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of citedFiles) {
+    if (files.length >= MAX_NEWER_FILES) break;
+    if (!raw) continue;
+    const paren = raw.lastIndexOf("(");
+    const rel = (paren >= 0 ? raw.slice(0, paren) : raw).trim();
+    if (!rel || seen.has(rel)) continue;
+    seen.add(rel);
+    const abs = join(projectRoot, rel);
+    // Same containment guard as detectStaleLog: a log can cite files under
+    // Library/ or a package cache whose mtimes the agent does not control.
+    if (!abs.startsWith(projectRoot)) continue;
+    try {
+      if (!existsSync(abs)) continue;
+      if (statSync(abs).mtimeMs > dllMtimeMs) files.push(rel);
+    } catch {
+      continue;
+    }
+  }
+
+  return files.length > 0 ? { files, dllMtimeMs } : null;
 }
 
 // ---------------------------------------------------------------------------

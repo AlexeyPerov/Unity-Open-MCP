@@ -82,16 +82,6 @@ export const BRIDGE_MAX_TIMEOUT_MS = 600_000;
 export const BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS = 55_000;
 
 /**
- * Shared activation instruction for `recompile_scripts`, which lives in the
- * `typed-editor` group (not enabled by default). Three call sites embed this
- * verbatim in tool/route descriptions (tool-router, read-compile-errors,
- * unity-log); centralizing the exact manage_tools invocation stops the three
- * from drifting. The surrounding prose stays site-specific. (feedback minor)
- */
-export const TYPED_EDITOR_ACTIVATE_INSTRUCTION =
-  "activate with manage_tools(action:\"activate\", group:\"typed-editor\")";
-
-/**
  * The npm package the MCP server is published as, pinned to the shared
  * trio version (`unity-open-mcp@X.Y.Z`) for the `npx -y` invocation.
  * Pinning (not `@latest`) keeps the MCP server aligned with the bridge /

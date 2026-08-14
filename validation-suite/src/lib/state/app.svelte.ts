@@ -72,6 +72,12 @@ export type BridgeStatusToken =
   | "compiling"
   | "stopped"
   | "dead_bridge"
+  // specs/feedback.md 2026-08-14 — the Editor process, heartbeat and /ping all
+  // look healthy but the Editor cannot do the work: either the Bee build driver
+  // died on Mono's fd ceiling (edits never compile) or a modal dialog is
+  // blocking the main thread. `bridge_status` reports the distinction in
+  // `wedged.reason`; the chip just needs to stop reading as "running".
+  | "wedged"
   | "cli_missing";
 
 class AppState {
@@ -689,6 +695,7 @@ function bridgeStatusTokenFromString(raw: string | undefined): BridgeStatusToken
     case "compiling":
     case "stopped":
     case "dead_bridge":
+    case "wedged":
       return raw;
     default:
       return "unknown";

@@ -334,11 +334,25 @@ that rotated `Editor.log` to `Editor-prev.log` while the live editor keeps
 writing to the rotated file), it falls back to `Editor-prev.log` and reports
 `logSource: "prev_log_live_editor"` in the response. When an assembly is stuck
 in a failed-compile state, `AssetDatabase.Refresh` no-ops and the response
-carries `staleLogSuspected` — force a recompile (`reimport_package` /
-`compile_check`) before trusting the errors. `compile_check` itself
+carries `staleLogSuspected` — force a recompile
+(`unity_open_mcp_recompile_scripts`; `compile_check` with the Editor closed)
+before trusting the errors. `compile_check` itself
 short-circuits with `editor_instance_locked` **before** spawning when a live
 editor holds the project, avoiding the spawn that would rotate the log in the
 first place.
+
+The log-mtime comparison behind `staleLogSuspected` cannot catch every case:
+unrelated asset imports keep appending to `Editor.log`, so the **file** can be
+fresh while the error **block** inside it is old, and Unity writes no timestamp
+on or around a compile block to anchor against. The built-assembly set is the
+anchor that does work — a cited source newer than the newest
+`Library/ScriptAssemblies/*.dll` proves no compile has *completed* since that
+file was edited, so the block necessarily comes from an earlier compile. The
+response reports that as `errorsMayPredateEdits: true` +
+`errorsMayPredateEditsFiles[]` + `errorsMayPredateEditsHint`, and the `headline`
+carries the caveat inline. Distinct from `staleAssembly` (which scans all of
+`Assets/`): this names the files the reported errors actually cite — the code an
+agent is about to re-read.
 
 When the log is stale (a cited source is newer than the log) **or** authored by
 a different Unity (a version mismatch), the top-level `status` is downgraded to
@@ -353,7 +367,12 @@ The response also carries `staleAssembly: true` when at least one
 — the running assembly predates the latest source (Unity's incremental compiler
 no-op'd a recompile), so a `no_errors_found` signal **cannot** be trusted until
 the assembly is rebuilt. Call `unity_open_mcp_recompile_scripts`, then re-read
-compile errors.
+compile errors. That tool lives in the non-default `typed-editor` group, so
+every hint and description that names it also carries the concrete
+`manage_tools` activation call: the strings come from one helper
+(`tool-hint.ts`) that resolves a tool's group from the registry and appends the
+activation call automatically, and a unit test asserts that no emitted hint or
+tool description names a non-default tool without it.
 
 When the log header was parseable (a short `-batchmode` run usually fits in the
 tail; a long live-editor session usually does not), the response also carries
@@ -383,6 +402,53 @@ boolean so a no-op is detectable; `agentNextSteps` branches on the outcome
 already in flight, fall back to `assets_refresh` / `reimport_package` when Unity
 judged sources unchanged). The recompile is project-wide; `paths_hint` exists
 only to give the gate a scoped hint (the edited scripts).
+
+### `unity_open_mcp_execute_csharp`
+
+The snippet is compiled into its **own** assembly (`UnityOpenMcpSnippet`), so it
+sees only the `public` surface of the project's assemblies. An `internal` member
+— the natural visibility for a testable seam — reports as `CS0117` ("does not
+contain a definition for"), `CS0122`, or `CS1061`, which reads like a typo. The
+`compilation_error` message appends a note naming the assembly boundary and the
+reflection recipe (`typeof(T).GetMethod(name, BindingFlags.NonPublic | …)`)
+whenever one of those diagnostics is present. For a seam you will call more than
+once, prefer making it public or exercising it from a test assembly with
+`InternalsVisibleTo` via `unity_senses_run_tests` — reflection loses
+compile-time checking.
+
+When the assembly is stale (a source is newer than the newest built DLL), the
+response carries a top-level `staleAssembly: true` + `warning` alongside the
+`_staleDomain` evidence — the snippet ran against the **pre-edit** code. When
+that coincides with the `editor_fd_exhaustion` signature in the freshest
+`Editor.log`, the call **fails** with `editor_build_wedged` instead: the build
+driver is dead, edits are on disk but were never compiled, and no recompile
+clears it. Discard anything concluded from results returned since.
+
+### `unity_open_mcp_execute_menu`
+
+Runs on Unity's main thread and blocks until the menu returns. It accepts
+`timeout_ms` with the same semantics and host-safe cap as `execute_csharp`
+(~55s — above that the MCP host aborts the `tools/call` before the bridge can
+return a structured envelope). Raise it for a genuinely slow menu:
+`Assets/Refresh` after an `AssetPostprocessor.GetVersion()` bump reimports the
+whole content tree.
+
+A `timeout` response is a wait that elapsed, **not** a failure — the menu is
+usually still running and completes. Confirm with `editor_status` or an asset
+probe; a blind retry of an authoring menu can double-write assets. The timeout
+envelope's `agentNextSteps` says exactly this.
+
+`paths_hint` is required for a mutating menu path **even with `gate: "off"`** —
+it is the declared mutation scope recorded in the audit trail, not only the
+gate's validation scope, and there is no whole-project fallback (read-only menu
+paths waive it). The refusal happens before dispatch, so the envelope reports
+`gate.skippedReason: "request_rejected"` — the gate never ran.
+
+Menus that open a **modal dialog** (material/scene converters, importer
+prompts) hold the main thread for as long as the dialog is open, wedging this
+and every subsequent call. No tool can dismiss a modal; `bridge_status` reports
+the state as `wedged` / `main_thread_wedged` so it is not mistaken for a compile
+failure. Prefer the non-interactive API.
 
 ### Creator tools and scene targeting
 

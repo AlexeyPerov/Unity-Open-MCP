@@ -71,6 +71,15 @@ metadata; it does not override that project default during dispatch.
 checkpoint → mutate → validate → delta flow. Changing this precedence or its
 fallback behavior is a bridge API contract change.
 
+`paths_hint` is mandatory for every mutating call and is **not** waived by
+`gate: "off"`. It is the declared mutation scope recorded in the audit trail,
+not only the gate's validation scope, and there is no whole-project fallback.
+The check runs before dispatch, so a missing `paths_hint` returns
+`error.code: "paths_hint_required"` with `gate.skippedReason:
+"request_rejected"` — nothing ran and no gate was evaluated. Tools that expose
+`read_only` (today: `execute_csharp`) waive the requirement when it is `true`,
+and a read-only `execute_menu` path waives it too.
+
 ## Health check example
 
 ```bash

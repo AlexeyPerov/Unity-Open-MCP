@@ -1,6 +1,13 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { makeTool } from "./schema-fragments.js";
-import { TYPED_EDITOR_ACTIVATE_INSTRUCTION } from "../constants.js";
+import { toolHintReference } from "../tool-hint.js";
+
+// specs/feedback.md 2026-08-14 — the description and the runtime hints must
+// prescribe the SAME recovery path and must both carry the activation call for
+// a tool outside the default surface. Both come from toolHintReference so the
+// two can no longer drift.
+const RECOMPILE_SCRIPTS_HINT = toolHintReference("unity_open_mcp_recompile_scripts");
+const COMPILE_CHECK_HINT = toolHintReference("unity_open_mcp_compile_check");
 
 // Offline, filesystem-only tool: reads the tail of Unity's Editor.log and
 // extracts BOTH C# compiler errors AND package / assembly-level red flags AND
@@ -66,16 +73,20 @@ export const readCompileErrors = makeTool(
     "response carries `staleLogSuspected: true`, the cited source files " +
     "were edited more recently than Editor.log — the error block may " +
     "reference on-disk code you have already fixed (Unity's incremental " +
-    "compiler no-op'd the recompile). Force a genuine recompile via " +
-    "unity_open_mcp_reimport_package (local package) or " +
-    "unity_open_mcp_compile_check before trusting the errors. When the " +
-    "response carries `staleAssembly: true`, at least one Assets/**/*.cs " +
+    "compiler no-op'd the recompile). When the response carries " +
+    "`errorsMayPredateEdits: true`, at least one file the errors CITE is newer " +
+    "than the newest built assembly, so no compile has completed since you " +
+    "edited it and the error block is from an earlier compile — do not re-read " +
+    "or re-fix that code on the strength of it. When the response carries " +
+    "`staleAssembly: true`, at least one Assets/**/*.cs " +
     "source is newer than the newest Library/ScriptAssemblies/*.dll — the " +
     "running assembly predates the latest source, so a no_errors_found signal " +
-    "CANNOT be trusted until the assembly is rebuilt. Call " +
-    "unity_open_mcp_recompile_scripts (deterministic force-recompile; it is in " +
-    `the typed-editor group — ${TYPED_EDITOR_ACTIVATE_INSTRUCTION} first) ` +
-    "then re-read compile errors. IMPORTANT — staged compilation: Unity compiles " +
+    "CANNOT be trusted until the assembly is rebuilt. All three call for the " +
+    "same next step (one recommended path per situation, matching the runtime " +
+    `hints): call ${RECOMPILE_SCRIPTS_HINT} for a deterministic ` +
+    "force-recompile, then re-read compile errors; with the Editor closed or " +
+    `unreachable, ${COMPILE_CHECK_HINT} spawns a fresh headless recompile ` +
+    "instead. IMPORTANT — staged compilation: Unity compiles " +
     "assemblies in dependency order, so when `errorCount` is small but the project " +
     "has multiple assemblies (the response carries `partialCompileLikely: true` " +
     "with `asmdefCount`/`assembliesWithErrors`), the reported errors may be a " +

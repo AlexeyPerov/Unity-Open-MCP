@@ -4,7 +4,17 @@ import { GATE_PROP, PATHS_HINT_TYPE, IGNORE_SCENE_DIRTY_BASE, CONFIRM_BYPASS_BAS
 
 export const executeCsharp = makeTool(
   "unity_open_mcp_execute_csharp",
-  "Compile and run a C# snippet in the Editor (Roslyn). Primary escape hatch — covers most Editor APIs without typed tools.",
+  "Compile and run a C# snippet in the Editor (Roslyn). Primary escape hatch — " +
+    "covers most Editor APIs without typed tools. The snippet compiles into its " +
+    "OWN assembly, so it sees only the PUBLIC members of your project's " +
+    "assemblies: an `internal` member (the natural visibility for a testable " +
+    "seam) reports as CS0117/CS0122/CS1061 'not found', which is the assembly " +
+    "boundary and not a typo. Reach it with reflection — " +
+    "typeof(T).GetMethod(\"Name\", BindingFlags.NonPublic | BindingFlags.Static)" +
+    ".Invoke(...) — or, for anything you will call more than once, make the seam " +
+    "public or exercise it from a test assembly via unity_senses_run_tests. " +
+    "(Same class of surprise as the no-`using`-directives rule: fully-qualify " +
+    "every type or pass `usings`.)",
   {
     // `code` is required unless setup_roslyn is true (the Roslyn fallback
     // install/poll flow needs no source). The bridge enforces this; a plain

@@ -5,7 +5,9 @@ import type { BatchSpawn } from "./batch-spawn.js";
 import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline, dependenciesOffline } from "./offline.js";
-import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES, detectStaleLog, detectStaleAssembly, parseLogAuthorship, compareLogAuthorship } from "./unity-log.js";
+import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES, detectStaleLog, detectStaleAssembly, detectErrorsPredatingEdits, parseLogAuthorship, compareLogAuthorship } from "./unity-log.js";
+import { toolHintReference } from "./tool-hint.js";
+import { scanForFdExhaustion } from "./editor-wedge.js";
 import { summarizeProjectHealth, extractProjectHealthIssues } from "./project-health.js";
 import { countProjectAsmdefs, countAssembliesWithErrors } from "./asmdef-discovery.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
@@ -27,7 +29,7 @@ import { generateSkill } from "./skill/generate-skill.js";
 import { getKnownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
-import { PORT_ENV_VAR, TYPED_EDITOR_ACTIVATE_INSTRUCTION } from "./constants.js";
+import { PORT_ENV_VAR } from "./constants.js";
 import { findUnityForProject, readProcessCommandLine } from "./running-unity.js";
 
 // M31-optimizations Plan 1 / L14 — opt-in route-logging gate. Resolved once at
@@ -487,11 +489,65 @@ function groupLiveRefsByKind(paths: string[]): Record<string, number> {
   return counts;
 }
 
+// specs/feedback.md 2026-08-14 — the coarse bridge_status token set. `wedged`
+// is the addition: the Editor process is alive and its listener answers, but
+// the Editor cannot do the work an agent is about to ask of it. Two distinct
+// reasons share the token (the `wedged.reason` field distinguishes them):
+//
+//   editor_fd_exhaustion — the build driver is dead; edits never compile and
+//     execute_csharp silently runs the previous assembly. Only a restart
+//     recovers. Previously reported as `running` / `healthy` in the same
+//     minute read_compile_errors reported `unhealthy: true`.
+//   main_thread_wedged   — a modal dialog (or another main-thread stall) is
+//     blocking Unity's message pump: the heartbeat (written from
+//     EditorApplication.update) has gone stale while /ping (served off the
+//     listener thread) still answers. Previously collapsed into `dead_bridge`,
+//     sending agents to hunt a compile failure that does not exist. Only an
+//     operator can dismiss a modal — no tool can.
+type BridgeStatusToken =
+  | "running"
+  | "compiling"
+  | "stopped"
+  | "dead_bridge"
+  | "unreachable"
+  | "wedged";
+
+type WedgeReason = "editor_fd_exhaustion" | "main_thread_wedged";
+
+interface BridgeWedge {
+  reason: WedgeReason;
+  /** One-line operator-facing explanation of what is stuck. */
+  detail: string;
+  /** Evidence trail: the log the fd signature was read from, when applicable. */
+  logPath?: string;
+  /** The matched log line, when applicable. */
+  raw?: string;
+}
+
 // Operator-facing "what to do next" hint for each coarse status. Kept short
 // and action-oriented so the Validation Suite can render it inline.
 function bridgeStatusNextStep(
-  status: "running" | "compiling" | "stopped" | "dead_bridge" | "unreachable",
+  status: BridgeStatusToken,
+  wedge?: BridgeWedge | null,
 ): string {
+  if (status === "wedged") {
+    return wedge?.reason === "main_thread_wedged"
+      ? "Unity's main thread is wedged — the HTTP listener still answers /ping, but the " +
+          "editor heartbeat has stopped, which is the signature of a MODAL DIALOG blocking " +
+          "the message pump (material/scene converters and several ExecuteMenuItem paths " +
+          "open one). This is NOT a compile failure and NOT a dead bridge assembly — a dead " +
+          "assembly has no listener at all. It cannot self-heal and no tool can dismiss the " +
+          "dialog: an operator must dismiss it in the Unity UI, after which queued calls " +
+          "resume. Prefer non-interactive APIs over unity_open_mcp_execute_menu for " +
+          "converter-style menus."
+      : "The Unity Editor hit the Bee build driver's file-descriptor exhaustion — the " +
+          "process is alive and the listener answers, but it can no longer BUILD: " +
+          "Library/ScriptAssemblies stops updating, so C# edits never take effect and " +
+          "unity_open_mcp_execute_csharp silently runs the previous assembly. Do not trust " +
+          "any result computed since. Call unity_open_mcp_read_compile_errors to confirm " +
+          "the editor_fd_exhaustion issue, save scene work, then restart the Editor " +
+          "(unity_open_mcp_restart_editor with confirm: true, or manually).";
+  }
   switch (status) {
     case "running":
       return "Bridge is ready. Proceed with live-only MCP tools.";
@@ -538,8 +594,26 @@ interface BridgeRecoveryHint {
 }
 
 function bridgeStatusRecoveryHint(
-  status: "running" | "compiling" | "stopped" | "dead_bridge" | "unreachable",
+  status: BridgeStatusToken,
+  wedge?: BridgeWedge | null,
 ): BridgeRecoveryHint | null {
+  if (status === "wedged") {
+    return wedge?.reason === "main_thread_wedged"
+      ? {
+          tool: "unity_open_mcp_editor_status",
+          reason:
+            "Main thread wedged (likely a modal dialog): /ping answers but the " +
+            "editor heartbeat stopped. No tool can dismiss a modal — an operator " +
+            "must close it in the Unity UI, then editor_status confirms recovery.",
+        }
+      : {
+          tool: "unity_open_mcp_read_compile_errors",
+          reason:
+            "editor_fd_exhaustion in the freshest Editor.log — the Editor answers " +
+            "HTTP but can no longer build, so C# edits never take effect. Confirm " +
+            "with read_compile_errors, then restart the Editor.",
+        };
+  }
   if (status === "dead_bridge") {
     return {
       tool: "unity_open_mcp_read_compile_errors",
@@ -910,6 +984,22 @@ export class ToolRouter implements Router {
     // mtimes and surface staleAssembly when any source is newer than the DLL.
     const staleAsm = detectStaleAssembly(this.projectPath);
 
+    // specs/feedback.md 2026-08-14 — "these errors may predate your edits".
+    // Three consecutive reads returned the same error block for code that had
+    // already been fixed, with no staleness signal: Editor.log's FILE mtime
+    // was fresh (asset imports keep appending) while the error BLOCK inside it
+    // was old, so the staleLog heuristic could not fire. The built-assembly
+    // mtime is the anchor that works — a cited source newer than the newest
+    // built DLL proves no compile has COMPLETED since the edit.
+    const errorsPredateEdits =
+      errors.length > 0
+        ? detectErrorsPredatingEdits(
+            errors.map((e) => e.file),
+            this.projectPath,
+            staleAsm.dllMtimeMs,
+          )
+        : null;
+
     // feedback-04-08-opus §2 — log-authorship cross-check. A batch run of a
     // NEWER Unity writes a log whose errors (e.g. an API deprecation that is
     // only an error on that version) CANNOT occur in the live editor. Parse the
@@ -977,9 +1067,24 @@ export class ToolRouter implements Router {
           ? `${errors.length} error(s) in Editor.log, but the log appears ` +
             "STALE or authored by a different Unity — these errors may NOT " +
             "apply to the running editor. Do NOT act on them until a genuine " +
-            "recompile (unity_open_mcp_recompile_scripts, in the typed-editor " +
-            `group — ${TYPED_EDITOR_ACTIVATE_INSTRUCTION} first) confirms them.`
-          : health.headline,
+            `recompile (${toolHintReference("unity_open_mcp_recompile_scripts")}) ` +
+            "confirms them."
+          : // specs/feedback.md 2026-08-14 — errors + a stale assembly means
+            // the error block was written by a compile that predates the
+            // on-disk edits (no compile has COMPLETED since: every built DLL
+            // is older than a cited source). The log-mtime staleness heuristic
+            // cannot see this — asset imports keep appending to Editor.log, so
+            // the FILE is fresh while the error BLOCK inside it is old. Say so
+            // in the headline rather than letting the agent re-read code it
+            // has already fixed.
+            errorsPredateEdits
+            ? `${health.headline} NOTE: these errors may PREDATE your edits — ` +
+              `${errorsPredateEdits.files.length} cited source file(s) are newer ` +
+              "than the newest built assembly, so no compile has completed since " +
+              "you changed them. Force a recompile " +
+              `(${toolHintReference("unity_open_mcp_recompile_scripts")}) and ` +
+              "re-read before acting on them."
+            : health.headline,
         ...(errorsMayNotApply ? { logVerdict } : {}),
         errorCount: errors.length,
         errors,
@@ -1030,6 +1135,27 @@ export class ToolRouter implements Router {
               staleAssembly: true,
               staleAssemblyHint: staleAsm.hint,
               staleAssemblyNewerSources: staleAsm.newerSources,
+            }
+          : {}),
+        // specs/feedback.md 2026-08-14 — machine-readable sibling of the
+        // headline caveat above. Present ONLY when errors were returned AND at
+        // least one file they cite is newer than the newest built assembly, so
+        // the error block cannot reflect the current source. Distinct from
+        // `staleLogSuspected` (log-file mtime) and `staleAssembly` (whole
+        // Assets/ scan): this names the cited files the agent is about to
+        // re-read.
+        ...(errorsPredateEdits
+          ? {
+              errorsMayPredateEdits: true,
+              errorsMayPredateEditsFiles: errorsPredateEdits.files,
+              errorsMayPredateEditsHint:
+                "These errors were parsed from a compile that ran BEFORE the " +
+                "listed files were last edited (each is newer than the newest " +
+                "Library/ScriptAssemblies/*.dll, so no compile has completed " +
+                "since). Do not re-read or re-fix that code on the strength of " +
+                "this block — force a recompile " +
+                `(${toolHintReference("unity_open_mcp_recompile_scripts")}) ` +
+                "and read again.",
             }
           : {}),
         // feedback-04-08-opus §2 — log authorship. Emitted whenever the header
@@ -1834,8 +1960,57 @@ export class ToolRouter implements Router {
       if (proc) unityProcessPid = proc.pid;
     }
 
-    let status: "running" | "compiling" | "stopped" | "dead_bridge" | "unreachable";
-    if (classification === "dead_bridge") {
+    // specs/feedback.md 2026-08-14 — wedge detection, evaluated BEFORE the
+    // existing token ladder because both wedges masquerade as one of its
+    // healthy-looking outcomes.
+    //
+    // (a) main_thread_wedged. `dead_bridge` means "live PID + stale
+    //     heartbeat". A modal dialog produces exactly that (the heartbeat is
+    //     written from EditorApplication.update, which a blocked pump stops
+    //     running) — but a dead bridge ASSEMBLY cannot answer /ping at all,
+    //     because the listener lives in the assembly that failed to compile.
+    //     So a reachable /ping alongside a stale heartbeat rules out the
+    //     safe-mode diagnosis and identifies a stalled main thread instead.
+    // (b) editor_fd_exhaustion. Process, heartbeat and /ping all survive a
+    //     dead build driver, so nothing in the existing ladder can see it.
+    //     One regex over the freshest log tail can (the same scan
+    //     read_compile_errors runs), and it only runs when the ladder would
+    //     otherwise report a healthy editor — the offline/stopped paths have
+    //     no editor to be wedged.
+    let wedge: BridgeWedge | null = null;
+    if (classification === "dead_bridge" && pingReachable) {
+      wedge = {
+        reason: "main_thread_wedged",
+        detail:
+          "The instance lock's heartbeat is stale (the editor main thread stopped " +
+          "ticking) but the bridge listener still answers /ping. A failed bridge " +
+          "assembly would take the listener down with it, so this is a blocked main " +
+          "thread — almost always a modal dialog — not Safe Mode.",
+      };
+    } else if (pingReachable && connected) {
+      const fd = scanForFdExhaustion(
+        this.projectPath,
+        this.resolveLiveEditorPid(),
+        this.globalLogPathOverride,
+      );
+      if (fd.present) {
+        wedge = {
+          reason: "editor_fd_exhaustion",
+          detail:
+            "The freshest Editor.log carries the Bee build-driver file-descriptor " +
+            "exhaustion signature. The Editor answers HTTP but cannot build: " +
+            "Library/ScriptAssemblies stops updating, so C# edits never take effect " +
+            "and execute_csharp keeps running the previous assembly.",
+          ...(fd.logPath ? { logPath: fd.logPath } : {}),
+          ...(fd.raw ? { raw: fd.raw } : {}),
+        };
+      }
+    }
+
+    let status: BridgeStatusToken;
+    if (wedge !== null) {
+      status = "wedged";
+    } else if (classification === "dead_bridge") {
       status = "dead_bridge";
     } else if (compiling) {
       status = "compiling";
@@ -1873,7 +2048,13 @@ export class ToolRouter implements Router {
       // Safe Mode / compile failure", not the generic "stopped" the bare
       // status used to suggest.
       classification,
-      recoveryHint: bridgeStatusRecoveryHint(status),
+      recoveryHint: bridgeStatusRecoveryHint(status, wedge),
+      // specs/feedback.md 2026-08-14 — present ONLY when the editor is wedged.
+      // `classification` keeps mirroring the instance lock verbatim (healthy |
+      // reloading | dead_bridge | gone) so that contract is unchanged; the
+      // wedge is carried by the tool's own `status` token plus this block, and
+      // `ready` is false either way.
+      ...(wedge !== null ? { wedged: wedge } : {}),
       instance: {
         lockPath: lockOnDisk,
         classification,
@@ -1894,7 +2075,7 @@ export class ToolRouter implements Router {
             mode: pingBody?.mode ?? null,
           }
         : { reachable: false },
-      nextStep: bridgeStatusNextStep(status),
+      nextStep: bridgeStatusNextStep(status, wedge),
     };
 
     // bridge_status never reports an error — even a stopped bridge is a

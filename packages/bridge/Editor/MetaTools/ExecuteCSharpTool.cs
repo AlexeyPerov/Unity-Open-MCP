@@ -153,7 +153,8 @@ namespace UnityOpenMcpBridge.MetaTools
 
             var (pe, errors) = RoslynHost.Compile(source);
             if (pe == null)
-                return ToolDispatchResult.Fail("compilation_error", errors ?? "Unknown compilation error");
+                return ToolDispatchResult.Fail("compilation_error",
+                    AppendAccessibilityHint(errors ?? "Unknown compilation error"));
 
             try
             {
@@ -329,6 +330,50 @@ namespace UnityOpenMcpBridge.MetaTools
             for (int i = 0; i < a.Length; i++)
                 if (a[i] != b[i]) return false;
             return true;
+        }
+
+        // specs/feedback.md 2026-08-14 — a snippet compiles into its OWN assembly
+        // (UnityOpenMcpSnippet), so it sees only the `public` surface of the
+        // project's assemblies. `internal` is the natural visibility for a
+        // testable seam, and the project marks several helpers internal precisely
+        // so tests can reach them — an agent verifying one of those hits this
+        // routinely and reads the diagnostic as "the member does not exist".
+        //
+        // The diagnostics that show up are CS0117 ("does not contain a definition
+        // for"), CS0122 ("inaccessible due to its protection level") and CS1061
+        // ("no definition for ... and no accessible extension method"). All three
+        // are ambiguous between a genuine typo and the assembly boundary, so name
+        // the boundary and give the recipe that works today. (Compiling the
+        // snippet WITH internals visibility would need Roslyn's IgnoreAccessibility
+        // binder flag plus IgnoresAccessChecksTo honored by the editor's Mono
+        // runtime; that is tracked separately — it cannot be verified from the
+        // server side and a silent MethodAccessException at Invoke time would be
+        // worse than this diagnostic.)
+        private static readonly string[] AccessibilityDiagnosticCodes =
+            { "CS0117", "CS0122", "CS1061" };
+
+        internal static string AppendAccessibilityHint(string errors)
+        {
+            if (string.IsNullOrEmpty(errors)) return errors;
+            var relevant = false;
+            foreach (var code in AccessibilityDiagnosticCodes)
+            {
+                if (errors.IndexOf(code, StringComparison.Ordinal) >= 0) { relevant = true; break; }
+            }
+            if (!relevant) return errors;
+
+            return errors + "\n\nNOTE — assembly boundary: this snippet compiles into its own assembly "
+                + "(UnityOpenMcpSnippet), so it can only see the PUBLIC members of your project's "
+                + "assemblies. If the member above exists but is declared 'internal' (or 'private'), "
+                + "that is why it is not found, and the diagnostic is not a typo. Reach it by "
+                + "reflection, e.g.:\n"
+                + "  var m = typeof(YourType).GetMethod(\"YourMember\", "
+                + "System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);\n"
+                + "  return m.Invoke(null, new object[] { /* args */ });\n"
+                + "(use BindingFlags.Instance | BindingFlags.NonPublic and pass the instance for "
+                + "non-static members). Reflection loses compile-time checking, so prefer making the "
+                + "seam public — or exercise it from a test assembly with InternalsVisibleTo via "
+                + "unity_senses_run_tests — when you will call it more than once.";
         }
 
         // internal so the EditMode suite can pin the B39 source-level contract

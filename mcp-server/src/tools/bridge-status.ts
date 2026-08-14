@@ -31,7 +31,7 @@ export const bridgeStatus = makeTool(
     "Unity compiling), `stopped` (Unity not running OR toolbar bridge " +
     "toggle off — no live listener), `unreachable` (Unity process alive " +
     "but the listener did not respond — usually a transient domain-reload " +
-    "window; retry shortly), or `dead_bridge` (Unity process " +
+    "window; retry shortly), `wedged` (see below), or `dead_bridge` (Unity process " +
     "alive but the bridge assembly failed to recompile, so /ping will " +
     "never recover; call unity_open_mcp_read_compile_errors). A " +
     "`dead_bridge` status also covers the COLD Safe Mode case — Unity " +
@@ -49,6 +49,18 @@ export const bridgeStatus = makeTool(
     "When classification is dead_bridge the result explicitly reads as " +
     "'Unity likely in Safe Mode / compile failure' rather than a generic " +
     "stopped, so an agent can branch on the machine-readable signal. " +
+    "IMPORTANT — a `running` / `healthy` result means 'the listener answers', " +
+    "NOT 'the Editor can compile'. Two failure modes leave the process, the " +
+    "heartbeat and /ping all looking fine while the Editor is unusable, and " +
+    "both are reported as `status: \"wedged\"` with a `wedged: { reason, " +
+    "detail }` block and a non-null recoveryHint: `editor_fd_exhaustion` (the " +
+    "Bee build driver died on Mono's fd ceiling — Library/ScriptAssemblies " +
+    "stops updating, so C# edits never take effect and execute_csharp keeps " +
+    "running the PREVIOUS assembly; detected by scanning the freshest " +
+    "Editor.log tail, and only a restart recovers) and `main_thread_wedged` " +
+    "(a modal dialog is blocking Unity's message pump — the heartbeat is stale " +
+    "but /ping still answers, which a failed bridge assembly could never do, " +
+    "so this is NOT Safe Mode; only an operator can dismiss the dialog). " +
     "Designed for the Validation Suite's manual bridge-offline scenario " +
     "pattern and operators confirming toolbar stop/start — not a " +
     "general agent health check (use unity_open_mcp_ping for that). " +

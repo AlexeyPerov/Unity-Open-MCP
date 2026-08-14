@@ -187,10 +187,33 @@ operator health:
 - `stopped`
 - `dead_bridge`
 - `unreachable`
+- `wedged`
 
 It combines the instance-lock classifier with one ping probe and never errors
 merely because the bridge is offline. `dead_bridge` includes a
 `recoveryHint` pointing to `unity_open_mcp_read_compile_errors`.
+
+`running` means **the listener answers**, not **the Editor can compile**. Two
+failure modes leave the process, the heartbeat and `/ping` all looking healthy
+while the Editor is unusable; both report `wedged` with a `wedged: { reason,
+detail }` block and a non-null `recoveryHint`:
+
+- `editor_fd_exhaustion` — the Bee build driver died on Mono's fd ceiling.
+  `Library/ScriptAssemblies` stops updating, so C# edits never take effect and
+  `execute_csharp` keeps running the previous assembly. Detected by folding the
+  `read_compile_errors` red-flag scan (a regex over the freshest `Editor.log`
+  tail) into this tool, so the two can no longer disagree. Only a restart
+  recovers.
+- `main_thread_wedged` — a modal dialog is blocking Unity's message pump. The
+  heartbeat is written from `EditorApplication.update`, so it goes stale and the
+  lock classifier says `dead_bridge`; but the HTTP listener runs on its own
+  thread and keeps answering, which a bridge assembly that actually failed to
+  compile could never do. A reachable `/ping` alongside a stale heartbeat is
+  therefore the discriminator. No tool can dismiss a modal — an operator must.
+
+`classification` keeps mirroring the instance lock verbatim
+(`healthy | reloading | dead_bridge | gone`); the wedge is carried by the tool's
+own `status` token plus the `wedged` block.
 
 Bridge start/stop tools are not exposed. Start/stop currently exists only in
 the Unity toolbar, and stopping through the same HTTP listener would risk

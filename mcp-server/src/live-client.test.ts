@@ -2590,3 +2590,145 @@ test("feedback-fable-04-08 §5: _staleDomain omitted on execute_csharp ERROR res
   }
 });
 
+// ----- specs/feedback.md 2026-08-14 — a wedged build driver must not hand an
+// agent stale execution results quietly.
+//
+// The field report: Library/ScriptAssemblies/Game.dll froze at one mtime while
+// edits kept landing, and execute_csharp kept executing the PREVIOUS assembly
+// with no error and no warning inside the snippet result. The stale output was
+// believed and written into a commit message before the mismatch was caught by
+// accident. `_staleDomain` alone did not stop that: it sits next to
+// `mutation.success: true` and is easy to skim past.
+
+/** Write a project-relative Editor.log carrying the Bee fd-exhaustion hang. */
+function plantFdExhaustionLog(s: Sandbox): void {
+  const logsDir = join(s.dir, "proj", "Logs");
+  mkdirSync(logsDir, { recursive: true });
+  writeFileSync(
+    join(logsDir, "Editor.log"),
+    "Unhandled exception during build: System.NotSupportedException: Could not " +
+      "register to wait for file descriptor 1194\n" +
+      "  at System.IOSelector.Add (System.IntPtr handle, System.IOSelectorJob job)\n",
+  );
+}
+
+test("2026-08-14: execute_csharp fails with editor_build_wedged on stale assembly + fd exhaustion", async () => {
+  const s = makeSandbox();
+  let bridge: BridgeStub | null = null;
+  const prevCacheTtl = process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS;
+  process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS = "0";
+  try {
+    plantStaleAssemblyFixture(s, 1000, 5000); // DLL frozen, edits landing
+    plantFdExhaustionLog(s); // and the build driver is dead
+    bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: STALE_DOMAIN_PROJECT,
+            unityVersion: "6000.0.80f1",
+            bridgeVersion: "1.0.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      // The snippet "succeeds" — computed from the pre-edit assembly.
+      res.end(JSON.stringify({ value: "0x1A47E90B" }));
+    });
+    plantLock(s, STALE_DOMAIN_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      join(s.dir, "proj"),
+    );
+
+    const result = await client.route("unity_open_mcp_execute_csharp", {
+      code: "return Hash();",
+      paths_hint: ["Assets/Scripts/Foo.cs"],
+    });
+    assert.equal(
+      result.isError,
+      true,
+      "a successful-looking result from a stale assembly is worse than no result",
+    );
+    const body = JSON.parse(
+      result.content[0]?.type === "text" ? (result.content[0].text as string) : "{}",
+    ) as { error?: { code?: string; message?: string } };
+    assert.equal(body.error?.code, "editor_build_wedged");
+    assert.ok(
+      body.error?.message?.includes("restart"),
+      "the message must say a restart is the only recovery (no recompile clears it)",
+    );
+    assert.ok(
+      body.error?.message?.includes("Assets/Scripts/Foo.cs"),
+      "the message must name the sources that were never compiled",
+    );
+  } finally {
+    if (bridge) await bridge.close();
+    if (prevCacheTtl === undefined) delete process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS;
+    else process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS = prevCacheTtl;
+    disposeSandbox(s);
+  }
+});
+
+test("2026-08-14: a merely stale assembly (no wedge) promotes staleAssembly + warning to the top level", async () => {
+  const s = makeSandbox();
+  let bridge: BridgeStub | null = null;
+  const prevCacheTtl = process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS;
+  process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS = "0";
+  try {
+    plantStaleAssemblyFixture(s, 1000, 5000); // stale, but the driver is fine
+    bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: STALE_DOMAIN_PROJECT,
+            unityVersion: "6000.0.80f1",
+            bridgeVersion: "1.0.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      res.end(JSON.stringify({ value: 42 }));
+    });
+    plantLock(s, STALE_DOMAIN_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      join(s.dir, "proj"),
+    );
+
+    const result = await client.route("unity_open_mcp_execute_csharp", {
+      code: "return 42;",
+      paths_hint: ["Assets/Scripts/Foo.cs"],
+    });
+    assert.equal(result.isError, false, "an incremental no-op is recoverable, not an error");
+    const body = JSON.parse(
+      result.content[0]?.type === "text" ? (result.content[0].text as string) : "{}",
+    ) as Record<string, unknown>;
+    assert.equal(body.staleAssembly, true, "top-level flag, not only the _staleDomain sibling");
+    assert.ok(
+      typeof body.warning === "string" &&
+        (body.warning as string).includes("RESULT MAY BE WRONG"),
+      "the warning must read as an integrity problem, not a footnote",
+    );
+    assert.ok(body._staleDomain, "the evidence detail is still attached");
+  } finally {
+    if (bridge) await bridge.close();
+    if (prevCacheTtl === undefined) delete process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS;
+    else process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS = prevCacheTtl;
+    disposeSandbox(s);
+  }
+});
+

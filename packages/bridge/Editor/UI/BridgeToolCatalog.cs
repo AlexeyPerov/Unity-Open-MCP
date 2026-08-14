@@ -375,7 +375,7 @@ namespace UnityOpenMcpBridge
                 case "unity_open_mcp_invoke_method":
                     return P("type_name: string", "method_name: string", "args: object[]", "is_static: bool = false", "assembly_name: string", "paths_hint: string[]", "gate: string = \"enforce\"", "timeout_ms: int = 30000");
                 case "unity_open_mcp_execute_menu":
-                    return P("menu_path: string", "paths_hint: string[]", "gate: string = \"enforce\"");
+                    return P("menu_path: string", "paths_hint: string[]", "gate: string = \"enforce\"", "timeout_ms: int = 30000");
                 case "unity_open_mcp_find_members":
                     return P("query: string", "kind: string = \"all\"", "assembly_filter: string", "include_unity_editor: bool = true", "include_project: bool = true", "max_results: int = 50");
                 case "unity_open_mcp_validate_edit":

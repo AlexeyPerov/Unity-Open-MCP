@@ -267,6 +267,46 @@ namespace UnityOpenMcpBridge.Tests
             Assert.Less(src.IndexOf("using static System.Math;"), namespaceIdx,
                 "using static must hoist to file scope.");
         }
+
+        // specs/feedback.md 2026-08-14 — a snippet compiles into its own
+        // assembly, so an `internal` member of the project's assemblies reports
+        // as "does not contain a definition for" (CS0117) and reads like a typo.
+        // `internal` is the natural visibility for a testable seam, so an agent
+        // verifying one hits this routinely; the diagnostic must name the
+        // assembly boundary and give the recipe that works.
+
+        [Test]
+        public static void AppendAccessibilityHint_AddsTheBoundaryNoteForCS0117()
+        {
+            var hinted = ExecuteCSharpTool.AppendAccessibilityHint(
+                "snippet(18,49): error CS0117: 'Mob2DSkinner' does not contain a definition for 'PickEntry'");
+            StringAssert.Contains("CS0117", hinted, "the original diagnostic is preserved");
+            StringAssert.Contains("own assembly", hinted,
+                "the note must name the assembly boundary as the cause");
+            StringAssert.Contains("internal", hinted,
+                "the note must say `internal` members are invisible, not missing");
+            StringAssert.Contains("GetMethod", hinted,
+                "the note must carry the reflection recipe");
+        }
+
+        [Test]
+        public static void AppendAccessibilityHint_AlsoCoversCS0122AndCS1061()
+        {
+            foreach (var code in new[] { "CS0122", "CS1061" })
+            {
+                var hinted = ExecuteCSharpTool.AppendAccessibilityHint($"snippet(1,1): error {code}: nope");
+                StringAssert.Contains("own assembly", hinted, $"{code} must get the boundary note too");
+            }
+        }
+
+        [Test]
+        public static void AppendAccessibilityHint_LeavesUnrelatedDiagnosticsAlone()
+        {
+            const string errors = "snippet(3,1): error CS1002: ; expected";
+            Assert.AreEqual(errors, ExecuteCSharpTool.AppendAccessibilityHint(errors),
+                "a syntax error must not grow an irrelevant accessibility lecture");
+            Assert.AreEqual("", ExecuteCSharpTool.AppendAccessibilityHint(""));
+            Assert.IsNull(ExecuteCSharpTool.AppendAccessibilityHint(null));
+        }
     }
 }
-

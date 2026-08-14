@@ -192,6 +192,48 @@ namespace UnityOpenMcpBridge.Tests
                 $"execute_csharp timeout must not suggest raising timeout_ms: {json}");
         }
 
+        // specs/feedback.md 2026-08-12 — the code-level blockers named above are
+        // not the only way a snippet wedges the main thread. An ExecuteMenuItem
+        // that opens a MODAL dialog does it too, and that case behaves
+        // differently: every subsequent call times out as well, /ping keeps
+        // answering, and bridge_status reported a false dead_bridge / Safe Mode.
+        // The envelope must name the modal cause so the agent stops chasing a
+        // compile failure that does not exist.
+        [Test]
+        public static void TimeoutEnvelope_ExecuteCSharp_NamesTheModalDialogCause()
+        {
+            var json = BridgeJson.BuildTimeoutEnvelope(
+                "unity_open_mcp_execute_csharp", "enforce", 30000);
+            StringAssert.Contains("ExecuteMenuItem", json,
+                $"execute_csharp timeout must name the ExecuteMenuItem/modal path: {json}");
+            StringAssert.Contains("modal", json,
+                $"execute_csharp timeout must name the modal-dialog cause: {json}");
+            StringAssert.Contains("operator", json,
+                $"a modal cannot self-heal — the envelope must say an operator has to dismiss it: {json}");
+        }
+
+        // specs/feedback.md 2026-08-14 — `Assets/Refresh` timed out twice while
+        // in fact completing both times. A blind retry of an authoring menu can
+        // double-write assets, so the envelope must say "verify, do not retry".
+        [Test]
+        public static void TimeoutEnvelope_ExecuteMenu_SaysVerifyRatherThanRetry()
+        {
+            var json = BridgeJson.BuildTimeoutEnvelope(
+                "unity_open_mcp_execute_menu", "enforce", 30000);
+            Assert.IsTrue(json.Contains("\"agentNextSteps\":["), $"Missing agentNextSteps: {json}");
+            StringAssert.Contains("still RUNNING", json,
+                $"a menu timeout is a wait that elapsed, not a failure: {json}");
+            StringAssert.Contains("editor_status", json,
+                $"the envelope must point at editor_status to confirm the outcome: {json}");
+            StringAssert.Contains("double-write", json,
+                $"the envelope must warn that retrying an authoring menu can double-write: {json}");
+            StringAssert.Contains("timeout_ms", json,
+                $"execute_menu now accepts timeout_ms — the envelope must mention it: {json}");
+            // The generic copy is replaced by the menu-specific guidance.
+            Assert.IsFalse(json.Contains("Consider increasing timeout_ms"),
+                $"execute_menu must use its own guidance, not the generic copy: {json}");
+        }
+
         [Test]
         public static void TimeoutEnvelope_GenericTool_KeepsRaiseTimeoutAdvice()
         {
