@@ -93,17 +93,32 @@ namespace UnityOpenMcpVerify.Tests
             Assert.False(SeverityThreshold.ShouldFail(FailSeverity.Error, ResultWith(0, 0)));
         }
 
-        [TestCase(FailSeverity.Warn)]
-        [TestCase(FailSeverity.Info)]
-        [TestCase(FailSeverity.Verbose)]
-        public void ShouldFail_WarnAndBelow_FailsOnErrorsOrWarnings(FailSeverity threshold)
+        [Test]
+        public void ShouldFail_Warn_FailsOnErrorsOrWarnings_ButNotInfoOnly()
         {
             // Error alone, warning alone, or both -> fail.
+            Assert.True(SeverityThreshold.ShouldFail(FailSeverity.Warn, ResultWith(1, 0)));
+            Assert.True(SeverityThreshold.ShouldFail(FailSeverity.Warn, ResultWith(0, 1)));
+            Assert.True(SeverityThreshold.ShouldFail(FailSeverity.Warn, ResultWith(1, 1)));
+            // Clean -> must not fail.
+            Assert.False(SeverityThreshold.ShouldFail(FailSeverity.Warn, ResultWith(0, 0)));
+            // Info-only stays non-failing at the Warn threshold: "warn" means
+            // "fail on warning or worse", and Info is below warning.
+            Assert.False(SeverityThreshold.ShouldFail(FailSeverity.Warn, ResultWith(0, 0, info: 3)));
+        }
+
+        [TestCase(FailSeverity.Info)]
+        [TestCase(FailSeverity.Verbose)]
+        public void ShouldFail_InfoAndVerbose_FailOnInfoOrWorse(FailSeverity threshold)
+        {
+            // "info" means "fail on info or worse" — every issue severity trips it.
             Assert.True(SeverityThreshold.ShouldFail(threshold, ResultWith(1, 0)));
             Assert.True(SeverityThreshold.ShouldFail(threshold, ResultWith(0, 1)));
-            Assert.True(SeverityThreshold.ShouldFail(threshold, ResultWith(1, 1)));
-            // Clean -> must not fail.
-            Assert.False(SeverityThreshold.ShouldFail(threshold, ResultWith(0, 0)));
+            Assert.True(SeverityThreshold.ShouldFail(threshold, ResultWith(0, 0, info: 1)),
+                "an info-only result must trip the info threshold (previously Info/Verbose " +
+                "collapsed onto the Warn branch, which counts only errors + warnings)");
+            Assert.False(SeverityThreshold.ShouldFail(threshold, ResultWith(0, 0)),
+                "a clean result must not fail at any threshold");
         }
 
         [Test]
@@ -134,9 +149,10 @@ namespace UnityOpenMcpVerify.Tests
         // helpers
         // -------------------------------------------------------------------
 
-        /// <summary>Builds a VerifyResult with <paramref name="errors"/> Error issues
-        /// and <paramref name="warnings"/> Warning issues (all dummy content).</summary>
-        private static VerifyResult ResultWith(int errors, int warnings)
+        /// <summary>Builds a VerifyResult with <paramref name="errors"/> Error issues,
+        /// <paramref name="warnings"/> Warning issues and <paramref name="info"/> Info
+        /// issues (all dummy content).</summary>
+        private static VerifyResult ResultWith(int errors, int warnings, int info = 0)
         {
             var issues = new List<VerifyIssue>();
             for (int i = 0; i < errors; i++)
@@ -148,6 +164,11 @@ namespace UnityOpenMcpVerify.Tests
             {
                 issues.Add(new VerifyIssue("test_rule", VerifySeverity.Warning,
                     "Assets/Test.prefab", "test_warn", $"warn {i}"));
+            }
+            for (int i = 0; i < info; i++)
+            {
+                issues.Add(new VerifyIssue("test_rule", VerifySeverity.Info,
+                    "Assets/Test.prefab", "test_info", $"info {i}"));
             }
             return new VerifyResult(issues, new[] { "test_rule" }, 0);
         }

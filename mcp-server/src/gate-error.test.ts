@@ -148,3 +148,47 @@ test("non-enforce gate with positive newErrors is NOT an error (gate mode matter
     assert.equal(deriveIsError(env), false, `mode=${mode}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// gate.outcome === "validate_scan_failed" → error
+//
+// The bridge marks GateFailed=true for validate_scan_failed (the mutation
+// committed but the post-mutation health check could not run — the validate
+// scan threw, or a verify rule threw on either side of the delta). isError
+// must agree with the bridge's own Failed classification, or an agent keying
+// on isError reads "health unknown" as an unqualified success.
+// ---------------------------------------------------------------------------
+
+test("gate.outcome=validate_scan_failed is an error even though the mutation succeeded", () => {
+  const env = okEnvelope();
+  env.gate.mode = "enforce";
+  env.gate.outcome = "validate_scan_failed";
+  env.gate.delta = null;
+  assert.equal(deriveIsError(env), true);
+});
+
+test("gate.outcome=validate_scan_failed is an error under warn mode too", () => {
+  // The mutation is committed and unverified — report-only mode does not make
+  // "health unknown" a success.
+  const env = okEnvelope();
+  env.gate.mode = "warn";
+  env.gate.outcome = "validate_scan_failed";
+  env.gate.delta = null;
+  assert.equal(deriveIsError(env), true);
+});
+
+test("gate.outcome=warned with newErrors under warn mode is NOT an error (report-only)", () => {
+  const env = okEnvelope();
+  env.gate.mode = "warn";
+  env.gate.outcome = "warned";
+  env.gate.delta = { newErrors: 2 };
+  assert.equal(deriveIsError(env), false);
+});
+
+test("gate.outcome=passed is NOT an error", () => {
+  const env = okEnvelope();
+  env.gate.mode = "enforce";
+  env.gate.outcome = "passed";
+  env.gate.delta = { newErrors: 0 };
+  assert.equal(deriveIsError(env), false);
+});

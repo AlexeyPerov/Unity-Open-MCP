@@ -71,6 +71,19 @@ metadata; it does not override that project default during dispatch.
 checkpoint → mutate → validate → delta flow. Changing this precedence or its
 fallback behavior is a bridge API contract change.
 
+Two honesty rules govern the gate's response:
+
+- `gate.delta` is `null` (never a zeroed object) whenever no delta was
+  computed — the checkpoint failed, the mutation failed before validation, or
+  the validate scan could not complete. A zeroed-looking delta always means
+  "computed and clean".
+- When a verify rule **throws** during the checkpoint or validate scan, the
+  gate reports `gate.outcome: "validate_scan_failed"` with
+  `gate.rulesFailed: [<ruleId>, …]` and withholds the delta: a failed rule
+  contributes no issues, so its pre-existing problems would read as phantom
+  "new"/"resolved" counts. The mutation itself still committed — verify health
+  manually with `validate_edit` / `scan_paths`.
+
 `paths_hint` is mandatory for every mutating call and is **not** waived by
 `gate: "off"`. It is the declared mutation scope recorded in the audit trail,
 not only the gate's validation scope, and there is no whole-project fallback.
@@ -79,6 +92,13 @@ The check runs before dispatch, so a missing `paths_hint` returns
 "request_rejected"` — nothing ran and no gate was evaluated. Tools that expose
 `read_only` (today: `execute_csharp`) waive the requirement when it is `true`,
 and a read-only `execute_menu` path waives it too.
+
+Rule auto-selection maps the `paths_hint` extensions to rule families. Only
+**registered** rule families are ever auto-selected: image (`.png`, `.jpg`,
+`.jpeg`, `.tga`) and audio (`.wav`, `.mp3`, `.ogg`) paths fall back to
+`missing_references` + `dependencies`, because the `textures`,
+`sprite_2d_analysis`, and `audio_analysis` families are planned-but-not-shipped
+and selecting them would run zero rules (a vacuous gate pass).
 
 ## Health check example
 

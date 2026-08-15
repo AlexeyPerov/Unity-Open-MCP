@@ -47,14 +47,18 @@ namespace UnityOpenMcpBridge
                         ruleSet.Add("shader_analysis");
                         hasKnownExtension = true;
                         break;
-                    case ".png":
-                    case ".jpg":
-                    case ".jpeg":
-                    case ".tga":
-                        ruleSet.Add("textures");
-                        ruleSet.Add("sprite_2d_analysis");
-                        hasKnownExtension = true;
-                        break;
+                    // Image / audio extensions deliberately do NOT select the
+                    // planned-only rules (textures, sprite_2d_analysis,
+                    // audio_analysis). Those rule families exist only in the
+                    // capability catalog as planned entries — none is
+                    // registered in VerifyRunner — so selecting them produced
+                    // a set with ZERO registered rules: the gate ran no rules
+                    // at all and reported a vacuous `passed` for every texture
+                    // / audio mutation, while scan_paths on the same paths
+                    // errored with `unknown_rule`. They fall through to the
+                    // fallback set below (the honest "what can we actually
+                    // validate" answer today); when a family ships, add a case
+                    // that selects it alongside the fallback.
                     case ".controller":
                     case ".anim":
                         ruleSet.Add("animation_analysis");
@@ -65,12 +69,6 @@ namespace UnityOpenMcpBridge
                     case ".asset":
                         ruleSet.Add("missing_references");
                         ruleSet.Add("dependencies");
-                        hasKnownExtension = true;
-                        break;
-                    case ".wav":
-                    case ".mp3":
-                    case ".ogg":
-                        ruleSet.Add("audio_analysis");
                         hasKnownExtension = true;
                         break;
                 }

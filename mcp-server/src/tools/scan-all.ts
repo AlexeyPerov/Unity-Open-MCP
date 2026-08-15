@@ -9,7 +9,7 @@ export const scanAll = makeTool(
           platform_profile: {
             enum: ["mobile", "console", "desktop"],
             default: "desktop",
-            description: "Stored in output metadata; does not filter rules in M5.",
+            description: "Applied to profile-sensitive rules (shader_analysis mobile-only detections) and echoed in output metadata. Does not filter which rules run.",
           },
           fail_on_severity: {
             enum: ["error", "warn", "info", "verbose", "never"],

@@ -42,6 +42,7 @@ namespace UnityOpenMcpVerify.Batch
 
             int errorCount = 0;
             int warnCount = 0;
+            int infoCount = 0;
 
             if (result != null && result.Issues != null)
             {
@@ -49,6 +50,7 @@ namespace UnityOpenMcpVerify.Batch
                 {
                     if (issue.Severity == VerifySeverity.Error) errorCount++;
                     else if (issue.Severity == VerifySeverity.Warning) warnCount++;
+                    else if (issue.Severity == VerifySeverity.Info) infoCount++;
                 }
             }
 
@@ -57,9 +59,16 @@ namespace UnityOpenMcpVerify.Batch
                 case FailSeverity.Error:
                     return errorCount > 0;
                 case FailSeverity.Warn:
+                    return errorCount > 0 || warnCount > 0;
                 case FailSeverity.Info:
                 case FailSeverity.Verbose:
-                    return errorCount > 0 || warnCount > 0;
+                    // "info" means "fail on info or worse": a result whose only
+                    // issues are Info (e.g. demoted empty_local_ref built-in
+                    // sites) must trip the threshold. Previously Info/Verbose
+                    // collapsed onto the Warn branch, which counts only errors
+                    // + warnings — an info-only result never failed even with
+                    // fail_on_severity:"info".
+                    return errorCount > 0 || warnCount > 0 || infoCount > 0;
                 default:
                     return false;
             }

@@ -314,6 +314,19 @@ namespace UnityOpenMcpBridge
                 // passed / skipped without parsing the agentNextSteps prose.
                 // validation.passed below stays as the boolean convenience.
                 sb.Append(",\"outcome\":\"").Append(result.Outcome.ToWireString()).Append("\"");
+                // Rules that threw during checkpoint/validate — their findings
+                // are missing from this result. Emitted only when non-empty so
+                // the common clean path keeps the historical shape.
+                if (result.RulesFailed != null && result.RulesFailed.Length > 0)
+                {
+                    sb.Append(",\"rulesFailed\":[");
+                    for (int i = 0; i < result.RulesFailed.Length; i++)
+                    {
+                        if (i > 0) sb.Append(',');
+                        sb.Append('"').Append(EscapeStringContent(result.RulesFailed[i])).Append('"');
+                    }
+                    sb.Append(']');
+                }
                 sb.Append(",\"validation\":{\"passed\":").Append(result.Outcome == GateOutcome.Passed ? "true" : "false");
                 sb.Append(",\"categoriesRun\":[");
                 if (result.CategoriesRun != null)
@@ -327,21 +340,35 @@ namespace UnityOpenMcpBridge
                 sb.Append("],\"durationMs\":").Append(result.ValidationDurationMs);
                 sb.Append('}');
 
-                sb.Append(",\"delta\":{\"newErrors\":").Append(result.Delta?.NewErrors ?? 0);
-                sb.Append(",\"newWarnings\":").Append(result.Delta?.NewWarnings ?? 0);
-                sb.Append(",\"resolvedErrors\":").Append(result.Delta?.ResolvedErrors ?? 0);
-                sb.Append(",\"resolvedWarnings\":").Append(result.Delta?.ResolvedWarnings ?? 0);
-                // feedback-04-08-opus §3 — bound the inlined issue-key arrays
-                // (first MaxDeltaIssuesInResponse, with a "Truncated" count for
-                // the elided tail) plus a countsByRule histogram so the delta's
-                // distribution stays visible without the ~222 KB a full prefab
-                // rebuild produced. The agent branches on the counts above; the
-                // full key list is available via validate_edit / scan_paths.
-                AppendBoundedIssueArray(sb, "newIssues", result.Delta?.NewIssueKeys);
-                AppendBoundedIssueArray(sb, "resolvedIssues", result.Delta?.ResolvedIssueKeys);
-                AppendCountsByRule(sb, "newIssues", result.Delta?.NewIssueKeys);
-                AppendCountsByRule(sb, "resolvedIssues", result.Delta?.ResolvedIssueKeys);
-                sb.Append('}');
+                // Delta is null on the paths where none was computed
+                // (checkpoint key failure, mutation failure, validate-scan
+                // failure / rules threw). Those paths previously emitted a
+                // zeroed delta object, which read as "computed and clean" —
+                // an agent keying on delta.newErrors === 0 could mistake a
+                // withheld delta for a verified one. Emit an explicit null so
+                // "no delta" stays distinguishable from "delta of zero".
+                if (result.Delta == null)
+                {
+                    sb.Append(",\"delta\":null");
+                }
+                else
+                {
+                    sb.Append(",\"delta\":{\"newErrors\":").Append(result.Delta.NewErrors);
+                    sb.Append(",\"newWarnings\":").Append(result.Delta.NewWarnings);
+                    sb.Append(",\"resolvedErrors\":").Append(result.Delta.ResolvedErrors);
+                    sb.Append(",\"resolvedWarnings\":").Append(result.Delta.ResolvedWarnings);
+                    // feedback-04-08-opus §3 — bound the inlined issue-key arrays
+                    // (first MaxDeltaIssuesInResponse, with a "Truncated" count for
+                    // the elided tail) plus a countsByRule histogram so the delta's
+                    // distribution stays visible without the ~222 KB a full prefab
+                    // rebuild produced. The agent branches on the counts above; the
+                    // full key list is available via validate_edit / scan_paths.
+                    AppendBoundedIssueArray(sb, "newIssues", result.Delta.NewIssueKeys);
+                    AppendBoundedIssueArray(sb, "resolvedIssues", result.Delta.ResolvedIssueKeys);
+                    AppendCountsByRule(sb, "newIssues", result.Delta.NewIssueKeys);
+                    AppendCountsByRule(sb, "resolvedIssues", result.Delta.ResolvedIssueKeys);
+                    sb.Append('}');
+                }
             }
 
             sb.Append('}');

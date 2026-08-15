@@ -35,8 +35,10 @@ Pinned exceptions:
 Offline-first tools such as `find_references`, `read_asset`, and
 `search_assets` can still enter through the live/compressible router when the
 bridge is reachable. For text-serialized assets the implementation may parse
-disk data while `_route.route` remains `live`; `_source` identifies the actual
-data source.
+disk data without contacting the bridge; `_route.route` then reports
+`offline` (matching `_source`) so the two tags never disagree about where the
+payload came from. Binary formats fall back to the live bridge and report
+`_route.route: "live"`.
 
 ## Offline coverage
 

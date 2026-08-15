@@ -295,6 +295,49 @@ namespace UnityOpenMcpBridge.Tests
             }
         }
 
+        // A verify rule that THREW during checkpoint/validate must not read as
+        // "ran clean": its issues are simply absent, so the delta is unreliable
+        // in both directions (phantom "new" or "resolved" counts). GatePolicy
+        // must withhold the delta and surface validate_scan_failed naming the
+        // failed rules, instead of the historical vacuous `passed`.
+        [Test]
+        public void Execute_ValidateRuleThrew_ReturnsValidateScanFailed_WithRulesFailed()
+        {
+            // Validate completes but reports a rule that threw.
+            GatePolicy.ValidatePathsOverride = (_, __, ___) => new VerifyResult(
+                new System.Collections.Generic.List<VerifyIssue>(),
+                new[] { "missing_references", "dependencies" },
+                5, null, null,
+                new[] { "missing_references" });
+            try
+            {
+                var result = GatePolicy.Execute(
+                    GateMode.Enforce,
+                    new[] { "Assets/__MCPTest_GatePolicy_RF.mat" },
+                    () => ToolDispatchResult.Ok("{\"touched\":[\"Assets/__MCPTest_GatePolicy_RF.mat\"]}"));
+
+                // The mutation committed.
+                Assert.IsTrue(result.Mutation.Success,
+                    "mutation must be reported as committed despite the rule throw");
+                // The delta is unreliable — it must be withheld entirely.
+                Assert.AreEqual(GateOutcome.ValidateScanFailed, result.Outcome);
+                Assert.IsTrue(result.GateFailed);
+                Assert.IsNull(result.Delta, "an unreliable delta must be withheld, not zeroed");
+                // The failing rule ids ride on the result for the envelope.
+                CollectionAssert.AreEquivalent(new[] { "missing_references" }, result.RulesFailed);
+                // Guidance names the rule and recommends manual validation.
+                Assert.IsNotNull(result.AgentNextSteps);
+                StringAssert.Contains("missing_references", result.AgentNextSteps[0],
+                    "agentNextSteps must name the rule(s) that threw");
+                StringAssert.Contains("validate_edit", result.AgentNextSteps[0],
+                    "agentNextSteps must recommend manual validate_edit / scan_paths");
+            }
+            finally
+            {
+                GatePolicy.ValidatePathsOverride = null;
+            }
+        }
+
         // -------------------------------------------------------------------
         // feedback.md issue 5 — play-mode short-circuit
         // -------------------------------------------------------------------

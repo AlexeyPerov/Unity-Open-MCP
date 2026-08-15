@@ -55,6 +55,47 @@ namespace UnityOpenMcpBridge.Tests
                 $"clean path must NOT emit compilePending (additive only): {json}");
         }
 
+        // A gate run where no delta was computed (checkpoint failure, mutation
+        // failure, validate_scan_failed) must emit delta:null — a zeroed delta
+        // object read as "computed and clean" and masked the withheld delta.
+        [Test]
+        public static void BuildGateEnvelope_NullDelta_EmitsJsonNull_NotZeroedObject()
+        {
+            var result = new GateDispatchResult
+            {
+                Mutation = ToolDispatchResult.Ok("{}"),
+                GateRan = true,
+                Outcome = GateOutcome.ValidateScanFailed,
+                CheckpointId = "test-cp",
+                CategoriesRun = new[] { "missing_references" },
+                Delta = null,
+                RulesFailed = new[] { "missing_references" },
+                GateFailed = true,
+                AgentNextSteps = new[] { "Mutation committed, but verify rule(s) threw…" },
+            };
+
+            var json = BridgeJson.BuildGateEnvelope(result, "enforce", LifecyclePolicy.EditorSettle);
+            StringAssert.Contains("\"delta\":null", json,
+                $"a withheld delta must be an explicit null: {json}");
+            Assert.IsFalse(json.Contains("\"newErrors\":"),
+                $"no delta counters may accompany a withheld delta: {json}");
+            StringAssert.Contains("\"outcome\":\"validate_scan_failed\"", json);
+            StringAssert.Contains("\"rulesFailed\":[\"missing_references\"]", json,
+                $"the failing rule ids must ride on the gate block: {json}");
+        }
+
+        // The clean path keeps the historical shape: a computed delta emits the
+        // counters, and rulesFailed is omitted entirely (additive-only field).
+        [Test]
+        public static void BuildGateEnvelope_ComputedDelta_OmitsRulesFailed()
+        {
+            var json = BridgeJson.BuildGateEnvelope(
+                MakeResult(compilePending: false), "enforce", LifecyclePolicy.EditorSettle);
+            StringAssert.Contains("\"newErrors\":0", json);
+            Assert.IsFalse(json.Contains("rulesFailed"),
+                $"rulesFailed is additive-only — a clean run must not carry it: {json}");
+        }
+
         // ---- Accepted: balanced JSON objects ----
 
         [Test]

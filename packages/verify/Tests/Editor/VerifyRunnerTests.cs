@@ -99,6 +99,77 @@ namespace UnityOpenMcpVerify.Tests
                 VerifyRunner.RunScoped(scope, new[] { "crashy" }, VerifyRunMode.Checkpoint));
         }
 
+        // A rule that throws must be distinguishable from a rule that ran
+        // clean: previously the exception was swallowed with only a console
+        // warning, so an incomplete scan was indistinguishable from a healthy
+        // one (a crashing rule produced a vacuous all-clear on both sides of
+        // the gate delta).
+        [Test]
+        public void RunScoped_ExceptionInRule_RecordsRulesFailed()
+        {
+            VerifyRunner.RegisterRule(new ThrowingRule("crashy"));
+
+            var scope = new VerifyScope(new[] { "Assets/Test.prefab" });
+            var result = VerifyRunner.RunScoped(scope, new[] { "crashy" }, VerifyRunMode.Checkpoint);
+
+            Assert.IsTrue(result.HasFailedRules);
+            CollectionAssert.AreEquivalent(new[] { "crashy" }, result.RulesFailed);
+        }
+
+        [Test]
+        public void RunScoped_ExceptionInOneRule_ListsOnlyThatRule()
+        {
+            VerifyRunner.RegisterRule(new ThrowingRule("crashy"));
+            VerifyRunner.RegisterRule(new StubRule("stable"));
+
+            var scope = new VerifyScope(new[] { "Assets/Test.prefab" });
+            var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Validate);
+
+            Assert.IsTrue(result.HasFailedRules);
+            CollectionAssert.AreEquivalent(new[] { "crashy" }, result.RulesFailed);
+        }
+
+        [Test]
+        public void RunScoped_AllRulesClean_NoRulesFailed()
+        {
+            VerifyRunner.RegisterRule(new StubRule("rule_a"));
+
+            var scope = new VerifyScope(new[] { "Assets/Test.prefab" });
+            var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Validate);
+
+            Assert.IsFalse(result.HasFailedRules);
+            Assert.AreEqual(0, result.RulesFailed.Length);
+        }
+
+        [Test]
+        public void CreateCheckpoint_ExceptionInRule_OmitsFingerprint_AndCarriesRulesFailed()
+        {
+            // A failed rule contributed no issues, so a fingerprint for it
+            // would claim a clean baseline it never established. The
+            // fingerprint must be omitted and the failure carried on the
+            // checkpoint so the gate can distrust its delta.
+            VerifyRunner.RegisterRule(new ThrowingRule("crashy"));
+            VerifyRunner.RegisterRule(new StubRule("stable"));
+
+            var scope = new VerifyScope(new[] { "Assets/Test.prefab" });
+            var cp = VerifyRunner.CreateCheckpoint(scope, null);
+
+            Assert.IsFalse(cp.Fingerprints.ContainsKey("crashy"));
+            Assert.IsTrue(cp.Fingerprints.ContainsKey("stable"));
+            CollectionAssert.AreEquivalent(new[] { "crashy" }, cp.RulesFailed);
+        }
+
+        [Test]
+        public void CreateCheckpoint_AllRulesClean_NoRulesFailed()
+        {
+            VerifyRunner.RegisterRule(new StubRule("rule_a"));
+
+            var scope = new VerifyScope(new[] { "Assets/dummy.prefab" });
+            var cp = VerifyRunner.CreateCheckpoint(scope, null);
+
+            Assert.AreEqual(0, cp.RulesFailed.Length);
+        }
+
         [Test]
         public void RunScoped_ExceptionInRule_StillRunsOtherRules()
         {
@@ -122,6 +193,17 @@ namespace UnityOpenMcpVerify.Tests
             var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Checkpoint);
 
             Assert.GreaterOrEqual(result.DurationMs, 0);
+        }
+
+        // The platform profile rides on the scope (default "desktop"; the
+        // batch entry threads --platform-profile through so a mobile scan_all
+        // actually runs the mobile-gated shader detections).
+        [Test]
+        public void VerifyScope_PlatformProfile_DefaultsToDesktop_AndCarriesOverride()
+        {
+            Assert.AreEqual("desktop", new VerifyScope(null).PlatformProfile);
+            Assert.AreEqual("desktop", new VerifyScope(null, platformProfile: null).PlatformProfile);
+            Assert.AreEqual("mobile", new VerifyScope(null, platformProfile: "mobile").PlatformProfile);
         }
 
         [Test]

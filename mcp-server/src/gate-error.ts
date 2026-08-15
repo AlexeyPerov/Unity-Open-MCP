@@ -7,6 +7,8 @@ export interface MutationEnvelope {
   gate: {
     mode: string;
     skipped: boolean;
+    /** Structured outcome token: passed | warned | failed | skipped | validate_scan_failed. */
+    outcome?: string;
     validation: unknown;
     delta: Record<string, unknown> | null;
   };
@@ -43,6 +45,15 @@ export function deriveIsError(envelope: MutationEnvelope): boolean {
     return false;
   }
   if (envelope.mutation.success === false) return true;
+
+  // The bridge marks GateFailed=true and outcome "validate_scan_failed" when
+  // the mutation committed but the post-mutation health check could not run
+  // (the validate scan threw, or a verify rule threw on either side of the
+  // delta). The bridge's own activity log records these as Failed; isError
+  // must agree, or an agent keying on isError reads "health unknown" as an
+  // unqualified success. (A `warned` outcome under warn mode stays non-error —
+  // report-only is the operator's explicit choice.)
+  if (envelope.gate?.outcome === "validate_scan_failed") return true;
 
   if (envelope.gate?.mode === "enforce" && envelope.gate.delta) {
     const newErrors = envelope.gate.delta.newErrors;

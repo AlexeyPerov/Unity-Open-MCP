@@ -898,9 +898,12 @@ test("route: read_asset is routed via the compressible path (offline hit, no liv
     const body = parseBody(result);
     assert.equal(result.isError, false);
     assert.equal(live.calls.length, 0);
-    // compressible results are tagged _route=live by the router wrapper even
-    // when the source was offline (the wrapper does not inspect the body).
-    assert.equal(routeOf(result), "live");
+    // The compressible branch derives _route from the payload's _source tag:
+    // an offline-served read (no bridge contact) must be stamped route=offline,
+    // not live — contradictory metadata pointed agent diagnostics at the
+    // bridge for data it never produced.
+    assert.equal(body._source, "offline");
+    assert.equal(routeOf(result), "offline");
   });
 });
 

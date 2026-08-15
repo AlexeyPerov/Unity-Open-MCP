@@ -64,6 +64,34 @@ namespace UnityOpenMcpVerify.Tests
             Assert.AreEqual(0, sink.Count);
         }
 
+        // The platform profile rides on the scope (default desktop; the batch
+        // entry threads --platform-profile through). A mobile scope must be
+        // accepted by the rule without throwing — it activates the
+        // mobile-expensive-keyword detection path that a desktop scope skips.
+        [UnityTest]
+        public System.Collections.IEnumerator Scan_MobileScopeProfile_IsAccepted()
+        {
+            var path = FixtureRoot + "/MobileProfile.shader";
+            File.WriteAllText(path, ValidUnlitShader());
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            Assert.DoesNotThrow(() =>
+            {
+                var sink = new List<VerifyIssue>();
+                var scope = new VerifyScope(new[] { path }, platformProfile: "mobile");
+                rule.Scan(scope, VerifyRunMode.Full, sink);
+            });
+
+            // The desktop default must keep the historical behavior.
+            Assert.DoesNotThrow(() =>
+            {
+                var sink = new List<VerifyIssue>();
+                var scope = new VerifyScope(new[] { path });
+                rule.Scan(scope, VerifyRunMode.Full, sink);
+            });
+        }
+
         [UnityTest]
         public System.Collections.IEnumerator Scan_HealthyShader_ProducesNoCompileError()
         {

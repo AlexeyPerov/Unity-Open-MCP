@@ -107,7 +107,10 @@ namespace UnityOpenMcpVerify.Batch
             // rules bail on their `scope.Paths == null` guard (only
             // project_health expands null internally). Expand to the full
             // Assets/ set here so every registered rule actually runs.
-            var scope = new VerifyScope(WholeProjectScope());
+            // The caller's --platform-profile rides on the scope so
+            // profile-sensitive rules (shader_analysis mobile detections)
+            // honor it instead of only echoing it in the result metadata.
+            var scope = new VerifyScope(WholeProjectScope(), platformProfile: profile);
             var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Full);
             sw.Stop();
 
@@ -145,7 +148,8 @@ namespace UnityOpenMcpVerify.Batch
             var sw = System.Diagnostics.Stopwatch.StartNew();
             // Whole-project scan — see RunScanAll for why a null scope is
             // expanded here instead of relying on per-rule null handling.
-            var scope = new VerifyScope(WholeProjectScope());
+            // The platform profile rides on the scope (see RunScanAll).
+            var scope = new VerifyScope(WholeProjectScope(), platformProfile: profile);
             var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Full);
             sw.Stop();
 
@@ -200,7 +204,8 @@ namespace UnityOpenMcpVerify.Batch
             var sw = System.Diagnostics.Stopwatch.StartNew();
             // Whole-project scan — see RunScanAll for why a null scope is
             // expanded here instead of relying on per-rule null handling.
-            var scope = new VerifyScope(WholeProjectScope());
+            // The platform profile rides on the scope (see RunScanAll).
+            var scope = new VerifyScope(WholeProjectScope(), platformProfile: profile);
             var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Full);
             sw.Stop();
 
@@ -239,6 +244,12 @@ namespace UnityOpenMcpVerify.Batch
                 br.summary = new SeveritySummary();
                 return br;
             }
+
+            // Echo rules that threw so a CI consumer can tell "clean" from
+            // "incomplete" — the issues list below is silently missing those
+            // rules' findings.
+            if (verifyResult.HasFailedRules)
+                br.rulesFailed.AddRange(verifyResult.RulesFailed);
 
             int errorCount = 0;
             int warnCount = 0;

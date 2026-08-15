@@ -118,12 +118,18 @@ namespace UnityOpenMcpVerify.Batch
         public string outputPath;
         public RegressionDetail regression;
         public string error;
+        // Rule ids that threw during the scan — the issues list is incomplete
+        // for these rules. Empty (JsonUtility omits nothing, so it serializes
+        // as []) on a clean run. A CI consumer gating on exitCode should treat
+        // a non-empty list as "scan incomplete", not "scan clean".
+        public List<string> rulesFailed;
 
         public BatchResult()
         {
             summary = new SeveritySummary();
             rules = new List<BatchRuleSummary>();
             issues = new List<IssueEntry>();
+            rulesFailed = new List<string>();
         }
     }
 }

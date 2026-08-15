@@ -67,6 +67,14 @@ namespace UnityOpenMcpVerify
 
             var categoriesRun = rulesToRun.Select(r => r.Id).ToArray();
 
+            // A rule that throws must not read as "ran clean": its issues are
+            // simply absent from the list, which previously made an incomplete
+            // scan indistinguishable from a healthy one (a crashing rule
+            // produced a vacuous all-clear on both sides of the gate delta).
+            // Record the failure per rule id and surface it on the result so
+            // consumers (gate, scan_paths, batch entry) can distrust the
+            // incomplete data instead of trusting silence.
+            var rulesFailed = new List<string>();
             foreach (var rule in rulesToRun)
             {
                 try
@@ -75,6 +83,7 @@ namespace UnityOpenMcpVerify
                 }
                 catch (Exception e)
                 {
+                    rulesFailed.Add(rule.Id);
                     UnityEngine.Debug.LogWarning($"[VerifyRunner] Rule '{rule.Id}' threw: {e.Message}");
                 }
             }
@@ -88,7 +97,8 @@ namespace UnityOpenMcpVerify
                     $"(budget: {CheckpointBudgetMs}ms) for paths: {string.Join(", ", scope.Paths ?? Array.Empty<string>())}");
             }
 
-            return new VerifyResult(issues, categoriesRun, sw.ElapsedMilliseconds, unknownRuleIds, availableRuleIds);
+            return new VerifyResult(issues, categoriesRun, sw.ElapsedMilliseconds, unknownRuleIds, availableRuleIds,
+                rulesFailed.Count == 0 ? null : rulesFailed.ToArray());
         }
 
         public static CheckpointFingerprint CreateCheckpoint(VerifyScope scope, string[] ruleIds)
@@ -99,6 +109,11 @@ namespace UnityOpenMcpVerify
 
             foreach (var category in result.CategoriesRun)
             {
+                // A rule that threw contributed no issues — its fingerprint
+                // would claim a clean baseline the rule never established.
+                // Skip failed rules here; the RulesFailed carry-through lets
+                // the gate distrust the checkpoint instead.
+                if (result.RulesFailed.Contains(category)) continue;
                 var categoryIssues = result.Issues.Where(i => i.RuleId == category).ToList();
                 var errors = categoryIssues.Count(i => i.Severity == VerifySeverity.Error);
                 var warnings = categoryIssues.Count(i => i.Severity == VerifySeverity.Warning);
@@ -106,7 +121,7 @@ namespace UnityOpenMcpVerify
                 fingerprints[category] = new RuleFingerprint(errors, warnings, keys);
             }
 
-            return new CheckpointFingerprint(id, fingerprints);
+            return new CheckpointFingerprint(id, fingerprints, result.RulesFailed);
         }
     }
 }

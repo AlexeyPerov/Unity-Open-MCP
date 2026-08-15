@@ -67,6 +67,14 @@ Bridge reports compiled inventory only — no MCP session state.
   dependency, no third escape helper. `BridgeJsonTests` pins the contract.
   Extension sub-assemblies keep their own escape helper (`BridgeJson` is
   internal).
+- `JsonBody` accessors match the FIRST `"key"` occurrence anywhere in the
+  body, including nested patch payloads. Tools that accept a patch array
+  (`fields` / `entries` / `patches` / `jsonPatches` / `deletes`) MUST read
+  their selector keys through `JsonBody.SelectorScope` (or an equivalent
+  depth-1 projection), and any NEW patch-array key must be added to
+  `JsonBody.PatchArrayKeys` in the same change — otherwise a selector name
+  nested inside a patch value can shadow (or be shadowed by) the top-level
+  parameter. `feedback-fable-31-07 §2` is the reference incident.
 
 ## Auth, deny list, remote bind, audit
 

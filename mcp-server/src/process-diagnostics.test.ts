@@ -425,6 +425,35 @@ test("H2: parseLsofStdout counts FD rows (non-empty lines minus header)", () => 
   assert.equal(r.approximate, false);
 });
 
+test("H2: parseLsofStdout excludes non-fd rows (cwd/txt/rtd/del are not descriptors)", () => {
+  // lsof emits one row per open FILE, not per fd: cwd + mapped libraries
+  // (txt) + deleted-but-held files can dominate a loaded Editor's listing
+  // while never registering with Mono's IOSelector. Only digit-leading FD
+  // column values count toward the ceiling math.
+  const out = [
+    "COMMAND   PID USER   FD   TYPE",
+    "Unity    1234 user   cwd   DIR",
+    "Unity    1234 user   txt   REG",
+    "Unity    1234 user   txt   REG",
+    "Unity    1234 user   rtd   DIR",
+    "Unity    1234 user   DEL   REG",
+    "Unity    1234 user   0r   CHR",
+    "Unity    1234 user   1w   REG",
+    "Unity    1234 user   255u  REG",
+  ].join("\n");
+  const r = parseLsofStdout(out, 1234);
+  assert.equal(r.count, 3, "only the 0r / 1w / 255u rows are descriptors");
+  assert.equal(r.approximate, false);
+});
+
+test("H2: parseLsofStdout with no recognizable header falls back to counting rows", () => {
+  // Header detection fails (no FD column token): the first line is assumed
+  // to be a header anyway, matching the historical count (rows = lines - 1).
+  const out = "Unity 1234 0r REG\nUnity 1234 1w REG\n";
+  const r = parseLsofStdout(out, 1234);
+  assert.equal(r.count, 1);
+});
+
 test("H2: parseLsofStdout on empty stdout reports not_found", () => {
   const r = parseLsofStdout("", 1234);
   assert.equal(r.count, null);

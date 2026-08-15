@@ -134,6 +134,20 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append(']');
 
             sb.Append(",\"durationMs\":").Append(result.DurationMs);
+
+            // Rules that threw during the scan — the issues list above is
+            // incomplete for them, so passed:true must not be read as
+            // "verified healthy" for those rules. Mirrors ScanPathsTool.
+            if (result.HasFailedRules)
+            {
+                sb.Append(",\"rulesFailed\":[");
+                for (int i = 0; i < result.RulesFailed.Length; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(Esc(result.RulesFailed[i])).Append('"');
+                }
+                sb.Append("],\"scanIncomplete\":true");
+            }
             sb.Append('}');
 
             return sb.ToString();

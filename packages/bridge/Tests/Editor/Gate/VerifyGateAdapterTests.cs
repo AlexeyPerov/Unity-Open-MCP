@@ -206,13 +206,22 @@ namespace UnityOpenMcpBridge.Tests
         [TestCase("Assets/M.mat", new[] { "missing_references", "dependencies", "materials", "shader_analysis" })]
         [TestCase("Assets/Sh.shader", new[] { "missing_references", "dependencies", "materials", "shader_analysis" })]
         [TestCase("Assets/G.shadergraph", new[] { "missing_references", "dependencies", "materials", "shader_analysis" })]
-        [TestCase("Assets/T.png", new[] { "textures", "sprite_2d_analysis" })]
-        [TestCase("Assets/T.jpg", new[] { "textures", "sprite_2d_analysis" })]
+        // Image / audio extensions fall back to the registered baseline rules:
+        // textures / sprite_2d_analysis / audio_analysis exist only as planned
+        // catalog entries (none is registered in VerifyRunner), so selecting
+        // them produced a set with zero registered rules — a vacuous gate pass
+        // for every texture/audio mutation, and an unknown_rule error from
+        // scan_paths on the same paths.
+        [TestCase("Assets/T.png", new[] { "missing_references", "dependencies" })]
+        [TestCase("Assets/T.jpg", new[] { "missing_references", "dependencies" })]
+        [TestCase("Assets/T.jpeg", new[] { "missing_references", "dependencies" })]
+        [TestCase("Assets/T.tga", new[] { "missing_references", "dependencies" })]
         [TestCase("Assets/Ac.controller", new[] { "animation_analysis", "missing_references", "dependencies" })]
         [TestCase("Assets/An.anim", new[] { "animation_analysis", "missing_references", "dependencies" })]
         [TestCase("Assets/So.asset", new[] { "missing_references", "dependencies" })]
-        [TestCase("Assets/S.wav", new[] { "audio_analysis" })]
-        [TestCase("Assets/S.mp3", new[] { "audio_analysis" })]
+        [TestCase("Assets/S.wav", new[] { "missing_references", "dependencies" })]
+        [TestCase("Assets/S.mp3", new[] { "missing_references", "dependencies" })]
+        [TestCase("Assets/S.ogg", new[] { "missing_references", "dependencies" })]
         public static void SelectRuleIds_KnownExtension_RoutesToExpectedRules(string path, string[] expected)
         {
             var ids = VerifyGateAdapter.SelectRuleIds(new[] { path });
@@ -239,11 +248,15 @@ namespace UnityOpenMcpBridge.Tests
             var ids = VerifyGateAdapter.SelectRuleIds(new[]
             {
                 "Assets/P.prefab",   // missing_references + scene_prefab_health + dependencies
-                "Assets/T.png",      // textures + sprite_2d_analysis
+                "Assets/T.png",      // image -> planned-only rules dropped, fallback applies
             });
 
+            // The prefab contributes its full set; the .png adds nothing the
+            // prefab hasn't already selected (its own mapped rules are
+            // planned-only and fall back to missing_references/dependencies,
+            // both already present).
             CollectionAssert.AreEquivalent(
-                new[] { "missing_references", "scene_prefab_health", "dependencies", "textures", "sprite_2d_analysis" },
+                new[] { "missing_references", "scene_prefab_health", "dependencies" },
                 ids);
         }
 

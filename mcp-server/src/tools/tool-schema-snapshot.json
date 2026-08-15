@@ -680,7 +680,7 @@
         },
         "platform_profile": {
           "default": "desktop",
-          "description": "Stored in output metadata; does not filter rules in M5.",
+          "description": "Applied to profile-sensitive rules (shader_analysis mobile-only detections) and echoed in output metadata. Does not filter which rules run.",
           "enum": [
             "mobile",
             "console",

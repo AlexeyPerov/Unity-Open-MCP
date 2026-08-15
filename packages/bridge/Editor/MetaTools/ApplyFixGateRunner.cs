@@ -111,6 +111,18 @@ namespace UnityOpenMcpBridge.MetaTools
                     ? new System.Collections.Generic.List<string>()
                     : new System.Collections.Generic.List<string>(result.AgentNextSteps);
                 steps.Add("The fix was rolled back — no project change remains. Inspect the issue manually before retrying.");
+                // FixRollback restores file BYTES; an open scene that the fix
+                // mutated in memory (remove_missing_script edits live scenes)
+                // still holds the pre-rollback state until it is reloaded — a
+                // later scene_save would re-commit the rolled-back change.
+                // Warn specifically when a restored scene is open.
+                if (RestoredOpenScene(result.RestoredPaths, out var openScenePath))
+                {
+                    steps.Add(
+                        $"WARNING: '{openScenePath}' is open in the editor and still holds the pre-rollback " +
+                        "in-memory state (the rollback restored the file on disk, not the live scene). " +
+                        "Reload that scene before saving it, or the rolled-back change will be re-committed.");
+                }
                 result.AgentNextSteps = steps.ToArray();
             }
             else if (mode == GateMode.Off && result.Mutation != null && result.Mutation.Success)
@@ -170,6 +182,43 @@ namespace UnityOpenMcpBridge.MetaTools
             var abs = Path.GetFullPath(Path.Combine(projectRoot, assetRelativePath));
             if (!sink.Contains(abs))
                 sink.Add(abs);
+        }
+
+        // True when one of the restored paths is a .unity scene that is
+        // currently open in the editor. Must run on the main thread (called
+        // from Execute, which the dispatcher runs there).
+        private static bool RestoredOpenScene(string[] restoredPaths, out string openScenePath)
+        {
+            openScenePath = null;
+            if (restoredPaths == null || restoredPaths.Length == 0) return false;
+            UnityEditor.SceneManagement.SceneSetup[] setup = null;
+            try
+            {
+                setup = UnityEditor.SceneManagement.EditorSceneManager.GetSceneManagerSetup();
+            }
+            catch
+            {
+                // Fail-open: no warning rather than failing the rollback report.
+                return false;
+            }
+            if (setup == null) return false;
+            foreach (var restored in restoredPaths)
+            {
+                if (string.IsNullOrEmpty(restored) ||
+                    !restored.EndsWith(".unity", System.StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var normalized = restored.Replace('\\', '/');
+                foreach (var entry in setup)
+                {
+                    if (entry == null || string.IsNullOrEmpty(entry.path)) continue;
+                    if (string.Equals(entry.path.Replace('\\', '/'), normalized, System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        openScenePath = normalized;
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         // Convert absolute restored paths back to the Assets/-relative form so

@@ -163,11 +163,41 @@ export interface FdProbe {
 // ---------------------------------------------------------------------------
 
 /**
+ * Count the actual file-descriptor rows in an `lsof -p` listing. Not every
+ * output row is an fd: `cwd` (working directory), `txt` (mapped executable and
+ * shared libraries — often dozens of rows on a loaded Editor), `rtd`, `del`,
+ * `ltz`/`ltx` rows describe directories and mmaps that Mono's IOSelector never
+ * registers. Counting every row systematically inflated the absolute fd count
+ * against the ~1024 Mono ceiling (an asset-heavy Editor maps hundreds of
+ * `txt` rows alone), skewing the warn/critical ratio states. The FD column
+ * index is located from the header; a row counts when its FD value starts with
+ * a digit (real fds are "0u"/"1w"/"255r"-style — number plus optional
+ * mode/lock letters). When no recognizable header exists (unusual), fall back
+ * to counting all rows so the probe never under-reports to zero.
+ */
+function countLsofFdRows(lines: string[]): number {
+  if (lines.length === 0) return 0;
+  const header = lines[0].trim().split(/\s+/);
+  const fdCol = header.indexOf("FD");
+  let count = 0;
+  for (let i = 1; i < lines.length; i++) {
+    if (fdCol >= 0) {
+      const fd = lines[i].trim().split(/\s+/)[fdCol];
+      if (fd !== undefined && /^\d/.test(fd)) count++;
+    } else {
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
  * Parse the stdout of a successful `lsof -p <pid>` run into an fd count.
  * Pure (no I/O) so it can be unit-tested without spawning lsof. lsof prints
- * a header line ("COMMAND PID USER FD TYPE ...") then one line per open fd;
- * the count is the non-empty line count minus the header. Empty stdout means
- * the PID vanished between spawn and read.
+ * a header line ("COMMAND PID USER FD TYPE ...") then one row per open file;
+ * only rows whose FD column is a numbered descriptor count (see
+ * {@link countLsofFdRows}). Empty stdout means the PID vanished between
+ * spawn and read.
  */
 export function parseLsofStdout(stdout: string, pid: number): FdCountResult {
   const lines = stdout.split(/\r?\n/).filter((l) => l.length > 0);
@@ -179,10 +209,8 @@ export function parseLsofStdout(stdout: string, pid: number): FdCountResult {
       message: `lsof produced no output for PID ${pid}.`,
     };
   }
-  // Header is the first line; its FD column says "FD" literally. The rest are
-  // per-fd rows. Subtract 1 for the header.
   return {
-    count: Math.max(0, lines.length - 1),
+    count: countLsofFdRows(lines),
     method: "lsof",
     approximate: false,
   };
@@ -229,7 +257,7 @@ export function classifyLsofError(
   const capturedLines = capturedStdout.split(/\r?\n/).filter((l) => l.length > 0);
   if (capturedLines.length > 0) {
     return {
-      count: Math.max(0, capturedLines.length - 1),
+      count: countLsofFdRows(capturedLines),
       method: "lsof",
       approximate: timedOut,
     };

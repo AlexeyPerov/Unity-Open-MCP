@@ -191,6 +191,21 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append(']');
 
             sb.Append(",\"durationMs\":").Append(result.DurationMs);
+
+            // Rules that threw during the scan — the issues list above is
+            // incomplete for them, and `passed` reflects only what was found.
+            // Surface both the ids and a scanIncomplete flag so an agent (or
+            // CI) can tell "clean" from "incomplete".
+            if (result.HasFailedRules)
+            {
+                sb.Append(",\"rulesFailed\":[");
+                for (int i = 0; i < result.RulesFailed.Length; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(Esc(result.RulesFailed[i])).Append('"');
+                }
+                sb.Append("],\"scanIncomplete\":true");
+            }
             sb.Append('}');
 
             return sb.ToString();

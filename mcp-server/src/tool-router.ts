@@ -122,7 +122,7 @@ import {
 export type SourceTag = "live" | "offline" | "local";
 
 export interface RouteMeta {
-  route: "live" | "batch";
+  route: "live" | "batch" | "offline";
   fallbackReason?: string;
   /**
    * feedback-fable-04-08 §7 — present only when a `live_unavailable` batch
@@ -741,7 +741,12 @@ export class ToolRouter implements Router {
 
     // Compact drill-down reads: offline-first for text-serialized assets, fall
     // back to live bridge for binary formats. The compressible-router handles
-    // the source selection internally.
+    // the source selection internally and tags the payload `_source`
+    // ("offline" when it was served from the disk parser without touching the
+    // bridge). Derive `_route` from that tag: stamping route:"live"
+    // unconditionally mislabeled offline-served reads as bridge responses —
+    // contradictory metadata that pointed an agent's diagnostics at the
+    // bridge for data it never produced.
     if (isCompressible(toolName)) {
       const result = await routeCompressible(
         toolName,
@@ -750,7 +755,11 @@ export class ToolRouter implements Router {
         this.modelCache,
         this.projectPath,
       );
-      return injectRouteMeta(result, { route: "live" });
+      const body = parseResultBody(result);
+      const meta: RouteMeta = body?._source === "offline"
+        ? { route: "offline" }
+        : { route: "live" };
+      return injectRouteMeta(result, meta);
     }
 
     const canBatch = this.batch.isBatchTool(toolName);

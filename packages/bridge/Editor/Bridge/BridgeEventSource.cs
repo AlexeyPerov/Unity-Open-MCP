@@ -126,13 +126,21 @@ namespace UnityOpenMcpBridge
             evt.Timestamp = DateTime.UtcNow;
 
             _buffer.Enqueue(evt);
-            var countAfter = Interlocked.Increment(ref _bufferCount);
+            Interlocked.Increment(ref _bufferCount);
 
             // Evict oldest entries when over capacity. ConcurrentQueue has no
-            // TryDequeue-N; drain one at a time until under cap.
-            while (countAfter > BufferCapacity && _buffer.TryDequeue(out _))
+            // TryDequeue-N; drain one at a time until under cap. The loop
+            // condition re-reads the SHARED count each iteration (not a
+            // thread-local snapshot of the post-increment value): Emit is
+            // single-producer in practice (Unity's log + editor callbacks are
+            // main-thread), but with the snapshot form two concurrent Emits
+            // could each dequeue for the same overflow and over-evict below
+            // the capacity, dropping live events and inflating subscribers'
+            // `missed` counts. Re-reading bounds the worst case to the
+            // genuinely-overflowing entries.
+            while (System.Threading.Volatile.Read(ref _bufferCount) > BufferCapacity && _buffer.TryDequeue(out _))
             {
-                countAfter = Interlocked.Decrement(ref _bufferCount);
+                Interlocked.Decrement(ref _bufferCount);
             }
         }
 
