@@ -26,10 +26,21 @@ export interface ErrorResultInput {
    * surface richer structured data (e.g. HTTP status + body from the bridge).
    */
   detail?: unknown;
+  /**
+   * Optional `_source` stamp on the DEFAULT body (ignored when `detail` is
+   * supplied — a custom body stamps its own). "local" for caller-side
+   * validation failures, "offline" when an offline-first attempt failed
+   * without bridge contact. Keeps the router's derived `_route` honest for
+   * error results too, instead of defaulting everything to route:"live".
+   */
+  source?: "live" | "offline" | "local";
 }
 
 export function makeErrorResult(input: ErrorResultInput): CallToolResult {
-  const body = input.detail ?? { error: { code: input.code, message: input.message } };
+  const body = input.detail ?? {
+    error: { code: input.code, message: input.message },
+    ...(input.source ? { _source: input.source } : {}),
+  };
   return {
     content: [{ type: "text", text: JSON.stringify(body) }],
     isError: true,

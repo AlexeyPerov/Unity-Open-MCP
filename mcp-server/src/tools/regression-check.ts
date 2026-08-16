@@ -4,7 +4,8 @@ import { makeTool } from "./schema-fragments.js";
 export const regressionCheck = makeTool(
   "unity_open_mcp_regression_check",
   "Compare current full scan against a baseline file. Returns exitCode 1 when the error count increase exceeds " +
-    "regression_threshold (global) or any per-category threshold, or when the baseline is missing/invalid. " +
+    "regression_threshold (global) or any per-category threshold, when the baseline is missing/invalid, or when any " +
+    "verify rule threw (rulesFailed — the scan is incomplete and the verdict covers only rules that ran clean on both sides). " +
     "per_category_thresholds maps a ruleId to its max tolerated error-count increase; rules absent from the map " +
     "fall back to regression_threshold. Emits a compact regression summary (with optional per-rule breakdown) " +
     "suitable for CI logs.",

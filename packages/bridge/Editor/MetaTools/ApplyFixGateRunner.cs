@@ -111,17 +111,18 @@ namespace UnityOpenMcpBridge.MetaTools
                     ? new System.Collections.Generic.List<string>()
                     : new System.Collections.Generic.List<string>(result.AgentNextSteps);
                 steps.Add("The fix was rolled back — no project change remains. Inspect the issue manually before retrying.");
-                // FixRollback restores file BYTES; an open scene that the fix
-                // mutated in memory (remove_missing_script edits live scenes)
-                // still holds the pre-rollback state until it is reloaded — a
-                // later scene_save would re-commit the rolled-back change.
-                // Warn specifically when a restored scene is open.
-                if (RestoredOpenScene(result.RestoredPaths, out var openScenePath))
+                // FixRollback restores file BYTES; an asset the fix mutated in
+                // memory (remove_missing_script edits live scenes AND open
+                // prefabs) still holds the pre-rollback state until it is
+                // reloaded — a later save would re-commit the rolled-back
+                // change. Warn when a restored scene or prefab is open.
+                if (RestoredOpenAsset(result.RestoredPaths, out var openAssetPath))
                 {
                     steps.Add(
-                        $"WARNING: '{openScenePath}' is open in the editor and still holds the pre-rollback " +
-                        "in-memory state (the rollback restored the file on disk, not the live scene). " +
-                        "Reload that scene before saving it, or the rolled-back change will be re-committed.");
+                        $"WARNING: '{openAssetPath}' is open in the editor and still holds the pre-rollback " +
+                        "in-memory state (the rollback restored the file on disk, not the live instance). " +
+                        "Reload the scene, or close the prefab stage without saving, before saving anything — " +
+                        "otherwise the rolled-back change will be re-committed.");
                 }
                 result.AgentNextSteps = steps.ToArray();
             }
@@ -184,13 +185,16 @@ namespace UnityOpenMcpBridge.MetaTools
                 sink.Add(abs);
         }
 
-        // True when one of the restored paths is a .unity scene that is
-        // currently open in the editor. Must run on the main thread (called
-        // from Execute, which the dispatcher runs there).
-        private static bool RestoredOpenScene(string[] restoredPaths, out string openScenePath)
+        // True when one of the restored (Assets/-relative) paths is an asset
+        // currently open with in-memory state: a .unity scene in the editor's
+        // scene setup, or a .prefab open in a prefab stage (PrefabStageUtility
+        // reports the currently-open stage). Must run on the main thread
+        // (called from Execute, which the dispatcher runs there).
+        private static bool RestoredOpenAsset(string[] restoredPaths, out string openAssetPath)
         {
-            openScenePath = null;
+            openAssetPath = null;
             if (restoredPaths == null || restoredPaths.Length == 0) return false;
+
             UnityEditor.SceneManagement.SceneSetup[] setup = null;
             try
             {
@@ -199,23 +203,79 @@ namespace UnityOpenMcpBridge.MetaTools
             catch
             {
                 // Fail-open: no warning rather than failing the rollback report.
-                return false;
             }
-            if (setup == null) return false;
-            foreach (var restored in restoredPaths)
+
+            string prefabStagePath = null;
+            try
             {
-                if (string.IsNullOrEmpty(restored) ||
-                    !restored.EndsWith(".unity", System.StringComparison.OrdinalIgnoreCase))
-                    continue;
-                var normalized = restored.Replace('\\', '/');
+                var stage = UnityEditor.SceneManagement.PrefabStageUtility.GetCurrentPrefabStage();
+                prefabStagePath = stage != null ? stage.assetPath : null;
+            }
+            catch
+            {
+                // Fail-open (same reason as above).
+            }
+
+            string[] openScenePaths = null;
+            if (setup != null)
+            {
+                var paths = new System.Collections.Generic.List<string>(setup.Length);
                 foreach (var entry in setup)
                 {
-                    if (entry == null || string.IsNullOrEmpty(entry.path)) continue;
-                    if (string.Equals(entry.path.Replace('\\', '/'), normalized, System.StringComparison.OrdinalIgnoreCase))
+                    if (entry != null && !string.IsNullOrEmpty(entry.path))
+                        paths.Add(entry.path);
+                }
+                openScenePaths = paths.ToArray();
+            }
+
+            return FindOpenRestoredAsset(restoredPaths, openScenePaths, prefabStagePath, out openAssetPath);
+        }
+
+        // Pure matcher (no Unity API) so the path semantics are unit-testable:
+        // a restored path matches when it is a .unity scene equal to one of the
+        // open scene paths, or a .prefab equal to the open prefab-stage path.
+        // Comparison normalizes separators and is case-insensitive (Windows
+        // asset paths). Both sides are Assets/-relative.
+        internal static bool FindOpenRestoredAsset(
+            string[] restoredPaths,
+            string[] openScenePaths,
+            string openPrefabStagePath,
+            out string matchedPath)
+        {
+            matchedPath = null;
+            if (restoredPaths == null || restoredPaths.Length == 0) return false;
+
+            foreach (var restored in restoredPaths)
+            {
+                if (string.IsNullOrEmpty(restored)) continue;
+                var normalized = restored.Replace('\\', '/');
+
+                var ext = System.IO.Path.GetExtension(normalized);
+                bool isScene = string.Equals(ext, ".unity", System.StringComparison.OrdinalIgnoreCase);
+                bool isPrefab = string.Equals(ext, ".prefab", System.StringComparison.OrdinalIgnoreCase);
+                if (!isScene && !isPrefab) continue;
+
+                if (isScene && openScenePaths != null)
+                {
+                    foreach (var scenePath in openScenePaths)
                     {
-                        openScenePath = normalized;
-                        return true;
+                        if (string.IsNullOrEmpty(scenePath)) continue;
+                        if (string.Equals(scenePath.Replace('\\', '/'), normalized,
+                                System.StringComparison.OrdinalIgnoreCase))
+                        {
+                            matchedPath = normalized;
+                            return true;
+                        }
                     }
+                }
+
+                if (isPrefab &&
+                    !string.IsNullOrEmpty(openPrefabStagePath) &&
+                    string.Equals(openPrefabStagePath.Replace('\\', '/'), normalized,
+                        System.StringComparison.OrdinalIgnoreCase))
+                {
+                    matchedPath = normalized;
+                    return true;
                 }
             }
             return false;

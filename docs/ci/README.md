@@ -21,8 +21,17 @@ The `unity-open-mcp` CLI ships six automation commands (see `unity-open-mcp --he
 |---|---|---|
 | 0 | Success — no issues / no regression | continue |
 | 1 | Warnings only — below the fail threshold | continue (advisory) |
-| 2 | Errors — issues at/above threshold, or a regression | **fail the job** |
+| 2 | Errors — issues at/above threshold, a regression, **or an incomplete scan** | **fail the job** |
 | 3 | Timeout — bridge unreachable or a call timed out | **fail the job** |
+
+**Incomplete scans fail like errors.** When a verify rule throws mid-scan,
+`verify`, `baseline`, and `regression check` all exit **2**: the issue list is
+silently missing that rule's findings, so "no issues" cannot be certified as
+clean. The JSON response names the gap in `rulesFailed` (plus
+`scanIncomplete: true` on live results); a baseline written in that state is
+partial — the crashed rule has no entry, its id rides on the baseline's
+`rulesFailed`, and later `regression check` runs skip that rule on both sides
+instead of misreading its counts as regressions or improvements.
 
 > **Note — Unity's own `-runTests` exit codes differ.** The table above is for the `unity-open-mcp` CLI. If you run Unity tests headlessly with `Unity -batchmode -runTests ...` (the `unity_senses_run_tests` tool has no MCP batch form), the exit codes are: `0` = all passed, `2` = test failures present (not a process error), `3` = runner setup failure. Also **omit `-quit`** — with `-quit`, the editor exits after the initial asset refresh, before the runner starts, so no tests run and no results XML is written despite exit 0.
 

@@ -830,6 +830,123 @@ test("runRegressionCommand: tool error → exit 2", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// scan incompleteness (rules that threw) must fail the CI gate like a verdict
+// failure — the issue list is silently missing those rules' findings.
+// ---------------------------------------------------------------------------
+
+test("runVerifyCommand: rulesFailed with zero issues → exit 2, not 0", async () => {
+  // A crashing rule contributes no issues: without the incompleteness check
+  // this body classifies as clean (exit 0) while the scan is incomplete.
+  const scanResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          passed: true,
+          issueCount: 0,
+          issuesBySeverity: { error: 0, warn: 0, info: 0, verbose: 0 },
+          rulesFailed: ["shader_analysis"],
+          scanIncomplete: true,
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(scanResult) });
+  const result = await runVerifyCommand(stack, {
+    json: true,
+    paths: [],
+    mode: "auto",
+    failOnSeverity: undefined,
+    profile: undefined,
+    includeRules: undefined,
+    excludeRules: undefined,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 2, "an incomplete scan must not exit 0");
+  assert.equal((result.json as { scanIncomplete: boolean }).scanIncomplete, true);
+});
+
+test("runBaselineCommand: rulesFailed → exit 2 (partial baseline)", async () => {
+  const baselineResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          baselinePath: "CI/baseline.json",
+          summary: { error: 0, warn: 0, info: 0, verbose: 0 },
+          rulesFailed: ["materials"],
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(baselineResult) });
+  const result = await runBaselineCommand(stack, {
+    json: true,
+    subcommand: "create",
+    baselinePath: "CI/baseline.json",
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 2, "CI must not adopt a partial baseline as green");
+});
+
+test("runRegressionCommand: nested regression.regressed (real batch shape) → exit 2", async () => {
+  // The real batch body nests the verdict under `regression.regressed`
+  // (RegressionDetail) — the CLI must read that shape, not only the flat
+  // legacy `regressed` field.
+  const regResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          operation: "regression_check",
+          exitCode: 1,
+          regression: { regressed: true, errorDelta: 3, errorThreshold: 0 },
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(regResult) });
+  const result = await runRegressionCommand(stack, {
+    json: true,
+    baselinePath: "CI/baseline.json",
+    regressionThreshold: 0,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 2);
+  assert.equal((result.json as { regressed: boolean }).regressed, true);
+});
+
+test("runRegressionCommand: rulesFailed with no regression → exit 2", async () => {
+  const regResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          operation: "regression_check",
+          exitCode: 1,
+          regression: { regressed: false, errorDelta: 0, errorThreshold: 0 },
+          rulesFailed: ["missing_references"],
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(regResult) });
+  const result = await runRegressionCommand(stack, {
+    json: true,
+    baselinePath: "CI/baseline.json",
+    regressionThreshold: 0,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 2,
+    "an incomplete scan cannot certify no-regression through exit 0");
+  assert.equal((result.json as { scanIncomplete: boolean }).scanIncomplete, true);
+});
+
+// ---------------------------------------------------------------------------
 // help / version text
 // ---------------------------------------------------------------------------
 

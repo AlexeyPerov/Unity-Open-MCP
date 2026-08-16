@@ -122,7 +122,14 @@ import {
 export type SourceTag = "live" | "offline" | "local";
 
 export interface RouteMeta {
-  route: "live" | "batch" | "offline";
+  /**
+   * Where the response came from: "live" (bridge), "batch" (headless spawn),
+   * "offline" (disk parser / offline-first attempt, no bridge contact), or
+   * "local" (caller-side validation / locally-computed result). The
+   * compressible branch derives this from the payload's `_source` tag —
+   * including error bodies — so the two tags never disagree about the origin.
+   */
+  route: "live" | "batch" | "offline" | "local";
   fallbackReason?: string;
   /**
    * feedback-fable-04-08 §7 — present only when a `live_unavailable` batch
@@ -743,7 +750,9 @@ export class ToolRouter implements Router {
     // back to live bridge for binary formats. The compressible-router handles
     // the source selection internally and tags the payload `_source`
     // ("offline" when it was served from the disk parser without touching the
-    // bridge). Derive `_route` from that tag: stamping route:"live"
+    // bridge; error results tag their origin too — "local" for caller-side
+    // validation, "offline" for a failed offline-first attempt with the
+    // bridge down). Derive `_route` from that tag: stamping route:"live"
     // unconditionally mislabeled offline-served reads as bridge responses —
     // contradictory metadata that pointed an agent's diagnostics at the
     // bridge for data it never produced.
@@ -755,10 +764,11 @@ export class ToolRouter implements Router {
         this.modelCache,
         this.projectPath,
       );
-      const body = parseResultBody(result);
-      const meta: RouteMeta = body?._source === "offline"
-        ? { route: "offline" }
-        : { route: "live" };
+      const source = parseResultBody(result)?._source;
+      const meta: RouteMeta =
+        source === "offline" || source === "local"
+          ? { route: source }
+          : { route: "live" };
       return injectRouteMeta(result, meta);
     }
 

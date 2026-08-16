@@ -131,12 +131,16 @@ glance without the ~222 KB a full prefab rebuild used to inline). What an agent
 branches on is `mutation.success` + `gate.outcome` + the counts; the full key
 list is available via `validate_edit` / `scan_paths` on the touched paths.
 
-`gate.delta` is `null` — never a zeroed object — when no delta was computed
-(checkpoint failure, mutation failure, or the validate scan could not run). In
-that window `gate.outcome` is `validate_scan_failed`, the MCP result is flagged
-`isError: true`, and when a verify rule threw, `gate.rulesFailed` lists the
-rule ids whose findings are missing: verify health manually with
-`validate_edit` / `scan_paths` instead of trusting a withheld delta.
+`gate.delta` is `null` — never a zeroed object — when no delta was computed.
+Three paths land there, with different outcome tokens: a **checkpoint failure**
+or a **mutation failure** reports `gate.outcome: "failed"` with
+`mutation.success: false` (the MCP result is `isError: true` via the mutation),
+and a **validate-scan failure** (the scan threw, or a verify rule threw on
+either side of the delta) reports `gate.outcome: "validate_scan_failed"` — the
+mutation committed, and the MCP result is still flagged `isError: true`. When a
+verify rule threw, `gate.rulesFailed` lists the rule ids whose findings are
+missing: verify health manually with `validate_edit` / `scan_paths` instead of
+trusting a withheld delta.
 
 `compilePending: true` (next to `settleMs`) is emitted when the editor is still
 compiling after the post-mutation settle wait — the gate's delta then reflects

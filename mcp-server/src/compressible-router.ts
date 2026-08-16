@@ -179,7 +179,13 @@ async function routeReadAsset(
 ): Promise<CallToolResult> {
   const assetPath = typeof args.asset_path === "string" ? args.asset_path : "";
   if (assetPath === "") {
-    return makeErrorResult({ code: "missing_parameter", message: "'asset_path' is required." });
+    // Local validation failure — no bridge contact, no disk read. _source
+    // keeps the router's derived _route honest (route:"local", not "live").
+    return makeErrorResult({
+      code: "missing_parameter",
+      message: "'asset_path' is required.",
+      source: "local",
+    });
   }
 
   const fieldLimit = typeof args.field_limit === "number" ? args.field_limit : 0;
@@ -221,11 +227,16 @@ async function routeReadAsset(
       // Fall back to live bridge (for binary formats or parse failures).
       const liveAvailable = await live.isLiveAvailable();
       if (!liveAvailable) {
+        // The offline attempt failed AND the bridge is down — neither source
+        // produced this payload, but the failure is offline-first in origin
+        // (the bridge was never contacted). _source keeps _route from
+        // mislabeling this as a bridge response.
         return makeErrorResult({
           code: "source_unavailable",
           message: isOfflineAsset(assetPath)
             ? `Offline parse failed and live bridge is unavailable for: ${assetPath}`
             : `Binary or unsupported format requires the live bridge, which is unavailable: ${assetPath}`,
+          source: "offline",
         });
       }
       const raw = await live.route("unity_open_mcp_read_asset", args);

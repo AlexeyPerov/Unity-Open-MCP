@@ -907,6 +907,47 @@ test("route: read_asset is routed via the compressible path (offline hit, no liv
   });
 });
 
+test("route: read_asset local validation error carries route=local, not live", async () => {
+  await withTmp("router-read-local-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makeFakeLive();
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+    // No asset_path at all -> caller-side validation error. Neither the disk
+    // parser nor the bridge produced anything; stamping route:"live" would
+    // point diagnostics at a bridge that was never contacted.
+    const result = await router.route("unity_open_mcp_read_asset", {});
+    const body = parseBody(result);
+    assert.equal(result.isError, true);
+    assert.equal(errorCode(result), "missing_parameter");
+    assert.equal(body._source, "local");
+    assert.equal(routeOf(result), "local");
+    assert.equal(live.calls.length, 0);
+  });
+});
+
+test("route: read_asset offline-parse failure with bridge down carries route=offline", async () => {
+  await withTmp("router-read-srcun-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makeFakeLive({ available: false });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+    // A text-serialized path that does not exist: the offline parse throws
+    // and the bridge is unavailable -> source_unavailable. The error is
+    // offline-first in origin (the bridge was never contacted), so its
+    // _route must not claim live.
+    const result = await router.route("unity_open_mcp_read_asset", {
+      asset_path: "Assets/Prefabs/Missing.prefab",
+    });
+    const body = parseBody(result);
+    assert.equal(result.isError, true);
+    assert.equal(errorCode(result), "source_unavailable");
+    assert.equal(body._source, "offline");
+    assert.equal(routeOf(result), "offline");
+    assert.equal(live.calls.length, 0);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // read_compile_errors — offline Editor.log reader (specs/feedback.md
 // 2026-07-05 entry adds staleLogSuspected when a cited source file is newer

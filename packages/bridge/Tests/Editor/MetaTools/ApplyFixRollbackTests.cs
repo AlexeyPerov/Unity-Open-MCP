@@ -181,6 +181,107 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         // -------------------------------------------------------------------
+        // FindOpenRestoredAsset — the pure matcher behind the "restored asset
+        // is open with in-memory state" rollback warning. A rolled-back scene
+        // OR an open prefab stage still holds the pre-rollback state; a later
+        // save would re-commit the rolled-back fix.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void FindOpenRestoredAsset_OpenScene_Matches()
+        {
+            var restored = new[] { "Assets/Scenes/Main.unity", "Assets/A.prefab" };
+            var open = new[] { "Assets/Other.unity", "Assets/Scenes/Main.unity" };
+
+            bool match = ApplyFixGateRunner.FindOpenRestoredAsset(
+                restored, open, openPrefabStagePath: null, out var matched);
+
+            Assert.IsTrue(match);
+            Assert.AreEqual("Assets/Scenes/Main.unity", matched);
+        }
+
+        [Test]
+        public void FindOpenRestoredAsset_OpenPrefabStage_Matches()
+        {
+            var restored = new[] { "Assets/Props/Widget.prefab" };
+            var open = new[] { "Assets/Scenes/Main.unity" };
+
+            bool match = ApplyFixGateRunner.FindOpenRestoredAsset(
+                restored, open, openPrefabStagePath: "Assets/Props/Widget.prefab", out var matched);
+
+            Assert.IsTrue(match, "a restored prefab open in a prefab stage needs the warning too");
+            Assert.AreEqual("Assets/Props/Widget.prefab", matched);
+        }
+
+        [Test]
+        public void FindOpenRestoredAsset_ClosedPrefabOrScene_NoMatch()
+        {
+            var restored = new[] { "Assets/Props/Closed.prefab", "Assets/Scenes/Closed.unity" };
+            var open = new[] { "Assets/Scenes/Main.unity" };
+
+            bool match = ApplyFixGateRunner.FindOpenRestoredAsset(
+                restored, open, openPrefabStagePath: "Assets/Props/Other.prefab", out _);
+
+            Assert.IsFalse(match);
+        }
+
+        [Test]
+        public void FindOpenRestoredAsset_ScenePathsDoNotMatchPrefabStage_AndViceVersa()
+        {
+            // A .unity path must only match the scene setup; a .prefab path
+            // must only match the prefab stage — no cross-kind collisions.
+            bool sceneVsStage = ApplyFixGateRunner.FindOpenRestoredAsset(
+                new[] { "Assets/A.unity" }, new string[0],
+                "Assets/A.unity", out _);
+            bool prefabVsScenes = ApplyFixGateRunner.FindOpenRestoredAsset(
+                new[] { "Assets/A.prefab" }, new[] { "Assets/A.prefab" },
+                null, out _);
+
+            Assert.IsFalse(sceneVsStage, "a scene path cannot match the prefab stage");
+            Assert.IsFalse(prefabVsScenes, "a prefab path cannot match the scene setup");
+        }
+
+        [Test]
+        public void FindOpenRestoredAsset_NormalizesSeparators_AndIsCaseInsensitive()
+        {
+            var restored = new[] { "assets\\scenes\\main.UNITY" };
+            var open = new[] { "Assets/Scenes/Main.unity" };
+
+            bool match = ApplyFixGateRunner.FindOpenRestoredAsset(
+                restored, open, null, out var matched);
+
+            Assert.IsTrue(match, "separator + case differences must not hide an open scene");
+            Assert.AreEqual("assets/scenes/main.UNITY", matched,
+                "the matched path is the restored form, normalized to forward slashes");
+        }
+
+        [Test]
+        public void FindOpenRestoredAsset_NonStageAssetsAndMetaPaths_NeverMatch()
+        {
+            // .meta companions and other asset kinds have no in-memory
+            // editor state to warn about.
+            var restored = new[] { "Assets/A.mat", "Assets/A.mat.meta", "Assets/B.unity.meta" };
+            var open = new[] { "Assets/A.mat", "Assets/B.unity" };
+
+            bool match = ApplyFixGateRunner.FindOpenRestoredAsset(
+                restored, open, "Assets/A.mat", out _);
+
+            Assert.IsFalse(match, "materials and .meta paths are never stage-monitored");
+        }
+
+        [Test]
+        public void FindOpenRestoredAsset_NullOrEmptyInputs_AreSafe()
+        {
+            Assert.IsFalse(ApplyFixGateRunner.FindOpenRestoredAsset(null, null, null, out _));
+            Assert.IsFalse(ApplyFixGateRunner.FindOpenRestoredAsset(new string[0], null, null, out _));
+            Assert.IsFalse(ApplyFixGateRunner.FindOpenRestoredAsset(
+                new[] { "Assets/A.unity" }, null, null, out _),
+                "no scene setup + no prefab stage => nothing can match");
+            Assert.IsFalse(ApplyFixGateRunner.FindOpenRestoredAsset(
+                new string[] { null, "" }, new[] { "Assets/A.unity" }, "Assets/A.prefab", out _));
+        }
+
+        // -------------------------------------------------------------------
         // Helpers
         // -------------------------------------------------------------------
 

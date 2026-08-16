@@ -48,12 +48,22 @@ namespace UnityOpenMcpVerify.Batch
         public string generatedAt;
         public SeveritySummary summary;
         public List<RuleBaselineEntry> rules;
+        // Rule ids that threw while the baseline was captured. Those rules got
+        // NO entry in `rules` and their issues are excluded from `summary` —
+        // a crashed rule contributes nothing, so a clean-looking entry for it
+        // would be a baseline it never established (the same vacuous-clean
+        // failure mode VerifyResult.RulesFailed exists for). regression_check
+        // skips these rule ids on BOTH sides of the comparison. Baselines
+        // written before this field existed deserialize it as null — treated
+        // as "no rules failed" (schema stays v1; the field is additive).
+        public List<string> rulesFailed;
 
         public BaselineFile()
         {
             schemaVersion = BaselineSchema.Version;
             summary = new SeveritySummary();
             rules = new List<RuleBaselineEntry>();
+            rulesFailed = new List<string>();
         }
     }
 

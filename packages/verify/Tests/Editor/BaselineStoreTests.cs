@@ -258,6 +258,156 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         // -------------------------------------------------------------------
+        // Crashed rules (rulesFailed) — a rule that threw must not produce a
+        // clean-looking baseline entry, and comparisons must skip it on both
+        // sides (the baseline analog of the gate's validate_scan_failed).
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void CreateFromResult_FailedRule_GetsNoEntry_IsRecorded_AndExcludedFromSummary()
+        {
+            // shader_analysis threw AFTER emitting one partial issue (rules
+            // append to the sink as they go, then throw); missing_references
+            // ran clean.
+            var issues = new List<VerifyIssue>
+            {
+                new VerifyIssue("shader_analysis", VerifySeverity.Error, "Assets/S.shader", "shader_compile_error", "partial"),
+                new VerifyIssue("missing_references", VerifySeverity.Error, "Assets/A.prefab", "missing_script", "a"),
+            };
+            var result = new VerifyResult(issues, new[] { "missing_references", "shader_analysis" }, 0,
+                rulesFailed: new[] { "shader_analysis" });
+
+            var baseline = BaselineStore.CreateFromResult(result, "desktop");
+
+            Assert.IsNull(baseline.rules.Find(r => r.ruleId == "shader_analysis"),
+                "a rule that threw must not get a clean-looking baseline entry");
+            CollectionAssert.AreEquivalent(new[] { "shader_analysis" }, baseline.rulesFailed,
+                "the crashed rule id rides on the file so Compare can skip it");
+            Assert.AreEqual(1, baseline.summary.error,
+                "the crashed rule's partial issue must not count toward the summary");
+        }
+
+        [Test]
+        public void CreateFromResult_AllRulesClean_RulesFailedStaysEmpty()
+        {
+            var baseline = BaselineStore.CreateFromResult(
+                ResultWith(1, 0, new[] { "missing_references" }), "desktop");
+
+            Assert.AreEqual(0, baseline.rulesFailed.Count);
+        }
+
+        [Test]
+        public void Compare_RuleFailedOnBaselineSide_DoesNotPhantomRegress()
+        {
+            // Baseline captured while shader_analysis crashed (no entry).
+            // The current run is healthy and reports 3 PRE-EXISTING
+            // shader_analysis errors — without the exclusion those read as
+            // +3 new and CI fails on a phantom regression.
+            var baseline = BaselineWithRules(("missing_references", 1));
+            baseline.rulesFailed.Add("shader_analysis");
+            var current = BaselineWithRules(("shader_analysis", 3), ("missing_references", 1));
+
+            var detail = BaselineStore.Compare(current, baseline, errorThreshold: 0);
+
+            Assert.AreEqual(0, detail.errorDelta,
+                "global delta covers only the rules that ran clean on both sides");
+            Assert.IsFalse(detail.regressed,
+                "a rule absent from the baseline because it crashed cannot regress");
+        }
+
+        [Test]
+        public void Compare_RuleFailedOnCurrentSide_CannotMaskRegressionOnCleanRules()
+        {
+            // shader_analysis crashed in the CURRENT scan, hiding its 2
+            // baseline errors. Without the exclusion, the phantom "-2
+            // improvement" cancels dependencies' real +2 regression and the
+            // gate passes while a clean rule genuinely regressed.
+            var baseline = BaselineWithRules(("shader_analysis", 2), ("dependencies", 1));
+            var current = BaselineWithRules(("dependencies", 3));
+            current.rulesFailed.Add("shader_analysis");
+
+            var detail = BaselineStore.Compare(current, baseline, errorThreshold: 0);
+
+            Assert.AreEqual(2, detail.errorDelta, "only the clean rules' counts enter the delta");
+            Assert.IsTrue(detail.regressed, "the real +2 on dependencies must surface");
+        }
+
+        [Test]
+        public void Compare_PerRule_SkipsRulesFailedOnEitherSide()
+        {
+            var baseline = BaselineWithRules(("missing_references", 1));
+            baseline.rulesFailed.Add("shader_analysis");
+            var current = BaselineWithRules(("missing_references", 1), ("shader_analysis", 3));
+
+            var map = new Dictionary<string, int> { { "shader_analysis", 0 }, { "missing_references", 0 } };
+            var detail = BaselineStore.Compare(current, baseline, 0, map);
+
+            Assert.IsNull(detail.perRule.Find(r => r.ruleId == "shader_analysis"),
+                "failed rules get no per-rule row — their counts are unknown, not zero");
+            Assert.IsNotNull(detail.perRule.Find(r => r.ruleId == "missing_references"),
+                "clean rules keep their per-rule row");
+            Assert.IsFalse(detail.regressed);
+        }
+
+        [Test]
+        public void Compare_ReportsCleanSums_WhenFailedRulesExcluded()
+        {
+            // With a failed rule in play, the summaries in the detail are the
+            // clean-rule sums so the arithmetic stays self-consistent
+            // (errorDelta == currentSummary.error - baselineSummary.error).
+            var baseline = BaselineWithRules(("shader_analysis", 2), ("dependencies", 1));
+            var current = BaselineWithRules(("dependencies", 3));
+            current.rulesFailed.Add("shader_analysis");
+
+            var detail = BaselineStore.Compare(current, baseline, errorThreshold: 0);
+
+            Assert.AreEqual(1, detail.baselineSummary.error);
+            Assert.AreEqual(3, detail.currentSummary.error);
+            Assert.AreEqual(
+                detail.currentSummary.error - detail.baselineSummary.error,
+                detail.errorDelta);
+        }
+
+        [Test]
+        public void Compare_OldBaseline_WithNullRulesFailed_BehavesLikeClean()
+        {
+            // Baselines written before the rulesFailed field existed
+            // deserialize it as null — they must compare exactly like a
+            // clean baseline (no migration; schema stays v1).
+            var baseline = BaselineWithRules(("missing_references", 1));
+            baseline.rulesFailed = null;
+            var current = BaselineWithRules(("missing_references", 4));
+
+            var detail = BaselineStore.Compare(current, baseline, errorThreshold: 0);
+
+            Assert.AreEqual(3, detail.errorDelta);
+            Assert.IsTrue(detail.regressed);
+        }
+
+        [Test]
+        public void SaveThenLoad_RoundTripsRulesFailed()
+        {
+            var path = Path.Combine(Application.temporaryCachePath, $"baseline-rf-{Guid.NewGuid()}.json");
+            try
+            {
+                var result = new VerifyResult(new List<VerifyIssue>(),
+                    new[] { "shader_analysis" }, 0, rulesFailed: new[] { "shader_analysis" });
+                var original = BaselineStore.CreateFromResult(result, "mobile");
+                BaselineStore.Save(original, path);
+
+                var loaded = BaselineStore.Load(path);
+
+                CollectionAssert.AreEquivalent(new[] { "shader_analysis" }, loaded.rulesFailed);
+                Assert.AreEqual(0, loaded.rules.Count,
+                    "the crashed rule has no entry after the round-trip");
+            }
+            finally
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+
+        // -------------------------------------------------------------------
         // Save / Load — round-trip + schema-version guard
         // -------------------------------------------------------------------
 

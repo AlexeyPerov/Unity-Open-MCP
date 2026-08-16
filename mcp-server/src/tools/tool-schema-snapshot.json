@@ -659,7 +659,7 @@
     }
   },
   "unity_open_mcp_scan_all": {
-    "description": "Full project scan using all ported verify rules. Runs in batch mode (headless Unity) — no open Editor required. Returns severity counts, per-rule summaries, timing, and issue details. exitCode 0 = pass, 1 = issues above fail_on_severity threshold.",
+    "description": "Full project scan using all ported verify rules. Runs in batch mode (headless Unity) — no open Editor required. Returns severity counts, per-rule summaries, timing, and issue details. exitCode 0 = pass, 1 = issues above fail_on_severity threshold or any verify rule threw (rulesFailed lists them — the scan is incomplete, not clean).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -692,7 +692,7 @@
     }
   },
   "unity_open_mcp_baseline_create": {
-    "description": "Run full scan and save a baseline JSON file (schema v1) for regression tracking. Baseline includes schemaVersion, platformProfile, generatedAt, severity summary, and per-rule issue keys.",
+    "description": "Run full scan and save a baseline JSON file (schema v1) for regression tracking. Baseline includes schemaVersion, platformProfile, generatedAt, severity summary, per-rule issue keys, and rulesFailed (rules that threw get no entry — a non-empty list means the baseline is partial and exitCode is 1).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -714,7 +714,7 @@
     }
   },
   "unity_open_mcp_regression_check": {
-    "description": "Compare current full scan against a baseline file. Returns exitCode 1 when the error count increase exceeds regression_threshold (global) or any per-category threshold, or when the baseline is missing/invalid. per_category_thresholds maps a ruleId to its max tolerated error-count increase; rules absent from the map fall back to regression_threshold. Emits a compact regression summary (with optional per-rule breakdown) suitable for CI logs.",
+    "description": "Compare current full scan against a baseline file. Returns exitCode 1 when the error count increase exceeds regression_threshold (global) or any per-category threshold, when the baseline is missing/invalid, or when any verify rule threw (rulesFailed — the scan is incomplete and the verdict covers only rules that ran clean on both sides). per_category_thresholds maps a ruleId to its max tolerated error-count increase; rules absent from the map fall back to regression_threshold. Emits a compact regression summary (with optional per-rule breakdown) suitable for CI logs.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

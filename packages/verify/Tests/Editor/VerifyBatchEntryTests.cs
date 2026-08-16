@@ -289,6 +289,24 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         // -------------------------------------------------------------------
+        // Exit-code resolution: scan incompleteness fails like a verdict.
+        // The three runners share ResolveExitCode so "a rule threw" can never
+        // read as "clean" / "no regression" through a passing exit code.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public static void ResolveExitCode_IncompleteScan_FailsEvenWithCleanVerdict()
+        {
+            Assert.AreEqual(VerifyBatchEntry.ExitPass, VerifyBatchEntry.ResolveExitCode(false, false),
+                "clean verdict + complete scan passes");
+            Assert.AreEqual(VerifyBatchEntry.ExitFail, VerifyBatchEntry.ResolveExitCode(true, false),
+                "verdict failure fails");
+            Assert.AreEqual(VerifyBatchEntry.ExitFail, VerifyBatchEntry.ResolveExitCode(false, true),
+                "a scan with crashed rules must not exit 0 — its issues list is incomplete");
+            Assert.AreEqual(VerifyBatchEntry.ExitFail, VerifyBatchEntry.ResolveExitCode(true, true));
+        }
+
+        // -------------------------------------------------------------------
         // Whole-project scope expansion (V1)
         //
         // The three batch runners (RunScanAll / RunBaselineCreate /

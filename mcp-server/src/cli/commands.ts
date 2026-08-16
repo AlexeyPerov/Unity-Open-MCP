@@ -723,15 +723,21 @@ export async function runVerifyCommand(
   const counts = extractSeverityCounts(body);
   const threshold = severityThreshold(opts.failOnSeverity);
   const unreachable = isUnreachableResult(body, isError);
+  // An incomplete scan (rules that threw) must fail the CI gate like a
+  // verdict failure — its issue list is silently missing those rules'
+  // findings, so "no issues found" cannot be read as "clean".
+  const scanIncomplete = isScanIncomplete(body);
   let exitCode: number = isError
     ? (isTimeoutError(body) ? EXIT.TIMEOUT : EXIT.ERRORS)
     : classifyBySeverity(counts, threshold);
+  if (!isError && scanIncomplete) exitCode = EXIT.ERRORS;
   exitCode = withTimeout(exitCode, unreachable);
 
   const json = {
     command: "verify",
     tool: toolName,
     isError,
+    scanIncomplete,
     result: body,
     severityCounts: counts,
     exitLevel: exitCodeToLevel(exitCode),
@@ -876,8 +882,11 @@ export async function runBaselineCommand(
   const body = extractResultBody(result);
   const isError = result.isError === true;
   const unreachable = isUnreachableResult(body, isError);
+  // A baseline captured with crashed rules is partial (rulesFailed names the
+  // rules with no entry) — CI must not adopt it as green through exit 0.
+  const scanIncomplete = isScanIncomplete(body);
   const exitCode = withTimeout(
-    isError ? EXIT.ERRORS : EXIT.SUCCESS,
+    isError || scanIncomplete ? EXIT.ERRORS : EXIT.SUCCESS,
     unreachable,
   );
 
@@ -886,6 +895,7 @@ export async function runBaselineCommand(
     subcommand: opts.subcommand,
     tool: toolName,
     isError,
+    scanIncomplete,
     result: body,
     exitLevel: exitCodeToLevel(exitCode),
   };
@@ -963,11 +973,14 @@ export async function runRegressionCommand(
   const unreachable = isUnreachableResult(body, isError);
 
   // The regression tool returns regressed=true when the error-count increase
-  // exceeded the threshold. A regression → ERRORS exit code.
+  // exceeded the threshold. A regression → ERRORS exit code. An incomplete
+  // scan (rules that threw on either side of the comparison) fails the same
+  // way — the verdict covers only the rules that ran clean on both sides.
   const regressed = isRegressed(body);
+  const scanIncomplete = isScanIncomplete(body);
   let exitCode: number = isError
     ? (isTimeoutError(body) ? EXIT.TIMEOUT : EXIT.ERRORS)
-    : regressed
+    : regressed || scanIncomplete
       ? EXIT.ERRORS
       : EXIT.SUCCESS;
   exitCode = withTimeout(exitCode, unreachable);
@@ -978,6 +991,7 @@ export async function runRegressionCommand(
     tool: toolName,
     isError,
     regressed,
+    scanIncomplete,
     result: body,
     exitLevel: exitCodeToLevel(exitCode),
   };
@@ -992,7 +1006,24 @@ export async function runRegressionCommand(
 
 function isRegressed(body: unknown): boolean {
   if (!body || typeof body !== "object") return false;
-  return (body as { regressed?: boolean }).regressed === true;
+  const b = body as { regressed?: unknown; regression?: { regressed?: unknown } | null };
+  // Top-level `regressed` is the legacy/flat shape; the real batch body nests
+  // the verdict under `regression.regressed` (RegressionDetail). Check both.
+  return b.regressed === true || b.regression?.regressed === true;
+}
+
+/**
+ * Scan-incompleteness signal from a verify-family tool body: rules that threw
+ * during the scan. Bridge live results carry `rulesFailed` + `scanIncomplete`;
+ * batch results carry `rulesFailed`. An incomplete scan must fail the CI gate
+ * like a verdict failure — its issue list is silently missing those rules'
+ * findings.
+ */
+function isScanIncomplete(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const b = body as { scanIncomplete?: unknown; rulesFailed?: unknown };
+  if (b.scanIncomplete === true) return true;
+  return Array.isArray(b.rulesFailed) && b.rulesFailed.length > 0;
 }
 
 function regressionError(message: string): CliCommandResult {

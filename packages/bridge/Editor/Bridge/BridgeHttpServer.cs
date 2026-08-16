@@ -1156,21 +1156,23 @@ namespace UnityOpenMcpBridge
             // only. Captured entries are attached to the result so
             // BuildGateEnvelope can surface them as the `logs` array.
             int captureStart = LogEntriesReader.StartCapture();
+            // No try/catch around DispatchWithGateCore: the capture is purely
+            // index-based (StartCapture/StopCapture hold no shared window
+            // state — the baseline is the caller-held `captureStart` int), so
+            // an exception leaves nothing open and the fault envelope is
+            // built by the caller. Only the log COLLECTION is best-effort: a
+            // reflection failure while reading optional console entries must
+            // not fault an otherwise-successful dispatch.
+            var result = DispatchWithGateCore(toolName, body, gateMode, pathsHint);
             try
             {
-                var result = DispatchWithGateCore(toolName, body, gateMode, pathsHint);
                 result.Logs = LogEntriesReader.StopCapture(captureStart);
-                return result;
             }
             catch
             {
-                // StopCapture also on the fault path so an exception cannot
-                // leave the capture window open across dispatches (the next
-                // StartCapture would otherwise baseline against a stale start
-                // and attribute unrelated entries to whatever runs next).
-                try { LogEntriesReader.StopCapture(captureStart); } catch { }
-                throw;
+                result.Logs = null;
             }
+            return result;
         }
 
         private static GateDispatchResult DispatchWithGateCore(string toolName, string body, string gateMode, string[] pathsHint)

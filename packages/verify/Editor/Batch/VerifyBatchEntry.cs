@@ -121,7 +121,7 @@ namespace UnityOpenMcpVerify.Batch
             batchResult.outputPath = outputPath;
 
             bool shouldFail = SeverityThreshold.ShouldFail(threshold, result);
-            batchResult.exitCode = shouldFail ? ExitFail : ExitPass;
+            batchResult.exitCode = ResolveExitCode(shouldFail, result.HasFailedRules);
 
             var json = JsonUtility.ToJson(batchResult, true);
 
@@ -169,7 +169,11 @@ namespace UnityOpenMcpVerify.Batch
 
             var batchResult = BuildBatchResult("baseline_create", profile, result, sw.ElapsedMilliseconds);
             batchResult.baselinePath = parsed.baselinePath;
-            batchResult.exitCode = ExitPass;
+            // A baseline captured with crashed rules is PARTIAL: its rulesFailed
+            // names the rules with no entry, and Compare skips those rules.
+            // The file is still written (useful for inspection), but the exit
+            // code must not let CI adopt a partial baseline as green.
+            batchResult.exitCode = ResolveExitCode(verdictFailed: false, scanIncomplete: result.HasFailedRules);
 
             var json = JsonUtility.ToJson(batchResult, true);
             return (batchResult.exitCode, json);
@@ -220,10 +224,23 @@ namespace UnityOpenMcpVerify.Batch
             var batchResult = BuildBatchResult("regression_check", profile, result, sw.ElapsedMilliseconds);
             batchResult.baselinePath = parsed.baselinePath;
             batchResult.regression = regression;
-            batchResult.exitCode = regression.regressed ? ExitFail : ExitPass;
+            batchResult.exitCode = ResolveExitCode(regression.regressed, result.HasFailedRules);
 
             var json = JsonUtility.ToJson(batchResult, true);
             return (batchResult.exitCode, json);
+        }
+
+        // Exit-code resolution shared by the three runners. Two independent
+        // reasons to fail, either suffices:
+        //   1. verdictFailed — the operation's own verdict (threshold trip /
+        //      regression) over the issues that WERE found.
+        //   2. scanIncomplete — a rule threw, so the issues list is missing
+        //      that rule's findings. An incomplete scan cannot certify
+        //      "clean" / "no regression" through the exit code; rulesFailed
+        //      in the JSON names the gap.
+        internal static int ResolveExitCode(bool verdictFailed, bool scanIncomplete)
+        {
+            return verdictFailed || scanIncomplete ? ExitFail : ExitPass;
         }
 
         private static BatchResult BuildBatchResult(

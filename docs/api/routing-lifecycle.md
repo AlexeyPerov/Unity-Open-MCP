@@ -38,7 +38,10 @@ bridge is reachable. For text-serialized assets the implementation may parse
 disk data without contacting the bridge; `_route.route` then reports
 `offline` (matching `_source`) so the two tags never disagree about where the
 payload came from. Binary formats fall back to the live bridge and report
-`_route.route: "live"`.
+`_route.route: "live"`. Error bodies tag their origin the same way: a
+caller-side validation failure reports `_route.route: "local"`, and a failed
+offline-first attempt with the bridge down reports `offline` — never `live`
+for a payload the bridge never produced.
 
 ## Offline coverage
 
