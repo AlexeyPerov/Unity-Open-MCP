@@ -1196,3 +1196,14 @@ export const ALL_TOOLS: Tool[] = [
   ...M31_PLAN3_TOOLS,
   ...INPUTSIM_TOOLS,
 ];
+
+// feedback 2026-08-17 — register the reachable tool-name set with tool-hint so
+// a remediation hint can never name (or prescribe a manage_tools activation
+// call for) a tool that is not actually registered. Pushed here rather than
+// imported by tool-hint.ts to avoid an import cycle: tool definition files
+// (e.g. read-compile-errors.ts) call toolHintReference at module-eval time,
+// which would run before ALL_TOOLS finished initializing if tool-hint pulled
+// it in. Runs after ALL_TOOLS is complete; until then the hint guard is a
+// no-op (covered statically by tool-hint.test.ts).
+import { registerHintableToolNames } from "../tool-hint.js";
+registerHintableToolNames(ALL_TOOLS.map((t) => t.name));

@@ -4,7 +4,13 @@ import { stat } from "node:fs/promises";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import { resolveUnityPath, scannedHubRoots } from "./unity-install-discovery.js";
-import { readInstanceLock, isPidAlive } from "./instance-discovery.js";
+import {
+  readInstanceLock,
+  isPidAlive,
+  classifyInstance,
+  type InstanceLock,
+} from "./instance-discovery.js";
+import { findUnityForProject } from "./running-unity.js";
 import { makeErrorResult } from "./results.js";
 import { VERIFY_JSON_BEGIN, VERIFY_JSON_END } from "./constants.js";
 
@@ -281,6 +287,145 @@ export function classifyBatchFailure(combined: string): string | null {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// feedback 2026-08-17 (editor_instance_locked) — the lock-conflict error used
+// to hard-code compile_check in its message + agentNextSteps no matter which
+// tool was actually called, and it always claimed "a live Unity Editor holds
+// the project lock" even when the Editor was merely BOOTING (a fresh process
+// holds Temp/UnityLockfile before its bridge listener starts — the exact state
+// that also makes the live route unavailable). The helpers below build the
+// error from (a) the invoked tool name and (b) what is actually observable
+// about the Editor, split into three variants:
+//
+//   - listener_up     — instance lock fresh (healthy/reloading): the bridge
+//                       should be reachable; retry the live route.
+//   - listener_down   — a Unity process is alive but the lock is stale or
+//                       absent (booting, Safe Mode, failed bridge recompile):
+//                       the remedy is to WAIT and retry, which the old text
+//                       never offered.
+//   - no_editor_found — no live Unity process matches this project (likely a
+//                       stale Temp/UnityLockfile from a crashed session).
+// ---------------------------------------------------------------------------
+
+export interface EditorLockDiagnosis {
+  variant: "listener_up" | "listener_down" | "no_editor_found";
+  /** Short human-readable observation, e.g. "instance lock fresh (pid 123)". */
+  detail: string;
+}
+
+/**
+ * Observe the Editor state behind a project-lock conflict. Pure reads (lock
+ * file + PID liveness; process scan only when the lock is unusable) — never
+ * throws, never spawns Unity. `listener_up` vs `listener_down` distinguishes
+ * "the live bridge should answer" from "the Editor holds the lock but its
+ * listener is not up yet".
+ */
+export function diagnoseEditorLock(projectPath: string): EditorLockDiagnosis {
+  const lock: InstanceLock | null = projectPath
+    ? readInstanceLock(projectPath)
+    : null;
+  if (lock && isPidAlive(lock.pid)) {
+    const classification = classifyInstance(lock);
+    if (classification === "dead_bridge") {
+      return {
+        variant: "listener_down",
+        detail: `instance lock stale (pid ${lock.pid} alive, heartbeat not advancing — booting, Safe Mode, or failed bridge recompile)`,
+      };
+    }
+    return {
+      variant: "listener_up",
+      detail: `instance lock fresh (pid ${lock.pid}, state ${lock.state})`,
+    };
+  }
+  // No usable lock. A live Unity process for this project without a lock is
+  // the booting / Safe-Mode shape (the bridge writes its lock only after the
+  // listener binds — cold Safe Mode never writes one at all).
+  const process = findUnityForProject(projectPath);
+  if (process) {
+    return {
+      variant: "listener_down",
+      detail: `Unity process ${process.pid} matches the project but no live bridge lock exists (booting before the bridge starts, or Safe Mode)`,
+    };
+  }
+  return {
+    variant: "no_editor_found",
+    detail: "no live Unity process for this project found",
+  };
+}
+
+/**
+ * Message for the `editor_instance_locked` error, naming the tool that was
+ * actually called (feedback 2026-08-17: the canned text said "the headless
+ * compile_check spawn" even for execute_menu).
+ */
+export function editorLockedMessage(
+  toolName: string,
+  diagnosis: EditorLockDiagnosis,
+): string {
+  switch (diagnosis.variant) {
+    case "listener_up":
+      return (
+        `A live Unity Editor holds the project lock, so the headless ${toolName} ` +
+        "spawn cannot open the project (Unity allows one Editor per project). " +
+        `(${diagnosis.detail}.) The Editor's bridge lock is fresh, so the live ` +
+        "bridge should be reachable — retry via the live route, or call " +
+        "unity_open_mcp_bridge_status to see why it is not answering."
+      );
+    case "listener_down":
+      return (
+        `A Unity Editor process holds the project lock but its bridge listener ` +
+        `is not up yet, so the headless ${toolName} spawn could not open the ` +
+        "project and the live route was unavailable too. " +
+        `(${diagnosis.detail}.) This is usually a booting Editor — wait for it ` +
+        "to finish starting, then retry; the call takes the live route once " +
+        "the listener is up."
+      );
+    default:
+      return (
+        `The headless ${toolName} spawn was refused with Unity's ` +
+        "one-Editor-per-project lock signature, but no live Unity process for " +
+        `this project was found (${diagnosis.detail}). The on-disk ` +
+        "Temp/UnityLockfile is likely stale from a crashed session."
+      );
+  }
+}
+
+/**
+ * Structured recovery hints for {@link editorLockedMessage}, one per variant.
+ * compile_check additionally keeps the read_compile_errors alternative (an
+ * open Editor makes a headless compile impossible, but the log is readable
+ * offline).
+ */
+export function editorLockedNextSteps(
+  toolName: string,
+  diagnosis: EditorLockDiagnosis,
+): string[] {
+  switch (diagnosis.variant) {
+    case "listener_up":
+      return [
+        `A live Unity Editor holds the project lock, so the headless ${toolName} spawn cannot open the project (one Editor per project).`,
+        `The instance lock is fresh — the live bridge should be reachable. Call unity_open_mcp_ping or unity_open_mcp_bridge_status, then retry ${toolName} on the live route.`,
+        ...(toolName === "unity_open_mcp_compile_check"
+          ? [
+              "To verify compile state without closing the Editor, call unity_open_mcp_read_compile_errors (reads Editor.log offline; if its logSource is a prev_log_* value, the log was rotated — prefer the live bridge's compile signal).",
+            ]
+          : []),
+        `To run a true headless ${toolName}, close the live Editor first.`,
+      ];
+    case "listener_down":
+      return [
+        `A Unity Editor process holds the project but its bridge listener is not up yet (${diagnosis.detail}) — that is why the live route was unavailable and the headless ${toolName} spawn hit the project lock.`,
+        "Wait for the Editor to finish booting (typically well under a minute) and retry — the call takes the live route once the listener is up.",
+        "If it does not come up, call unity_open_mcp_bridge_status and unity_open_mcp_read_compile_errors: a failed bridge recompile shows there, and the remedy is to fix the C# errors, not to retry the spawn.",
+      ];
+    default:
+      return [
+        `The ${toolName} spawn was refused with Unity's project-lock signature, but no live Unity process for this project was found — Temp/UnityLockfile is likely stale from a crashed session.`,
+        "Verify no Unity instance holds the project (running processes), remove the stale <project>/Temp/UnityLockfile if none does, and retry.",
+      ];
+  }
+}
+
 // Capture the offending package id(s) from a Package Manager resolution
 // failure tail. Unity prints reverse-DNS package identifiers on lines like:
 //   [Package Manager] com.unity.modules.physicscore2d is not a valid package
@@ -464,24 +609,30 @@ export class BatchSpawn implements Router {
       try {
         const lock = readInstanceLock(this.projectPath);
         if (lock && lock.pid && isPidAlive(lock.pid)) {
+          // feedback 2026-08-17 — parameterize by the invoked tool and split
+          // "live bridge should be up" from "Editor holds the lock but its
+          // listener is not (booting / Safe Mode / failed recompile)". The old
+          // canned text always described a compile_check spawn against a fully
+          // live Editor, which misdirected agents calling any other tool.
+          const diagnosis = diagnoseEditorLock(this.projectPath);
+          const message =
+            "A live Unity Editor holds the project lock, so the headless " +
+            `spawn for '${toolName}' was not attempted (Unity allows one ` +
+            "Editor per project, and the failed spawn would rotate Editor.log " +
+            "and break read_compile_errors). " +
+            editorLockedMessage(toolName, diagnosis);
           return makeErrorResult({
             code: "editor_instance_locked",
-            message:
-              "A live Unity Editor holds the project lock, so the headless " +
-              "spawn was not attempted (Unity allows one Editor per project, " +
-              "and the failed spawn would rotate Editor.log and break " +
-              "read_compile_errors).",
+            message,
             detail: {
               error: {
                 code: "editor_instance_locked",
                 message:
-                  "A live Unity Editor (pid " + lock.pid + ") holds the project lock.",
+                  "A live Unity Editor (pid " + lock.pid + ") holds the project lock. " +
+                  diagnosis.detail,
+                lockVariant: diagnosis.variant,
               },
-              agentNextSteps: [
-                "A live Unity Editor holds the project lock, so the headless spawn cannot open the project (one Editor per project).",
-                "To verify compile state without closing the Editor, call unity_open_mcp_read_compile_errors (reads Editor.log offline; if its logSource is a prev_log_* value, the log was rotated — prefer the live bridge's compile signal).",
-                "Or close the live Editor and retry the batch spawn.",
-              ],
+              agentNextSteps: editorLockedNextSteps(toolName, diagnosis),
             },
           });
         }
@@ -512,7 +663,7 @@ export class BatchSpawn implements Router {
 
     let parsed: ParsedBatchResult;
     try {
-      parsed = await this.spawnUnity(operation, args, executeMethod, argBuilder);
+      parsed = await this.spawnUnity(toolName, operation, args, executeMethod, argBuilder);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // M22 Plan 3 / T-fix-2 — a classified failure (e.g.
@@ -619,6 +770,7 @@ export class BatchSpawn implements Router {
   }
 
   private spawnUnity(
+    toolName: string,
     operation: string,
     args: Record<string, unknown>,
     executeMethod: string,
@@ -731,23 +883,19 @@ export class BatchSpawn implements Router {
           // recognizable signature when a live Editor already holds the
           // project; emit editor_instance_locked so an agent can act (close
           // the live Editor or use live introspection) instead of seeing an
-          // opaque batch_spawn_failed.
+          // opaque batch_spawn_failed. feedback 2026-08-17 — the message and
+          // agentNextSteps name the invoked tool (not a canned compile_check)
+          // and split "listener should be up" from "Editor booting / Safe
+          // Mode / no Editor at all".
           const classified = classifyBatchFailure(combined);
           if (classified === "editor_instance_locked") {
+            const diagnosis = this.projectPath
+              ? diagnoseEditorLock(this.projectPath)
+              : { variant: "no_editor_found" as const, detail: "project path unknown" };
             reject(new BatchClassificationError(
               "editor_instance_locked",
-              "A live Unity Editor holds the project lock, so the headless " +
-                "compile_check spawn could not open the project. Unity allows " +
-                "only one Editor per project. Either close the live Editor and " +
-                "retry compile_check, or verify compile state via the live " +
-                "bridge instead (execute_csharp + Library/ScriptAssemblies DLL " +
-                "mtime check, or read_compile_errors).",
-              [
-                "A live Unity Editor holds the project lock, so the headless compile_check spawn cannot open the project (one Editor per project).",
-                "To verify compile state without closing the Editor, call unity_open_mcp_read_compile_errors (reads Editor.log offline).",
-                "To confirm a specific local package recompiled, call unity_open_mcp_reimport_package on the package and compare dllMtimeBefore/dllMtimeAfter.",
-                "To run a true headless compile_check, close the live Editor first.",
-              ],
+              editorLockedMessage(toolName, diagnosis),
+              editorLockedNextSteps(toolName, diagnosis),
             ));
             return;
           }
@@ -790,18 +938,32 @@ export class BatchSpawn implements Router {
           // Final generic fallback. Two cases reach here with no markers:
           //   - exit 0: Unity exited cleanly (likely a healthy compile) but
           //     emitted no markers — the async finalize path (BridgeBatchEntry
-          //     → EditorApplication.update) did not fire. Point the agent at
-          //     read_compile_errors so it can confirm the clean state instead
-          //     of trusting an opaque failure. See specs/feedback.md (case 2).
-          //   - non-zero: an unclassified spawn failure.
+          //     → EditorApplication.update) did not fire. feedback 2026-08-15
+          //     recurrence: this used to surface as the generic
+          //     batch_spawn_failed code, so agents (and MCP hosts keying on
+          //     isError) read a healthy compile as a spawn failure. It now
+          //     carries the distinct `markers_missing` code with the
+          //     confirm-via-read_compile_errors guidance.
+          //   - non-zero: an unclassified spawn failure (stays
+          //     batch_spawn_failed).
+          if (exitCode === 0) {
+            reject(new BatchClassificationError(
+              "markers_missing",
+              `Batch output did not contain JSON markers. Exit code: 0.` +
+                (tail ? ` Last output: ${tail}` : "") +
+                ` Unity exited cleanly but emitted no markers after '${toolName}' ` +
+                "(the async finalize path did not run) — the compile likely " +
+                "succeeded. Call unity_open_mcp_read_compile_errors to confirm.",
+              [
+                `The ${toolName} batch Unity exited cleanly (exit 0) but emitted no JSON markers — the async finalize path did not run. This is usually a healthy compile with a missing report, not a spawn failure.`,
+                "Call unity_open_mcp_read_compile_errors to confirm errorCount is 0 before treating the compile as passed.",
+              ],
+            ));
+            return;
+          }
           reject(new Error(
             `Batch output did not contain JSON markers. Exit code: ${exitCode}.` +
-              (tail ? ` Last output: ${tail}` : "") +
-              (exitCode === 0
-                ? " Unity exited cleanly but emitted no markers (the async " +
-                  "finalize path did not run) — the compile likely succeeded. " +
-                  "Call unity_open_mcp_read_compile_errors to confirm."
-                : ""),
+              (tail ? ` Last output: ${tail}` : ""),
           ));
           return;
         }

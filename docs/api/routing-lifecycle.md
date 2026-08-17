@@ -156,12 +156,13 @@ commands and the hard maximum is 100.
 | `bridge_compile_failed` | Unity is alive but the bridge assembly did not reload, often Safe Mode or a compile failure. | Call `read_compile_errors`; restart Unity for editor resource exhaustion. |
 | `main_thread_blocked` | A modal or long editor operation prevented dispatch. | Dismiss the modal, check dirty scenes, then re-probe; do not only raise the timeout. |
 | `compile_timeout` | Compile wait exceeded. | Wait and re-probe; switch to offline compile errors if the bridge is dead. |
-| `editor_instance_locked` | Headless Unity cannot open a project held by the Editor. | Close the Editor or use the live/offline alternative named in `agentNextSteps`. |
+| `editor_instance_locked` | Headless Unity cannot open a project held by the Editor. | Read the message's diagnosis: a fresh instance lock means the live bridge should be reachable (retry the live route); a live process with no listener means a booting Editor — wait and retry; no matching process means a stale `Temp/UnityLockfile`. The error names the invoked tool, and `agentNextSteps` carries the variant-specific remedy. |
 | `unity_not_discovered` | No Unity executable was found. | Install under a standard Hub path or set `UNITY_PATH`. |
 | `unity_spawn_refused` | The configured Unity binary could not execute. | Correct `UNITY_PATH`; do not retry unchanged. |
 | `restart_signature_absent` | `restart_editor` was asked to kill but the `editor_fd_exhaustion` signature is NOT in the recent Editor.log tail. | Re-run `read_compile_errors`; do not kill the Editor for a fixable compile failure. A call with `confirm` absent/false is NOT an error — it returns a structured dry-run preview the agent can inspect before committing. |
 | `unity_process_not_found` | `restart_editor` / `resource_pressure` could not resolve a live Unity PID for this project. | Open Unity for this project (with `-projectPath`), or pass an explicit `pid` to `resource_pressure`. |
-| `batch_spawn_failed` | Headless Unity produced no classifiable result. | Inspect compile errors, package state, project lock, and path. |
+| `markers_missing` | Headless Unity exited **cleanly** (exit 0) but emitted no JSON report — the async finalize path did not run; the compile likely succeeded. | Confirm with `read_compile_errors` (expect `errorCount: 0`) instead of treating the call as a spawn failure. |
+| `batch_spawn_failed` | Headless Unity produced no classifiable result (non-zero exit, no markers). | Inspect compile errors, package state, project lock, and path. |
 | `scene_dirty` | A disruptive mutation was refused because a scene has unsaved work. | Save/discard first or deliberately opt into the documented risk. |
 | `bridge_response_unparsable` | A substantial bridge response could not be parsed. | Do not trust partial output; check bridge health before retrying. |
 
@@ -219,6 +220,20 @@ detail }` block and a non-null `recoveryHint`:
 `classification` keeps mirroring the instance lock verbatim
 (`healthy | reloading | dead_bridge | gone`); the wedge is carried by the tool's
 own `status` token plus the `wedged` block.
+
+### `ping` provenance
+
+A successful `unity_open_mcp_ping` answer is always the result of a fresh HTTP
+probe, never a lock-derived guess — and the response says so: `source:
+"probe"` plus `asOf` (when the probe was answered), so an agent can re-probe
+before acting on a possibly-seconds-stale `connected: true`. The batch-route
+fallback ping (live route unavailable, no probe possible) reports
+`source: "unprobed"` with `connected: false`. When the probe answers but the
+project's instance lock is `gone`, the response additionally carries a
+`lockCheck: { classification, note }` warning — the answering listener may be
+a dying Editor mid-shutdown or a foreign process on the port, so
+`connected: true` plus `bridge_status: "stopped"` stops reading as a
+contradiction: do not route live mutations off that ping alone.
 
 Bridge start/stop tools are not exposed. Start/stop currently exists only in
 the Unity toolbar, and stopping through the same HTTP listener would risk

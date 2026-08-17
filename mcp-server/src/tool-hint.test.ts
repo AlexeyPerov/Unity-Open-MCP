@@ -14,13 +14,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile, utimes } from "node:fs/promises";
+import { readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { ALL_TOOLS } from "./tools/index.js";
 import { toolHintReference, isDefaultVisible, activateInstruction } from "./tool-hint.js";
 import { detectStaleAssembly, detectStaleLog } from "./unity-log.js";
-import { groupFor, DEFAULT_ENABLED_GROUPS } from "./capabilities/tool-groups.js";
+import { groupFor, DEFAULT_ENABLED_GROUPS, toolGroupAssignment } from "./capabilities/tool-groups.js";
 
 // Tools that live outside the default session surface and are named in agent-
 // facing prose. Any string that mentions one of these MUST also carry the
@@ -175,4 +177,94 @@ test("no emitted hint names a non-default tool without manage_tools", async () =
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+// --- feedback 2026-08-17 — a hint must not name an unregistered tool --------
+//
+// The reported case: the remediation hint named recompile_scripts, the agent
+// activated the typed-editor group, and the tool was still absent from its
+// build. These tests pin (a) that the named tools ARE registered, (b) that
+// EVERY group-assigned name is registered (the group table is what
+// toolHintReference derives activation calls from), and (c) that every
+// toolHintReference(...) call site in the source names a registered tool.
+
+test("the tools named in hints are actually registered", () => {
+  const registered = new Set(ALL_TOOLS.map((t) => t.name));
+  for (const named of NON_DEFAULT_TOOLS_NAMED_IN_HINTS) {
+    assert.ok(
+      registered.has(named),
+      `${named} is named in agent-facing hints but is NOT registered in ALL_TOOLS — ` +
+        "a hint must never name a tool the server cannot serve",
+    );
+  }
+});
+
+test("every group-assigned tool name is registered (hint reachability parity)", () => {
+  // toolHintReference appends an activation call for any non-default-GROUP
+  // name. If the group table listed a name that is not a registered tool,
+  // that hint would prescribe activating a group to reach a tool that does
+  // not exist. (At runtime tool-hint.ts renders such names bare + warns; this
+  // pins the invariant so the warning path stays unreachable.)
+  const registered = new Set(ALL_TOOLS.map((t) => t.name));
+  const unregistered = Object.keys(toolGroupAssignment()).filter(
+    (name) => !registered.has(name),
+  );
+  assert.deepEqual(
+    unregistered,
+    [],
+    `group table lists unregistered tools: ${unregistered.join(", ")}`,
+  );
+});
+
+test("every toolHintReference call site names a registered tool", () => {
+  // Source-level scan: find every toolHintReference("<name>") literal under
+  // src/ and assert the name is registered. Catches a future call site (or a
+  // tool rename) that turns a hint into a dead reference even when the group
+  // table still resolves it.
+  const here = dirname(fileURLToPath(import.meta.url));
+  // Compiled tests run from dist-test/; the source tree is <repo>/src.
+  let dir = here;
+  let srcDir: string | null = null;
+  for (let i = 0; i < 6; i++) {
+    const candidate = join(dir, "src");
+    try {
+      readdirSync(candidate);
+      srcDir = candidate;
+      break;
+    } catch {
+      dir = dirname(dir);
+    }
+  }
+  assert.ok(srcDir, "could not locate the src/ tree from the test location");
+
+  const registered = new Set(ALL_TOOLS.map((t) => t.name));
+  const referenced = new Map<string, string[]>(); // name → call-site files
+  const visit = (d: string): void => {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      const full = join(d, entry.name);
+      if (entry.isDirectory()) {
+        visit(full);
+      } else if (entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) {
+        const text = readFileSync(full, "utf-8");
+        const re = /toolHintReference\(\s*"([^"]+)"/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(text)) !== null) {
+          const sites = referenced.get(m[1]) ?? [];
+          sites.push(entry.name);
+          referenced.set(m[1], sites);
+        }
+      }
+    }
+  };
+  visit(srcDir);
+  assert.ok(referenced.size > 0, "scan must find the known call sites");
+
+  const unregistered = [...referenced.keys()].filter((n) => !registered.has(n));
+  assert.deepEqual(
+    unregistered,
+    [],
+    `toolHintReference call sites name unregistered tools: ${unregistered
+      .map((n) => `${n} (${referenced.get(n)!.join(", ")})`)
+      .join("; ")}`,
+  );
 });

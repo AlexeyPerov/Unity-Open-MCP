@@ -850,6 +850,11 @@ export class ToolRouter implements Router {
             mode: "batch",
             compiling: false,
             isPlaying: false,
+            // feedback 2026-08-17 — provenance marker distinguishing this
+            // synthesized fallback (no probe was possible; the live route was
+            // unavailable) from the live route's verified probe answer
+            // (source:"probe" + asOf).
+            source: "unprobed",
             _route: {
               route: "batch",
               fallbackReason: "live_unavailable",
@@ -1050,7 +1055,17 @@ export class ToolRouter implements Router {
     const errorsMayNotApply =
       health.unhealthy &&
       (!!staleLog || authorshipCheck.versionMismatch);
-    const status = errorsMayNotApply ? "stale_log" : logVerdict;
+    // feedback 2026-08-17 — a clean bill of health read from the ROTATED log
+    // is not a clean bill of health. When logSource is a prev_log_* value the
+    // resolver fell back to Editor-prev.log while a live Editor writes a
+    // different file; an agent reading only `status` got a false green. A
+    // no-errors read from a rotated log is explicitly `indeterminate`.
+    const prevLogRead = resolvedLog.reason.startsWith("prev_log_");
+    const status = errorsMayNotApply
+      ? "stale_log"
+      : logVerdict === "no_errors_found" && prevLogRead
+        ? "indeterminate"
+        : logVerdict;
 
     // specs/feedback.md 2026-08-12 — partial-compile signal. Unity compiles
     // assemblies in dependency order; when an early assembly fails the pipeline
@@ -1072,6 +1087,55 @@ export class ToolRouter implements Router {
       ? countAssembliesWithErrors(errors.map((e) => e.file), this.projectPath)
       : 0;
 
+    // Headline assembly. Precedence (most severe first):
+    //   1. errorsMayNotApply — stale log / version mismatch: the errors may
+    //      not apply at all (feedback-fable-04-08 §4).
+    //   2. errorsPredateEdits — errors + a stale assembly: the error block
+    //      was written by a compile that predates the on-disk edits (no
+    //      compile has COMPLETED since: every built DLL is older than a cited
+    //      source). The log-mtime staleness heuristic cannot see this — asset
+    //      imports keep appending to Editor.log, so the FILE is fresh while
+    //      the error BLOCK inside it is old. Say so in the headline rather
+    //      than letting the agent re-read code it has already fixed
+    //      (specs/feedback.md 2026-08-14).
+    //   3. feedback 2026-08-17 — errors + staleAssembly WITHOUT the
+    //      cited-files proof: the whole-Assets scan still shows a source
+    //      newer than the newest built DLL, so the error block may come from
+    //      an earlier compile. The 2026-08-14 fix covered only the
+    //      errorsPredateEdits shape; this extends the headline caveat to the
+    //      staleAssembly shape (the field report's 12 stale CS errors had
+    //      staleAssembly:true but the headline stated them as fact).
+    //   4. indeterminate (feedback 2026-08-17) — no errors, but read from the
+    //      ROTATED log: not a verified clean bill of health.
+    //   5. the plain health headline.
+    const headline: string = errorsMayNotApply
+      ? `${errors.length} error(s) in Editor.log, but the log appears ` +
+        "STALE or authored by a different Unity — these errors may NOT " +
+        "apply to the running editor. Do NOT act on them until a genuine " +
+        `recompile (${toolHintReference("unity_open_mcp_recompile_scripts")}) ` +
+        "confirms them."
+      : errorsPredateEdits
+        ? `${health.headline} NOTE: these errors may PREDATE your edits — ` +
+          `${errorsPredateEdits.files.length} cited source file(s) are newer ` +
+          "than the newest built assembly, so no compile has completed since " +
+          "you changed them. Force a recompile " +
+          `(${toolHintReference("unity_open_mcp_recompile_scripts")}) and ` +
+          "re-read before acting on them."
+        : hasErrors && staleAsm.staleAssembly
+          ? `${health.headline} NOTE: the error block may PREDATE the current ` +
+            `sources — ${staleAsm.newerSources.length} Assets/**/*.cs source(s) ` +
+            "are newer than the newest built assembly, so these errors may come " +
+            "from an earlier compile. Force a recompile " +
+            `(${toolHintReference("unity_open_mcp_recompile_scripts")}) and ` +
+            "re-read before acting on them."
+          : status === "indeterminate"
+            ? "No errors found, but this is NOT a verified clean bill of " +
+              `health: the read came from the ROTATED log (${resolvedLog.reason === "prev_log_live_editor" ? "Editor-prev.log chosen because a live editor holds the project" : "Editor-prev.log fallback"}) ` +
+              "while a live Editor may be writing a different log. Confirm via " +
+              "the live bridge (unity_open_mcp_editor_status / a live tool " +
+              "probe) or re-read after the Editor settles."
+            : health.headline;
+
     return sourceResult(
       {
         status,
@@ -1082,29 +1146,11 @@ export class ToolRouter implements Router {
         // log verdict is preserved in `logVerdict` for callers that want the
         // literal signal regardless of freshness.
         unhealthy: errorsMayNotApply ? false : health.unhealthy,
-        headline: errorsMayNotApply
-          ? `${errors.length} error(s) in Editor.log, but the log appears ` +
-            "STALE or authored by a different Unity — these errors may NOT " +
-            "apply to the running editor. Do NOT act on them until a genuine " +
-            `recompile (${toolHintReference("unity_open_mcp_recompile_scripts")}) ` +
-            "confirms them."
-          : // specs/feedback.md 2026-08-14 — errors + a stale assembly means
-            // the error block was written by a compile that predates the
-            // on-disk edits (no compile has COMPLETED since: every built DLL
-            // is older than a cited source). The log-mtime staleness heuristic
-            // cannot see this — asset imports keep appending to Editor.log, so
-            // the FILE is fresh while the error BLOCK inside it is old. Say so
-            // in the headline rather than letting the agent re-read code it
-            // has already fixed.
-            errorsPredateEdits
-            ? `${health.headline} NOTE: these errors may PREDATE your edits — ` +
-              `${errorsPredateEdits.files.length} cited source file(s) are newer ` +
-              "than the newest built assembly, so no compile has completed since " +
-              "you changed them. Force a recompile " +
-              `(${toolHintReference("unity_open_mcp_recompile_scripts")}) and ` +
-              "re-read before acting on them."
-            : health.headline,
-        ...(errorsMayNotApply ? { logVerdict } : {}),
+        headline,
+        // Raw verdict preserved whenever the top-level status was rewritten
+        // (stale_log downgrade OR the indeterminate prev-log case), so callers
+        // can still read what the log literally said.
+        ...(errorsMayNotApply || status === "indeterminate" ? { logVerdict } : {}),
         errorCount: errors.length,
         errors,
         // specs/feedback.md 2026-08-12 — present only when there are errors AND

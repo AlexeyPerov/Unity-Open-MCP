@@ -31,6 +31,9 @@ const COMPILE_CHECK_HINT = toolHintReference("unity_open_mcp_compile_check");
 //
 // Response fields:
 //   - status: "compile_failed" | "project_unhealthy" | "no_errors_found"
+//             | "stale_log" (errors may not apply — stale log / version
+//             mismatch) | "indeterminate" (no errors, but read from the
+//             ROTATED prev_log_* — not a verified clean bill of health)
 //   - unhealthy: true when compiler errors OR issues are present
 //   - headline: one-line triage summary (empty when healthy)
 //   - errors[]: structured CSxxxx diagnostics (file/line/code/message)
@@ -81,7 +84,15 @@ export const readCompileErrors = makeTool(
     "`staleAssembly: true`, at least one Assets/**/*.cs " +
     "source is newer than the newest Library/ScriptAssemblies/*.dll — the " +
     "running assembly predates the latest source, so a no_errors_found signal " +
-    "CANNOT be trusted until the assembly is rebuilt. All three call for the " +
+    "CANNOT be trusted until the assembly is rebuilt. When that flag is set " +
+    "WITH errors, the `headline` itself says the error block may predate the " +
+    "current sources (not just the separate staleAssemblyHint field). When " +
+    "`logSource` is a `prev_log_*` value (the read came from the ROTATED " +
+    "Editor-prev.log while a live Editor may be writing a different log) and " +
+    "no errors were found, `status` is `indeterminate`, NOT " +
+    "`no_errors_found` — a clean read from the rotated log is not a verified " +
+    "clean bill of health; confirm via the live bridge or re-read after the " +
+    "Editor settles. All staleness signals call for the " +
     "same next step (one recommended path per situation, matching the runtime " +
     `hints): call ${RECOMPILE_SCRIPTS_HINT} for a deterministic ` +
     "force-recompile, then re-read compile errors; with the Editor closed or " +

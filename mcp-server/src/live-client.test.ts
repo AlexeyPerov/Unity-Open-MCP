@@ -450,6 +450,71 @@ test("LiveClient: ping with no lock + live Unity process returns bridge_compile_
   }
 });
 
+// --- feedback 2026-08-17 — ping provenance ----------------------------------
+//
+// Within ~1 minute of an Editor close+relaunch, a ping answered connected:true
+// (the dying Editor's listener still served /ping) while the next call took
+// the batch route and bridge_status reported gone. The answer is now stamped
+// with its provenance (source:"probe" + asOf) and cross-checked against the
+// instance lock so `connected:true` + a gone lock stops reading as a
+// contradiction.
+
+test("LiveClient: ping success carries source 'probe' + asOf, and flags a gone instance lock", async () => {
+  const s = makeSandbox();
+  // Redirect HOME with NO lock planted → classifyInstance is "gone" while the
+  // probe still answers connected:true — the dying-Editor shape.
+  process.env.HOME = s.dir;
+  process.env.USERPROFILE = s.dir;
+  const bridge = await startBridgeStub(idleOkHandler);
+  try {
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      undefined,
+      COLD_SAFE_PROJECT,
+    );
+    const result = await client.route("unity_open_mcp_ping", {});
+    assert.equal(result.isError, false);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.connected, true);
+    assert.equal(body.source, "probe", "ping must state its provenance");
+    assert.ok(
+      !Number.isNaN(Date.parse(body.asOf)),
+      "ping must stamp when the probe was answered",
+    );
+    assert.equal(body.lockCheck?.classification, "gone");
+    assert.ok(
+      (body.lockCheck?.note ?? "").includes("bridge_status"),
+      "the lock mismatch note must point at bridge_status",
+    );
+  } finally {
+    await bridge.close();
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient: ping success with a fresh lock carries no lock mismatch note", async () => {
+  const s = makeSandbox();
+  plantLock(s, COLD_SAFE_PROJECT, process.pid, 0, "idle");
+  const bridge = await startBridgeStub(idleOkHandler);
+  try {
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      undefined,
+      COLD_SAFE_PROJECT,
+    );
+    const result = await client.route("unity_open_mcp_ping", {});
+    assert.equal(result.isError, false);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.source, "probe");
+    assert.equal(body.lockCheck, undefined, "a healthy lock adds no warning");
+  } finally {
+    await bridge.close();
+    disposeSandbox(s);
+  }
+});
+
 test("LiveClient: no lock + no Unity process still returns bridge_offline (genuine offline)", async () => {
   // Regression guard: the cold-Safe-Mode scan must not flip a genuine "Unity
   // is not running" state into bridge_compile_failed.

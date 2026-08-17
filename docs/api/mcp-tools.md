@@ -291,7 +291,14 @@ reload — writes a terminal `test-results-<runId>.json` with
 so a polling agent always sees a final state instead of timing out in silence.
 Unknown parameter keys are rejected with `validation_error` (the bridge
 validates body keys against the declared parameter names, mirroring the MCP
-schema's `additionalProperties: false`).
+schema's `additionalProperties: false`). The four **transport envelope keys**
+— `gate`, `timeout_ms`, `ignore_scene_dirty`, `confirm_bypass` — are exempt:
+the dispatcher consumes them off the raw body for every tool (gate policy,
+queue timeout, scene-dirty guard, deny bypass), so they are valid on any tool
+regardless of its parameter list. Without the exemption the server's
+schema-default injection (`gate: "enforce"`, `timeout_ms: 30000`) made
+registry-dispatched tools with no matching C# parameter (e.g.
+`editor_status`) uncallable with default args.
 
 ### `unity_senses_visual_compare`
 
@@ -377,13 +384,29 @@ The response also carries `staleAssembly: true` when at least one
 `Assets/**/*.cs` source is newer than the newest `Library/ScriptAssemblies/*.dll`
 — the running assembly predates the latest source (Unity's incremental compiler
 no-op'd a recompile), so a `no_errors_found` signal **cannot** be trusted until
-the assembly is rebuilt. Call `unity_open_mcp_recompile_scripts`, then re-read
-compile errors. That tool lives in the non-default `typed-editor` group, so
+the assembly is rebuilt. When that flag is set **with errors**, the `headline`
+itself carries the may-predate caveat (not only the separate
+`staleAssemblyHint` field) — errors parsed from a compile that predates the
+newest on-disk source must not be acted on as fact. Call
+`unity_open_mcp_recompile_scripts`, then re-read compile errors. That tool lives
+in the non-default `typed-editor` group, so
 every hint and description that names it also carries the concrete
 `manage_tools` activation call: the strings come from one helper
 (`tool-hint.ts`) that resolves a tool's group from the registry and appends the
 activation call automatically, and a unit test asserts that no emitted hint or
-tool description names a non-default tool without it.
+tool description names a non-default tool without it. The helper also refuses
+to prescribe an activation call for a name that is not a registered tool (the
+registered name list is pushed to it from `tools/index.ts`, and tests pin
+group-table ↔ registry parity plus every call site), so a hint can no longer
+send an agent to activate a group for a tool that does not exist.
+
+When `logSource` is a `prev_log_*` value (the resolver fell back to the
+ROTATED `Editor-prev.log`) and the read finds no errors, `status` is
+**`indeterminate`**, not `no_errors_found` — a clean read from the rotated log
+is not a verified clean bill of health while a live Editor may be writing a
+different log. The headline says exactly that and points at the live bridge
+(`editor_status` / a live probe) for confirmation; the raw verdict is preserved
+in `logVerdict`.
 
 When the log header was parseable (a short `-batchmode` run usually fits in the
 tail; a long live-editor session usually does not), the response also carries

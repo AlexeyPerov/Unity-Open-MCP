@@ -174,12 +174,27 @@ namespace UnityOpenMcpBridge
                 // The MCP JSON-Schema layer already sets additionalProperties:
                 // false, but direct bridge dispatch (batch_execute body
                 // passthrough) bypasses that validation.
+                //
+                // feedback (2026-08-17, editor_status uncallable) — transport
+                // envelope keys are NOT tool parameters and must be exempt:
+                // the dispatcher itself consumes them off the raw body
+                // (BridgeRequestBody.ExtractGateMode / ExtractTimeoutMs,
+                // SceneDirtyGuard's ignore_scene_dirty, BridgeDenyBypass's
+                // confirm_bypass). The MCP server materializes schema defaults
+                // (gate:"enforce", timeout_ms:30000) into every forwarded body,
+                // so without the exemption every registry-dispatched tool whose
+                // schema declares them — editor_status (timeout_ms) and every
+                // extension tool (gate) — failed with validation_error on a
+                // default-args call.
                 var unknown = FindUnknownKeys(entry, body);
                 if (unknown != null && unknown.Count > 0)
                 {
+                    var allowed = entry.Parameters.Length == 0
+                        ? "(none)"
+                        : string.Join(", ", entry.Parameters.Select(p => char.ToLowerInvariant(p.Name[0]) + p.Name.Substring(1)));
                     return ToolDispatchResult.Fail("validation_error",
                         $"Unknown parameter(s) for tool '{toolName}': {string.Join(", ", unknown)}. " +
-                        $"Allowed: {string.Join(", ", entry.Parameters.Select(p => char.ToLowerInvariant(p.Name[0]) + p.Name.Substring(1)))}.");
+                        $"Allowed: {allowed}.");
                 }
 
                 var args = ExtractArguments(entry, body);
@@ -212,6 +227,16 @@ namespace UnityOpenMcpBridge
         // parameter is "known" if its lowercased-first-char name matches a
         // declared parameter name — mirrors the lookup key ExtractArguments
         // uses, so the two never disagree.
+        //
+        // feedback (2026-08-17) — TRANSPORT_ENVELOPE_KEYS are pre-seeded into
+        // the known set: the dispatcher consumes them from the raw body for
+        // every tool (gate policy, queue timeout, scene-dirty guard, deny
+        // bypass), so they are valid on ANY registry tool regardless of its
+        // C# parameter list. Everything else still has to match a declared
+        // parameter.
+        private static readonly string[] TransportEnvelopeKeys =
+            { "gate", "timeout_ms", "ignore_scene_dirty", "confirm_bypass" };
+
         private static List<string> FindUnknownKeys(BridgeToolEntry entry, string body)
         {
             if (string.IsNullOrEmpty(body)) return null;
@@ -219,6 +244,8 @@ namespace UnityOpenMcpBridge
             if (keys == null || keys.Count == 0) return null;
 
             var known = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var key in TransportEnvelopeKeys)
+                known.Add(key);
             for (int i = 0; i < entry.Parameters.Length; i++)
             {
                 var name = entry.Parameters[i].Name;

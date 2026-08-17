@@ -309,6 +309,56 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual("missing_parameter", result.ErrorCode);
         }
 
+        // feedback (2026-08-17, editor_status uncallable) — the transport
+        // envelope keys (gate / timeout_ms / ignore_scene_dirty /
+        // confirm_bypass) are consumed by the dispatcher off the raw body for
+        // EVERY tool, so they must be accepted even on a zero-parameter
+        // registry tool. Without the exemption, the MCP server's
+        // schema-default injection (timeout_ms:30000 on editor_status,
+        // gate:"enforce" on every extension tool) made those tools uncallable
+        // with default args.
+        [Test]
+        public static void TryDispatch_TransportEnvelopeKeys_AcceptedOnParamlessTool()
+        {
+            var body =
+                "{\"gate\":\"enforce\",\"timeout_ms\":30000," +
+                "\"ignore_scene_dirty\":false,\"confirm_bypass\":false}";
+            var result = BridgeToolRegistry.TryDispatch("test_single_tool", body);
+            Assert.IsNotNull(result);
+            Assert.IsTrue(result.Success,
+                "Transport envelope keys must not fail validation on a zero-parameter tool. " +
+                (result.Success ? "" : $"Got {result.ErrorCode}: {result.ErrorMessage}"));
+            Assert.AreEqual("ok", result.Output);
+        }
+
+        [Test]
+        public static void TryDispatch_UnknownKeyOnParamlessTool_ReportsNoneAllowed()
+        {
+            // feedback (2026-08-17) — an empty allow-list rendered as
+            // "Allowed: ." (an unreadable bare dot). It must read "(none)".
+            var body = "{\"foo\":\"bar\"}";
+            var result = BridgeToolRegistry.TryDispatch("test_single_tool", body);
+            Assert.IsNotNull(result);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("validation_error", result.ErrorCode);
+            StringAssert.Contains("Allowed: (none).", result.ErrorMessage,
+                "A zero-parameter tool's allow-list must render as '(none)', not an empty list.");
+        }
+
+        [Test]
+        public static void TryDispatch_EnvelopeKeysDoNotMaskRealTypos()
+        {
+            // The exemption must stay narrow: a genuinely unknown key is still
+            // rejected even when envelope keys are present alongside it.
+            var body = "{\"gate\":\"enforce\",\"timeout_ms\":30000,\"name\":\"x\",\"count\":1,\"camalCase\":\"typo\"}";
+            var result = BridgeToolRegistry.TryDispatch("test_params_tool", body);
+            Assert.IsNotNull(result);
+            Assert.IsFalse(result.Success, "A misspelled parameter key must still be rejected");
+            Assert.AreEqual("validation_error", result.ErrorCode);
+            StringAssert.Contains("camalCase", result.ErrorMessage,
+                "The unknown-key list must name the misspelled key, not the envelope keys.");
+        }
+
         // M13 T4.1 — [BridgeTool(Lifecycle = ...)] must flow onto the entry so
         // the dispatcher and dirty guard see the declared policy.
         [Test]

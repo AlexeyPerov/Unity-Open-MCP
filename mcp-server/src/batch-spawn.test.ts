@@ -4,8 +4,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
-import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, extractOffendingPackages, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator } from "./batch-spawn.js";
+import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, extractOffendingPackages, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator, diagnoseEditorLock, editorLockedMessage, editorLockedNextSteps } from "./batch-spawn.js";
 import { lockPath } from "./instance-discovery.js";
+import { setUnityProcessScannerForTest } from "./running-unity.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 function parseBody(result: CallToolResult): Record<string, unknown> {
@@ -546,8 +547,14 @@ test("compile_check with a live Editor open surfaces editor_instance_locked, not
   // signature. We drive it through a fake Unity that echoes the lock phrase
   // to stderr and exits non-zero without JSON markers, so the spawn hits the
   // classifyBatchFailure branch.
+  //
+  // feedback 2026-08-17 — the message must name the invoked tool and split
+  // "Editor booting (listener not up)" from "no Editor at all". The scanner
+  // fake reports a Unity process for THIS project with no instance lock —
+  // the booting-Editor shape — so the diagnosis is listener_down.
   const savedPath = process.env.UNITY_PATH;
   delete process.env.UNITY_PATH;
+  const restore = setUnityProcessScannerForTest(null);
   try {
     const tmp = mkdtempSync(join(tmpdir(), "batch-lock-"));
     try {
@@ -574,31 +581,295 @@ test("compile_check with a live Editor open surfaces editor_instance_locked, not
         chmodSync(exe, 0o755);
       }
 
-      const batch = new BatchSpawn({ discoveryRoots: [tmp], projectPath: tmp });
-      const result = await batch.route("unity_open_mcp_compile_check", {});
-      const body = parseBody(result);
+      const restoreBooting = setUnityProcessScannerForTest({
+        scan() {
+          // A fresh Editor process holds the project (Temp/UnityLockfile)
+          // before its bridge writes the instance lock — the booting shape.
+          return [{ pid: 48525, projectPath: tmp }];
+        },
+      });
+      let body: Record<string, unknown>;
+      try {
+        const batch = new BatchSpawn({ discoveryRoots: [tmp], projectPath: tmp });
+        const result = await batch.route("unity_open_mcp_compile_check", {});
+        body = parseBody(result);
+      } finally {
+        restoreBooting();
+      }
       const error = body.error as Record<string, string>;
       assert.equal(error.code, "editor_instance_locked");
+      // Names the tool that was actually called…
       assert.ok(
-        error.message.includes("live Unity Editor"),
-        "message should explain the live-Editor lock",
+        error.message.includes("unity_open_mcp_compile_check"),
+        "message should name the invoked tool",
+      );
+      // …and the booting-Editor diagnosis with its wait-and-retry remedy.
+      assert.ok(
+        error.message.includes("listener") && error.message.includes("not up"),
+        "message should explain the listener is not up yet (booting Editor)",
       );
       // specs/feedback.md (editor_instance_locked) — the response now carries a
-      // structured recovery hint array pointing at the live-bridge branch.
+      // structured recovery hint array pointing at the recovery branch.
       assert.ok(
         Array.isArray(body.agentNextSteps) && body.agentNextSteps.length > 0,
         "editor_instance_locked should carry a non-empty agentNextSteps array",
       );
       assert.ok(
-        (body.agentNextSteps as string[]).some((s) => s.includes("read_compile_errors")),
+        (body.agentNextSteps as string[]).some((s) => s.includes("Wait")),
+        "the booting-Editor remedy is to wait and retry",
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  } finally {
+    restore();
+    if (savedPath === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = savedPath;
+  }
+});
+
+test("lock-refusal with no matching Unity process diagnoses a stale Temp/UnityLockfile", async () => {
+  // feedback 2026-08-17 — the other half of the split: the spawn was refused
+  // with the lock signature but NO Unity process matches this project. The
+  // message must say the on-disk lock is likely stale, not claim a live
+  // Editor holds the project.
+  const savedPath = process.env.UNITY_PATH;
+  delete process.env.UNITY_PATH;
+  const restore = setUnityProcessScannerForTest({ scan: () => [] });
+  try {
+    const tmp = mkdtempSync(join(tmpdir(), "batch-lock-stale-"));
+    try {
+      const installDir = join(tmp, "6000.0.0f1");
+      const exeRel = process.platform === "win32"
+        ? ["Editor", "Unity.exe"]
+        : ["Unity.app", "Contents", "MacOS", "Unity"];
+      const exe = join(installDir, ...exeRel);
+      mkdirSync(dirname(exe), { recursive: true });
+      if (process.platform !== "win32") {
+        writeFileSync(
+          exe,
+          "#!/bin/sh\n" +
+            'echo "It looks like another Unity instance is running with this project open." 1>&2\n' +
+            "exit 1\n",
+        );
+        chmodSync(exe, 0o755);
+      } else {
+        writeFileSync(exe, "fake");
+      }
+
+      const batch = new BatchSpawn({ discoveryRoots: [tmp], projectPath: tmp });
+      const result = await batch.route("unity_open_mcp_compile_check", {});
+      if (process.platform === "win32") {
+        // The fake blob is not executable on win32 — the spawn errors before
+        // the lock tail exists. Nothing to assert here (same caveat as the
+        // sibling tests); the POSIX branch carries the assertion.
+        return;
+      }
+      const body = parseBody(result);
+      const error = body.error as Record<string, string>;
+      assert.equal(error.code, "editor_instance_locked");
+      assert.ok(
+        error.message.includes("Temp/UnityLockfile"),
+        "no-Editor diagnosis should name the stale on-disk lock",
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  } finally {
+    restore();
+    if (savedPath === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = savedPath;
+  }
+});
+
+test("execute_menu batch-fallback lock error names execute_menu, not a canned compile_check", async () => {
+  // feedback 2026-08-17 — an execute_menu call that fell back to batch while a
+  // booting Editor held the project returned the canned compile_check
+  // message, misdirecting the agent. The error must name the invoked tool.
+  const savedPath = process.env.UNITY_PATH;
+  delete process.env.UNITY_PATH;
+  const restore = setUnityProcessScannerForTest({
+    scan: () => [],
+  });
+  try {
+    const tmp = mkdtempSync(join(tmpdir(), "batch-lock-menu-"));
+    try {
+      const installDir = join(tmp, "6000.0.0f1");
+      const exeRel = process.platform === "win32"
+        ? ["Editor", "Unity.exe"]
+        : ["Unity.app", "Contents", "MacOS", "Unity"];
+      const exe = join(installDir, ...exeRel);
+      mkdirSync(dirname(exe), { recursive: true });
+      if (process.platform !== "win32") {
+        writeFileSync(
+          exe,
+          "#!/bin/sh\n" +
+            'echo "another Unity instance is running with this project open" 1>&2\n' +
+            "exit 1\n",
+        );
+        chmodSync(exe, 0o755);
+      } else {
+        writeFileSync(exe, "fake");
+      }
+
+      const batch = new BatchSpawn({ discoveryRoots: [tmp], projectPath: tmp });
+      const result = await batch.route("unity_open_mcp_execute_menu", {
+        menu_path: "Assets/Refresh",
+      });
+      if (process.platform === "win32") return; // same win32 caveat as above
+      const body = parseBody(result);
+      const error = body.error as Record<string, string>;
+      assert.equal(error.code, "editor_instance_locked");
+      assert.ok(
+        error.message.includes("unity_open_mcp_execute_menu"),
+        "message should name execute_menu",
+      );
+      assert.ok(
+        !error.message.includes("compile_check"),
+        "message must not describe a compile_check spawn",
+      );
+      assert.ok(
+        (body.agentNextSteps as string[]).some((s) =>
+          s.includes("unity_open_mcp_execute_menu"),
+        ),
+        "agentNextSteps should name the invoked tool too",
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  } finally {
+    restore();
+    if (savedPath === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = savedPath;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// feedback 2026-08-15 recurrence (compile_check) — exit 0 + no markers is a
+// LIKELY SUCCESS (the async finalize path did not run), not a spawn failure.
+// The distinct markers_missing code keeps agents (and MCP hosts keying on
+// isError / error.code) from reading a healthy compile as batch_spawn_failed.
+// ---------------------------------------------------------------------------
+test("compile_check exit 0 without markers surfaces markers_missing, not batch_spawn_failed", async () => {
+  const savedPath = process.env.UNITY_PATH;
+  delete process.env.UNITY_PATH;
+  const restore = setUnityProcessScannerForTest({ scan: () => [] });
+  try {
+    const tmp = mkdtempSync(join(tmpdir(), "batch-exit0-"));
+    try {
+      const installDir = join(tmp, "6000.0.0f1");
+      const exeRel = process.platform === "win32"
+        ? ["Editor", "Unity.exe"]
+        : ["Unity.app", "Contents", "MacOS", "Unity"];
+      const exe = join(installDir, ...exeRel);
+      mkdirSync(dirname(exe), { recursive: true });
+      // Fake binary exits CLEANLY with no JSON markers — the async finalize
+      // path (BridgeBatchEntry → EditorApplication.update) never fired.
+      if (process.platform === "win32") {
+        writeFileSync(exe, "fake");
+      } else {
+        writeFileSync(exe, "#!/bin/sh\necho 'Compilation succeeded'\nexit 0\n");
+        chmodSync(exe, 0o755);
+      }
+
+      const batch = new BatchSpawn({ discoveryRoots: [tmp], projectPath: tmp });
+      const result = await batch.route("unity_open_mcp_compile_check", {});
+      if (process.platform === "win32") return; // same win32 caveat as above
+      const body = parseBody(result);
+      const error = body.error as Record<string, string>;
+      assert.equal(error.code, "markers_missing");
+      assert.ok(
+        error.message.includes("exited cleanly"),
+        "message should say Unity exited cleanly",
+      );
+      assert.ok(
+        error.message.includes("read_compile_errors"),
+        "message should point at read_compile_errors to confirm",
+      );
+      assert.ok(
+        (body.agentNextSteps as string[]).some((s) =>
+          s.includes("read_compile_errors"),
+        ),
         "agentNextSteps should mention read_compile_errors",
       );
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
   } finally {
+    restore();
     if (savedPath === undefined) delete process.env.UNITY_PATH;
     else process.env.UNITY_PATH = savedPath;
+  }
+});
+
+// --- feedback 2026-08-17 — diagnoseEditorLock / message builders (pure) -----
+
+test("diagnoseEditorLock: fresh lock → listener_up with live-bridge guidance", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "batch-diag-"));
+  const lockFile = lockPath(tmp);
+  mkdirSync(dirname(lockFile), { recursive: true });
+  writeFileSync(lockFile, JSON.stringify({
+    pid: process.pid,
+    port: 20000,
+    projectPath: tmp,
+    projectHash: "deadbeef",
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    heartbeatAt: new Date().toISOString(),
+    state: "idle",
+    isPlaying: false,
+    isCompiling: false,
+    bridgeVersion: "0.0.0-test",
+    unityVersion: "6000.0.0f1",
+  }));
+  try {
+    const diagnosis = diagnoseEditorLock(tmp);
+    assert.equal(diagnosis.variant, "listener_up");
+    const message = editorLockedMessage("unity_open_mcp_compile_check", diagnosis);
+    assert.ok(message.includes("live bridge should be reachable"));
+    assert.ok(
+      editorLockedNextSteps("unity_open_mcp_compile_check", diagnosis)
+        .some((s) => s.includes("read_compile_errors")),
+      "compile_check keeps the read_compile_errors alternative when the bridge is up",
+    );
+  } finally {
+    try { rmSync(lockFile, { force: true }); } catch { /* best effort */ }
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("diagnoseEditorLock: stale heartbeat + live PID → listener_down (booting / Safe Mode)", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "batch-diag-stale-"));
+  const lockFile = lockPath(tmp);
+  mkdirSync(dirname(lockFile), { recursive: true });
+  const stale = new Date(Date.now() - 60_000).toISOString();
+  writeFileSync(lockFile, JSON.stringify({
+    pid: process.pid,
+    port: 20000,
+    projectPath: tmp,
+    projectHash: "deadbeef",
+    startedAt: stale,
+    updatedAt: stale,
+    heartbeatAt: stale,
+    state: "reloading",
+    isPlaying: false,
+    isCompiling: false,
+    bridgeVersion: "0.0.0-test",
+    unityVersion: "6000.0.0f1",
+  }));
+  try {
+    const diagnosis = diagnoseEditorLock(tmp);
+    assert.equal(diagnosis.variant, "listener_down");
+    const message = editorLockedMessage("unity_open_mcp_execute_menu", diagnosis);
+    assert.ok(message.includes("not up yet"));
+    assert.ok(
+      editorLockedNextSteps("unity_open_mcp_execute_menu", diagnosis)
+        .some((s) => s.includes("Wait")),
+      "the listener_down remedy must offer wait-and-retry",
+    );
+  } finally {
+    try { rmSync(lockFile, { force: true }); } catch { /* best effort */ }
+    rmSync(tmp, { recursive: true, force: true });
   }
 });
 

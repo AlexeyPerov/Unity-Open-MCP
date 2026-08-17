@@ -8,9 +8,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, utimes } from "node:fs/promises";
-import { utimesSync } from "node:fs";
+import { utimesSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 
 import { ToolRouter } from "./tool-router.js";
 // M31-optimizations Plan 1 / L14 — pure helper + module-load flag for the
@@ -27,6 +27,7 @@ import { ToolSessionState, filterVisibleTools } from "./tool-session-state.js";
 import { DEFAULT_ENABLED_GROUPS } from "./capabilities/tool-groups.js";
 import { setUnityProcessScannerForTest } from "./running-unity.js";
 import { ALL_TOOLS } from "./tools/index.js";
+import { lockPath } from "./instance-discovery.js";
 // M31 Plan 3 — injectable seams for the restart_editor + resource_pressure
 // routes (no real process.kill / lsof / /proc in unit tests).
 import { setProcessKillerForTest } from "./editor-process-control.js";
@@ -1020,6 +1021,105 @@ test("route: read_compile_errors omits staleLogSuspected when the log is fresher
     assert.equal(body.status, "compile_failed");
     assert.equal(body.staleLogSuspected, undefined,
       "fresh log must not carry the stale flag");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// feedback 2026-08-17 — (a) a no-errors read from the ROTATED prev log is
+// `indeterminate`, not `no_errors_found`; (b) errors + staleAssembly put the
+// may-predate caveat in the HEADLINE itself, not only in the side fields.
+// ---------------------------------------------------------------------------
+
+test("route: read_compile_errors returns indeterminate (not no_errors_found) when reading the rotated prev log", async () => {
+  await withTmp("router-rce-prevlog-", async (tmp) => {
+    // Frozen live log (<4096 bytes) + a live-PID instance lock + a prev log
+    // with no CS errors → resolveEditorLogPath falls back to
+    // prev_log_live_editor, and the clean read must not read as a verified
+    // clean bill of health.
+    await mkdir(join(tmp, "Logs"), { recursive: true });
+    const liveLog = join(tmp, "Logs", "Editor.log");
+    const prevLog = join(tmp, "Logs", "Editor-prev.log");
+    await writeFile(liveLog, "tiny frozen startup banner\n");
+    await writeFile(prevLog, "Refresh completed (io time)\n"); // no CS errors
+
+    const lockFile = lockPath(tmp);
+    mkdirSync(dirname(lockFile), { recursive: true });
+    writeFileSync(lockFile, JSON.stringify({
+      pid: process.pid,
+      port: 20000,
+      projectPath: tmp,
+      projectHash: "deadbeef",
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      heartbeatAt: new Date().toISOString(),
+      state: "idle",
+      isPlaying: false,
+      isCompiling: false,
+      bridgeVersion: "0.0.0-test",
+      unityVersion: "6000.0.0f1",
+    }));
+    try {
+      const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream(),
+        undefined, undefined, undefined, join(tmp, "no-global-log", "Editor.log"));
+      const result = await router.route("unity_open_mcp_read_compile_errors", {});
+      const body = parseBody(result);
+
+      assert.equal(body.logSource, "prev_log_live_editor");
+      assert.equal(body.status, "indeterminate",
+        "a clean read from the rotated log must not claim no_errors_found");
+      assert.equal(body.logVerdict, "no_errors_found",
+        "the raw verdict is preserved for callers");
+      assert.equal(body.unhealthy, false);
+      assert.ok(
+        typeof body.headline === "string" && body.headline.includes("ROTATED"),
+        "the headline must say the read came from the rotated log",
+      );
+    } finally {
+      try { if (existsSync(lockFile)) rmSync(lockFile, { force: true }); } catch { /* best effort */ }
+    }
+  });
+});
+
+test("route: read_compile_errors puts the may-predate caveat in the headline when staleAssembly is set with errors", async () => {
+  // The field report: 12 CS errors, staleAssembly:true, but the cited files
+  // were NOT newer than the DLL (so errorsPredateEdits stayed silent) — some
+  // OTHER source was newer than the newest DLL. The headline stated the stale
+  // errors as fact; it must carry the caveat itself.
+  await withTmp("router-rce-staleasm-", async (tmp) => {
+    await mkdir(join(tmp, "Logs"), { recursive: true });
+    await mkdir(join(tmp, "Assets", "Scripts"), { recursive: true });
+    await mkdir(join(tmp, "Library", "ScriptAssemblies"), { recursive: true });
+    const logPath = join(tmp, "Logs", "Editor.log");
+    const citedPath = join(tmp, "Assets", "Scripts", "Cited.cs");
+    const newerPath = join(tmp, "Assets", "Scripts", "Newer.cs");
+    const dllPath = join(tmp, "Library", "ScriptAssemblies", "Game.dll");
+    await writeFile(logPath, "Assets/Scripts/Cited.cs(3,10): error CS0246: type not found\n");
+    await writeFile(citedPath, "class Cited {}");
+    await writeFile(newerPath, "class Newer {}");
+    await writeFile(dllPath, "not-a-real-dll");
+    // Timeline: cited (1000) < dll (2000) < other source (3000) < log (4000).
+    // The cited file predates the build (errorsPredateEdits null), the OTHER
+    // source is newer than the newest DLL (staleAssembly true), and the log is
+    // fresher than everything (staleLogSuspected absent).
+    utimesSync(citedPath, new Date(1000_000), new Date(1000_000));
+    utimesSync(dllPath, new Date(2000_000), new Date(2000_000));
+    utimesSync(newerPath, new Date(3000_000), new Date(3000_000));
+    utimesSync(logPath, new Date(4000_000), new Date(4000_000));
+
+    const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream(),
+      undefined, undefined, undefined, join(tmp, "no-global-log", "Editor.log"));
+    const result = await router.route("unity_open_mcp_read_compile_errors", {});
+    const body = parseBody(result);
+
+    assert.equal(body.status, "compile_failed");
+    assert.equal(body.errorCount, 1);
+    assert.equal(body.staleAssembly, true);
+    assert.equal(body.errorsMayPredateEdits, undefined,
+      "the cited file is older than the DLL — the cited-files signal must stay silent");
+    assert.ok(
+      typeof body.headline === "string" && body.headline.includes("PREDATE the current sources"),
+      "the headline itself must say the error block may predate the current sources",
+    );
   });
 });
 

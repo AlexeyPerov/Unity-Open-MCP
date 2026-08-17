@@ -457,8 +457,51 @@ export class LiveClient implements Router {
       const body: PingResponse = await res.json();
       this.pingCache.record(body);
       this.maybeWarnCompat(body.bridgeVersion);
+      // feedback 2026-08-17 — mark the provenance of the answer. Within ~1
+      // minute of an Editor close+relaunch, a ping answered connected:true
+      // (the dying Editor's listener still served /ping) while the next call
+      // took the batch route and bridge_status reported gone — an agent that
+      // trusted `connected:true` proceeded to live mutations that failed.
+      // The answer is ALWAYS the result of a fresh HTTP probe here (never a
+      // lock-derived guess), so say so and stamp when it was measured; an
+      // agent can compare `asOf` against its own clock and re-probe before
+      // acting on a possibly-seconds-stale "connected".
+      const enriched: PingResponse & {
+        source: "probe";
+        asOf: string;
+        lockCheck?: { classification: InstanceClassification; note: string };
+      } = {
+        ...body,
+        source: "probe",
+        asOf: new Date().toISOString(),
+      };
+      // Cross-check the instance lock the way bridge_status does: when the
+      // probe answered but the project's lock is gone (no lock / dead PID),
+      // the listener that answered is not backed by a live registered bridge
+      // instance — a dying Editor mid-shutdown, or a foreign process on the
+      // port. Flag it so `connected:true` + bridge_status "stopped" stops
+      // reading as a contradiction.
+      if (this.projectPath) {
+        try {
+          const lock = readInstanceLock(this.projectPath);
+          const classification = classifyInstance(lock);
+          if (classification === "gone" && body.connected) {
+            enriched.lockCheck = {
+              classification,
+              note:
+                "The /ping probe was answered, but this project has no live " +
+                "bridge instance lock — the answering listener may be a dying " +
+                "Editor mid-shutdown or a foreign process on the port. Do not " +
+                "trust this answer for routing decisions; call " +
+                "unity_open_mcp_bridge_status before issuing live mutations.",
+            };
+          }
+        } catch {
+          // Lock read failure must not corrupt the ping answer.
+        }
+      }
       return {
-        content: [{ type: "text", text: JSON.stringify(body) }],
+        content: [{ type: "text", text: JSON.stringify(enriched) }],
         isError: false,
       };
     } catch {
