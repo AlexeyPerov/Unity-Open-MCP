@@ -26,6 +26,10 @@
 import { parseCliArgs } from "./args.js";
 import { helpText, versionText } from "./help-text.js";
 import { readPackageVersion } from "../package-version.js";
+// Light supervision hook (type-only node:child_process import, no runtime
+// deps) — keeps the CLI entry lazy-load contract intact while covering the
+// CLI's batch children with the same SIGINT/SIGTERM teardown as the server.
+import { installBatchChildSupervision } from "../child-supervision.js";
 
 const PING_DEFAULT_TIMEOUT_MS = 5_000;
 
@@ -127,6 +131,11 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
     const env = resolveEnv(parsed.projectPath, parsed.port);
     logResolve(env.port, env.projectPath, env.authToken);
     stack = buildRouterStack(env);
+    // run-tool / verify / baseline / regression can spawn headless Unity via
+    // the batch router. Supervise those children so a Ctrl+C on a wedged CLI
+    // run kills the Unity (and releases the project lock) instead of
+    // orphaning it. Idempotent; no-op when nothing is tracked.
+    installBatchChildSupervision();
   } catch (err) {
     if (err instanceof ResolveEnvError) {
       await writeAndDrain(process.stderr, `unity-open-mcp: ${err.message}\n`);

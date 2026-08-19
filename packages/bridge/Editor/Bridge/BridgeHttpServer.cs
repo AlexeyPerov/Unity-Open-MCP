@@ -708,7 +708,16 @@ namespace UnityOpenMcpBridge
             if (int.TryParse(maxPerPollRaw, out var parsed) && parsed > 0 && parsed <= 1000)
                 maxPerPoll = parsed;
 
-            if (string.IsNullOrEmpty(subscriber))
+            // fd-leak review — an id minted HERE has no reconnecting owner;
+            // retire it when this stream ends so the subscriber dictionary
+            // stays bounded by genuinely live clients. A client-supplied id
+            // is NOT retired: Subscribe is idempotent but resets the cursor
+            // to "now", so unsubscribing a named subscriber on every stream
+            // end would break the reconnect contract (gap events between the
+            // disconnect and the reconnect would be silently skipped instead
+            // of delivered or counted as `missed`).
+            bool mintedSubscriber = string.IsNullOrEmpty(subscriber);
+            if (mintedSubscriber)
                 subscriber = System.Guid.NewGuid().ToString("N");
 
             // Take ownership of the response lifecycle so HandleRequest's finally
@@ -758,6 +767,10 @@ namespace UnityOpenMcpBridge
             }
             finally
             {
+                // Retire an anonymous (minted) subscriber with the stream that
+                // created it; named subscribers persist for their owner's
+                // reconnects (see the mint comment above).
+                if (mintedSubscriber) BridgeEventSource.Unsubscribe(subscriber);
                 try { context.Response.Close(); } catch { }
             }
         }
@@ -786,7 +799,12 @@ namespace UnityOpenMcpBridge
         {
             var query = context.Request.QueryString;
             var subscriber = query["subscriber"];
-            if (string.IsNullOrEmpty(subscriber))
+            // fd-leak review — a poll-minted id has no owner that will ever
+            // reconnect for it; retire it with this request so anonymous
+            // pollers don't accumulate subscriber state forever. Named ids
+            // persist — their cursor across polls is the endpoint's contract.
+            bool mintedSubscriber = string.IsNullOrEmpty(subscriber);
+            if (mintedSubscriber)
                 subscriber = System.Guid.NewGuid().ToString("N");
 
             int maxEvents = 100;
@@ -795,6 +813,7 @@ namespace UnityOpenMcpBridge
 
             var drain = BridgeEventSource.Drain(subscriber, maxEvents);
             BridgeHttpResponse.SendJson(context, 200, BridgeEventSource.RenderDrain(drain));
+            if (mintedSubscriber) BridgeEventSource.Unsubscribe(subscriber);
         }
 
         private static void HandleToolDispatch(HttpListenerContext context, string toolName)

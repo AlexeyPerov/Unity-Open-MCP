@@ -97,10 +97,15 @@ export function buildRouterStack(env: ResolvedEnv): RouterStack {
   const pingCache = new PingCache();
   const live = new LiveClient(env.port, pingCache, env.authToken, env.projectPath, undefined, env.envPort);
   const batch = new BatchSpawn({ projectPath: env.projectPath });
+  // projectPath/envPort let the reader's reconnects re-read the instance lock
+  // (the bridge rotates its bearer token on every domain reload), mirroring
+  // LiveClient's refreshEndpointFromLock self-heal.
   const eventStream = new BridgeEventStream(
     bridgeBaseUrl(env.port),
     undefined,
     env.authToken,
+    env.projectPath,
+    env.envPort,
   );
   const sessionState = new ToolSessionState();
   const router = new ToolRouter(live, batch, env.projectPath, eventStream, sessionState);

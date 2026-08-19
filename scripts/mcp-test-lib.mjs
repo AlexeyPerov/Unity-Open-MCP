@@ -29,7 +29,7 @@
 // mcp-server/dist/index.js built; a Unity Editor open with the project + bridge
 // running for live suites (S0/S1/S4); Editor closed for S2; stdio server for S3.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -38,6 +38,110 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
 const CLI_BIN = resolve(REPO_ROOT, "mcp-server", "dist", "index.js");
 const DISMISS_MOD = pathToFileURL(resolve(REPO_ROOT, "mcp-server", "dist", "dialog-dismiss.js")).href;
+
+// ---------------------------------------------------------------------------
+// supervised CLI child processes (process-group kill)
+//
+// run-tool / verify / baseline CLI calls spawn headless Unity (batch routes).
+// execFileSync's timeout kills ONLY the CLI node process — the Unity grandchild
+// is orphaned and keeps the project lock + its fds until its own 10-minute
+// timeout, breaking every subsequent batch step with editor_instance_locked.
+// execCliGrouped runs the CLI in its own process group (POSIX) / spawn tree
+// (Windows) and SIGKILLs the whole group after the call, so no grandchild can
+// outlive a timed-out step. Signal handlers keep the groups killable when the
+// suite process itself is asked to die.
+// ---------------------------------------------------------------------------
+
+/** Group pids of CLI calls currently supervised (POSIX). */
+const SUPERVISED_GROUPS = new Set();
+
+function killGroup(pid) {
+  if (process.platform === "win32") {
+    // No negative-pid semantics on Windows; taskkill /T walks the spawn tree.
+    try {
+      execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    process.kill(-pid, "SIGKILL");
+    return true;
+  } catch {
+    return false; // group already gone
+  }
+}
+
+function killAllSupervisedGroups() {
+  for (const pid of SUPERVISED_GROUPS) killGroup(pid);
+}
+
+let supervisionHooksInstalled = false;
+function installCliSupervisionHooks() {
+  if (supervisionHooksInstalled) return;
+  supervisionHooksInstalled = true;
+  process.on("exit", killAllSupervisedGroups);
+  // Suites with their own SIGINT cleanup (mcp-headless, mcp-sandbox) import
+  // this lib first, so their handler is registered AFTER ours and this
+  // listenerCount check sees it. Only exit here when we are the sole
+  // listener; otherwise let the suite handler run its cleanup and decide.
+  process.on("SIGINT", () => {
+    killAllSupervisedGroups();
+    if (process.listenerCount("SIGINT") === 1) process.exit(130);
+  });
+  process.on("SIGTERM", () => {
+    killAllSupervisedGroups();
+    if (process.listenerCount("SIGTERM") === 1) process.exit(143);
+  });
+}
+
+/**
+ * execFileSync drop-in for CLI invocations: runs the child in its own process
+ * group and kills the whole group when the call completes (timeout, failure,
+ * or success), so a timed-out CLI cannot orphan its headless Unity grandchild.
+ * Throws errors shaped like execFileSync's (status/code/signal/killed/
+ * stdout/stderr) so the existing catch blocks keep working.
+ */
+function execCliGrouped(file, args, opts) {
+  installCliSupervisionHooks();
+  const detached = process.platform !== "win32";
+  // killSignal SIGKILL: the call is already dead the moment Node's timeout
+  // fires — no value in a cooperative shutdown phase for the CLI itself.
+  const res = spawnSync(file, args, { ...opts, detached, killSignal: "SIGKILL" });
+  if (res.pid) {
+    if (detached) SUPERVISED_GROUPS.add(res.pid);
+    try {
+      // Kill any group members that outlived the CLI — the orphaned-grandchild
+      // case (timed-out run, or a CLI that exited before its Unity child).
+      killGroup(res.pid);
+    } finally {
+      SUPERVISED_GROUPS.delete(res.pid);
+    }
+  }
+  if (res.error) {
+    const err = res.error;
+    err.stdout = res.stdout;
+    err.stderr = res.stderr;
+    if (res.signal) err.killed = true;
+    throw err;
+  }
+  if (res.status !== 0) {
+    const cmd = `${file} ${args.join(" ")}`;
+    const err = new Error(
+      `Command failed: ${cmd}${res.signal ? ` (killed by ${res.signal})` : ""}`,
+    );
+    err.status = res.status;
+    err.code = res.status;
+    err.signal = res.signal ?? null;
+    err.killed = res.signal != null;
+    err.stdout = res.stdout;
+    err.stderr = res.stderr;
+    throw err;
+  }
+  return res.stdout;
+}
+
 
 // Standard fixture + scene layout shared by S0/S1. S5 overrides via opts.
 const DEFAULT_FIXTURE_ROOT = "Assets/MCP_FullTest";
@@ -296,7 +400,7 @@ export function dismissBlockingModals(runEnv) {
     });
   `;
   try {
-    execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    execCliGrouped(process.execPath, ["--input-type=module", "-e", script], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 15_000,
@@ -317,7 +421,7 @@ export function dismissBlockingModals(runEnv) {
 export function invokeTool(project, tool, args, timeoutMs, runEnv) {
   const argStr = JSON.stringify(args ?? {});
   try {
-    const stdout = execFileSync(
+    const stdout = execCliGrouped(
       process.execPath,
       [CLI_BIN, "run-tool", tool, "--project", project, "--json", "--args", argStr],
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs, env: runEnv },
@@ -365,7 +469,7 @@ export function runToolOnce(step, ctx, project, defaultTimeout, runEnv) {
   const t0 = Date.now();
   let stdout;
   try {
-    stdout = execFileSync(
+    stdout = execCliGrouped(
       process.execPath,
       [CLI_BIN, "run-tool", step.tool, "--project", project, "--json", "--args", argStr],
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024, timeout, env: runEnv },
@@ -605,7 +709,7 @@ export function cleanupViaBridge(project, runEnv, opts = {}) {
   ];
   for (const op of ops) {
     try {
-      execFileSync(
+      execCliGrouped(
         process.execPath,
         [CLI_BIN, "run-tool", op.tool, "--project", project, "--json", "--args", JSON.stringify(op.args)],
         { encoding: "utf8", stdio: ["ignore", "ignore", "ignore"], timeout: 30_000, env: runEnv },

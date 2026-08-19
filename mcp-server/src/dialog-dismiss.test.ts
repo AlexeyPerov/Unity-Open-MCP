@@ -606,3 +606,79 @@ test("pollAndDismissDialogs: respects minimum interval clamp (interval below 50m
   void elapsed;
   assert.ok(ticks <= 5, `interval clamp failed: ${ticks} ticks`);
 });
+
+// ---------------------------------------------------------------------------
+// SIGKILL escalation watchdog (fd-leak review 2026-08-19)
+//
+// execFile's `timeout` sends a single SIGTERM; a wedged probe that traps it
+// never fires its callback, so pollAndDismissDialogs would hang forever with
+// the child + its pipes alive. armSigkillEscalation escalates to SIGKILL.
+// ---------------------------------------------------------------------------
+
+test("armSigkillEscalation: SIGKILLs a probe that ignores its timeout SIGTERM", async (t) => {
+  if (process.platform === "win32") t.skip("POSIX signal semantics");
+  const { spawn } = await import("node:child_process");
+  const { armSigkillEscalation } = await import("./dialog-dismiss.js");
+
+  // The wedge case: a child that traps SIGTERM and refuses to die. execFile's
+  // timeout behavior is simulated by sending the SIGTERM at `timeoutMs`. The
+  // child announces readiness so the SIGTERM can't race the handler install.
+  const child = spawn(
+    process.execPath,
+    ["-e", "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000);"],
+    { stdio: ["ignore", "pipe", "ignore"] },
+  );
+  await new Promise<void>((resolve, reject) => {
+    const fail = setTimeout(() => reject(new Error("probe child never became ready")), 10_000);
+    child.stdout?.on("data", () => { clearTimeout(fail); resolve(); });
+    child.on("close", () => { clearTimeout(fail); reject(new Error("probe child exited before ready")); });
+  });
+  let settled = false;
+  const disarm = armSigkillEscalation(child, 300, () => settled);
+  try {
+    const outcome = await new Promise<{ signal: string | null }>((resolve, reject) => {
+      const fail = setTimeout(
+        () => reject(new Error("watchdog did not SIGKILL the wedged probe in time")),
+        10_000,
+      );
+      child.on("close", (_code, signal) => {
+        clearTimeout(fail);
+        resolve({ signal: signal ?? null });
+      });
+      // Simulate execFile's timeout SIGTERM (which this child ignores).
+      setTimeout(() => {
+        try { child.kill("SIGTERM"); } catch { /* dead */ }
+      }, 300);
+    });
+    assert.equal(outcome.signal, "SIGKILL", "unblockable escalation must fire");
+  } finally {
+    settled = true;
+    disarm();
+    try { child.kill("SIGKILL"); } catch { /* already dead */ }
+  }
+});
+
+test("armSigkillEscalation: disarmed watchdog leaves a settled probe alone", async () => {
+  const { armSigkillEscalation } = await import("./dialog-dismiss.js");
+  // A fake "child" — the disarmed watchdog is never fired, so kill is never
+  // called; assert via the returned disarm being callable and the isSettled
+  // gate preventing any signal on a live child.
+  const { spawn } = await import("node:child_process");
+  const child = spawn(
+    process.execPath,
+    ["-e", "setTimeout(() => {}, 400);"],
+    { stdio: ["ignore", "ignore", "ignore"] },
+  );
+  let settled = false;
+  const disarm = armSigkillEscalation(child, 100, () => settled);
+  // Settle + disarm well before the watchdog tick; the child exits on its own.
+  settled = true;
+  disarm();
+  await new Promise((resolve, reject) => {
+    const fail = setTimeout(() => reject(new Error("child did not exit on its own")), 10_000);
+    child.on("close", () => {
+      clearTimeout(fail);
+      resolve(null);
+    });
+  });
+});

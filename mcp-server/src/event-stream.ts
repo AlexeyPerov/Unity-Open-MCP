@@ -12,6 +12,12 @@
 //     reader once and is a no-op afterwards.
 //   - The reader reconnects with the last subscriber id so it keeps its cursor
 //     across disconnects (a 10-minute SSE timeout or a Unity domain reload).
+//     Reconnects back off exponentially (2s doubling to a 30s cap, reset after
+//     a successful connect) so a dead bridge is not hammered forever, and each
+//     attempt re-reads the instance lock first: the bridge mints a fresh token
+//     on every Acquire (domain reload / editor restart), so the reader must
+//     pick up the new port+token instead of going permanently 401 with the
+//     construction-time credentials.
 //   - On bridge-unavailable (connection refused), ensureSubscription records
 //     the failure and the tool surfaces a `bridge_unavailable` error to the
 //     agent instead of hanging.
@@ -20,6 +26,7 @@
 // `node:events` API.
 
 import { randomBytes } from "node:crypto";
+import { resolveRefreshedEndpoint } from "./instance-discovery.js";
 
 export interface BridgeEvent {
   seq: number;
@@ -48,6 +55,11 @@ export interface PullResult {
 
 const QUEUE_CAPACITY = 500;
 
+/** First reconnect delay; doubles on each consecutive failure. */
+const RECONNECT_BASE_DELAY_MS = 2000;
+/** Backoff ceiling — consecutive failures never wait longer than this. */
+const RECONNECT_MAX_DELAY_MS = 30_000;
+
 export class BridgeEventStream {
   private subscriberId: string;
   private queue: BridgeEvent[] = [];
@@ -57,6 +69,11 @@ export class BridgeEventStream {
   private abortController: AbortController | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
+  // Current reconnect delay — doubles in scheduleReconnect() on each
+  // consecutive failure and resets to RECONNECT_BASE_DELAY_MS once a connect
+  // succeeds. Plain 2s-forever meant a dead/stale-token bridge was retried
+  // ~1800 times/hour for the whole process lifetime.
+  private reconnectDelayMs = RECONNECT_BASE_DELAY_MS;
   // True after stop() so the pump's finally/catch know not to schedule a
   // reconnect for the AbortError they observe when the stream is torn down.
   private stopped = false;
@@ -73,13 +90,29 @@ export class BridgeEventStream {
   // sees events emitted AFTER its first pull.
   private readonly cursors: Map<string, number> = new Map();
 
+  // baseUrl/authToken are mutable: connect() re-resolves them from the
+  // instance lock (resolveRefreshedEndpoint) because the bridge rotates its
+  // bearer token on every domain reload / editor restart. projectPath/envPort
+  // feed that refresh; envPort in force means env is authoritative and the
+  // refresh is a no-op (same precedence as LiveClient).
+  private baseUrl: string;
+  private authToken?: string;
+  private readonly projectPath?: string;
+  private readonly envPort?: number;
+
   constructor(
-    private readonly baseUrl: string,
+    baseUrl: string,
     subscriberId?: string,
-    private readonly authToken?: string,
+    authToken?: string,
+    projectPath?: string,
+    envPort?: number,
   ) {
+    this.baseUrl = baseUrl;
     this.subscriberId =
       subscriberId ?? randomBytes(16).toString("hex");
+    this.authToken = authToken;
+    this.projectPath = projectPath;
+    this.envPort = envPort;
   }
 
   /**
@@ -98,6 +131,22 @@ export class BridgeEventStream {
     // (Re)starting after a stop() — clear the stopped flag so genuine failures
     // can drive reconnects again.
     this.stopped = false;
+    // The bridge mints a fresh token on every Acquire (domain reload /
+    // editor restart), so the construction-time credentials go stale
+    // mid-session. Re-read the instance lock so this reconnect targets the
+    // CURRENT port+token instead of hammering a live listener with 401s
+    // until the process exits. No-op without a projectPath or when an
+    // env-port override is in force.
+    const refreshed = resolveRefreshedEndpoint(
+      this.projectPath,
+      this.envPort,
+      this.baseUrl,
+      this.authToken,
+    );
+    if (refreshed) {
+      this.baseUrl = refreshed.baseUrl;
+      this.authToken = refreshed.authToken;
+    }
     this.abortController = new AbortController();
     const url = `${this.baseUrl}/events?subscriber=${encodeURIComponent(
       this.subscriberId,
@@ -115,10 +164,19 @@ export class BridgeEventStream {
     })
       .then((res) => {
         if (!res.ok || !res.body) {
+          // Cancel the unconsumed body before throwing: undici keeps the
+          // socket (and its fd) out of the keep-alive pool until the
+          // Response is garbage-collected, so dropping it on every failed
+          // reconnect (a stale token yields one 401 per retry) accumulated
+          // abandoned sockets for the whole process lifetime.
+          if (res.body) void res.body.cancel().catch(() => {});
           throw new Error(`HTTP ${res.status}`);
         }
         this.connected = true;
         this.lastError = null;
+        // A successful connect ends any backoff streak — the next failure
+        // starts again from the base delay.
+        this.reconnectDelayMs = RECONNECT_BASE_DELAY_MS;
         this.pump(res.body);
       })
       .catch((err: unknown) => {
@@ -249,11 +307,23 @@ export class BridgeEventStream {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return;
+    const delay = this.reconnectDelayMs;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.abortController = null;
       this.connect();
-    }, 2000);
+    }, delay);
+    // A pending reconnect must not keep the Node event loop alive after the
+    // MCP host closes stdio — without the MCP server ever calling stop() on
+    // this path, an un-unref'd timer chained forever left an orphaned node
+    // process behind every host session.
+    this.reconnectTimer.unref?.();
+    // Exponential backoff: 2s → 4s → … → 30s cap. The delay resets to the
+    // base on the next successful connect (see connect()).
+    this.reconnectDelayMs = Math.min(
+      this.reconnectDelayMs * 2,
+      RECONNECT_MAX_DELAY_MS,
+    );
   }
 
   /** Drain all queued events. The subscription keeps running. */
@@ -339,6 +409,8 @@ export class BridgeEventStream {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    // A stopped→restarted stream starts its backoff from scratch.
+    this.reconnectDelayMs = RECONNECT_BASE_DELAY_MS;
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;

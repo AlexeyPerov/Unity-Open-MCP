@@ -10,6 +10,7 @@ import {
   normalizePath,
   resolvePort,
   resolveAuthToken,
+  resolveRefreshedEndpoint,
   isPidAlive,
   PORT_RANGE_START,
   PORT_RANGE_SIZE,
@@ -21,6 +22,7 @@ import {
   TEST_PENDING_TTL_MS,
   type InstanceLock,
 } from "./instance-discovery.js";
+import { bridgeBaseUrl } from "./constants.js";
 
 // Pinned cross-side values. Both the bridge (InstancePortResolverTests.cs)
 // and this test MUST agree on these — that's the whole point of deterministic
@@ -537,4 +539,109 @@ test("hasRecentPendingTestRun: returns false (fail-safe) when the dir is missing
     hasRecentPendingTestRun(Date.now(), TEST_PENDING_TTL_MS, "/nonexistent-dir-xyz"),
     false,
   );
+});
+
+// ---------------------------------------------------------------------------
+// resolveRefreshedEndpoint — reconnect-time endpoint/token refresh
+//
+// The bridge mints a fresh bearer token on every Acquire (domain reload /
+// editor restart). Long-lived clients (LiveClient, BridgeEventStream) call
+// this before each reconnect so they pick up the current port+token instead
+// of going permanently 401 with construction-time credentials.
+// ---------------------------------------------------------------------------
+
+test("resolveRefreshedEndpoint: null without projectPath, with an env-port override, or with no lock", () => {
+  assert.equal(
+    resolveRefreshedEndpoint(undefined, undefined, bridgeBaseUrl(22028), "t1"),
+    null,
+    "no projectPath → nothing to read",
+  );
+  assert.equal(
+    resolveRefreshedEndpoint("/proj", 25000, bridgeBaseUrl(22028), "t1"),
+    null,
+    "env-port override is authoritative → refresh is a no-op",
+  );
+  const sandbox = makeSandbox();
+  try {
+    // Sandbox HOME set by plantLock is not needed here — no lock planted at
+    // all, so point homedir() at the empty sandbox manually.
+    process.env.HOME = sandbox.dir;
+    process.env.USERPROFILE = sandbox.dir;
+    assert.equal(
+      resolveRefreshedEndpoint("/proj", undefined, bridgeBaseUrl(22028), "t1"),
+      null,
+      "missing lock → null",
+    );
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("resolveRefreshedEndpoint: null when the lock's PID is dead", () => {
+  const sandbox = makeSandbox();
+  try {
+    // 999_999_999 is beyond any real pid_max — guaranteed ESRCH.
+    plantLock(sandbox, "/proj", { port: 22028, pid: 999_999_999, authToken: "t2" });
+    assert.equal(
+      resolveRefreshedEndpoint("/proj", undefined, bridgeBaseUrl(22028), "t1"),
+      null,
+      "a dead-PID lock must not be adopted",
+    );
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("resolveRefreshedEndpoint: null when port and token are unchanged", () => {
+  const sandbox = makeSandbox();
+  try {
+    plantLock(sandbox, "/proj", { port: 22028, pid: LIVE_PID, authToken: "t1" });
+    assert.equal(
+      resolveRefreshedEndpoint("/proj", undefined, bridgeBaseUrl(22028), "t1"),
+      null,
+      "nothing changed → no refresh",
+    );
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("resolveRefreshedEndpoint: returns the refreshed pair when the token rotated (same port)", () => {
+  // The common case across a domain reload: port stable, token changed.
+  const sandbox = makeSandbox();
+  try {
+    plantLock(sandbox, "/proj", { port: 22028, pid: LIVE_PID, authToken: "t2" });
+    assert.deepEqual(
+      resolveRefreshedEndpoint("/proj", undefined, bridgeBaseUrl(22028), "t1"),
+      { baseUrl: bridgeBaseUrl(22028), authToken: "t2" },
+    );
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("resolveRefreshedEndpoint: returns the refreshed pair when the bridge moved ports", () => {
+  const sandbox = makeSandbox();
+  try {
+    plantLock(sandbox, "/proj", { port: 23000, pid: LIVE_PID, authToken: "t1" });
+    assert.deepEqual(
+      resolveRefreshedEndpoint("/proj", undefined, bridgeBaseUrl(22028), "t1"),
+      { baseUrl: bridgeBaseUrl(23000), authToken: "t1" },
+    );
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("resolveRefreshedEndpoint: a tokenless (older-bridge) lock clears a stale cached token", () => {
+  const sandbox = makeSandbox();
+  try {
+    plantLock(sandbox, "/proj", { port: 22028, pid: LIVE_PID });
+    assert.deepEqual(
+      resolveRefreshedEndpoint("/proj", undefined, bridgeBaseUrl(22028), "t1"),
+      { baseUrl: bridgeBaseUrl(22028), authToken: undefined },
+    );
+  } finally {
+    cleanupSandbox(sandbox);
+  }
 });

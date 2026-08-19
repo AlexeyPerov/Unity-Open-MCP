@@ -23,7 +23,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { STATUS_DIR_NAME } from "./constants.js";
+import { STATUS_DIR_NAME, bridgeBaseUrl } from "./constants.js";
 
 export const PORT_RANGE_START = 20000;
 export const PORT_RANGE_SIZE = 10000;
@@ -243,6 +243,53 @@ export function resolveAuthToken(projectPath: string, envPort?: number): string 
   if (!lock || !isPidAlive(lock.pid)) return undefined;
   const token = lock.authToken;
   return typeof token === "string" && token.length > 0 ? token : undefined;
+}
+
+/**
+ * Re-resolve a bridge endpoint (baseUrl + authToken) from the on-disk instance
+ * lock, returning the refreshed pair when the live bridge has moved, or null
+ * when nothing changed / the lock can't be trusted. Shared by LiveClient and
+ * BridgeEventStream so every long-lived bridge client self-heals after a Unity
+ * restart or domain reload — the bridge mints a fresh token on every Acquire,
+ * so a client that caches the construction-time token forever goes permanently
+ * 401 after the first reload.
+ *
+ * No-op (null) when there is no projectPath, an env-port override is in force
+ * (env is authoritative — no lock to read, matching resolvePort/
+ * resolveAuthToken), or the lock is missing/its PID is dead/nothing actually
+ * changed. Never throws — readInstanceLock/isPidAlive are fault-tolerant.
+ *
+ * @param projectPath   absolute Unity project root
+ * @param envPort       parsed UNITY_OPEN_MCP_BRIDGE_PORT override, if any
+ * @param currentBaseUrl  the client's currently cached bridge base URL
+ * @param currentToken    the client's currently cached bearer token
+ */
+export function resolveRefreshedEndpoint(
+  projectPath: string | undefined,
+  envPort: number | undefined,
+  currentBaseUrl: string,
+  currentToken: string | undefined,
+): { baseUrl: string; authToken: string | undefined } | null {
+  if (!projectPath) return null;
+  if (envPort !== undefined) return null; // env override wins
+  let lock: InstanceLock | null;
+  try {
+    lock = readInstanceLock(projectPath);
+  } catch {
+    return null;
+  }
+  if (!lock) return null;
+  if (!isPidAlive(lock.pid)) return null;
+  const portChanged =
+    typeof lock.port === "number" &&
+    lock.port > 0 &&
+    currentBaseUrl !== bridgeBaseUrl(lock.port);
+  const tokenChanged = lock.authToken !== currentToken;
+  if (!portChanged && !tokenChanged) return null;
+  return {
+    baseUrl: portChanged ? bridgeBaseUrl(lock.port) : currentBaseUrl,
+    authToken: tokenChanged ? lock.authToken : currentToken,
+  };
 }
 
 // ---------------------------------------------------------------------------

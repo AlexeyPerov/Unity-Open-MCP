@@ -12,6 +12,11 @@ Default bind is loopback (`127.0.0.1`).
 | `/instance` | `GET` | Runtime instance metadata snapshot. |
 | `/events` | `GET` | SSE event stream (console/editor-state events). |
 | `/events/poll` | `GET` | Pull-style event drain endpoint. |
+
+Subscriber lifecycle on both event endpoints: a client-supplied `subscriber`
+id persists across polls/reconnects and keeps its cursor; an id the bridge
+mints (no `subscriber` param) is retired with the request/stream so anonymous
+clients don't accumulate subscriber state.
 | `/tools` | `GET` | Compiled-state tool inventory + group→tools map (used by capabilities / manage_tools for per-group availability). |
 | `/tools/{toolName}` | `POST` | Execute one bridge tool. |
 | `/resources` | `GET` | List bridge resources. |

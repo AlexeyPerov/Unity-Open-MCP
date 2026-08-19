@@ -878,6 +878,13 @@ namespace UnityOpenMcpBridge
                 if (!p.WaitForExit((int)timeout.TotalMilliseconds))
                 {
                     try { p.Kill(); } catch { }
+                    // Bounded wait for the kill to land and the async output
+                    // readers to flush their final lines before the using
+                    // below disposes the process and its pipe handles — a
+                    // reader mid-flush at Dispose would lose its tail (the
+                    // no-arg WaitForExit on the success path exists for the
+                    // same reason).
+                    try { p.WaitForExit(5_000); } catch { }
                     return new ProcessOutput(stdoutBuilder.ToString(), "(timed out)", -1);
                 }
                 // WaitForExit(int) can return before async streams flush; this

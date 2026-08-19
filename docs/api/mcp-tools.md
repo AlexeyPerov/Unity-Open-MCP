@@ -300,6 +300,20 @@ schema-default injection (`gate: "enforce"`, `timeout_ms: 30000`) made
 registry-dispatched tools with no matching C# parameter (e.g.
 `editor_status`) uncallable with default args.
 
+### `unity_senses_pull_events`
+
+Incremental console logs and editor-state transitions from a single
+server-side SSE subscription. The first call opens the stream; later calls
+return only new events (pass a stable `subscriber` id for a per-caller
+cursor). The reader survives Unity restarts and domain reloads: every
+reconnect re-resolves the bridge port and bearer token from the instance
+lock under `~/.unity-open-mcp/instances/` (the bridge rotates its token on
+each reload), reconnecting with exponential backoff — 2s doubling to a 30s
+cap, reset after a successful connect. While the bridge is unreachable the
+tool surfaces `bridge_unavailable` (with the last reconnect failure in
+`lastError`); once the bridge returns, the next reconnect resumes the stream
+without any agent action.
+
 ### `unity_senses_visual_compare`
 
 Visual regression compare — capture a named reference snapshot, then diff a

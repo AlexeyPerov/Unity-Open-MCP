@@ -17,8 +17,8 @@ import {
   readDismissConfig,
   type PollAndDismissOptions,
 } from "./dialog-dismiss.js";
-import { readInstanceLock, classifyInstance, lockPath, isPidAlive, statusDir, hasRecentPendingTestRun } from "./instance-discovery.js";
-import type { InstanceClassification, InstanceLock } from "./instance-discovery.js";
+import { readInstanceLock, classifyInstance, lockPath, isPidAlive, statusDir, hasRecentPendingTestRun, resolveRefreshedEndpoint } from "./instance-discovery.js";
+import type { InstanceClassification } from "./instance-discovery.js";
 import {
   bridgeBaseUrl,
   BRIDGE_DEFAULT_TIMEOUT_MS,
@@ -1464,31 +1464,20 @@ export class LiveClient implements Router {
    * (because {@link postTool} re-POSTs on recovery) duplicate side-effects
    * once the editor came back. Refreshing here lets a restart self-heal.
    *
-   * No-op (returns false) when there is no projectPath, an env-port override
-   * is in force (env is authoritative — no lock to read, matching
-   * resolvePort/resolveAuthToken), or the lock is missing/its PID is dead/
-   * nothing actually changed. Never throws — readInstanceLock/isPidAlive are
-   * already fault-tolerant.
+   * Delegates the lock read/comparison to the shared
+   * {@link resolveRefreshedEndpoint} helper (also used by BridgeEventStream)
+   * — no-op semantics live there.
    */
   private refreshEndpointFromLock(): boolean {
-    if (!this.projectPath) return false;
-    if (this.envPort !== undefined) return false; // env override wins
-    let lock: InstanceLock | null;
-    try {
-      lock = readInstanceLock(this.projectPath);
-    } catch {
-      return false;
-    }
-    if (!lock) return false;
-    if (!isPidAlive(lock.pid)) return false;
-    const portChanged =
-      typeof lock.port === "number" &&
-      lock.port > 0 &&
-      this.baseUrl !== bridgeBaseUrl(lock.port);
-    const tokenChanged = lock.authToken !== this.authToken;
-    if (!portChanged && !tokenChanged) return false;
-    if (portChanged) this.baseUrl = bridgeBaseUrl(lock.port);
-    if (tokenChanged) this.authToken = lock.authToken;
+    const next = resolveRefreshedEndpoint(
+      this.projectPath,
+      this.envPort,
+      this.baseUrl,
+      this.authToken,
+    );
+    if (!next) return false;
+    this.baseUrl = next.baseUrl;
+    this.authToken = next.authToken;
     return true;
   }
 

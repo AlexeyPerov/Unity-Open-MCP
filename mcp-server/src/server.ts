@@ -23,6 +23,7 @@ import { ALL_TOOLS } from "./tools/index.js";
 import { ALL_RESOURCES } from "./resources/index.js";
 import { LiveClient } from "./live-client.js";
 import { BatchSpawn } from "./batch-spawn.js";
+import { installBatchChildSupervision } from "./child-supervision.js";
 import { ToolRouter } from "./tool-router.js";
 import { PingCache } from "./ping-cache.js";
 import { ResourceRouter } from "./resource-router.js";
@@ -129,14 +130,21 @@ export function createServer(
   const pingCache = new PingCache();
   const liveClient = new LiveClient(port, pingCache, authToken, projectPath, undefined, envPort);
   const batchSpawn = new BatchSpawn({ projectPath });
+  // Batch children (headless Unity) hold the project lock; supervise them so
+  // a host restart / SIGINT / SIGTERM cannot orphan a run.
+  installBatchChildSupervision();
   // M13 T4.4 — one SSE subscription per server process. The MCP server is the
   // only long-lived hop between the bridge and the LLM; a per-process reader
   // amortizes the connection and lets every `unity_senses_pull_events` call
-  // share the same buffered queue.
+  // share the same buffered queue. projectPath/envPort feed the reconnect-time
+  // instance-lock refresh (the bridge rotates its bearer token on every domain
+  // reload), mirroring LiveClient's refreshEndpointFromLock self-heal.
   const eventStream = new BridgeEventStream(
     bridgeBaseUrl(port),
     undefined,
     authToken,
+    projectPath,
+    envPort,
   );
   // Per-session tool-group visibility state. Lives in the MCP server and
   // restores the catalog's default-on groups on every server restart; mutated

@@ -58,7 +58,7 @@ These drive tools through `unity-open-mcp run-tool` (one fresh process per call)
 | [`mcp-extensions.mjs`](mcp-extensions.mjs) | **S4** — embedded domains | End-to-end chains per compiled embedded domain (NavMesh, Input System, ProBuilder, …). Uncompiled groups skip; compiled groups must pass. |
 | [`mcp-sandbox.mjs`](mcp-sandbox.mjs) | **S5** — sandbox | Destructive lifecycle (packages, Hub mutators, builds) on a disposable clone of `demo/`. Editor must not be open on the sandbox. |
 
-Shared helpers for S0–S5 live in [`mcp-test-lib.mjs`](mcp-test-lib.mjs) (not run directly).
+Shared helpers for S0–S5 live in [`mcp-test-lib.mjs`](mcp-test-lib.mjs) (not run directly). Every CLI invocation runs in its own process group and the whole group is killed when the call completes — a timed-out step takes its headless Unity child with it instead of orphaning an Editor that holds the project lock until its own 10-minute timeout.
 
 ### Common flags
 

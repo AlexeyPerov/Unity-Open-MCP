@@ -3,6 +3,7 @@ import { StringDecoder } from "node:string_decoder";
 import { stat } from "node:fs/promises";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
+import { trackBatchChild } from "./child-supervision.js";
 import { resolveUnityPath, scannedHubRoots } from "./unity-install-discovery.js";
 import {
   readInstanceLock,
@@ -798,6 +799,12 @@ export class BatchSpawn implements Router {
       const child = spawn(this.unityPath, unityArgs, {
         stdio: ["ignore", "pipe", "pipe"],
       });
+
+      // Register with the process-wide supervision registry so the
+      // SIGINT/SIGTERM/exit handlers installed at the entry points tear this
+      // child down if the server dies mid-run (otherwise the headless Unity
+      // is orphaned holding the project lock until its own 10-min timeout).
+      trackBatchChild(child);
 
       // M13 — escalate SIGTERM → SIGKILL after a grace window so a wedged
       // Unity actually dies instead of lingering until the parent is killed.

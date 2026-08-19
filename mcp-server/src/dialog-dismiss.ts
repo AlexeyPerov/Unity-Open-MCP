@@ -385,6 +385,7 @@ async function tryDismissWindows(
       (err, stdout) => {
         if (settled) return;
         settled = true;
+        disarmWatchdog();
         detachAbort();
         if (err) {
           resolve({ kind: "error", message: err.message });
@@ -392,6 +393,13 @@ async function tryDismissWindows(
         }
         resolve(parseDismissOutput(stdout));
       },
+    );
+    // SIGKILL escalation for a wedged PowerShell that ignores execFile's
+    // timeout SIGTERM (see armSigkillEscalation).
+    const disarmWatchdog = armSigkillEscalation(
+      child,
+      DISMISS_SHELL_TIMEOUT_MS,
+      () => settled,
     );
     // M12 — kill the in-flight PowerShell probe when the loop's abort signal
     // fires so waitForCompile's compile-settled abort unblocks promptly.
@@ -612,6 +620,7 @@ async function tryDismissMacOS(
       (err, stdout) => {
         if (settled) return;
         settled = true;
+        disarmWatchdog();
         detachAbort();
         if (err) {
           resolve({ kind: "error", message: err.message });
@@ -619,6 +628,13 @@ async function tryDismissMacOS(
         }
         resolve(parseDismissOutput(stdout));
       },
+    );
+    // SIGKILL escalation for a wedged osascript that ignores execFile's
+    // timeout SIGTERM (see armSigkillEscalation).
+    const disarmWatchdog = armSigkillEscalation(
+      child,
+      DISMISS_SHELL_TIMEOUT_MS,
+      () => settled,
     );
     // M12 — kill the in-flight osascript probe when the loop's abort signal
     // fires so waitForCompile's compile-settled abort unblocks promptly.
@@ -778,6 +794,7 @@ async function tryDismissLinuxX11(
           { timeout: XDOTOOL_PROBE_TIMEOUT_MS },
           (err, stdout) => {
             activeChild = null;
+            disarmWatchdog();
             if (settled) return;
             if (err || !stdout.trim()) {
               tryNextFragment();
@@ -818,6 +835,7 @@ async function tryDismissLinuxX11(
                 { timeout: XDOTOOL_PROBE_TIMEOUT_MS },
                 (activateErr) => {
                   activeChild = null;
+                  disarmActivateWatchdog();
                   if (settled) return;
                   if (activateErr) {
                     finish({
@@ -829,13 +847,25 @@ async function tryDismissLinuxX11(
                   finish({ kind: "dismissed", button: "Focus", dialog: kind });
                 },
               );
+              // SIGKILL escalation for a wedged activate/key probe.
+              const disarmActivateWatchdog = armSigkillEscalation(
+                activateChild,
+                XDOTOOL_PROBE_TIMEOUT_MS,
+                () => settled,
+              );
               // M12 — the activate/key probe is also abort-cancellable.
               activeChild = activateChild;
-            });
+            }, () => settled);
           },
         );
         // M12 — track the in-flight search child so the abort handler kills it.
         activeChild = child;
+        // SIGKILL escalation for a wedged search probe.
+        const disarmWatchdog = armSigkillEscalation(
+          child,
+          XDOTOOL_PROBE_TIMEOUT_MS,
+          () => settled,
+        );
       };
       tryNextFragment();
     };
@@ -846,25 +876,33 @@ async function tryDismissLinuxX11(
 /**
  * Walk `candidateIds` and call `done(winId)` with the first window owned by
  * a Unity PID, or `done(undefined)` if none match. Sequential — the list is
- * small and parallelism buys nothing meaningful here.
+ * small and parallelism buys nothing meaningful.
+ *
+ * `stop` (optional) is polled before each probe and recursion step: once the
+ * outer probe has settled, the walk must not spawn further getwindowpid
+ * children (the result would be discarded anyway).
  */
 function findUnityOwnedWindow(
   candidateIds: string[],
   unityPids: ReadonlySet<number>,
   done: (winId: string | undefined) => void,
+  stop?: () => boolean,
 ): void {
   let idx = 0;
   const next = (): void => {
+    if (stop?.()) return;
     if (idx >= candidateIds.length) {
       done(undefined);
       return;
     }
     const winId = candidateIds[idx++];
-    execFile(
+    const child = execFile(
       "xdotool",
       ["getwindowpid", winId],
       { timeout: LINUX_PROBE_TIMEOUT_MS },
       (err, stdout) => {
+        disarmWatchdog();
+        if (stop?.()) return;
         if (err) {
           next();
           return;
@@ -876,6 +914,12 @@ function findUnityOwnedWindow(
         }
         next();
       },
+    );
+    // SIGKILL escalation for a wedged getwindowpid probe.
+    const disarmWatchdog = armSigkillEscalation(
+      child,
+      LINUX_PROBE_TIMEOUT_MS,
+      () => stop?.() ?? false,
     );
   };
   next();
@@ -970,6 +1014,38 @@ const DISMISS_SHELL_TIMEOUT_MS = 5_000;
 const XDOTOOL_PROBE_TIMEOUT_MS = 2_000;
 /** Linux process-presence / window-id probe cap (pgrep / getwindowpid). */
 const LINUX_PROBE_TIMEOUT_MS = 1_000;
+/**
+ * Grace added on top of each probe timeout before the SIGKILL watchdog fires.
+ * execFile's own `timeout` sends a single SIGTERM; a wedged probe that
+ * ignores it would never invoke the callback, leaving the caller's
+ * `settled` flag false forever (pollAndDismissDialogs then never resolves
+ * and waitForCompile hangs with the child + its pipes still alive). The
+ * watchdog escalates to the unblockable SIGKILL so the callback always
+ * fires. Short — the probe already had the full timeout to exit cleanly.
+ */
+const DISMISS_SIGKILL_GRACE_MS = 2_000;
+
+/**
+ * SIGKILL escalation for one execFile probe child (see
+ * DISMISS_SIGKILL_GRACE_MS). `isSettled` is checked just before firing so a
+ * probe that settled in the race window between its callback and the
+ * watchdog tick is left alone. The timer is unref'd — a pending escalation
+ * must not keep the event loop alive. Returns a disarm function the caller
+ * invokes on normal settle. Exported for unit tests.
+ */
+export function armSigkillEscalation(
+  child: { kill: (signal?: NodeJS.Signals) => boolean },
+  timeoutMs: number,
+  isSettled: () => boolean,
+): () => void {
+  const watchdog = setTimeout(() => {
+    if (!isSettled()) {
+      try { child.kill("SIGKILL"); } catch { /* already dead */ }
+    }
+  }, timeoutMs + DISMISS_SIGKILL_GRACE_MS);
+  watchdog.unref?.();
+  return () => clearTimeout(watchdog);
+}
 
 /**
  * Substring markers that identify a `kind: "error"` outcome as permanent for

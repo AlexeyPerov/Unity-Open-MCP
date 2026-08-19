@@ -79,6 +79,32 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public static void Unsubscribe_RetiresSubscriber_NextDrainLazilyResubscribesAtNow()
+        {
+            // fd-leak review — the SSE/poll handlers retire ids they minted
+            // (anonymous clients) via Unsubscribe so the subscriber dictionary
+            // stays bounded. This pins the contract those handlers rely on:
+            // after Unsubscribe the id is gone, and a later Drain treats it as
+            // a brand-new subscriber (lazy re-subscribe, cursor at "now", no
+            // replay of events emitted while retired).
+            var sub = BridgeEventSource.Subscribe("retire-sub");
+            BridgeEventSource.EmitForTests("log", "before retire");
+
+            BridgeEventSource.Unsubscribe(sub);
+
+            BridgeEventSource.EmitForTests("log", "while retired");
+            var drain = BridgeEventSource.Drain(sub, 100);
+            Assert.IsNotNull(drain.Events);
+            Assert.AreEqual(0, drain.Events.Count,
+                "resubscribed at now — events emitted while retired are not replayed");
+
+            // And the resubscribed cursor works normally afterwards.
+            BridgeEventSource.EmitForTests("log", "after resubscribe");
+            var next = BridgeEventSource.Drain(sub, 100);
+            Assert.AreEqual(1, next.Events.Count, "post-resubscribe events drain normally");
+        }
+
+        [Test]
         public static void RenderEvent_ProducesValidJsonForLog()
         {
             BridgeEventSource.EmitForTests("log", "render me");
