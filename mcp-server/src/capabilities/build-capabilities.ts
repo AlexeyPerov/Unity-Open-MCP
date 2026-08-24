@@ -284,6 +284,11 @@ export const ROUTING_SUMMARY: RoutingSummary = {
   // and gate mutations need a live Editor — they have no batch form.
   liveOnlyCategories: ["agent-senses"],
   perToolFlag: "batchCapable",
+  perToolFlagMeaning:
+    "batchCapable answers 'does this tool have a headless batch-spawn fallback when the " +
+    "bridge is down?'. It does NOT say whether the tool can be a nested batch_execute step — " +
+    "that is decided by batch_execute's pre-flight refusals (batch_tool_not_invokable, " +
+    "batch_nested_reload_unsafe, batch_step_requires_server_poll).",
 };
 
 export interface ToolCapability {
@@ -455,6 +460,16 @@ export interface RoutingSummary {
    * read that flag on each tool, not scan this summary for the list.
    */
   perToolFlag: string;
+  /**
+   * specs/feedback.md 2026-08-24 — what `perToolFlag` actually means. A field
+   * report read `batchCapable: false` as "cannot be a nested `batch_execute`
+   * step" and expected `batch_execute` to refuse the tool on that basis. The
+   * two are independent axes: this flag is about the HEADLESS spawn fallback,
+   * while nestability is decided by `batch_execute`'s own pre-flight refusals.
+   * Spelling it out here costs one short string and removes the ambiguity at
+   * the point of reading.
+   */
+  perToolFlagMeaning: string;
 }
 
 export interface CapabilitiesFilter {

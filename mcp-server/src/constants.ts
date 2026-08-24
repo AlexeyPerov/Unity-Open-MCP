@@ -82,6 +82,25 @@ export const BRIDGE_MAX_TIMEOUT_MS = 600_000;
 export const BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS = 55_000;
 
 /**
+ * The bridge wire-contract revision this server was built against
+ * (`BridgeSession.WireContract`).
+ *
+ * specs/feedback.md 2026-08-24 — the package semver does not move for every
+ * observable change to the request/response contract, so a fixed-and-shipped
+ * blocker recurring against a stale install was indistinguishable from a
+ * regression: both reported `bridgeVersion "1.0.0"`. The bridge now reports an
+ * integer revision on `/ping` that IS bumped for every such change, and
+ * `bridge_status` compares it against this constant so an agent can tell
+ * "reinstall the Unity package" from "file a regression".
+ *
+ * A bridge that predates the field reports no `wireContract` at all — treat the
+ * absence as stale. Bump this in the same change as `BridgeSession.WireContract`
+ * (`packages/bridge/Editor/Bridge/BridgeSession.cs`), which carries the
+ * revision log.
+ */
+export const EXPECTED_BRIDGE_WIRE_CONTRACT = 1;
+
+/**
  * The npm package the MCP server is published as, pinned to the shared
  * trio version (`unity-open-mcp@X.Y.Z`) for the `npx -y` invocation.
  * Pinning (not `@latest`) keeps the MCP server aligned with the bridge /

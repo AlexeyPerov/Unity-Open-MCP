@@ -148,6 +148,18 @@ not rolled back when a later step fails; undo the group when needed. Power
 tools and local-only meta-tools cannot be nested. The default limit is 25
 commands and the hard maximum is 100.
 
+Nestability is decided by `batch_execute`'s pre-flight refusals, **not** by the
+per-tool `batchCapable` capability flag (that flag is about the headless
+batch-spawn fallback above — a different axis). Every pre-flight refusal happens
+before the dispatch loop, so `batch.results[]` is empty and nothing was
+committed; `agentNextSteps` says exactly that rather than offering the
+partial-failure/`editor_undo` guidance. `unity_senses_run_tests` is refused with
+`batch_step_requires_server_poll` — its terminal result comes from the server
+polling a results file, which only the top-level route does. Where a concrete
+meta-tool equivalent exists the refusal names it, so a client that ignores
+`tools/list_changed` (and therefore cannot see a freshly activated tool) is not
+pointed at a top-level call it cannot make.
+
 ## Common recovery codes
 
 | Code | Meaning | Recovery |
@@ -163,6 +175,7 @@ commands and the hard maximum is 100.
 | `unity_process_not_found` | `restart_editor` / `resource_pressure` could not resolve a live Unity PID for this project. | Open Unity for this project (with `-projectPath`), or pass an explicit `pid` to `resource_pressure`. |
 | `markers_missing` | Headless Unity exited **cleanly** (exit 0) but emitted no JSON report — the async finalize path did not run; the compile likely succeeded. | Confirm with `read_compile_errors` (expect `errorCount: 0`) instead of treating the call as a spawn failure. |
 | `batch_spawn_failed` | Headless Unity produced no classifiable result (non-zero exit, no markers). | Inspect compile errors, package state, project lock, and path. |
+| `batch_step_requires_server_poll` | A `batch_execute` step's terminal result is produced by the server polling a results file, which the batch route does not do (today: `unity_senses_run_tests`). | Call the tool as a single top-level call. The message also names a reachable `execute_csharp` / `invoke_method` equivalent for clients that cannot see the tool. |
 | `scene_dirty` | A disruptive mutation was refused because a scene has unsaved work. | Save/discard first or deliberately opt into the documented risk. |
 | `bridge_response_unparsable` | A substantial bridge response could not be parsed. | Do not trust partial output; check bridge health before retrying. |
 
@@ -220,6 +233,29 @@ detail }` block and a non-null `recoveryHint`:
 `classification` keeps mirroring the instance lock verbatim
 (`healthy | reloading | dead_bridge | gone`); the wedge is carried by the tool's
 own `status` token plus the `wedged` block.
+
+### Stale install vs. regression
+
+When `/ping` is reachable the response also carries a `wireContract` block:
+
+```json
+{ "bridge": 1, "expected": 1, "stale": false, "note": null }
+```
+
+`wireContract` is an integer the bridge bumps for every observable change to the
+request/response contract (accepted parameter keys, error codes, envelope fields,
+declared schema ceilings) — the things `bridgeVersion` does **not** move for.
+Without it, a tool failing in a way the docs describe as already fixed is
+indistinguishable from a regression, because a stale install and a current one
+report the same semver.
+
+- `stale: true` — the installed Unity bridge package predates this MCP server's
+  contract. Reinstall/update it and retry before reporting anything. A bridge old
+  enough to omit the field reports `bridge: null, stale: true`.
+- `stale: false` — the pair is aligned, so a failure the docs call fixed is a real
+  regression worth reporting.
+
+The block is `null` when `/ping` was unreachable (there is nothing to compare).
 
 ### `ping` provenance
 

@@ -18,6 +18,9 @@ export const batchExecute = makeTool(
     "(`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group " +
     "(always visible). Live-only — NOT headless `batchCapable`; there is no batch spawn fallback " +
     "when the bridge is down.\n\n" +
+    "NOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS " +
+    "batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". " +
+    "The two are independent axes; nestability is decided by the pre-flight refusals below.\n\n" +
     "Safety: the WHOLE batch shares ONE gate cycle (one checkpoint → all steps → one validate/" +
     "delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure " +
     "and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step " +
@@ -38,7 +41,15 @@ export const batchExecute = makeTool(
     "`batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently " +
     "abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its " +
     "default Single mode replaces the active scene stack and can discard unsaved changes in open " +
-    "scenes). Use those tools as single top-level calls instead.",
+    "scenes). Use those tools as single top-level calls instead.\n\n" +
+    "A step whose terminal result is produced by the SERVER rather than by the Editor dispatch is " +
+    "refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns " +
+    "`{status:\"started\", runId}` immediately and the server polls a results file to turn that " +
+    "into a real result, which only happens on the top-level route. Inside a batch nothing polls, " +
+    "so the step would be recorded `success` carrying the non-terminal \"started\" body and the " +
+    "run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also " +
+    "names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for " +
+    "clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
   {
     required: ["commands", "paths_hint"],
         properties: {

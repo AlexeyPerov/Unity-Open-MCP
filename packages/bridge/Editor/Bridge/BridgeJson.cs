@@ -792,6 +792,11 @@ namespace UnityOpenMcpBridge
             sb.Append("\"projectPath\":").Append(EscapeString(BridgeSession.ProjectPath)).Append(',');
             sb.Append("\"unityVersion\":").Append(EscapeString(BridgeSession.UnityVersion)).Append(',');
             sb.Append("\"bridgeVersion\":").Append(EscapeString(BridgeSession.BridgeVersion)).Append(',');
+            // specs/feedback.md 2026-08-24 — wire-contract revision alongside the
+            // package semver so a client can tell a stale install from a
+            // regression when the semver has not moved. Absent on any bridge
+            // predating this field, which is itself the "stale" signal.
+            sb.Append("\"wireContract\":").Append(BridgeSession.WireContract).Append(',');
             sb.Append("\"mode\":").Append(EscapeString(BridgeSession.Mode)).Append(',');
             sb.Append("\"compiling\":").Append(BridgeSession.IsCompiling ? "true" : "false").Append(',');
             sb.Append("\"isPlaying\":").Append(BridgeSession.IsPlaying ? "true" : "false");

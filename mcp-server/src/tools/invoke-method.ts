@@ -1,5 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { BRIDGE_DEFAULT_TIMEOUT_MS } from "../constants.js";
+import { BRIDGE_DEFAULT_TIMEOUT_MS, BRIDGE_MIN_TIMEOUT_MS, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS } from "../constants.js";
 import { GATE_PROP, PATHS_HINT_TYPE, IGNORE_SCENE_DIRTY_BASE, makeTool } from "./schema-fragments.js";
 
 // M16 Plan 6 — invoke_method enhanced in place with better overload + generic-
@@ -78,6 +78,21 @@ export const invokeMethod = makeTool(
           timeout_ms: {
             type: "integer",
             default: BRIDGE_DEFAULT_TIMEOUT_MS,
+            minimum: BRIDGE_MIN_TIMEOUT_MS,
+            // specs/feedback.md 2026-08-24 — the live POST path clamps every
+            // forwarded timeout_ms to BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS, so the
+            // ceiling has to be DECLARED: a schema with no `maximum` invites a
+            // 120000 first call, which a validating client rejects outright
+            // (too_big) and a non-validating one gets clamped anyway. Same cap
+            // and same reasoning as execute_csharp / execute_menu.
+            maximum: BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS,
+            description:
+              `How long to wait for the invocation to return. Hard cap ${BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS} ms ` +
+              "(the transport cap shared with execute_csharp / execute_menu): values above a typical " +
+              "MCP host request timeout (~60s) are unreachable because the host aborts the tools/call " +
+              "first, so the route clamps server-side and reports the clamp. A method that needs longer " +
+              "belongs in unity_senses_run_tests (async job-poll shape) or split into smaller calls. " +
+              "Default 30000.",
           },
           max_depth: {
             type: "integer",

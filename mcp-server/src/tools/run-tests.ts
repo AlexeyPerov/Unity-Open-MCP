@@ -14,7 +14,11 @@ export const runTests = makeTool(
     "looks like 'no results' but is a no-match filter, not a failure. " +
     "Tip: to run a single test method deterministically, invoke the test " +
     "class/method directly via unity_open_mcp_invoke_method — NUnit assertion " +
-    "failures come back verbatim in the error.",
+    "failures come back verbatim in the error. " +
+    "This call is terminal: it starts the run AND waits for the results file, so there is no " +
+    "polling step for the caller to perform — `run_id` starts a run, it does not read one. " +
+    "It also cannot be a nested unity_open_mcp_batch_execute step (the batch route has no " +
+    "results poller and is refused up-front with batch_step_requires_server_poll).",
   {
     properties: {
           play_mode: {
@@ -62,7 +66,12 @@ export const runTests = makeTool(
           run_id: {
             type: "string",
             description:
-              "Optional run id. Omit to let the bridge generate a safe one (<pid>-<unixMs>). " +
+              "Optional id for the run this call STARTS. It is NOT a poll handle: re-calling " +
+              "run_tests with the id from a previous response does not fetch that run's status — " +
+              "it would start a second run under the same id, so the bridge refuses it while the " +
+              "first is still in flight. There is nothing to poll by hand: this call already " +
+              "waits out `timeout_ms` and returns the terminal result (raise it for a long " +
+              "suite). Omit to let the bridge generate a safe one (<pid>-<unixMs>). " +
               "Must be 1..128 chars of [A-Za-z0-9._-] only.",
           },
         },

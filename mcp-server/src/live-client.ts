@@ -149,6 +149,12 @@ interface PingResponse {
   projectPath: string | null;
   unityVersion: string | null;
   bridgeVersion: string;
+  /**
+   * Wire-contract revision (specs/feedback.md 2026-08-24). Optional on
+   * purpose: a bridge predating the field omits it, and that absence is how a
+   * caller recognizes a stale install whose semver has not moved.
+   */
+  wireContract?: number;
   mode: string;
   compiling: boolean;
   isPlaying: boolean;

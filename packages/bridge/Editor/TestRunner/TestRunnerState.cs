@@ -56,6 +56,15 @@ namespace UnityOpenMcpBridge.TestRunner
 
         static TestRunnerState()
         {
+            // specs/feedback.md 2026-08-24 — finalize markers from a DEAD Editor
+            // process before anything else. On a fresh Editor launch
+            // AssemblyReloadEvents.afterAssemblyReload does not fire, so the
+            // marker loop below never ran and a marker from the previous
+            // (killed) process survived for the full 1h TTL. Safe to run on
+            // every domain reload too: a live run's marker carries THIS pid and
+            // is skipped.
+            SweepDeadProcessMarkers();
+
             AssemblyReloadEvents.afterAssemblyReload += OnAfterAssemblyReload;
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
             // feedback #7 — entering play mode aborts any in-flight EditMode
@@ -173,6 +182,18 @@ namespace UnityOpenMcpBridge.TestRunner
                 // fresh PlayMode run on every recompile, even for EditMode).
                 sb.Append("\"playMode\":").Append(playMode ? "true" : "false").Append(',');
                 sb.Append("\"includePasses\":").Append(includePasses ? "true" : "false");
+                // specs/feedback.md 2026-08-24 — record the Editor process that
+                // owns this run. A marker whose pid is not the CURRENT process
+                // was written by an Editor that is gone (killed, crashed,
+                // relaunched), so its run can never resume: the TestRunnerApi
+                // and its callbacks died with the process. SweepDeadProcessMarkers
+                // finalizes those on load instead of leaving them to the 1h TTL —
+                // the field report found one still sitting there after the Editor
+                // was killed and relaunched, and any MCP poller still waiting on
+                // that run saw silence until its own timeout.
+                sb.Append(",\"pid\":").Append(
+                    System.Diagnostics.Process.GetCurrentProcess().Id
+                        .ToString(System.Globalization.CultureInfo.InvariantCulture));
                 // B9 — record when the marker was written so OnAfterAssemblyReload
                 // can discard a stale one (failed Execute, force-quit, lost
                 // onFinished) instead of reattaching on every future recompile.
@@ -221,6 +242,80 @@ namespace UnityOpenMcpBridge.TestRunner
             }
         }
 
+        // specs/feedback.md 2026-08-24 — is a run with this id still in flight?
+        //
+        // `run_id` is a START-time id, not a poll handle, but its schema
+        // description read like one: the field report re-called run_tests with
+        // the runId from the first response to "poll" it and got
+        // {status:"started"} again — because the second call STARTED A SECOND
+        // RUN under the same id, which superseded the first, aborted its
+        // callbacks, and rewrote its pending marker with the second call's
+        // (empty) filters. The visible symptom was "the batch route drops the
+        // declared params"; the actual cause was this silent restart.
+        //
+        // A fresh, non-stale marker for the requested id means a run is still
+        // in flight, so RunTests refuses instead of clobbering it. Markers past
+        // the TTL (a crashed run) are NOT in flight and the id is reusable.
+        internal static bool IsRunInFlight(string runId)
+        {
+            if (string.IsNullOrEmpty(runId)) return false;
+            try
+            {
+                var path = PendingFilePath(runId);
+                if (!File.Exists(path)) return false;
+                var json = File.ReadAllText(path);
+                var createdAtMs = JsonBody.GetLong(json, "createdAt", 0);
+                var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                return !IsPendingStale(createdAtMs, nowMs);
+            }
+            catch
+            {
+                // Unreadable marker — do not block the run on a filesystem
+                // hiccup. The worst case is the pre-existing behavior.
+                return false;
+            }
+        }
+
+        // specs/feedback.md 2026-08-24 — finalize every pending marker written by
+        // an Editor process that no longer exists.
+        //
+        // Such a run is unrecoverable by construction: the TestRunnerApi
+        // instance, its callbacks and the collected results all lived in that
+        // process's managed heap. Nothing will ever write its results file, so
+        // the marker is pure litter AND an MCP poller still waiting on the run
+        // gets silence until its own timeout. WriteAbortedFile gives the poller a
+        // terminal answer and clears the marker.
+        //
+        // Deliberately narrower than the TTL rule below: this only touches
+        // markers whose pid is present and foreign. A marker with no pid predates
+        // this field, and one with THIS pid may be a live run — both are left to
+        // the existing TTL/reattach logic.
+        internal static void SweepDeadProcessMarkers()
+        {
+            try
+            {
+                if (!Directory.Exists(TestRunnerService.StatusDir)) return;
+                var currentPid = System.Diagnostics.Process.GetCurrentProcess().Id;
+                foreach (var file in Directory.GetFiles(TestRunnerService.StatusDir, "test-pending-*.json"))
+                {
+                    var json = File.ReadAllText(file);
+                    var runId = JsonBody.GetString(json, "runId");
+                    if (string.IsNullOrEmpty(runId)) continue;
+                    var pid = JsonBody.GetLong(json, "pid", 0);
+                    // 0 = absent (pre-field marker). Only a KNOWN foreign pid is
+                    // proof the owning process is gone.
+                    if (pid <= 0 || pid == currentPid) continue;
+                    var playMode = JsonBody.GetBool(json, "playMode", true);
+                    TestRunnerService.WriteAbortedFile(
+                        runId, playMode ? "PlayMode" : "EditMode", "editor_process_gone");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[TestRunnerState] SweepDeadProcessMarkers error: {ex.Message}");
+            }
+        }
+
         private static void OnAfterAssemblyReload()
         {
             try
@@ -257,10 +352,6 @@ namespace UnityOpenMcpBridge.TestRunner
                         continue;
                     }
 
-                    var assemblyName = JsonBody.GetString(json, "assemblyName");
-                    var testNamespace = JsonBody.GetString(json, "testNamespace");
-                    var testClass = JsonBody.GetString(json, "testClass");
-                    var testMethod = JsonBody.GetString(json, "testMethod");
                     // B8 — read the persisted mode. Pending files written before
                     // this fix lacked the field; default to PlayMode to preserve
                     // the prior behaviour for in-flight PlayMode runs (the only
@@ -268,11 +359,12 @@ namespace UnityOpenMcpBridge.TestRunner
                     var playMode = JsonBody.GetBool(json, "playMode", true);
                     var includePasses = JsonBody.GetBool(json, "includePasses", true);
 
-                    if (assemblyName == "") assemblyName = null;
-                    if (testNamespace == "") testNamespace = null;
-                    if (testClass == "") testClass = null;
-                    if (testMethod == "") testMethod = null;
-
+                    // The marker's filter fields (assemblyName / testNamespace /
+                    // testClass / testMethod) are NOT read here: reattach only
+                    // re-registers callbacks for the run the framework is already
+                    // resuming, and re-deriving a Filter would mean calling
+                    // Execute again — the B8 bug. They stay in the marker as
+                    // human-readable provenance for whoever inspects the file.
                     ReattachCallbacks(runId, playMode, includePasses);
                 }
             }

@@ -12,6 +12,7 @@ import {
   VERIFY_JSON_BEGIN,
   VERIFY_JSON_END,
   BRIDGE_DEFAULT_TIMEOUT_MS,
+  EXPECTED_BRIDGE_WIRE_CONTRACT,
   NPM_PACKAGE,
   ARCHIVE_URL,
   RELEASE_NOTES_URL_PREFIX,
@@ -79,6 +80,16 @@ function extractCsConst(src: string, name: string): string | null {
   return m ? m[1] : null;
 }
 
+/** Extract a numeric `const int NAME = value` assignment from a C# source blob.
+ *  Distinct from {@link extractCsConst}, which only matches STRING constants —
+ *  passing a numeric constant to that helper silently returns null and makes the
+ *  assertion vacuous. */
+function extractCsIntConst(src: string, name: string): string | null {
+  const re = new RegExp(`${name}\\s*=\\s*(-?[0-9_]+)\\s*;`);
+  const m = src.match(re);
+  return m ? m[1].replace(/_/g, "") : null;
+}
+
 /** Extract a `pub const NAME: &str = "value"` assignment from a Rust source blob. */
 function extractRustConst(src: string, name: string): string | null {
   const re = new RegExp(`${name}\\s*:\\s*&str\\s*=\\s*"([^"]+)"`);
@@ -139,14 +150,15 @@ test("bridge default timeout matches across bridge C#, TS, and hub Rust", () => 
     );
     if (existsSync(requestBodyPath)) {
       const src = readFileSync(requestBodyPath, "utf8");
-      const csVal = extractCsConst(src, "DefaultTimeoutMs");
-      if (csVal !== null) {
-        assert.equal(
-          csVal,
-          tsValue,
-          "bridge DefaultTimeoutMs drifted from TS BRIDGE_DEFAULT_TIMEOUT_MS",
-        );
-      }
+      // `DefaultTimeoutMs` is `const int` — read it with the numeric extractor.
+      // The string extractor never matched it, so this assertion used to be
+      // vacuous (csVal === null → skipped) and a one-sided bump passed CI.
+      const csVal = extractCsIntConst(src, "DefaultTimeoutMs");
+      assert.equal(
+        csVal,
+        tsValue,
+        "bridge DefaultTimeoutMs drifted from TS BRIDGE_DEFAULT_TIMEOUT_MS",
+      );
     }
   }
   if (hub) {
@@ -156,6 +168,26 @@ test("bridge default timeout matches across bridge C#, TS, and hub Rust", () => 
       "hub BRIDGE_DEFAULT_TIMEOUT_MS drifted from TS",
     );
   }
+});
+
+// specs/feedback.md 2026-08-24 — the wire-contract revision is the signal that
+// tells "your installed bridge predates the fix" from "this regressed", so the
+// two sides MUST agree. A one-sided bump would make every healthy pair report
+// itself stale (bridge behind server) or hide a real staleness (server behind
+// bridge), which is worse than not having the signal at all.
+test("bridge wire-contract revision matches the TS expectation", () => {
+  const root = findToolkitRoot();
+  if (!root) return; // standalone mcp-server install — nothing to compare
+  const sessionPath = join(root, "packages/bridge/Editor/Bridge/BridgeSession.cs");
+  if (!existsSync(sessionPath)) return;
+  const src = readFileSync(sessionPath, "utf8");
+  const csVal = extractCsIntConst(src, "WireContract");
+  assert.equal(
+    csVal,
+    String(EXPECTED_BRIDGE_WIRE_CONTRACT),
+    "bridge BridgeSession.WireContract drifted from TS EXPECTED_BRIDGE_WIRE_CONTRACT — " +
+      "bump both in the same change",
+  );
 });
 
 test("npm package name matches across bridge C#, TS, and hub Rust", () => {

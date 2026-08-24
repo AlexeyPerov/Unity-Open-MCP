@@ -61,6 +61,14 @@ export const bridgeStatus = makeTool(
     "(a modal dialog is blocking Unity's message pump — the heartbeat is stale " +
     "but /ping still answers, which a failed bridge assembly could never do, " +
     "so this is NOT Safe Mode; only an operator can dismiss the dialog). " +
+    "Also reports a `wireContract` block ({ bridge, expected, stale, note }) " +
+    "whenever /ping was reachable. The bridge's wire-contract revision moves " +
+    "for every observable change to the request/response contract, which the " +
+    "package semver does NOT — so when a tool fails in a way the docs say is " +
+    "already fixed, `wireContract.stale: true` means the installed Unity " +
+    "package predates the fix (reinstall it) and `stale: false` means the " +
+    "failure is a genuine regression worth reporting. A bridge old enough not " +
+    "to report the field at all reads as `bridge: null, stale: true`. " +
     "Designed for the Validation Suite's manual bridge-offline scenario " +
     "pattern and operators confirming toolbar stop/start — not a " +
     "general agent health check (use unity_open_mcp_ping for that). " +

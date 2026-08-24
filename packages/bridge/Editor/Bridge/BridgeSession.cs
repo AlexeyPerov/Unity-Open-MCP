@@ -9,6 +9,36 @@ namespace UnityOpenMcpBridge
         public static string ProjectPath => _projectPath;
         public static string UnityVersion => _unityVersion;
         public static string BridgeVersion => "1.0.0";
+
+        // specs/feedback.md 2026-08-24 — a WIRE-CONTRACT revision that moves
+        // independently of the package semver.
+        //
+        // The motivating incident: a fixed-and-shipped blocker (registry tools
+        // rejecting the transport envelope keys, so editor_status was uncallable
+        // with default args) recurred in the field against an installed bridge
+        // that still reported bridgeVersion "1.0.0" — the same string the fixed
+        // source reports. From the call site "your installed bridge predates the
+        // fix" and "this regressed" were indistinguishable, so the agent could
+        // not tell whether to reinstall or to file a regression.
+        //
+        // This integer is the disambiguator: bump it in the SAME change as any
+        // observable change to the request/response contract a client can
+        // depend on — accepted parameter keys, error codes, envelope fields,
+        // declared schema ceilings. It is reported by /ping and surfaced by
+        // bridge_status next to bridgeVersion (see
+        // mcp-server/src/constants.ts EXPECTED_BRIDGE_WIRE_CONTRACT, which is
+        // the revision the paired server was built against). An older bridge
+        // omits the field entirely, which reads as "stale" — that absence is
+        // itself the answer to the question above.
+        //
+        // Revisions:
+        //   1 — transport-envelope key exemption in registry dispatch
+        //       (gate / timeout_ms / ignore_scene_dirty / confirm_bypass),
+        //       "(none)" allow-list rendering for zero-parameter tools,
+        //       batch_execute pre-flight refusal of server-polled steps
+        //       (batch_step_requires_server_poll), run_tests in-flight run_id
+        //       refusal (run_id_in_flight).
+        public const int WireContract = 1;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
         public static string Mode => "live";

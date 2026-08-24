@@ -116,6 +116,16 @@ Use `/ping` to confirm:
 - bridge reachability
 - compile/play state
 - readiness before running mutating tools
+- the installed bridge's wire-contract revision
+
+The response body carries `bridgeVersion` (the package semver) **and**
+`wireContract` (an integer bumped for every observable change to the
+request/response contract — accepted parameter keys, error codes, envelope
+fields, declared schema ceilings). The semver does not move for a wire-contract
+fix, so `wireContract` is what distinguishes a stale install from a regression:
+`unity_open_mcp_bridge_status` compares it against the revision its MCP server
+was built against and reports `wireContract.stale`. A bridge old enough to omit
+the field is, by definition, older than revision 1.
 
 ## Related docs
 

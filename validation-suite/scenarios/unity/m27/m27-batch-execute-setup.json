@@ -90,11 +90,37 @@
     {
       "id": "expected-deny",
       "type": "expected",
-      "title": "Expected outcomes (deny-list)",
+      "title": "Expected outcomes (pre-flight refusal)",
       "items": [
         "mutation.success is false",
-        "error.code is \"batch_tool_not_invokable\" — the whole batch is rejected before any step runs (clean rejection, no partial state)",
-        "error.message names execute_csharp and explains it must be a single top-level call"
+        "error.code is \"batch_nested_reload_unsafe\" — execute_csharp resolves to the restart_then_settle lifecycle, so the lifecycle guard refuses it (the explicit deny-list now covers only batch_execute itself and compile_check)",
+        "the whole batch is rejected before any step runs (clean rejection, no partial state)",
+        "error.message names execute_csharp and explains it must be a single top-level call",
+        "agentNextSteps says the batch was REFUSED before any step ran (batch.results[] empty, nothing to undo) — NOT the partial-failure/editor_undo guidance"
+      ]
+    },
+    {
+      "id": "prompt-server-polled",
+      "type": "agent_prompt",
+      "title": "Attempt to nest a server-polled tool (run_tests)",
+      "tool": "unity_open_mcp_batch_execute",
+      "payload": {
+        "commands": [
+          { "tool": "unity_senses_run_tests", "params": { "play_mode": false, "assembly_name": "GameTests" } }
+        ],
+        "paths_hint": ["Assets/Scenes/Main.unity"]
+      }
+    },
+    {
+      "id": "expected-server-polled",
+      "type": "expected",
+      "title": "Expected outcomes (server-polled step)",
+      "items": [
+        "mutation.success is false",
+        "error.code is \"batch_step_requires_server_poll\" — run_tests only ever returns {status:\"started\"} from the Editor; the MCP server's results-file poller (which produces the terminal result) does not run on the batch route",
+        "error.message names commands[0], unity_senses_run_tests, and the top-level route",
+        "error.message also names a reachable alternative (invoke_method / execute_csharp) for clients that ignore tools/list_changed",
+        "no test-pending-*.json is left behind in ~/.unity-open-mcp (the refusal happens before dispatch, so no run was started)"
       ]
     },
     {

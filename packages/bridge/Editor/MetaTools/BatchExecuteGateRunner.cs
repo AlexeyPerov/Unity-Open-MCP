@@ -84,7 +84,22 @@ namespace UnityOpenMcpBridge.MetaTools
                 ? new List<string>()
                 : new List<string>(result.AgentNextSteps);
 
-            if (!result.Mutation.Success)
+            if (IsPreflightRefusal(result.Mutation.ErrorCode))
+            {
+                // specs/feedback.md 2026-08-24 — a pre-flight refusal happens
+                // BEFORE the dispatch loop: there is no batch.results[], nothing
+                // executed, and nothing was committed. Pointing the agent at
+                // per-step results and at editor_undo (as the partial-failure
+                // guidance below does) sends it looking for state that does not
+                // exist. The refusal message itself carries the fix — including
+                // the reachable-alternative hint for the tools that have one.
+                steps.Add(
+                    "The batch was REFUSED before any step ran — batch.results[] is empty, no " +
+                    "mutation was committed, and there is nothing to undo. Read " +
+                    "mutation.error.message: it names the offending commands[i] entry and what " +
+                    "to do instead. Fix the batch and re-send it.");
+            }
+            else if (!result.Mutation.Success)
             {
                 steps.Add(
                     "One or more batch steps failed. Inspect batch.results[] for the per-step " +
@@ -107,6 +122,28 @@ namespace UnityOpenMcpBridge.MetaTools
             }
 
             return result;
+        }
+
+        // specs/feedback.md 2026-08-24 — the error codes BatchExecuteTool can
+        // return from its pre-flight classification, before the dispatch loop
+        // starts. Every one of them means "nothing ran": no per-step results, no
+        // committed side effects. Kept next to the runner (not in the tool) so
+        // the guidance branch and the refusal sites stay visibly paired; a new
+        // pre-flight code must be added here in the same change.
+        private static bool IsPreflightRefusal(string errorCode)
+        {
+            switch (errorCode)
+            {
+                case "missing_parameter":
+                case "batch_invalid_step":
+                case "batch_too_many_commands":
+                case "batch_tool_not_invokable":
+                case "batch_nested_reload_unsafe":
+                case "batch_step_requires_server_poll":
+                    return true;
+                default:
+                    return false;
+            }
         }
     }
 }

@@ -19,6 +19,8 @@ import { dirname, join } from "node:path";
 import { ALL_TOOLS } from "./tools/index.js";
 import { delta } from "./tools/delta.js";
 import { checkpointCreate } from "./tools/checkpoint-create.js";
+import { executeMenu } from "./tools/execute-menu.js";
+import { BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS } from "./constants.js";
 
 function schemaOf(tool: { inputSchema: unknown }): Record<string, unknown> {
   const schema = tool.inputSchema;
@@ -232,4 +234,80 @@ test("no tool file inlines the canonical gate enum literal (all use ...GATE_PROP
   }
   // Sanity: a healthy tool tree has many gate-bearing tools.
   assert.ok(gateCount > 100, `expected >100 gate-bearing tools, got ${gateCount}`);
+});
+
+// ---------------------------------------------------------------------------
+// specs/feedback.md 2026-08-24 — every `timeout_ms` must declare its ceiling.
+//
+// `invoke_method` declared only `{ type, default }`. The live POST path clamps
+// every forwarded timeout to BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS regardless, so an
+// undeclared ceiling is a silent, per-tool, invisible cap: a validating client
+// rejects the natural first call (120000) with an opaque `too_big`, and a
+// non-validating one gets clamped without knowing the boundary. Assert the
+// invariant across the whole registry so the next timeout-bearing tool cannot
+// ship without it.
+// ---------------------------------------------------------------------------
+
+/**
+ * The two tools whose `timeout_ms` is NOT the live transport wait, and so
+ * legitimately declare a ceiling above the transport cap:
+ *  - `compile_check` always runs as a headless batch spawn (no HTTP wait).
+ *  - `run_tests` uses it as the server-side results-file poll budget; the value
+ *    is stripped from the start POST (see LiveClient.handleRunTests).
+ */
+const NON_TRANSPORT_TIMEOUT_TOOLS = new Set([
+  "unity_open_mcp_compile_check",
+  "unity_senses_run_tests",
+]);
+
+test("every timeout_ms declares both a minimum and a maximum", () => {
+  const offenders: string[] = [];
+  let seen = 0;
+  for (const tool of ALL_TOOLS) {
+    const props = (tool.inputSchema as { properties?: Record<string, unknown> }).properties;
+    const timeout = props?.timeout_ms as
+      | { minimum?: unknown; maximum?: unknown }
+      | undefined;
+    if (!timeout) continue;
+    seen++;
+    if (typeof timeout.minimum !== "number" || typeof timeout.maximum !== "number") {
+      offenders.push(tool.name);
+    }
+  }
+  assert.ok(seen >= 7, `expected the known timeout-bearing tools, got ${seen}`);
+  assert.deepEqual(
+    offenders,
+    [],
+    `timeout_ms without a declared minimum+maximum: ${offenders.join(", ")}`,
+  );
+});
+
+test("transport-capped tools declare maximum === the host-safe transport cap", () => {
+  const offenders: string[] = [];
+  for (const tool of ALL_TOOLS) {
+    if (NON_TRANSPORT_TIMEOUT_TOOLS.has(tool.name)) continue;
+    const props = (tool.inputSchema as { properties?: Record<string, unknown> }).properties;
+    const timeout = props?.timeout_ms as { maximum?: unknown } | undefined;
+    if (!timeout) continue;
+    if (timeout.maximum !== BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS) {
+      offenders.push(`${tool.name} (${String(timeout.maximum)})`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `live-routed timeout_ms must cap at ${BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS}: ${offenders.join(", ")}`,
+  );
+});
+
+test("execute_menu's description names the ceiling it tells the caller to raise", () => {
+  // The description actively invites a larger timeout_ms ("a legitimately slow
+  // menu needs an explicit timeout_ms"). Naming the cap in the same breath is
+  // what stops the wasted round trip the field report hit.
+  const description = executeMenu.description ?? "";
+  assert.match(description, /timeout_ms/);
+  assert.ok(
+    description.includes(String(BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS)),
+    "execute_menu must name the transport cap where it invites a larger timeout_ms",
+  );
 });

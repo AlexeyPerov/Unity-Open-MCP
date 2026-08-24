@@ -521,6 +521,34 @@ namespace UnityOpenMcpBridge.Tests
                 "The error CODE is unchanged — only the reasoning is corrected.");
         }
 
+        // ---- specs/feedback.md 2026-08-24 — /ping wire-contract revision ----
+
+        [Test]
+        public static void BuildPingJson_ReportsWireContractRevision()
+        {
+            // The revision is what lets a client tell "your installed bridge
+            // predates the fix" from "this regressed" when the package semver
+            // has not moved (the 2026-08-17 editor_status fix recurring in the
+            // field against a stale 1.0.0 install). It must be on /ping — that
+            // is the only body bridge_status reads it from.
+            var json = BridgeJson.BuildPingJson();
+            StringAssert.Contains(
+                "\"wireContract\":" + BridgeSession.WireContract, json,
+                $"/ping must report the wire-contract revision: {json}");
+            // bridgeVersion stays put — the two are separate axes on purpose.
+            StringAssert.Contains("\"bridgeVersion\":", json);
+        }
+
+        [Test]
+        public static void WireContract_IsPositive_SoAbsenceReadsAsStale()
+        {
+            // A caller treats a MISSING wireContract as "older than revision 1".
+            // That inference only holds while the first shipped revision is >= 1;
+            // a 0 would make a fixed bridge indistinguishable from an ancient one.
+            Assert.GreaterOrEqual(BridgeSession.WireContract, 1,
+                "The first wire-contract revision must be >= 1 so a missing field reads as stale.");
+        }
+
         [Test]
         public static void BuildPathsHintErrorEnvelope_NoReadOnlyClause_ForToolsWithoutIt()
         {

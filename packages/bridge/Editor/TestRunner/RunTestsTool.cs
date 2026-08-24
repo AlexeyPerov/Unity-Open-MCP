@@ -26,7 +26,8 @@ namespace UnityOpenMcpBridge.TestRunner
             string run_id = null,
             bool include_passes = true)
         {
-            if (string.IsNullOrEmpty(run_id))
+            bool callerSuppliedRunId = !string.IsNullOrEmpty(run_id);
+            if (!callerSuppliedRunId)
                 run_id = System.Diagnostics.Process.GetCurrentProcess().Id + "-"
                         + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
 
@@ -44,6 +45,26 @@ namespace UnityOpenMcpBridge.TestRunner
                     "Invalid 'run_id': must be 1.." + TestRunnerService.MaxRunIdLength +
                     " characters of [A-Za-z0-9._-] only (no path separators, whitespace, or '..'). " +
                     "Omit run_id to let the tool generate a safe one.");
+            }
+
+            // specs/feedback.md 2026-08-24 — `run_id` starts a run; it does NOT
+            // poll one. Re-calling with the id from a previous {status:"started"}
+            // response used to start a SECOND run under the same id: the new run
+            // superseded the first (DrainActiveCallbacks below), rewrote its
+            // pending marker with this call's filters, and answered "started"
+            // again — so an agent polling that way saw an endless "started" and a
+            // marker whose filters looked like they had been dropped. Refuse
+            // instead, and say what the id is actually for. Only a CALLER-supplied
+            // id can collide; the generated form embeds a fresh timestamp.
+            if (callerSuppliedRunId && TestRunnerState.IsRunInFlight(run_id))
+            {
+                throw new InvalidOperationException(
+                    "A test run with run_id '" + run_id + "' is already in flight. 'run_id' names a " +
+                    "run to START, not one to poll — re-calling with it would abort the running " +
+                    "run and start a new one under the same id. Results are delivered by the MCP " +
+                    "server polling test-results-<runId>.json, so the ORIGINAL run_tests call " +
+                    "returns them when the run finishes (raise its timeout_ms for a long suite). " +
+                    "To start a genuinely different run, omit run_id or pass a new one.");
             }
 
             var mode = play_mode ? "PlayMode" : "EditMode";

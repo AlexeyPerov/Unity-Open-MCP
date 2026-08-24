@@ -166,6 +166,88 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         // -------------------------------------------------------------------
+        // specs/feedback.md 2026-08-24 — run_tests cannot be a batch step: its
+        // terminal result comes from the MCP server polling
+        // test-results-<runId>.json (a LiveClient.route special case), and the
+        // batch route has no poller. The field report's batch answered
+        // {status:"started"} and never anything else, while the step was
+        // reported success. It must be refused up-front instead.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void Execute_RunTests_RefusedAsServerPolled()
+        {
+            var body = "{\"commands\":[{\"tool\":\"unity_senses_run_tests\",\"params\":" +
+                       "{\"play_mode\":false,\"assembly_name\":\"GameTests\"}}]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("batch_step_requires_server_poll", result.ErrorCode);
+            StringAssert.Contains("unity_senses_run_tests", result.ErrorMessage);
+            StringAssert.Contains("commands[0]", result.ErrorMessage);
+            // The refusal must name the route that DOES work.
+            StringAssert.Contains("top-level", result.ErrorMessage);
+        }
+
+        [Test]
+        public void Execute_RunTests_RefusalNamesAReachableAlternative()
+        {
+            // The whole point of the field report: "use it as a single top-level
+            // call" is a dead end for a client that cannot see the tool at all
+            // (it ignored tools/list_changed after manage_tools activated the
+            // group). The refusal must also name something reachable from the
+            // always-visible core group.
+            var body = "{\"commands\":[{\"tool\":\"unity_senses_run_tests\",\"params\":{}}]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.AreEqual("batch_step_requires_server_poll", result.ErrorCode);
+            StringAssert.Contains("invoke_method", result.ErrorMessage);
+            StringAssert.Contains("execute_csharp", result.ErrorMessage);
+        }
+
+        [Test]
+        public void Execute_RunTests_RefusedBeforeAnyOtherStepRuns()
+        {
+            // Pre-flight classification means the refusal happens BEFORE the
+            // dispatch loop, so a safe leading step must not have executed.
+            var name = CleanupPrefix + "PreflightGuard";
+            var body = "{\"commands\":[" +
+                       "{\"tool\":\"unity_open_mcp_gameobject_create\",\"params\":{\"name\":\"" + name + "\"}}," +
+                       "{\"tool\":\"unity_senses_run_tests\",\"params\":{}}" +
+                       "]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.AreEqual("batch_step_requires_server_poll", result.ErrorCode);
+            StringAssert.Contains("commands[1]", result.ErrorMessage);
+            Assert.IsNull(GameObject.Find(name),
+                "A pre-flight refusal must commit nothing — the leading step must not have run.");
+        }
+
+        [Test]
+        public void Execute_RecompileScripts_RefusalNamesTheExecuteCsharpEquivalent()
+        {
+            // recompile_scripts is RestartThenSettle, so it is refused by the
+            // lifecycle guard — but the refusal used to point only at a
+            // top-level call the reporting client could not make. It must now
+            // also carry the concrete execute_csharp equivalent.
+            var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_recompile_scripts\",\"params\":{}}]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("batch_nested_reload_unsafe", result.ErrorCode);
+            StringAssert.Contains("RequestScriptCompilation", result.ErrorMessage);
+            StringAssert.Contains("editor_status", result.ErrorMessage);
+        }
+
+        [Test]
+        public void Execute_ReloadUnsafeWithoutAlternative_KeepsTheBaseRefusal()
+        {
+            // Tools with no honest one-liner equivalent must NOT get a made-up
+            // workaround appended — the base refusal stands alone.
+            var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_package_add\",\"params\":{\"package_id\":\"com.unity.test\"}}]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.AreEqual("batch_nested_reload_unsafe", result.ErrorCode);
+            Assert.IsFalse(result.ErrorMessage.Contains("execute_csharp"),
+                "No fabricated alternative for a tool that has none: " + result.ErrorMessage);
+        }
+
+        // -------------------------------------------------------------------
         // Review follow-up — scene_create is EditorSettle (no domain reload),
         // so IsNestedReloadUnsafe does NOT catch it. But its default Single
         // mode replaces the active scene stack. The param-aware guard refuses

@@ -28,6 +28,7 @@ import { DEFAULT_ENABLED_GROUPS } from "./capabilities/tool-groups.js";
 import { setUnityProcessScannerForTest } from "./running-unity.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath } from "./instance-discovery.js";
+import { EXPECTED_BRIDGE_WIRE_CONTRACT } from "./constants.js";
 // M31 Plan 3 — injectable seams for the restart_editor + resource_pressure
 // routes (no real process.kill / lsof / /proc in unit tests).
 import { setProcessKillerForTest } from "./editor-process-control.js";
@@ -303,6 +304,63 @@ test("route: capabilities filters by kind", async () => {
     const body = parseBody(res);
     assert.ok(Array.isArray(body.rules) && body.rules.length > 0, "rules surface present");
     assert.ok(Array.isArray(body.tools) && body.tools.length === 0, "tools filtered out by kind=rules");
+  });
+});
+
+// specs/feedback.md 2026-08-24 — the tool route defaults to the compact
+// profile. The unfolded catalog is ~500 KB on one line, which overflows a
+// typical harness per-result ceiling and gets spilled to a file; the tool the
+// server instructions say to "call first" has to be affordable by default.
+test("route: capabilities defaults to the compact profile", async () => {
+  await withTmp("router-caps-compact-", async (tmp) => {
+    const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
+    const res = await router.route("unity_open_mcp_capabilities", {});
+    const body = parseBody(res);
+    assert.equal(body.profile, "compact");
+    assert.equal(typeof body.profileHint, "string");
+    const tools = body.tools as Record<string, unknown>[];
+    assert.ok(tools.length > 250);
+    assert.equal("inputSchema" in tools[0], false, "compact must not carry input schemas");
+
+    // The default response has to be materially smaller than the full one.
+    const full = parseBody(
+      await router.route("unity_open_mcp_capabilities", { profile: "full" }),
+    );
+    const compactSize = JSON.stringify(body).length;
+    const fullSize = JSON.stringify(full).length;
+    assert.ok(
+      compactSize * 3 < fullSize,
+      `compact ${compactSize} should be well under a third of full ${fullSize}`,
+    );
+    assert.ok("inputSchema" in (full.tools as Record<string, unknown>[])[0]);
+  });
+});
+
+test("route: capabilities pages the tools list with a resumable cursor", async () => {
+  await withTmp("router-caps-page-", async (tmp) => {
+    const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
+    const first = parseBody(
+      await router.route("unity_open_mcp_capabilities", { kind: "tools", page_size: 25 }),
+    );
+    const pagination = first.pagination as { next_cursor: string | null; truncated: number };
+    assert.equal((first.tools as unknown[]).length, 25);
+    assert.ok(pagination.next_cursor, "a truncated list must offer a cursor");
+    assert.ok(pagination.truncated > 0);
+
+    const second = parseBody(
+      await router.route("unity_open_mcp_capabilities", {
+        kind: "tools",
+        page_size: 25,
+        cursor: pagination.next_cursor,
+      }),
+    );
+    const firstNames = (first.tools as { name: string }[]).map((t) => t.name);
+    const secondNames = (second.tools as { name: string }[]).map((t) => t.name);
+    assert.equal(
+      firstNames.some((n) => secondNames.includes(n)),
+      false,
+      "consecutive pages must not overlap",
+    );
   });
 });
 
@@ -2272,6 +2330,87 @@ test("route: bridge_status reports main_thread_wedged, not dead_bridge, when /pi
       else process.env.USERPROFILE = prevUserProfile;
       await rm(sandboxDir, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// specs/feedback.md 2026-08-24 — wire-contract staleness on bridge_status.
+//
+// A blocker fixed on 2026-08-17 recurred in the field against an installed
+// bridge that still reported bridgeVersion "1.0.0" — the same string the FIXED
+// source reports, because the semver does not move for a wire-contract fix. The
+// agent could not tell "reinstall the package" from "file a regression".
+// ---------------------------------------------------------------------------
+
+test("route: bridge_status reports a matching wire contract as not stale", async () => {
+  await withTmp("router-bstatus-wire-ok-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makePingFakeLive({
+      pingBody: {
+        connected: true,
+        compiling: false,
+        mode: "live",
+        bridgeVersion: "1.0.0",
+        wireContract: EXPECTED_BRIDGE_WIRE_CONTRACT,
+      },
+    });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+    const body = parseBody(await router.route("unity_open_mcp_bridge_status", {}));
+    const wire = body.wireContract as {
+      bridge: number | null;
+      expected: number;
+      stale: boolean;
+      note: string | null;
+    };
+    assert.equal(wire.bridge, EXPECTED_BRIDGE_WIRE_CONTRACT);
+    assert.equal(wire.expected, EXPECTED_BRIDGE_WIRE_CONTRACT);
+    assert.equal(wire.stale, false);
+    assert.equal(wire.note, null, "an aligned pair must not be nagged about");
+    // The raw value is mirrored inside the ping block too.
+    const ping = body.ping as { wireContract?: number | null };
+    assert.equal(ping.wireContract, EXPECTED_BRIDGE_WIRE_CONTRACT);
+  });
+});
+
+test("route: bridge_status flags a missing wireContract as a stale install", async () => {
+  await withTmp("router-bstatus-wire-stale-", async (tmp) => {
+    await setupProject(tmp);
+    // The exact field shape of the bridge that produced the report: a healthy
+    // /ping, the current semver, and no wireContract at all.
+    const live = makePingFakeLive({
+      pingBody: { connected: true, compiling: false, mode: "live", bridgeVersion: "1.0.0" },
+    });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+    const body = parseBody(await router.route("unity_open_mcp_bridge_status", {}));
+    // Still a healthy bridge — staleness is not a failure state.
+    assert.equal(body.status, "running");
+    const wire = body.wireContract as {
+      bridge: number | null;
+      expected: number;
+      stale: boolean;
+      note: string | null;
+    };
+    assert.equal(wire.bridge, null, "an absent field must not be coerced to 0");
+    assert.equal(wire.stale, true);
+    assert.ok(typeof wire.note === "string" && wire.note.length > 0);
+    assert.match(wire.note!, /reinstall|update/i, "the note must name the action to take");
+  });
+});
+
+test("route: bridge_status omits the wire-contract block when /ping is unreachable", async () => {
+  await withTmp("router-bstatus-wire-offline-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makePingFakeLive({ pingBody: null, available: false });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+    const body = parseBody(await router.route("unity_open_mcp_bridge_status", {}));
+    assert.equal(
+      body.wireContract,
+      null,
+      "with no bridge to compare, a 'stale' verdict would be fabricated",
+    );
   });
 });
 

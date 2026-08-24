@@ -53,6 +53,73 @@ namespace UnityOpenMcpBridge.MetaTools
             "unity_open_mcp_compile_check",
         };
 
+        // specs/feedback.md 2026-08-24 — tools whose TERMINAL result is produced
+        // by the MCP SERVER, not by this dispatch.
+        //
+        // run_tests returns {status:"started", runId} immediately (Execute is
+        // deferred to an editor tick so it cannot wedge the dispatch queue) and
+        // the server turns that into a real result by polling
+        // ~/.unity-open-mcp/test-results-<runId>.json — a special case in
+        // LiveClient.route, ahead of the generic tool POST. A nested batch step
+        // goes straight through BridgeHttpServer.DispatchTool, which knows
+        // nothing about that poller, so the step is recorded `success` carrying
+        // the non-terminal "started" body and the caller never learns the run's
+        // outcome. The field report burned a full session on exactly this: the
+        // batch answered `started` and nothing else, forever.
+        //
+        // Note this is NOT the same axis as the capability surface's
+        // `batchCapable` flag, which means "has a HEADLESS batch-spawn fallback
+        // when the bridge is down" — a different question with a coincidentally
+        // similar answer for this tool. Keep the two independent.
+        private static readonly HashSet<string> ServerPolledTools = new HashSet<string>
+        {
+            "unity_senses_run_tests",
+        };
+
+        // specs/feedback.md 2026-08-24 — every pre-flight refusal below tells the
+        // caller to "use it as a single top-level call instead". That is the right
+        // advice, EXCEPT for the client shape the field report hit: a client that
+        // does not re-issue tools/list on `tools/list_changed` cannot see a tool
+        // that manage_tools just activated, so the top-level call it is pointed at
+        // does not exist for it, and the refusal is a dead end. Where a concrete
+        // meta-tool equivalent exists, name it — an agent can always reach
+        // execute_csharp / invoke_method (they are in the always-visible `core`
+        // group). Returns null when there is no honest one-liner, in which case
+        // the caller gets the top-level advice alone rather than a made-up
+        // workaround.
+        private static string NestedAlternativeHint(string tool)
+        {
+            switch (tool)
+            {
+                case "unity_open_mcp_recompile_scripts":
+                    return "If your client cannot see the top-level tool (a manage_tools activation " +
+                           "whose tools/list_changed it ignored), the equivalent is one " +
+                           "execute_csharp call with read_only:true — " +
+                           "`UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation(); " +
+                           "return \"requested\";` — then poll editor_status until isCompiling is " +
+                           "false. That is what this tool does; it only adds the before/after " +
+                           "Library/ScriptAssemblies mtimes that make a no-op recompile detectable.";
+                case "unity_senses_run_tests":
+                    return "If your client cannot see the top-level tool (a manage_tools activation " +
+                           "whose tools/list_changed it ignored), invoke the test class or method " +
+                           "directly with invoke_method — NUnit assertion failures come back verbatim " +
+                           "in the error — or drive UnityEditor.TestTools.TestRunner.Api.TestRunnerApi " +
+                           "from an execute_csharp snippet. Neither gets the results-file poll, so " +
+                           "keep each call inside the transport timeout.";
+                default:
+                    return null;
+            }
+        }
+
+        // Append the reachable-alternative hint to a refusal message when one
+        // exists. Kept separate from the message text so every refusal path
+        // reads the same and a new hint lands everywhere at once.
+        private static string WithAlternative(string message, string tool)
+        {
+            var hint = NestedAlternativeHint(tool);
+            return hint == null ? message : message + " " + hint;
+        }
+
         // M30-polish Plan 5 / T5.2 — a nested step that resolves to the
         // RestartThenSettle lifecycle would force a domain reload (package add /
         // remove / reimport, asmdef edit, build_set_defines/target, settings_set
@@ -190,9 +257,32 @@ namespace UnityOpenMcpBridge.MetaTools
                 {
                     return ToolDispatchResult.Fail(
                         "batch_tool_not_invokable",
-                        $"commands[{i}] tool '{tool}' is not invokable inside a batch " +
-                        "(nesting / headless-only restriction). Use it as a " +
-                        "single top-level call instead.");
+                        WithAlternative(
+                            $"commands[{i}] tool '{tool}' is not invokable inside a batch " +
+                            "(nesting / headless-only restriction). Use it as a " +
+                            "single top-level call instead.",
+                            tool));
+                }
+
+                // specs/feedback.md 2026-08-24 — a step whose terminal result is
+                // produced by the MCP server's results-file poller can never
+                // resolve inside a batch: nothing polls, so the step reports
+                // `success` with a non-terminal {"status":"started"} body and the
+                // run's outcome is unreachable. Refuse up-front rather than
+                // silently accepting a call that cannot answer.
+                if (ServerPolledTools.Contains(tool))
+                {
+                    return ToolDispatchResult.Fail(
+                        "batch_step_requires_server_poll",
+                        WithAlternative(
+                            $"commands[{i}] tool '{tool}' is not invokable inside a batch: its " +
+                            "terminal result is produced by the MCP server polling a results file " +
+                            "under ~/.unity-open-mcp, and the batch route has no poller. The step " +
+                            "would be recorded as success carrying a non-terminal " +
+                            "{\"status\":\"started\"} body and the run's outcome would never " +
+                            "reach you. Use it as a single top-level call instead — that route " +
+                            "polls to a terminal result (and honors its timeout_ms poll budget).",
+                            tool));
                 }
 
                 // B-N9 — scene_create's safety depends on its `mode` param
@@ -221,10 +311,12 @@ namespace UnityOpenMcpBridge.MetaTools
                 {
                     return ToolDispatchResult.Fail(
                         "batch_nested_reload_unsafe",
-                        $"commands[{i}] tool '{tool}' has lifecycle " +
-                        $"{unsafePolicy.ToWireString()} and is not invokable inside a batch: " +
-                        "it may trigger a domain reload or scene switch that silently aborts " +
-                        "the remaining steps. Use it as a single top-level call instead.");
+                        WithAlternative(
+                            $"commands[{i}] tool '{tool}' has lifecycle " +
+                            $"{unsafePolicy.ToWireString()} and is not invokable inside a batch: " +
+                            "it may trigger a domain reload or scene switch that silently aborts " +
+                            "the remaining steps. Use it as a single top-level call instead.",
+                            tool));
                 }
 
                 steps.Add(new BatchStep { Tool = tool, ParamsBody = paramsBody });

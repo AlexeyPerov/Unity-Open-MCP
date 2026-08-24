@@ -88,7 +88,8 @@ Call `unity_open_mcp_capabilities` first:
 ```json
 {
   "kind": "tools",
-  "include_planned": true
+  "include_planned": true,
+  "page_size": 40
 }
 ```
 
@@ -104,6 +105,30 @@ Important response fields:
 
 The response is the authoritative current catalog. Public documentation uses
 `250+` instead of a hand-maintained exact total.
+
+### Keeping the discovery call cheap
+
+`capabilities` honors the same `profile` / `page_size` / `cursor` contract as the
+heavy read tools, because the unfolded catalog is ~500 KB on one line (per-tool
+`inputSchema` is ~85% of that) and overflows a typical client's per-result
+ceiling.
+
+| `profile` | Contains | Rough size |
+| --- | --- | --- |
+| `compact` (default) | identity + `group` + `routePolicy` + `batchCapable` + `lifecycle`; no `inputSchema`, no descriptions, per-group `tools[]` folded to `toolCount` | ~100 KB |
+| `balanced` | adds descriptions back; still no `inputSchema` | ~285 KB |
+| `full` | every field, including `inputSchema` | ~515 KB |
+
+`page_size` + `cursor` page the `tools[]` list; the response carries a
+`pagination` block with `next_cursor`, plus the echoed `profile` and a
+`profileHint` naming what was folded away. The efficient pattern is
+`kind: "tools"` + `profile: "compact"` + `page_size` to find the tool, then one
+`profile: "full"` call for the single schema you need.
+
+`batchCapable` answers "does this tool have a **headless batch-spawn** fallback
+when the bridge is down?" — it does **not** say whether the tool may be a nested
+`batch_execute` step. `routing.perToolFlagMeaning` states this inline; nestability
+is decided by `batch_execute`'s pre-flight refusals.
 
 ## Mutation and gate contract
 
@@ -180,9 +205,9 @@ Heavy tools share:
 - `cursor` from the previous `pagination.next_cursor`.
 
 Profile-aware tools include `read_asset`, `search_assets`, `scene_get_data`,
-`find_references`, `validate_edit`, `scan_paths`, and `component_get`.
-`capabilities.costHints` provides recommended starting page sizes and expected
-cost bands.
+`find_references`, `validate_edit`, `scan_paths`, `component_get`, and
+`capabilities` itself. `capabilities.costHints` provides recommended starting
+page sizes and expected cost bands.
 
 Legacy `detail` and per-tool caps remain aliases when `page_size` is omitted.
 Prefer `profile` plus uniform paging for new callers.
@@ -215,6 +240,30 @@ refresh can kill the HTTP response mid-write via a domain reload before the
 batch envelope is serialized (surfaced by the client as
 `bridge_response_unparsable`). Write the script as a single top-level call, let
 it settle, then run the remaining steps in a separate batch.
+
+A step whose **terminal result is produced by the MCP server** rather than by the
+Editor dispatch is refused with `batch_step_requires_server_poll`.
+`unity_senses_run_tests` is the case: it returns `{status: "started", runId}`
+immediately and the server polls `test-results-<runId>.json` to turn that into a
+real result — a top-level-route behavior the batch path does not have. Nested, the
+step would be recorded `success` carrying the non-terminal `"started"` body and the
+run's outcome would never reach the caller. Call it top-level.
+
+Pre-flight refusals (`batch_tool_not_invokable`, `batch_nested_reload_unsafe`,
+`batch_step_requires_server_poll`, `batch_too_many_commands`,
+`batch_invalid_step`, `missing_parameter`) all happen **before** the dispatch
+loop: `batch.results[]` is empty, nothing was committed, and `agentNextSteps`
+says so instead of offering the partial-failure/`editor_undo` guidance. Where a
+concrete meta-tool equivalent exists, the refusal message also names it — a
+client that ignores `tools/list_changed` cannot see a tool `manage_tools` just
+activated, so "use it as a single top-level call" alone would be a dead end for
+it. `recompile_scripts` points at the `CompilationPipeline.RequestScriptCompilation()`
+`execute_csharp` one-liner plus an `editor_status` poll; `run_tests` points at
+`invoke_method` / a `TestRunnerApi` snippet.
+
+Nestability is a separate axis from the capability surface's `batchCapable` flag,
+which is about the headless batch-spawn fallback. Read the refusals above, not
+that flag, to decide what may be a step.
 
 This is live request batching, not headless Unity fallback. See
 [Routing and lifecycle](routing-lifecycle.md).
@@ -284,11 +333,27 @@ match). To run a single test method deterministically, invoke the test class or
 method directly via `unity_open_mcp_invoke_method` — NUnit assertion failures
 come back verbatim in the error.
 
+`run_id` names the run this call **starts**; it is not a poll handle. There is no
+polling step for the caller to perform — the call starts the run *and* waits out
+`timeout_ms` for the results file, then returns the terminal result. Re-calling
+with the id from a previous response used to start a *second* run under that id,
+superseding the first and rewriting its pending marker with the second call's
+(empty) filters — which read as "the declared params were dropped". The bridge now
+refuses a `run_id` whose run is still in flight and says what the id is for.
+
+`run_tests` also cannot be a nested `unity_open_mcp_batch_execute` step; the batch
+route has no results poller and refuses it up-front with
+`batch_step_requires_server_poll`.
+
 A run that is aborted before its results land — superseded by a newer run,
-aborted when play mode is entered mid-EditMode-run, or cancelled by a domain
-reload — writes a terminal `test-results-<runId>.json` with
-`status: "aborted"` and a `reason` (`superseded_by_run` | `playmode_entered`),
-so a polling agent always sees a final state instead of timing out in silence.
+aborted when play mode is entered mid-EditMode-run, cancelled by a domain
+reload, or owned by an Editor process that is gone — writes a terminal
+`test-results-<runId>.json` with `status: "aborted"` and a `reason`
+(`superseded_by_run` | `playmode_entered` | `editor_process_gone`), so a polling
+agent always sees a final state instead of timing out in silence. Each pending
+marker records the Editor process that owns it, and the bridge finalizes markers
+from a dead process on load — a killed/relaunched Editor no longer leaves one
+sitting for the full one-hour TTL.
 Unknown parameter keys are rejected with `validation_error` (the bridge
 validates body keys against the declared parameter names, mirroring the MCP
 schema's `additionalProperties: false`). The four **transport envelope keys**

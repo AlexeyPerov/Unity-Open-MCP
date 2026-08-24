@@ -7,7 +7,10 @@ export const executeMenu = makeTool(
   "Execute a Unity Editor menu item. Runs on Unity's main thread and blocks " +
     "until the menu returns, so a legitimately slow menu needs an explicit " +
     "`timeout_ms` (e.g. `Assets/Refresh` after an AssetPostprocessor version " +
-    "bump reimports the whole content tree). A `timeout` response does NOT " +
+    `bump reimports the whole content tree) — raised up to the ${BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS} ms ` +
+    "transport cap, which is the hard ceiling this schema declares, NOT an " +
+    "arbitrary value: a menu that needs longer cannot be waited out in one " +
+    "call (poll unity_open_mcp_editor_status instead). A `timeout` response does NOT " +
     "mean the menu failed — it usually completed after the wait elapsed; " +
     "confirm with unity_open_mcp_editor_status or an asset probe rather than " +
     "retrying, because a blind retry of an authoring menu can double-write " +

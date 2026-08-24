@@ -25,11 +25,12 @@ import {
   type RecommendedGroup,
 } from "./capabilities/intent-groups.js";
 import { listRules } from "./capabilities/list-rules.js";
+import { viewCapabilities } from "./capabilities/capabilities-view.js";
 import { generateSkill } from "./skill/generate-skill.js";
 import { getKnownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
-import { PORT_ENV_VAR } from "./constants.js";
+import { PORT_ENV_VAR, EXPECTED_BRIDGE_WIRE_CONTRACT } from "./constants.js";
 import { findUnityForProject, readProcessCommandLine } from "./running-unity.js";
 
 // M31-optimizations Plan 1 / L14 — opt-in route-logging gate. Resolved once at
@@ -116,6 +117,7 @@ import {
   foldVerifyResult,
   parseResultBody,
   withResultBody,
+  isOutputProfile,
   type OutputProfile,
 } from "./output-profile.js";
 
@@ -351,6 +353,8 @@ function parsePingBody(result: {
   isPlaying?: boolean;
   unityVersion?: string | null;
   bridgeVersion?: string;
+  /** Optional — absent on a bridge predating the field (see wireContractBlock). */
+  wireContract?: number;
   mode?: string;
 } | null {
   const first = result.content[0];
@@ -366,6 +370,7 @@ function parsePingBody(result: {
         isPlaying?: boolean;
         unityVersion?: string | null;
         bridgeVersion?: string;
+        wireContract?: number;
         mode?: string;
       };
     }
@@ -598,6 +603,58 @@ interface BridgeRecoveryHint {
   tool: string;
   /** Why that tool — one short sentence. */
   reason: string;
+}
+
+/**
+ * specs/feedback.md 2026-08-24 — wire-contract staleness block.
+ *
+ * The field report: a blocker fixed and shipped on 2026-08-17 (registry tools
+ * rejecting the transport envelope keys, which made `editor_status` uncallable
+ * with default args) recurred against an installed bridge that still reported
+ * `bridgeVersion "1.0.0"` — the same string the FIXED source reports, because
+ * the package semver does not move for a wire-contract fix. "Your install is
+ * stale" and "this regressed" were therefore indistinguishable at the call
+ * site, and the agent had no way to pick between reinstalling and filing a bug.
+ *
+ * `BridgeSession.WireContract` is bumped for every observable change to the
+ * request/response contract, so comparing it against
+ * {@link EXPECTED_BRIDGE_WIRE_CONTRACT} answers that question directly. A
+ * bridge that predates the field reports no `wireContract` at all — `bridge`
+ * is then null and `stale` is true, which is the correct reading (it is older
+ * than revision 1 by definition).
+ *
+ * Returns null when /ping was unreachable: there is no bridge to compare, and a
+ * bogus "stale" on an offline bridge would be worse than silence.
+ */
+function wireContractBlock(
+  reachable: boolean,
+  reported: number | undefined,
+): {
+  bridge: number | null;
+  expected: number;
+  stale: boolean;
+  note: string | null;
+} | null {
+  if (!reachable) return null;
+  const bridge = typeof reported === "number" ? reported : null;
+  const stale = bridge === null || bridge < EXPECTED_BRIDGE_WIRE_CONTRACT;
+  return {
+    bridge,
+    expected: EXPECTED_BRIDGE_WIRE_CONTRACT,
+    stale,
+    note: stale
+      ? "The installed Unity bridge package is OLDER than this MCP server's wire " +
+        "contract" +
+        (bridge === null
+          ? " (it does not report `wireContract` at all, so it predates revision 1)"
+          : ` (revision ${bridge} vs ${EXPECTED_BRIDGE_WIRE_CONTRACT})`) +
+        ". A tool failing in a way the docs say is fixed is almost certainly " +
+        "this staleness, not a regression: reinstall/update the bridge package " +
+        "in Unity (Package Manager > the unity-open-mcp-bridge git URL) and " +
+        "retry before filing anything. bridgeVersion alone cannot tell you " +
+        "this — it does not move for a wire-contract fix."
+      : null,
+  };
 }
 
 function bridgeStatusRecoveryHint(
@@ -1368,6 +1425,12 @@ export class ToolRouter implements Router {
         ? args.kind
         : undefined;
     const includePlanned = args.include_planned !== false;
+    // specs/feedback.md 2026-08-24 — the tool surface defaults to `compact`
+    // (the unfolded catalog is ~513 KB, which overflows a typical harness
+    // per-result ceiling). `buildCapabilities` itself keeps returning the full
+    // shape so its other caller (generate_skill) is unaffected; the fold is a
+    // view applied here.
+    const profile = isOutputProfile(args.profile) ? args.profile : "compact";
 
     // M18 Plan 2 / T18.2.3 — when the bridge is live, probe its compiled-
     // state tool inventory so per-group `available` reflects whether each
@@ -1400,7 +1463,14 @@ export class ToolRouter implements Router {
       },
       { kind, includePlanned },
     );
-    return sourceResult(result, "local");
+    return sourceResult(
+      viewCapabilities(result, {
+        profile,
+        page_size: typeof args.page_size === "number" ? args.page_size : undefined,
+        cursor: typeof args.cursor === "string" ? args.cursor : undefined,
+      }),
+      "local",
+    );
   }
 
   private async routeListRules(
@@ -2137,9 +2207,14 @@ export class ToolRouter implements Router {
             isPlaying: pingBody?.isPlaying ?? null,
             unityVersion: pingBody?.unityVersion ?? null,
             bridgeVersion: pingBody?.bridgeVersion ?? null,
+            wireContract: pingBody?.wireContract ?? null,
             mode: pingBody?.mode ?? null,
           }
         : { reachable: false },
+      // specs/feedback.md 2026-08-24 — null when /ping was unreachable; a
+      // `stale: true` block is the signal to reinstall the Unity package
+      // rather than file a regression.
+      wireContract: wireContractBlock(pingReachable, pingBody?.wireContract),
       nextStep: bridgeStatusNextStep(status, wedge),
     };
 

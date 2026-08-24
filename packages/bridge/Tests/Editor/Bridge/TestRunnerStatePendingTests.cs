@@ -269,5 +269,173 @@ namespace UnityOpenMcpBridge.Tests
                 Clear(other);
             }
         }
+
+        // -------------------------------------------------------------------
+        // specs/feedback.md 2026-08-24 — a marker whose owning Editor process is
+        // gone can never resume (the TestRunnerApi, its callbacks and the
+        // collected results all died with the process), yet one survived a kill
+        // + relaunch in the field and sat there for the full 1h TTL. The marker
+        // now records the writing pid and the load-time sweep finalizes any
+        // marker with a foreign pid.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void MarkPending_RecordsTheWritingProcessId()
+        {
+            var runId = RunId("pid");
+            try
+            {
+                TestRunnerState.MarkPending(runId, "A", null, null, null,
+                    playMode: false, includePasses: true);
+                var json = File.ReadAllText(TestRunnerService.PendingFilePath(runId));
+                var pid = System.Diagnostics.Process.GetCurrentProcess().Id;
+                StringAssert.Contains("\"pid\":" + pid, json,
+                    $"the marker must record the owning Editor process: {json}");
+            }
+            finally
+            {
+                Clear(runId);
+            }
+        }
+
+        [Test]
+        public void SweepDeadProcessMarkers_FinalizesForeignPidMarkers()
+        {
+            var runId = RunId("deadpid");
+            try
+            {
+                // A marker that looks like it came from a previous Editor
+                // process: fresh (well inside the TTL, so the TTL rule would
+                // NOT have caught it) but owned by a pid that is not ours.
+                var path = TestRunnerService.PendingFilePath(runId);
+                Directory.CreateDirectory(TestRunnerService.StatusDir);
+                File.WriteAllText(path,
+                    "{\"runId\":\"" + runId + "\",\"assemblyName\":\"GameTests\"," +
+                    "\"testNamespace\":\"\",\"testClass\":\"\",\"testMethod\":\"\"," +
+                    "\"playMode\":false,\"includePasses\":true,\"pid\":1," +
+                    "\"createdAt\":" + System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + "}");
+
+                TestRunnerState.SweepDeadProcessMarkers();
+
+                Assert.IsFalse(File.Exists(path),
+                    "a marker from a dead Editor process must not survive the sweep");
+                var resultsPath = TestRunnerService.ResultsFilePath(runId);
+                Assert.IsTrue(File.Exists(resultsPath),
+                    "the sweep must leave a TERMINAL file so a waiting poller stops");
+                var json = File.ReadAllText(resultsPath);
+                StringAssert.Contains("\"status\":\"aborted\"", json);
+                StringAssert.Contains("\"reason\":\"editor_process_gone\"", json);
+                StringAssert.Contains("\"mode\":\"EditMode\"", json,
+                    "the swept run's mode comes from the marker, not a guess");
+            }
+            finally
+            {
+                ClearResults(runId);
+                Clear(runId);
+            }
+        }
+
+        [Test]
+        public void SweepDeadProcessMarkers_LeavesThisProcessMarkerAlone()
+        {
+            var runId = RunId("ourpid");
+            try
+            {
+                // MarkPending stamps OUR pid — this may be a live run, so the
+                // sweep must not touch it.
+                TestRunnerState.MarkPending(runId, "A", null, null, null,
+                    playMode: false, includePasses: true);
+
+                TestRunnerState.SweepDeadProcessMarkers();
+
+                Assert.IsTrue(File.Exists(TestRunnerService.PendingFilePath(runId)),
+                    "a marker owned by the running Editor must survive the sweep");
+                Assert.IsFalse(File.Exists(TestRunnerService.ResultsFilePath(runId)),
+                    "a live run must not be given a terminal aborted file");
+            }
+            finally
+            {
+                ClearResults(runId);
+                Clear(runId);
+            }
+        }
+
+        [Test]
+        public void SweepDeadProcessMarkers_LeavesPidlessMarkerToTheTtlRule()
+        {
+            var runId = RunId("nopid");
+            try
+            {
+                // A marker written before the pid field existed. Absence is not
+                // proof the owner is gone, so the sweep must defer to the TTL.
+                var path = TestRunnerService.PendingFilePath(runId);
+                Directory.CreateDirectory(TestRunnerService.StatusDir);
+                File.WriteAllText(path,
+                    "{\"runId\":\"" + runId + "\",\"playMode\":false,\"includePasses\":true," +
+                    "\"createdAt\":" + System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + "}");
+
+                TestRunnerState.SweepDeadProcessMarkers();
+
+                Assert.IsTrue(File.Exists(path),
+                    "a pre-field marker must be left to the existing TTL rule");
+            }
+            finally
+            {
+                ClearResults(runId);
+                Clear(runId);
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // specs/feedback.md 2026-08-24 — `run_id` starts a run, it does not poll
+        // one. IsRunInFlight is what lets RunTests refuse a re-call with an
+        // in-flight id instead of silently aborting that run and starting a new
+        // one under the same id (which rewrote the marker with the second call's
+        // empty filters — the "params were dropped" symptom).
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void IsRunInFlight_TrueForAFreshMarker()
+        {
+            var runId = RunId("inflight");
+            try
+            {
+                TestRunnerState.MarkPending(runId, "A", null, null, null,
+                    playMode: false, includePasses: true);
+                Assert.IsTrue(TestRunnerState.IsRunInFlight(runId));
+            }
+            finally
+            {
+                Clear(runId);
+            }
+        }
+
+        [Test]
+        public void IsRunInFlight_FalseWithNoMarkerAndForAStaleOne()
+        {
+            var missing = RunId("missing");
+            Assert.IsFalse(TestRunnerState.IsRunInFlight(missing),
+                "no marker means no run in flight");
+            Assert.IsFalse(TestRunnerState.IsRunInFlight(null));
+            Assert.IsFalse(TestRunnerState.IsRunInFlight(""));
+
+            var stale = RunId("staleinflight");
+            try
+            {
+                // Older than the TTL → a crashed run, so the id is reusable.
+                var createdAt = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    - TestRunnerState.PendingTtlMs - 1000;
+                Directory.CreateDirectory(TestRunnerService.StatusDir);
+                File.WriteAllText(TestRunnerService.PendingFilePath(stale),
+                    "{\"runId\":\"" + stale + "\",\"playMode\":false,\"includePasses\":true," +
+                    "\"createdAt\":" + createdAt + "}");
+                Assert.IsFalse(TestRunnerState.IsRunInFlight(stale),
+                    "a marker past the TTL is not an in-flight run");
+            }
+            finally
+            {
+                Clear(stale);
+            }
+        }
     }
 }
