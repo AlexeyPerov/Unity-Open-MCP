@@ -14,16 +14,35 @@ namespace UnityOpenMcpBridge.MetaTools
         private static Assembly _cacs;
         private static bool _initAttempted;
 
-        // B40 — MetadataReference construction is the expensive part of every
-        // compile: BuildMetadataReferences walks every loaded assembly and calls
-        // CreateFromAssembly / CreateFromFile (which opens and parses each PE).
-        // The set of referenced assemblies is effectively stable for the session
-        // (Unity loads its assemblies once at startup; execute_csharp does not
-        // load new production assemblies), so cache the built references keyed by
-        // the assembly count. A domain reload clears the static field; a genuine
-        // new assembly bumps the count and triggers one rebuild.
+        // B40 + fd-exhaustion fix — MetadataReference construction is the
+        // expensive part of every compile: BuildMetadataReferences walks every
+        // file-backed loaded assembly (~400 on a real editor). The built list
+        // is cached; the key is the count of REFERENCABLE assemblies
+        // (non-dynamic, non-empty Location) — see BuildMetadataReferences for
+        // why that count is an exact key within a domain. A domain reload
+        // clears the statics.
         private static List<object> _cachedReferences;
         private static int _cachedReferenceAssemblyCount = -1;
+        // AssemblyMetadata instances owned by the current _cachedReferences
+        // (stream-factory path). Disposed on rebuild / Reinitialize so the
+        // prefetched metadata blobs (native memory) are freed promptly instead
+        // of waiting for finalizers.
+        private static List<IDisposable> _cachedReferenceMetadata;
+        // Test seam: number of full reference-list rebuilds this domain. The
+        // fd-exhaustion regression test pins that loading a byte[] snippet
+        // assembly between two compiles does NOT trigger a rebuild
+        // (empty-Location assemblies are outside the cache key).
+        internal static int ReferenceBuildCount;
+
+        // Reflection handles for the no-fd metadata factory
+        // (AssemblyMetadata.CreateFromStream + PEStreamOptions.PrefetchMetadata
+        // + GetReference). Resolved once per domain from _ca; reset by
+        // Reinitialize. _streamFactoryProbed latches a failed probe so a Roslyn
+        // without the API is probed once, not on every compile.
+        private static bool _streamFactoryProbed;
+        private static MethodInfo _metadataCreateFromStream;
+        private static object _prefetchMetadataFlag;
+        private static MethodInfo _metadataGetReference;
 
         public static bool IsAvailable { get; private set; }
         public static string LastInitError { get; private set; }
@@ -58,8 +77,13 @@ namespace UnityOpenMcpBridge.MetaTools
             LastInitError = null;
             _ca = null;
             _cacs = null;
-            _cachedReferences = null;
-            _cachedReferenceAssemblyCount = -1;
+            DisposeCachedReferences();
+            // The stream-factory handles were resolved from the old _ca; force
+            // a re-probe against whichever Roslyn the re-init loads.
+            _streamFactoryProbed = false;
+            _metadataCreateFromStream = null;
+            _prefetchMetadataFlag = null;
+            _metadataGetReference = null;
             // Detach any previously registered fallback resolver and clear its
             // one-shot latch. Without this, a re-install (e.g. to a different
             // RoslynDirOverride, or after an atomic dir swap deleted the old
@@ -456,41 +480,89 @@ namespace UnityOpenMcpBridge.MetaTools
             return (tree, null);
         }
 
+        // True when `asm` can contribute a metadata reference: a normal
+        // file-backed assembly. Dynamic assemblies have no PE image at all, and
+        // byte-loaded assemblies (Assembly.Load(byte[]) — every execute_csharp
+        // snippet) report an empty Location, so neither can be referenced.
+        private static bool IsReferencableAssembly(Assembly asm)
+        {
+            if (asm == null || asm.IsDynamic) return false;
+            try { return !string.IsNullOrEmpty(asm.Location); }
+            catch { return false; }
+        }
+
         private static List<object> BuildMetadataReferences(Type metadataRefType)
         {
-            var createFromAssembly = FindStaticMethodMinimal(metadataRefType, "CreateFromAssembly", typeof(Assembly));
-            var createFromFile = FindStaticMethod(metadataRefType, "CreateFromFile", typeof(string));
-            if (createFromAssembly == null && createFromFile == null)
-                return null;
-
-            // B40 — MetadataReference construction (CreateFromAssembly /
-            // CreateFromFile) opens and parses every loaded PE and is the
-            // expensive part of every compile. The referenced assembly set is
-            // effectively stable for the session: Unity loads its assemblies at
-            // startup and execute_csharp does not load new production assemblies.
-            // Cache the built references keyed by the loaded-assembly count so a
-            // genuine new assembly (e.g. a freshly compiled snippet, or a
-            // domain-bound package) triggers exactly one rebuild, while the
-            // common repeated-call case reuses the cached list. A domain reload
-            // clears the static fields, so the cache never outlives its
-            // AppDomain.
+            // The editor-fd-exhaustion fix. Two independent bugs made this
+            // method the dominant descriptor leak — measured at +679 open fds
+            // per execute_csharp call on a ~400-assembly editor, tripping
+            // Mono's ~1024 IOSelector ceiling ("Could not register to wait for
+            // file descriptor N") on the SECOND call of a session:
+            //
+            //   1. CreateFromAssembly / CreateFromFile keep the referenced PE
+            //      file open for the lifetime of the metadata object, and
+            //      nothing ever disposed the built list — up to two
+            //      descriptors per referenced assembly, held until domain
+            //      reload.
+            //   2. The cache key was AppDomain.GetAssemblies().Length, which
+            //      every DISTINCT snippet bumps (Assembly.Load(byte[]) adds an
+            //      assembly to the domain). The cache therefore never hit
+            //      across snippets: every call rebuilt all ~400 references and
+            //      abandoned the previous set's open descriptors.
+            //
+            // Fixed by (1) building references through
+            // AssemblyMetadata.CreateFromStream + PEStreamOptions.
+            // PrefetchMetadata — the PE's metadata section (all a compilation
+            // reference ever needs) is copied into memory during the call and
+            // the FileStream closes before it returns, so a reference holds NO
+            // file descriptor (per-assembly fallback to the old file-backed
+            // factories when the API is unavailable); and (2) keying the cache
+            // on the count of REFERENCABLE assemblies (IsReferencableAssembly)
+            // instead of the raw domain count. Snippet assemblies are
+            // byte-loaded (empty Location) and can never be referenced, so
+            // they are outside the key — and since assemblies cannot unload
+            // without a domain reload, the referencable set only grows, making
+            // the count an exact key. The previous list's prefetched metadata
+            // is disposed before a rebuild; safe because rebuilds only happen
+            // between compiles (Compile runs synchronously on the main
+            // thread), so no compilation can still hold the old references.
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
-            if (_cachedReferences != null && _cachedReferenceAssemblyCount == assemblies.Length)
+            int referencable = 0;
+            foreach (var asm in assemblies)
+                if (IsReferencableAssembly(asm)) referencable++;
+
+            if (_cachedReferences != null && _cachedReferenceAssemblyCount == referencable)
                 return _cachedReferences;
 
-            var references = new List<object>();
+            bool useStreamFactory = TryResolveMetadataStreamFactory();
+
+            // Legacy file-backed factories — the per-assembly fallback, and the
+            // only path on a Roslyn without the AssemblyMetadata stream API.
+            var createFromAssembly = FindStaticMethodMinimal(metadataRefType, "CreateFromAssembly", typeof(Assembly));
+            var createFromFile = FindStaticMethod(metadataRefType, "CreateFromFile", typeof(string));
+            if (!useStreamFactory && createFromAssembly == null && createFromFile == null)
+                return null;
+
+            DisposeCachedReferences();
+            ReferenceBuildCount++;
+
+            var references = new List<object>(referencable);
+            var owned = new List<IDisposable>(referencable);
             foreach (var asm in assemblies)
             {
-                if (asm.IsDynamic) continue;
+                if (!IsReferencableAssembly(asm)) continue;
 
                 object reference = null;
-                if (createFromAssembly != null)
+                if (useStreamFactory)
+                    reference = TryCreateReferenceFromMetadataStream(asm.Location, owned);
+
+                if (reference == null && createFromAssembly != null)
                 {
                     try { reference = InvokeWithOptionalDefaults(createFromAssembly, null, asm); }
                     catch { }
                 }
 
-                if (reference == null && createFromFile != null && !string.IsNullOrEmpty(asm.Location))
+                if (reference == null && createFromFile != null)
                 {
                     try { reference = InvokeWithOptionalDefaults(createFromFile, null, asm.Location); }
                     catch { }
@@ -501,8 +573,123 @@ namespace UnityOpenMcpBridge.MetaTools
             }
 
             _cachedReferences = references;
-            _cachedReferenceAssemblyCount = assemblies.Length;
+            _cachedReferenceMetadata = owned;
+            _cachedReferenceAssemblyCount = referencable;
             return references;
+        }
+
+        // Build one PortableExecutableReference for a file-backed assembly
+        // WITHOUT keeping the file open: PEStreamOptions.PrefetchMetadata makes
+        // the PEReader copy the metadata section into memory inside the
+        // CreateFromStream call, so the FileStream can close before the
+        // reference is ever used. The created AssemblyMetadata is added to
+        // `owned` so a cache rebuild can dispose the prefetched blob. Returns
+        // null on any failure (file deleted since load, exotic PE) — the
+        // caller falls back to the file-backed factories for that assembly.
+        private static object TryCreateReferenceFromMetadataStream(string location, List<IDisposable> owned)
+        {
+            object metadata = null;
+            try
+            {
+                using (var fs = new FileStream(location, FileMode.Open, FileAccess.Read,
+                           FileShare.ReadWrite | FileShare.Delete))
+                {
+                    metadata = _metadataCreateFromStream.Invoke(null, new object[] { fs, _prefetchMetadataFlag });
+                }
+                if (metadata == null) return null;
+
+                var reference = InvokeWithOptionalDefaults(_metadataGetReference, metadata);
+                if (reference == null)
+                {
+                    (metadata as IDisposable)?.Dispose();
+                    return null;
+                }
+
+                if (metadata is IDisposable disposable)
+                    owned.Add(disposable);
+                return reference;
+            }
+            catch
+            {
+                try { (metadata as IDisposable)?.Dispose(); } catch { }
+                return null;
+            }
+        }
+
+        // Resolve AssemblyMetadata.CreateFromStream(Stream, PEStreamOptions),
+        // the PrefetchMetadata flag, and AssemblyMetadata.GetReference(...)
+        // once per domain. Returns false (latched) when this Roslyn does not
+        // expose the API — BuildMetadataReferences then uses the file-backed
+        // factories exactly as before the fix.
+        private static bool TryResolveMetadataStreamFactory()
+        {
+            if (_streamFactoryProbed)
+                return _metadataCreateFromStream != null && _metadataGetReference != null;
+            _streamFactoryProbed = true;
+            try
+            {
+                var metadataType = _ca.GetType("Microsoft.CodeAnalysis.AssemblyMetadata");
+                if (metadataType == null) return false;
+
+                foreach (var m in metadataType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+                {
+                    if (m.Name != "CreateFromStream") continue;
+                    var ps = m.GetParameters();
+                    if (ps.Length != 2) continue;
+                    if (!typeof(Stream).IsAssignableFrom(ps[0].ParameterType)) continue;
+                    if (!ps[1].ParameterType.IsEnum
+                        || ps[1].ParameterType.Name != "PEStreamOptions") continue;
+                    _prefetchMetadataFlag = Enum.Parse(ps[1].ParameterType, "PrefetchMetadata");
+                    _metadataCreateFromStream = m;
+                    break;
+                }
+                if (_metadataCreateFromStream == null) return false;
+
+                // GetReference(documentation = null, aliases = default,
+                // embedInteropTypes = false, filePath = null, display = null) —
+                // every parameter optional on every Roslyn this host loads.
+                _metadataGetReference = metadataType
+                    .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(m => m.Name == "GetReference"
+                                && m.GetParameters().All(p => p.IsOptional))
+                    .OrderByDescending(m => m.GetParameters().Length)
+                    .FirstOrDefault();
+                if (_metadataGetReference == null)
+                {
+                    _metadataCreateFromStream = null;
+                    _prefetchMetadataFlag = null;
+                    return false;
+                }
+                return true;
+            }
+            catch
+            {
+                _metadataCreateFromStream = null;
+                _prefetchMetadataFlag = null;
+                _metadataGetReference = null;
+                return false;
+            }
+        }
+
+        // Test seam: drop the cached reference list (disposing owned metadata)
+        // so a test can force and observe a full rebuild.
+        internal static void ResetReferenceCacheForTests() => DisposeCachedReferences();
+
+        // Drop the cached reference list and dispose the prefetched metadata it
+        // owned. Safe only between compiles (Compile is synchronous on the main
+        // thread): a disposed AssemblyMetadata throws on any later use, so this
+        // must never run while a compilation still holds the references.
+        private static void DisposeCachedReferences()
+        {
+            var owned = _cachedReferenceMetadata;
+            _cachedReferenceMetadata = null;
+            _cachedReferences = null;
+            _cachedReferenceAssemblyCount = -1;
+            if (owned == null) return;
+            foreach (var metadata in owned)
+            {
+                try { metadata?.Dispose(); } catch { }
+            }
         }
 
         private static MethodInfo FindStaticMethod(Type type, string name, Type firstParamType)

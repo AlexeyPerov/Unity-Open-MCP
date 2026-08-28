@@ -199,7 +199,7 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_regression_check", 356 },
             { "unity_open_mcp_reimport_package", 501 },
             { "unity_open_mcp_reserialize", 459 },
-            { "unity_open_mcp_resource_pressure", 729 },
+            { "unity_open_mcp_resource_pressure", 801 },
             { "unity_open_mcp_restart_editor", 566 },
             { "unity_open_mcp_scan_all", 250 },
             { "unity_open_mcp_scan_paths", 663 },

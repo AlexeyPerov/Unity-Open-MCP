@@ -447,18 +447,44 @@ namespace UnityOpenMcpBridge
 
             sb.Append(",\"agentNextSteps\":[");
             var steps = result.AgentNextSteps;
+            int written = 0;
+            bool compilePendingAdvisoryPresent = false;
             if (steps != null)
             {
                 for (int i = 0; i < steps.Length; i++)
                 {
-                    if (i > 0) sb.Append(',');
+                    if (written > 0) sb.Append(',');
                     sb.Append('"').Append(EscapeStringContent(steps[i])).Append('"');
+                    written++;
+                    if (steps[i] != null && steps[i].Contains("PRE-compile state"))
+                        compilePendingAdvisoryPresent = true;
                 }
+            }
+            // The envelope is self-consistent: a compilePending:true result
+            // always carries the matching prose advisory, even when the caller
+            // (normally the dispatcher, which appends it before recording the
+            // audit entry) did not. Idempotent — never duplicated when the
+            // dispatcher already appended it.
+            if (result.CompilePending && !compilePendingAdvisoryPresent)
+            {
+                if (written > 0) sb.Append(',');
+                sb.Append('"').Append(EscapeStringContent(CompilePendingStep)).Append('"');
             }
             sb.Append("]}");
 
             return sb.ToString();
         }
+
+        // feedback-fable-04-08 §9 — the compilePending advisory. Owned here so
+        // the envelope writer above can guarantee compilePending:true is always
+        // accompanied by the prose; the dispatcher appends the same constant to
+        // result.AgentNextSteps up front so the audit trail carries it too.
+        internal const string CompilePendingStep =
+            "A script compilation was still in progress when the gate validated " +
+            "— the gate's passed/newErrors:0 reflects the PRE-compile state, not " +
+            "the new code. Poll unity_open_mcp_editor_status.isCompiling until " +
+            "false, then unity_open_mcp_read_compile_errors to confirm the new " +
+            "code is healthy before trusting this result.";
 
         // feedback-04-08-opus §3 — the gate delta inlines every issue key into
         // the response. A large prefab rebuild produced ~1 450 keys (~222 KB),

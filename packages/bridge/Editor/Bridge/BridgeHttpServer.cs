@@ -1117,6 +1117,19 @@ namespace UnityOpenMcpBridge
                     }
                 }
 
+                // fd-exhaustion tripwire — execute_csharp responses carry an
+                // fd-pressure advisory once THIS Editor process is at ≥80% of
+                // Mono's ~1024 IOSelector ceiling, so the agent sees the wall
+                // coming instead of discovering it when a compile hangs. Runs
+                // on this worker thread (the probe reads /dev/fd — no Unity
+                // APIs) and stays silent below the warn threshold.
+                if (toolName == "unity_open_mcp_execute_csharp")
+                {
+                    var fdAdvisory = EditorFdPressure.BuildAdvisory();
+                    if (fdAdvisory != null)
+                        result.AgentNextSteps = AppendStep(result.AgentNextSteps, fdAdvisory);
+                }
+
                 BridgeAuditRecorder.RecordGateRun(toolName, effectiveGateMode, result, pathsHint);
                 BridgeActivityRecorder.ApplyToolResultToActivity(activity, result, sw.ElapsedMilliseconds);
                 BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildGateEnvelope(result, effectiveGateMode, lifecycle));
@@ -1154,17 +1167,19 @@ namespace UnityOpenMcpBridge
         }
 
         // feedback-fable-04-08 §9 — append the compilePending advisory to the
-        // gate envelope's agentNextSteps. Returns a new array (preserving the
-        // existing steps) so the gate's own next-steps (issue hints, etc.) are
-        // not dropped. Null/empty input yields a single-element array.
+        // gate envelope's agentNextSteps. The advisory text is owned by
+        // BridgeJson (whose envelope writer also guarantees it for
+        // compilePending:true results built without the dispatcher); appending
+        // it here too puts it on result.AgentNextSteps for the audit trail.
         private static string[] AppendCompilePendingStep(string[] existing)
+            => AppendStep(existing, BridgeJson.CompilePendingStep);
+
+        // Append one advisory line to an agentNextSteps array. Returns a new
+        // array (preserving the existing steps) so the gate's own next-steps
+        // (issue hints, etc.) are not dropped. Null/empty input yields a
+        // single-element array.
+        private static string[] AppendStep(string[] existing, string step)
         {
-            const string step =
-                "A script compilation was still in progress when the gate validated " +
-                "— the gate's passed/newErrors:0 reflects the PRE-compile state, not " +
-                "the new code. Poll unity_open_mcp_editor_status.isCompiling until " +
-                "false, then unity_open_mcp_read_compile_errors to confirm the new " +
-                "code is healthy before trusting this result.";
             if (existing == null || existing.Length == 0) return new[] { step };
             var combined = new string[existing.Length + 1];
             System.Array.Copy(existing, combined, existing.Length);

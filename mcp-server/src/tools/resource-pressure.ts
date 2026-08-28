@@ -39,24 +39,29 @@ export const resourcePressure = makeTool(
     "(`\"default\"` | `\"config\"` — whether `.unity-open-mcp/settings.json` " +
     "`resourcePressure.fdCeiling` overrode the default), `headroom`, " +
     "`pressureRatio`, `state` (`ok` | `warn` at ≥80% | `critical` at ≥90% | " +
-    "`over_ceiling` when the count already exceeds the ceiling proxy | " +
+    "`over_ceiling` when the count is at/above the ceiling | " +
     "`unknown` when the probe failed), `trend` (`stable` | `rising` | " +
-    "`leaking` — monotonic climb across successive samples = leak in progress; " +
-    "absolute count alone is not enough), and `samples[]` (the session-scoped " +
-    "in-memory ring of recent samples for this PID — no disk cache). " +
-    "IMPORTANT for fd-heavy projects: an asset-heavy Editor legitimately sits " +
-    "OVER the ceiling proxy on a fresh healthy process (lsof/HandleCount count " +
-    "ALL OS fds — mmap'd assets, file watchers, FileStream handles — while only " +
-    "Mono-IOSelector-registered descriptors trip the hang), so `over_ceiling` " +
-    "is INFORMATIONAL, not an alarm: when `state` is `over_ceiling` and the " +
-    "trend is stable/no-history the response carries a `pressureNote` instead " +
-    "of a `warning`, and you should watch the TREND, not the absolute. The " +
-    "agent should surface a `warning` (recommend saving scene work + planning a " +
-    "restart) when `state` is warn/critical, OR `trend.state` is " +
-    "leaking/rising — do NOT call `restart_editor` yet (the Editor is still " +
-    "healthy). Use this after heavy automation (many recompiles / domain " +
-    "reloads) to catch fd growth across reloads. No disk cache — samples live " +
-    "in the session store and are cleared on MCP-server restart.",
+    "`leaking` — monotonic climb across successive samples = leak in progress), " +
+    "and `samples[]` (the session-scoped in-memory ring of recent samples for " +
+    "this PID — no disk cache). IMPORTANT: with a real fd count (`fdMethod` " +
+    "lsof/proc — only true numbered descriptors are counted, never mmap/txt " +
+    "rows), `over_ceiling` IS an alarm: POSIX allocates the lowest free " +
+    "descriptor number, so at/past the ceiling every NEW descriptor lands " +
+    "above it and the next Mono IOSelector registration (e.g. the Bee build " +
+    "driver's pipes) can hang the Editor — the response carries a " +
+    "critical-level `warning`. A fresh healthy Unity 6 editor sits at ~160 " +
+    "fds; real counts near the ceiling are never legitimate. The one soft " +
+    "case is Windows: HandleCount covers kernel/GDI/user objects and " +
+    "routinely exceeds 1024 on a healthy process, so an over-ceiling handle " +
+    "count carries an informational `pressureNote` instead and only a " +
+    "`leaking` trend alarms there. When a `warning` is present, surface it to " +
+    "the operator (recommend saving scene work + restarting via the Hub) — do " +
+    "NOT call `restart_editor` yet (the Editor is still healthy). Use this " +
+    "after heavy automation (many recompiles / domain reloads) to catch fd " +
+    "growth across reloads; execute_csharp responses also carry an in-band " +
+    "fd-pressure advisory in agentNextSteps once the Editor passes 80% of the " +
+    "ceiling. No disk cache — samples live in the session store and are " +
+    "cleared on MCP-server restart.",
   {
     properties: {
           pid: {

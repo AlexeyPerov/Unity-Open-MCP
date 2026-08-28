@@ -9,9 +9,8 @@ namespace UnityOpenMcpBridge.MetaTools
     // for it" primitive. assets_refresh / AssetDatabase.ImportAsset frequently
     // no-op on edited C# (Unity's incremental compiler sees no import change),
     // leaving the running assembly stale while read_compile_errors reports the
-    // old healthy state. This tool calls CompilationPipeline.RequestScriptCompilation
-    // (or EditorUtility.RequestScriptCompilation on older versions), reporting
-    // the newest Library/ScriptAssemblies DLL mtime before/after so a no-op
+    // old healthy state. This tool calls CompilationPipeline.RequestScriptCompilation,
+    // reporting the newest Library/ScriptAssemblies DLL mtime before/after so a no-op
     // recompile is detectable — mirroring reimport_package's contract but
     // project-wide (no package scoping). The compile itself is observed on the
     // dispatcher's WORKER thread after the RestartThenSettle settle wait (see
@@ -35,10 +34,9 @@ namespace UnityOpenMcpBridge.MetaTools
 
             bool wasCompiling = EditorApplication.isCompiling;
 
-            // Request a script compilation. CompilationPipeline.RequestScriptCompilation
-            // exists on 2019.3+; the internal EditorUtility.RequestScriptCompilation
-            // is the older fallback. Wrapped because it throws if a compile is
-            // already in flight — the worker-side settle path covers either case.
+            // Request a script compilation. Wrapped because
+            // CompilationPipeline.RequestScriptCompilation throws if a compile
+            // is already in flight — the worker-side settle path covers that.
             bool requested = TryRequestScriptCompilation(out var requestError);
 
             // Deliberately NO inline wait here. Execute runs on the MAIN
@@ -166,45 +164,31 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        // Request a script compilation via CompilationPipeline where available,
-        // falling back to the internal EditorUtility.RequestScriptCompilation on
-        // older Unity versions. Returns false (with an error string) only when
-        // neither API is reachable by reflection — a no-op compile still leaves
-        // the settle wait as the backstop.
+        // Request a script compilation via the compile-time
+        // CompilationPipeline.RequestScriptCompilation() call — public since
+        // 2019.3, so always present on the bridge's 2022.3 floor. The previous
+        // reflection lookup (GetMethod("RequestScriptCompilation", Public |
+        // Static)) threw AmbiguousMatchException on every supported Unity
+        // (2021.2+ adds the RequestScriptCompilationOptions overload), then
+        // fell through to the long-removed internal
+        // EditorUtility.RequestScriptCompilation and reported "No
+        // RequestScriptCompilation API found on this Unity version" — the tool
+        // never actually requested a compile. Returns false with an error
+        // string only when the call throws for a reason other than a compile
+        // already being in flight (which counts as requested — the settle wait
+        // covers it).
         private static bool TryRequestScriptCompilation(out string error)
         {
             error = null;
             try
             {
-                // 2019.3+: UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation().
-                var cpType = System.Type.GetType("UnityEditor.Compilation.CompilationPipeline, UnityEditor");
-                if (cpType != null)
-                {
-                    var mi = cpType.GetMethod("RequestScriptCompilation", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                    if (mi != null) { mi.Invoke(null, null); return true; }
-                }
+                UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation();
+                return true;
             }
             catch (System.Exception e)
             {
-                // CompilationPipeline.RequestScriptCompilation throws if a
-                // compile is already in flight — the settle wait covers it; we
-                // still report the request as made.
                 if (IsAlreadyCompilingException(e)) return true;
                 error = "CompilationPipeline.RequestScriptCompilation threw: " + e.Message;
-            }
-            try
-            {
-                // Older Unity: internal EditorUtility.RequestScriptCompilation().
-                var euType = typeof(EditorUtility);
-                var mi = euType.GetMethod("RequestScriptCompilation", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-                if (mi != null) { mi.Invoke(null, null); return true; }
-                error = "No RequestScriptCompilation API found on this Unity version.";
-                return false;
-            }
-            catch (System.Exception e)
-            {
-                if (IsAlreadyCompilingException(e)) return true;
-                error = "EditorUtility.RequestScriptCompilation threw: " + e.Message;
                 return false;
             }
         }

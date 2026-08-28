@@ -12,30 +12,30 @@ namespace UnityOpenMcpBridge.MetaTools
 {
     public static class ExecuteCSharpTool
     {
-        // M30-polish T4.5 — snippet assembly lifecycle. Assembly.Load(byte[])
-        // assemblies are tracked by the AppDomain and are NOT unloadable without
-        // a collectible AssemblyLoadContext (the full fix, deferred to backlog).
-        // Two problems arise from loading a fresh assembly every call:
-        //   1. Accumulation — each call grows the AppDomain with a new
-        //      UnityOpenMcpSnippet.Snippet assembly.
-        //   2. Type-resolution ambiguity — ResolveComponentType /
-        //      ObjectHandle.TryResolveType walk AppDomain.GetAssemblies() and
-        //      return the FIRST UnityOpenMcpSnippet.Snippet they find, which is
-        //      load-order dependent and may be a stale snippet.
+        // M30-polish T4.5, extended by the fd-exhaustion fix — snippet assembly
+        // lifecycle. Assembly.Load(byte[]) assemblies are tracked by the
+        // AppDomain and are NOT unloadable without a collectible
+        // AssemblyLoadContext (the full fix, deferred to backlog), so every
+        // DISTINCT snippet necessarily grows the domain by one assembly until
+        // the next reload. What is avoidable is re-compiling and re-loading
+        // snippets this session has already seen: the cache below keys the
+        // loaded assembly by the SHA256 of the fully generated compilation
+        // unit (BuildSource output — usings + wrapper + body), so re-running
+        // ANY previously executed snippet — not just the most recent one, as
+        // the old single-slot last-PE cache did — reuses its assembly and
+        // skips the Roslyn compile entirely. (Hashing the source instead of
+        // the PE also dodges nondeterministic PE bytes such as the COFF
+        // timestamp.) Entries live until domain reload; eviction would release
+        // nothing, because the AppDomain pins the assembly regardless.
         //
-        // Minimal mitigation (this plan): keep a single static reference to the
-        // most-recently-loaded snippet assembly + its compiled PE hash. When the
-        // incoming PE is byte-identical to the last load (the common case — an
-        // agent re-running the same snippet), reuse the existing assembly
-        // instead of loading a new one, so repeated identical calls do NOT
-        // accumulate. When the PE differs, load the new assembly and drop the
-        // old static reference. The dropped assembly remains in the AppDomain
-        // (Unity limitation) but is no longer reachable via our static handle,
-        // and type lookups that prefer s_snippetType resolve the newest snippet.
-        // True unload via collectible ALC is tracked in
+        // Type-resolution ambiguity between accumulated snippet assemblies
+        // (they all declare UnityOpenMcpSnippet.Snippet) is handled by
+        // IsSnippetAssembly — type catalogs skip them all, and Execute always
+        // resolves the type from the assembly the cache returned for THIS
+        // call. True unload via collectible ALC is tracked in
         // specs/backlog/backlog-packages.md (P2 — Collectible ALC).
-        private static Assembly s_snippetAssembly;
-        private static byte[] s_snippetPeHash;
+        private static readonly Dictionary<string, Assembly> s_snippetAssemblies =
+            new Dictionary<string, Assembly>();
         private static readonly object s_snippetLock = new object();
 
         // The transient namespace + assembly-name prefix every compiled snippet
@@ -151,14 +151,25 @@ namespace UnityOpenMcpBridge.MetaTools
 
             var source = BuildSource(code, allUsings);
 
-            var (pe, errors) = RoslynHost.Compile(source);
-            if (pe == null)
-                return ToolDispatchResult.Fail("compilation_error",
-                    AppendAccessibilityHint(errors ?? "Unknown compilation error"));
+            // fd-exhaustion fix — source-keyed snippet cache: a snippet this
+            // session already compiled skips Roslyn (and the metadata-reference
+            // path) entirely and reuses its loaded assembly.
+            var sourceKey = ComputeSourceKey(source);
+            var cachedAssembly = TryGetCachedSnippetAssembly(sourceKey);
+
+            byte[] pe = null;
+            if (cachedAssembly == null)
+            {
+                string errors;
+                (pe, errors) = RoslynHost.Compile(source);
+                if (pe == null)
+                    return ToolDispatchResult.Fail("compilation_error",
+                        AppendAccessibilityHint(errors ?? "Unknown compilation error"));
+            }
 
             try
             {
-                var assembly = LoadSnippetAssembly(pe);
+                var assembly = cachedAssembly ?? LoadSnippetAssembly(sourceKey, pe);
                 var type = assembly.GetType("UnityOpenMcpSnippet.Snippet");
                 if (type == null)
                     return ToolDispatchResult.Fail("execution_error", "Compiled snippet type not found");
@@ -169,12 +180,12 @@ namespace UnityOpenMcpBridge.MetaTools
 
                 // Inject resolved object references so the snippet can access live objects.
                 // B39 — always resolve the Refs field, even when this call has no
-                // object_ids. The compiled snippet assembly is REUSED when the PE is
-                // byte-identical (LoadSnippetAssembly), so a previous call that DID
-                // pass object_ids leaves its Refs array on the static field. Re-running
-                // the same snippet without object_ids would then hand it the previous
-                // call's (possibly destroyed) objects. Explicitly null the field when no
-                // refs were resolved this call so the reuse path is clean.
+                // object_ids. The compiled snippet assembly is REUSED when the source
+                // is identical (the source-keyed cache above), so a previous call that
+                // DID pass object_ids leaves its Refs array on the static field.
+                // Re-running the same snippet without object_ids would then hand it the
+                // previous call's (possibly destroyed) objects. Explicitly null the
+                // field when no refs were resolved this call so the reuse path is clean.
                 var refsField = type.GetField("Refs", BindingFlags.Public | BindingFlags.Static);
                 if (refsField != null)
                     refsField.SetValue(null, resolvedRefs);
@@ -292,44 +303,53 @@ namespace UnityOpenMcpBridge.MetaTools
             };
         }
 
-        // Resolve the snippet assembly for this call, reusing the previously
-        // loaded assembly when the compiled PE is byte-identical (the common
-        // case — an agent re-running the same snippet). This bounds identical-
-        // call accumulation to one assembly instead of one-per-call. Distinct
-        // snippets still load a new assembly (the old one is dropped from our
-        // static handle); true unload requires a collectible AssemblyLoadContext
-        // (backlog). Thread-safe via s_snippetLock — execute_csharp runs on the
-        // main thread today, but the guard is cheap insurance against future
-        // call sites.
-        private static Assembly LoadSnippetAssembly(byte[] pe)
+        // SHA256 of the generated compilation unit, lowercase hex — the
+        // snippet-cache key.
+        // B40 — SHA256.Create() returns an IDisposable hash algorithm (a
+        // native crypto provider handle). Wrap in `using` so a throw from
+        // ComputeHash cannot leak it across calls.
+        private static string ComputeSourceKey(string source)
         {
-            // B40 — SHA256.Create() returns an IDisposable hash algorithm (a
-            // native crypto provider handle). Wrap in `using` so a throw from
-            // ComputeHash (or the lock body) cannot leak it across calls.
             byte[] hash;
             using (var sha = System.Security.Cryptography.SHA256.Create())
             {
-                hash = sha.ComputeHash(pe);
+                hash = sha.ComputeHash(Encoding.UTF8.GetBytes(source));
             }
+            var sb = new StringBuilder(hash.Length * 2);
+            for (int i = 0; i < hash.Length; i++)
+                sb.Append(hash[i].ToString("x2"));
+            return sb.ToString();
+        }
+
+        private static Assembly TryGetCachedSnippetAssembly(string sourceKey)
+        {
             lock (s_snippetLock)
             {
-                if (s_snippetAssembly != null && s_snippetPeHash != null && BytesEqual(s_snippetPeHash, hash))
-                    return s_snippetAssembly;
-
-                s_snippetAssembly = Assembly.Load(pe);
-                s_snippetPeHash = hash;
-                return s_snippetAssembly;
+                return s_snippetAssemblies.TryGetValue(sourceKey, out var cached) ? cached : null;
             }
         }
 
-        // Byte-for-byte hash comparison. Short-circuits on length mismatch.
-        private static bool BytesEqual(byte[] a, byte[] b)
+        // Load a freshly compiled snippet PE and cache it under its source key.
+        // Double-checks under the lock so a hypothetical concurrent identical
+        // call cannot load twice — execute_csharp runs on the main thread
+        // today, but the guard is cheap insurance against future call sites.
+        private static Assembly LoadSnippetAssembly(string sourceKey, byte[] pe)
         {
-            if (a == null || b == null) return a == b;
-            if (a.Length != b.Length) return false;
-            for (int i = 0; i < a.Length; i++)
-                if (a[i] != b[i]) return false;
-            return true;
+            lock (s_snippetLock)
+            {
+                if (s_snippetAssemblies.TryGetValue(sourceKey, out var existing))
+                    return existing;
+
+                var assembly = Assembly.Load(pe);
+                s_snippetAssemblies[sourceKey] = assembly;
+                return assembly;
+            }
+        }
+
+        // Test seam: number of snippet assemblies cached this domain.
+        internal static int CachedSnippetAssemblyCount
+        {
+            get { lock (s_snippetLock) { return s_snippetAssemblies.Count; } }
         }
 
         // specs/feedback.md 2026-08-14 — a snippet compiles into its OWN assembly

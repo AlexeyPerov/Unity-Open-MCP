@@ -121,22 +121,31 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void IsSnippetAssembly_ClassifiesCorrectly()
         {
-            // Real loaded assemblies must never classify as snippets.
-            int snippetCount = 0;
+            // The old form asserted ZERO snippet-classified assemblies in the
+            // domain, assuming no test ever compiles a snippet — false on any
+            // editor with a loadable Roslyn (the batch-parity and fd-hygiene
+            // suites execute real snippets there), and order-dependent. Pin the
+            // classification contract itself instead: everything classified as
+            // a snippet must actually carry the snippet name prefix, and known
+            // real assemblies must never classify as snippets.
             int realCount = 0;
             foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
             {
                 if (ExecuteCSharpTool.IsSnippetAssembly(asm))
-                    snippetCount++;
+                {
+                    StringAssert.StartsWith("UnityOpenMcpSnippet", asm.GetName().Name,
+                        "only UnityOpenMcpSnippet-prefixed assemblies may classify as snippets");
+                }
                 else
+                {
                     realCount++;
+                }
             }
-            // No snippet has been compiled in this test session (the deny
-            // heuristic short-circuits before Assembly.Load), so the count of
-            // snippet-classified assemblies must be zero here.
-            Assert.AreEqual(0, snippetCount,
-                "No execute_csharp snippet should be loaded in the test session.");
             Assert.Greater(realCount, 0, "Sanity: the AppDomain has loaded assemblies.");
+            Assert.IsFalse(ExecuteCSharpTool.IsSnippetAssembly(typeof(ExecuteCSharpTool).Assembly),
+                "the bridge assembly itself must never classify as a snippet");
+            Assert.IsFalse(ExecuteCSharpTool.IsSnippetAssembly(typeof(UnityEngine.Object).Assembly),
+                "engine assemblies must never classify as snippets");
         }
 
         // T4.5 — null must not throw (defensive). IsSnippetAssembly is called
@@ -248,7 +257,9 @@ namespace UnityOpenMcpBridge.Tests
                 System.Array.Empty<string>());
             var namespaceIdx = src.IndexOf("namespace UnityOpenMcpSnippet");
             var aliasIdx = src.IndexOf("using SB = System.Text.StringBuilder;");
-            Assert.Greater(aliasIdx, 0, "alias using must be present.");
+            // >= 0, not > 0: with no caller usings the hoisted alias IS the
+            // first line of the generated source (index 0) — still "present".
+            Assert.GreaterOrEqual(aliasIdx, 0, "alias using must be present.");
             Assert.Less(aliasIdx, namespaceIdx,
                 "alias using must hoist to file scope, not stay inside Run().");
             // Exactly once — not left behind in the body.

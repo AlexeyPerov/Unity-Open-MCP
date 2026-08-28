@@ -23,6 +23,11 @@ import {
   PORT_RANGE_START,
   PORT_RANGE_SIZE,
 } from "./instance-discovery.js";
+import {
+  FD_CEILING_DEFAULT,
+  FD_WARN_RATIO,
+  FD_CRITICAL_RATIO,
+} from "./process-diagnostics.js";
 
 // ---------------------------------------------------------------------------
 // Cross-tree parity tests.
@@ -133,6 +138,42 @@ test("verify JSON markers match across bridge C#, TS, and hub Rust", () => {
       "hub VERIFY_JSON_END drifted from TS",
     );
   }
+});
+
+/** Extract a numeric `const double NAME = value` assignment from a C# blob. */
+function extractCsDoubleConst(src: string, name: string): number | null {
+  const re = new RegExp(`${name}\\s*=\\s*(-?[0-9._]+)\\s*;`);
+  const m = src.match(re);
+  return m ? Number(m[1].replace(/_/g, "")) : null;
+}
+
+test("fd-pressure thresholds match across bridge C# (EditorFdPressure) and TS", () => {
+  // The bridge's in-band execute_csharp fd advisory (EditorFdPressure.cs) and
+  // the server's resource_pressure math (process-diagnostics.ts) must agree on
+  // the Mono ceiling and the warn/critical ratios, or the two surfaces would
+  // alarm at different pressure levels.
+  const root = findToolkitRoot();
+  if (!root) return; // standalone mcp-server install — C# source absent.
+  const p = join(root, "packages/bridge/Editor/Bridge/EditorFdPressure.cs");
+  if (!existsSync(p)) {
+    assert.fail("EditorFdPressure.cs moved — update this parity test's path");
+  }
+  const src = readFileSync(p, "utf8");
+  assert.equal(
+    extractCsIntConst(src, "MonoFdCeiling"),
+    String(FD_CEILING_DEFAULT),
+    "bridge MonoFdCeiling drifted from TS FD_CEILING_DEFAULT",
+  );
+  assert.equal(
+    extractCsDoubleConst(src, "WarnRatio"),
+    FD_WARN_RATIO,
+    "bridge WarnRatio drifted from TS FD_WARN_RATIO",
+  );
+  assert.equal(
+    extractCsDoubleConst(src, "CriticalRatio"),
+    FD_CRITICAL_RATIO,
+    "bridge CriticalRatio drifted from TS FD_CRITICAL_RATIO",
+  );
 });
 
 test("bridge default timeout matches across bridge C#, TS, and hub Rust", () => {

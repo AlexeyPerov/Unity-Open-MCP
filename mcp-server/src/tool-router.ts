@@ -2622,23 +2622,35 @@ export class ToolRouter implements Router {
     const samples = this.sessionState.fdSamplesSnapshot();
     const trend = analyzeFdTrend(samples, ceiling);
 
-    // 4. Decide whether to raise an operator warning. For an fd-heavy project
-    //    the OS-level count legitimately sits OVER the Mono-ceiling proxy on a
-    //    fresh healthy process (lsof counts mmap'd assets / file watchers /
-    //    FileStream handles that Mono's IOSelector never registers), so an
-    //    absolute `over_ceiling` state is NOT an alarm by itself. Alarm only on:
+    // 4. Decide whether to raise an operator warning. Alarm on:
+    //    - a real fd count at/past the ceiling (`over_ceiling` from lsof//proc):
+    //      POSIX allocates the lowest free descriptor number, so every NEW
+    //      descriptor now lands above the ceiling and the next IOSelector
+    //      registration (any async pipe/socket — e.g. the Bee build driver)
+    //      can hang the Editor. A fresh healthy Unity 6 editor sits at ~160
+    //      fds; real counts past 1024 are never legitimate now that
+    //      countLsofFdRows excludes the cwd/txt/mmap rows that once inflated
+    //      the count.
     //    - a monotonic leak (the actionable trend signal), or
     //    - approaching the ceiling from below (warn/critical).
-    //    A merely `rising` or stable/no-history over-ceiling process gets a
-    //    `pressureNote` instead. `rising` is any net-positive delta that is NOT a
-    //    qualifying leak — it fires on ordinary drift, so it must NOT alarm on its
-    //    own (the prior over_ceiling+rising alarm re-cried wolf on every sample
-    //    after the first).
+    //    The one downgraded case is a Windows HandleCount probe over the
+    //    ceiling: handle counts cover kernel/GDI/user objects and routinely
+    //    exceed 1024 on a healthy process, so it gets a `pressureNote` and
+    //    alarms only on the trend. `rising` is any net-positive delta that is
+    //    NOT a qualifying leak — it fires on ordinary drift, so it never
+    //    alarms on its own.
     const fdMethod = probe.method;
     const probeReason = "reason" in probe ? probe.reason : null;
     const probeMessage = "message" in probe ? probe.message : null;
 
+    // A partial (timed-out) lsof listing is a LOWER BOUND on real fds, so an
+    // over-ceiling verdict from it still stands; only the Windows HandleCount
+    // metric measures something broader than fds.
+    const overCeilingRealFds =
+      headroom.state === "over_ceiling" && fdMethod !== "handle_count";
+
     const shouldWarn =
+      overCeilingRealFds ||
       trend.state === "leaking" ||
       headroom.state === "warn" ||
       headroom.state === "critical";
@@ -2646,24 +2658,32 @@ export class ToolRouter implements Router {
     const warningState = shouldWarn
       ? {
           level:
-            headroom.state === "critical"
+            headroom.state === "critical" || overCeilingRealFds
               ? "critical"
               : trend.state === "leaking"
                 ? "leaking"
                 : "warn",
-          message:
-            headroom.state === "critical"
+          message: overCeilingRealFds
+            ? `Editor fd count (${count}) is at or above the ${ceiling}-descriptor ` +
+              `Mono IOSelector ceiling. Every newly allocated descriptor number now ` +
+              `lands above the ceiling, so the next async pipe/socket registration ` +
+              `(e.g. the Bee build driver's IPC) can hang the Editor mid-build` +
+              (trend.state === "leaking"
+                ? ` — and the count is still climbing (trend delta ${trend.delta} ` +
+                  `over ${trend.sampleCount} sample(s))`
+                : "") +
+              `. Save scene work and restart Unity via the Hub now.`
+            : headroom.state === "critical"
               ? `Editor fd usage is at ${Math.round(headroom.pressureRatio * 100)}% of ` +
                 `the ${ceiling}-descriptor ceiling — the next domain reload is ` +
                 `likely to trip the Bee build-driver hang. Save scene work and restart ` +
                 `Unity via the Hub now, before the Editor hangs.`
               : trend.state === "leaking"
                 ? headroom.state === "over_ceiling"
-                  ? `Editor fd usage (${count}) is ABOVE the ${ceiling}-descriptor ` +
-                    `ceiling and climbing monotonically (leak in progress): trend ` +
-                    `delta ${trend.delta} over ${trend.sampleCount} sample(s). The ` +
-                    `count has already crossed the ceiling proxy — save scene work ` +
-                    `and restart Unity via the Hub now.`
+                  ? `Editor handle count (${count}) is ABOVE the ${ceiling} ceiling ` +
+                    `proxy and climbing monotonically (leak in progress): trend ` +
+                    `delta ${trend.delta} over ${trend.sampleCount} sample(s). ` +
+                    `Save scene work and restart Unity via the Hub now.`
                   : `Editor fd usage is climbing monotonically across samples (leak in ` +
                     `progress): trend delta ${trend.delta} over ${trend.sampleCount} ` +
                     `sample(s). Save scene work and plan a restart before the count ` +
@@ -2675,17 +2695,15 @@ export class ToolRouter implements Router {
         }
       : null;
 
-    // Informational (non-alarming) note for the over-ceiling-but-stable case.
+    // Informational note for the remaining soft case: a Windows HandleCount
+    // over the ceiling proxy with no qualifying leak trend.
     const pressureNote =
       !shouldWarn && headroom.state === "over_ceiling"
-        ? `OS-level fd count (${count}) is above the ${ceiling}-descriptor ceiling ` +
-          `proxy, but lsof / HandleCount count ALL OS file descriptors (mmap'd ` +
-          `assets, file watchers, regular FileStream handles) while only ` +
-          `Mono-IOSelector-registered descriptors (sockets/pipes under async IO) ` +
-          `count toward the real trip point. For an asset-heavy project this is ` +
-          `expected on a healthy process. Treat this as a concern ONLY if the trend ` +
-          `becomes a monotonic leak (leaking) — re-sample after the next domain ` +
-          `reload to establish one.`
+        ? `Windows handle count (${count}) is above the ${ceiling} fd-ceiling ` +
+          `proxy, but HandleCount covers kernel/GDI/user objects — far broader ` +
+          `than Unix fds — so this is expected on a healthy process. Treat it as ` +
+          `a concern ONLY if the trend becomes a monotonic leak (leaking) — ` +
+          `re-sample after the next domain reload to establish one.`
         : null;
 
     return sourceResult(

@@ -33,8 +33,9 @@ definitions live in `mcp-server/src/tools/`.
   recovery (`restart_editor` — requires explicit confirmation, refuses when
   the fd-exhaustion signature is absent), and proactive fd-usage prediction
   (`resource_pressure` — headroom against the Mono fd ceiling (default ~1024,
-  configurable) + leak-trend detection; `over_ceiling` is informational for
-  fd-heavy projects so only a `leaking`/`rising` trend alarms). All
+  configurable) + leak-trend detection; a real fd count at/past the ceiling
+  (`over_ceiling` from lsof/proc) warns at critical level — only the broader
+  Windows HandleCount metric stays informational). All
   local-routed; they act on the OS process and survive a dead bridge.
 - **Gate and validation** — validation, checkpoints, deltas, references,
   dependencies, scans, baselines, regression checks, and targeted fixes.
@@ -503,8 +504,7 @@ the inverse of the stale-log trap is just as dangerous.
 ### `unity_open_mcp_recompile_scripts`
 
 A deterministic "force a real recompile and wait for it" primitive. Calls
-`CompilationPipeline.RequestScriptCompilation` (or the internal
-`EditorUtility.RequestScriptCompilation` on older Unity) and blocks until the
+`CompilationPipeline.RequestScriptCompilation()` and blocks until the
 compile settles via its `restart_then_settle` lifecycle. Use this when
 `assets_refresh` / `execute_csharp` fail to recompile after a C# edit — Unity's
 incremental compiler frequently no-ops on unchanged-import views, leaving the
@@ -536,6 +536,14 @@ that coincides with the `editor_fd_exhaustion` signature in the freshest
 `Editor.log`, the call **fails** with `editor_build_wedged` instead: the build
 driver is dead, edits are on disk but were never compiled, and no recompile
 clears it. Discard anything concluded from results returned since.
+
+Snippets and compiles are cached per domain: an identical snippet re-run reuses
+its loaded assembly (no recompile, no fresh `Assembly.Load`), and the Roslyn
+metadata references are built once per domain through streams that hold no file
+descriptors open. As a tripwire, once the Editor process passes 80% of Mono's
+~1024 fd ceiling the response's `agentNextSteps` carries an fd-pressure
+advisory (elevated at ≥80%, CRITICAL at ≥90%) recommending a domain reload —
+which releases leaked descriptors — and a `resource_pressure` check.
 
 ### `unity_open_mcp_execute_menu`
 

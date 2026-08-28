@@ -62,11 +62,11 @@ test("computeFdHeadroom: at the critical threshold → critical", () => {
   assert.equal(h.state, "critical");
 });
 
-test("computeFdHeadroom: above the ceiling → over_ceiling (informational), headroom clamped at 0", () => {
-  // The OS-level count exceeded the Mono-ceiling proxy. This is INFORMATIONAL,
-  // not critical: lsof over-counts OS fds (mmap/assets/watchers) vs the
-  // IOSelector-registered descriptors that trip the hang. The router decides
-  // whether to alarm based on the TREND, not this absolute state.
+test("computeFdHeadroom: above the ceiling → over_ceiling (distinct state), headroom clamped at 0", () => {
+  // The count is at/past the Mono ceiling: new descriptor numbers now land
+  // above it. The state stays a DISTINCT `over_ceiling` (not folded into
+  // `critical`) so the router can alarm on real fd counts (lsof//proc) while
+  // downgrading the broader Windows HandleCount metric to a note.
   const h = computeFdHeadroom(FD_CEILING + 50);
   assert.equal(h.state, "over_ceiling");
   assert.equal(h.headroom, 0);
@@ -111,10 +111,11 @@ test("FD_CEILING_DEFAULT is 1024 (Mono internal ceiling, not OS soft limit)", ()
 // A + D — over_ceiling state + parameterized (configurable) ceiling.
 // ---------------------------------------------------------------------------
 
-test("A: computeFdHeadroom: a chronically fd-heavy process (5000 fds) → over_ceiling, not critical", () => {
-  // The user's scenario: a fresh Unity that legitimately sits on thousands of
-  // OS fds (mmap'd assets / file watchers). Pre-fix this read `critical` and
-  // cried wolf on every call. Now it is informational `over_ceiling`.
+test("A: computeFdHeadroom: an fd count far past the ceiling (5000) → over_ceiling, not critical", () => {
+  // over_ceiling stays a distinct state (never folded into critical) so the
+  // router can tell "past the ceiling" apart from "approaching it" and word
+  // the alarm accordingly. The router treats a reliable over_ceiling as a
+  // critical-level warning; only the Windows HandleCount metric is soft.
   const h = computeFdHeadroom(5000);
   assert.equal(h.state, "over_ceiling");
   assert.equal(h.headroom, 0);
@@ -128,8 +129,10 @@ test("A: computeFdHeadroom: count exactly at the ceiling → over_ceiling (>= te
 });
 
 test("A: computeFdHeadroom: Windows approximate count over the ceiling → over_ceiling (not critical)", () => {
-  // Windows HandleCount is naturally high; an over-ceiling approximate count
-  // is informational too (no crying wolf on a naturally-high handle count).
+  // Windows HandleCount is naturally high (kernel/GDI/user objects). The
+  // state still reads over_ceiling, but reliable:false lets the router
+  // downgrade it to a pressureNote instead of the critical warning a real
+  // fd count gets.
   const h = computeFdHeadroom(5000, true);
   assert.equal(h.state, "over_ceiling");
   assert.equal(h.reliable, false);

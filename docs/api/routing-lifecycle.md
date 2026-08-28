@@ -300,15 +300,18 @@ and never depend on a reachable bridge.
   (`stable` / `rising` / `leaking` — a monotonic climb across successive
   samples is the leak signature), `ceiling` + `ceilingSource` (`"default"` vs
   `"config"`), and the session-scoped sample ring. No disk cache — samples are
-  in-memory and clear on server restart. **Fd-heavy projects:** `over_ceiling`
-  is INFORMATIONAL, not an alarm — `lsof`/`HandleCount` count ALL OS fds
-  (mmap'd assets, file watchers, `FileStream` handles) while only
-  Mono-IOSelector-registered descriptors trip the hang, so an asset-heavy
-  Editor legitimately sits over the proxy ceiling on a fresh healthy process; a
-  stable/no-history `over_ceiling` carries a `pressureNote` (no `warning`), so
-  watch the **trend**, not the absolute. Override the ceiling for a runtime
-  whose internal limit differs from Mono's 1024 (e.g. Unity 6 / CoreCLR) via
-  `.unity-open-mcp/settings.json` (`resourcePressure.fdCeiling`).
+  in-memory and clear on server restart. **`over_ceiling` semantics:** with a
+  real fd count (`fdMethod` lsof/proc — only numbered descriptors are counted,
+  never mmap/txt rows), at/past the ceiling every NEW descriptor number lands
+  above it and the next Mono IOSelector registration can hang the Editor, so
+  the response carries a **critical-level `warning`** (a fresh healthy Unity 6
+  editor sits at ~160 fds). The one soft case is the Windows `HandleCount`
+  probe — handle counts cover kernel/GDI/user objects and routinely exceed
+  1024 on a healthy process, so an over-ceiling handle count carries an
+  informational `pressureNote` and only a `leaking` trend alarms there.
+  Override the ceiling for a runtime whose internal limit differs from Mono's
+  1024 (e.g. Unity 6 / CoreCLR) via `.unity-open-mcp/settings.json`
+  (`resourcePressure.fdCeiling`).
 
 Use `resource_pressure` after heavy automation (many recompiles / domain
 reloads) to catch fd growth before the Editor hangs; escalate to

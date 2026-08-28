@@ -3586,12 +3586,15 @@ test("route: resource_pressure is registered in ALL_TOOLS and always-visible", (
   );
 });
 
-// --- A: a chronically fd-heavy process does NOT cry wolf -------------------
+// --- A: a real fd count at/past the ceiling IS the alarm -------------------
 
-test("route: resource_pressure over_ceiling on a fresh fd-heavy process stays silent (pressureNote, no warning)", async () => {
-  // The user's scenario: a fresh Unity legitimately on thousands of OS fds.
-  // Pre-fix this read `critical` + `warning` on every call. Now it is the
-  // informational `over_ceiling` state with a `pressureNote` and NO warning.
+test("route: resource_pressure over_ceiling from a real fd count warns at level critical", async () => {
+  // A real (lsof//proc) fd count past the ceiling means every newly allocated
+  // descriptor number lands above the Mono IOSelector limit — the next async
+  // pipe/socket registration can hang the Editor. A fresh healthy Unity 6
+  // editor sits at ~160 fds, so a real count of 2000 is never legitimate
+  // (the old "lsof over-counts" softening predated countLsofFdRows, which
+  // already excludes cwd/txt/mmap rows).
   await withTmp("router-rp-overceiling-", async (tmp) => {
     await setupProject(tmp);
     const restoreScan = setUnityProcessScannerForTest({
@@ -3616,11 +3619,47 @@ test("route: resource_pressure over_ceiling on a fresh fd-heavy process stays si
       assert.equal(body.state, "over_ceiling");
       assert.equal(body.ceiling, 1024);
       assert.equal(body.ceilingSource, "default");
-      assert.equal(body.warning, undefined, "no cry-wolf warning on a stable over-ceiling process");
-      assert.equal(body.agentNextSteps, undefined);
+      const warning = body.warning as { level?: string; message?: string };
+      assert.equal(warning.level, "critical", "real fd count over the ceiling → critical");
       assert.ok(
-        typeof body.pressureNote === "string" && body.pressureNote.length > 0,
-        "informational pressureNote surfaces the lsof-over-count nuance",
+        warning.message!.includes("at or above"),
+        "message states the count is at/above the ceiling",
+      );
+      assert.ok(Array.isArray(body.agentNextSteps), "agentNextSteps accompany the warning");
+      assert.equal(body.pressureNote, undefined, "no soft note when the warning fires");
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
+test("route: resource_pressure over_ceiling from Windows HandleCount stays a pressureNote (no warning)", async () => {
+  // HandleCount covers kernel/GDI/user objects — far broader than Unix fds —
+  // and routinely exceeds 1024 on a healthy Windows process. The absolute
+  // over-ceiling verdict is therefore downgraded to the informational
+  // pressureNote there; only a qualifying leak trend alarms.
+  await withTmp("router-rp-overceiling-handles-", async (tmp) => {
+    await setupProject(tmp);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 7777, projectPath: tmp }];
+      },
+    });
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        return { count: 2000, method: "handle_count", approximate: true };
+      },
+    });
+    try {
+      const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
+      const result = await router.route("unity_open_mcp_resource_pressure", {});
+      const body = parseBody(result);
+      assert.equal(body.state, "over_ceiling");
+      assert.equal(body.warning, undefined, "HandleCount over the proxy ceiling must NOT warn");
+      assert.ok(
+        typeof body.pressureNote === "string" && body.pressureNote.includes("HandleCount"),
+        "informational pressureNote explains the handle-vs-fd nuance",
       );
     } finally {
       restoreProbe();
@@ -3629,47 +3668,10 @@ test("route: resource_pressure over_ceiling on a fresh fd-heavy process stays si
   });
 });
 
-test("route: resource_pressure over_ceiling + small RISING trend stays silent (pressureNote)", async () => {
-  // Over the proxy ceiling with only a `rising` (drift) trend is NOT a leak —
-  // `rising` fires on ordinary fd drift, so it must not cry wolf. The response
-  // carries the informational pressureNote and NO warning. Only a qualifying
-  // `leaking` trend (next test) alarms.
-  await withTmp("router-rp-overceiling-rising-", async (tmp) => {
-    await setupProject(tmp);
-    const restoreScan = setUnityProcessScannerForTest({
-      scan() {
-        return [{ pid: 7777, projectPath: tmp }];
-      },
-    });
-    // 2000 → 2050: monotonic, delta 50 (< leak threshold of ~102 → rising).
-    const counts = [2000, 2050];
-    const restoreProbe = setFdProbeForTest({
-      count() {
-        const next = counts.shift();
-        if (next === undefined) return { count: 2050, method: "lsof", approximate: false };
-        return { count: next, method: "lsof", approximate: false };
-      },
-    });
-    try {
-      const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
-      await router.route("unity_open_mcp_resource_pressure", {}); // sample 1
-      const result = await router.route("unity_open_mcp_resource_pressure", {}); // sample 2
-      const body = parseBody(result);
-      assert.equal(body.state, "over_ceiling");
-      assert.equal(body.warning, undefined, "over_ceiling + rising (drift) must NOT warn");
-      assert.equal(typeof body.pressureNote, "string", "informational pressureNote present instead");
-    } finally {
-      restoreProbe();
-      restoreScan();
-    }
-  });
-});
-
-test("route: resource_pressure over_ceiling + LEAKING trend raises a warning", async () => {
-  // Over the proxy ceiling AND a qualifying monotonic leak (delta ≥ the leak
-  // threshold) → genuine concern. The warning fires at level "leaking" and,
-  // because the count is already over the ceiling, the message says so ("already
-  // crossed") rather than "before it crosses".
+test("route: resource_pressure over_ceiling + LEAKING trend warns critical and mentions the climb", async () => {
+  // Over the ceiling AND a qualifying monotonic leak: the over-ceiling state
+  // already carries the critical level; the message additionally reports the
+  // climb so the operator sees the leak is active.
   await withTmp("router-rp-overceiling-leaking-", async (tmp) => {
     await setupProject(tmp);
     const restoreScan = setUnityProcessScannerForTest({
@@ -3693,10 +3695,10 @@ test("route: resource_pressure over_ceiling + LEAKING trend raises a warning", a
       const body = parseBody(result);
       assert.equal(body.state, "over_ceiling");
       const warning = body.warning as { level?: string; message?: string };
-      assert.equal(warning.level, "leaking", "over_ceiling + leaking → level leaking");
+      assert.equal(warning.level, "critical", "over_ceiling (real fds) outranks the leaking level");
       assert.ok(
-        warning.message!.includes("already crossed"),
-        "an over-ceiling leak message says the count already crossed the ceiling",
+        warning.message!.includes("still climbing"),
+        "an over-ceiling leak message also reports the active climb",
       );
       assert.equal(body.pressureNote, undefined, "no pressureNote when warning fires");
     } finally {

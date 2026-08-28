@@ -251,8 +251,11 @@ result — a stale answer that reads as success is worse than no answer.
 A recompile will not clear it. Save scene work, then restart the Editor
 (`restart_editor` with `confirm: true`, or manually) and relaunch via the Hub.
 Discard any conclusion drawn from results returned after the Editor wedged.
-`resource_pressure` predicts the condition — sample it after heavy automation
-and watch the **trend**, not the absolute count.
+`resource_pressure` predicts the condition — sample it after heavy automation:
+a real fd count at/past the ceiling (`over_ceiling`) or a `leaking` trend both
+warn before the hang, and `execute_csharp` responses carry an in-band
+fd-pressure advisory in `agentNextSteps` once the Editor passes 80% of the
+ceiling.
 
 ## `restart_editor` refuses with `restart_signature_absent`
 

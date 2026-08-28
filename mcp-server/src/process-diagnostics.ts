@@ -22,7 +22,9 @@
 //
 // Cross-platform probe:
 //   - macOS: `lsof -p <pid>` (no /proc on macOS). Bounded execFileSync
-//     timeout; line count is the fd total. Heavy — callers cache briefly.
+//     timeout; only rows whose FD column is a numbered descriptor are counted
+//     (`countLsofFdRows` — cwd/txt/mmap rows are not fds). Heavy — callers
+//     cache briefly.
 //   - Linux: `readdirSync(/proc/<pid>/fd).length` (no shell-out).
 //   - Windows: `Get-Process -Id <pid>.HandleCount` (approximate — Windows
 //     handle count is broader than Unix fds; the threshold differs and the
@@ -118,16 +120,18 @@ export type FdCountResult = FdCountOk | FdCountFailed;
 /**
  * Coarse pressure state derived from `computeFdHeadroom`.
  *
- * `over_ceiling` is informational, NOT an alarm: the OS-level fd count (from
- * `lsof` / `/proc` / `HandleCount`) already exceeds the Mono-ceiling proxy, but
- * `lsof` counts ALL OS file descriptors (mmap'd assets, file watchers, regular
- * `FileStream` handles) while only descriptors registered with Mono's
- * IOSelector count toward the real trip point. So an asset-heavy project can
- * legitimately sit over the proxy ceiling on a fresh, healthy process. The
- * actionable signal there is the TREND (`rising` / `leaking`), not the
- * absolute. The router only raises an operator warning on `over_ceiling` when
- * the trend is actively climbing; a stable/no-history over-ceiling process
- * gets a `pressureNote` instead of a `warning`.
+ * `over_ceiling` (count >= ceiling) is an ALARM when the count is a real fd
+ * count (`lsof` / `/proc`): POSIX allocates the lowest free descriptor
+ * number, so with the count at or past the ceiling every NEW descriptor gets
+ * a number above it — and the next Mono IOSelector registration (any async
+ * pipe/socket, e.g. the Bee build driver's IPC) fails with "Could not
+ * register to wait for file descriptor N". A fresh healthy Unity 6 editor
+ * sits at ~160 open fds; real counts near 1024 are never legitimate.
+ * (`countLsofFdRows` already excludes the cwd/txt/mmap rows that once
+ * justified treating this state as informational.) The one soft case is a
+ * Windows `HandleCount` probe: handle counts cover kernel/GDI/user objects
+ * and routinely exceed 1024 on a healthy process, so the router downgrades
+ * over-ceiling to a `pressureNote` there and alarms on the trend instead.
  */
 export type FdPressureState =
   | "ok"
@@ -454,10 +458,10 @@ export function countFileDescriptors(pid: number): FdCountResult {
  * agent must NOT treat "unknown" as "ok"; it should surface the trend (if any
  * prior samples exist) and tell the operator the live count could not be read.
  *
- * `over_ceiling` (count >= ceiling) is informational: the OS-level count
- * exceeded the Mono-ceiling proxy, but `lsof` over-counts relative to the
- * IOSelector-registered descriptors that actually trip the hang. The router
- * decides whether to alarm based on the TREND, not this absolute state.
+ * `over_ceiling` (count >= ceiling) means new descriptor numbers now land
+ * above the Mono IOSelector ceiling — see {@link FdPressureState} for why the
+ * router treats a reliable (lsof//proc) over-ceiling count as critical and
+ * only downgrades the Windows HandleCount approximation to a note.
  *
  * @param ceiling the resolved fd ceiling (default {@link FD_CEILING_DEFAULT});
  *   passed in by the router from `readFdCeiling` so the math scales with a
@@ -482,10 +486,10 @@ export function computeFdHeadroom(
   const headroom = Math.max(0, ceiling - clamped);
   let state: FdPressureState;
   if (clamped >= ceiling) {
-    // OS-level fd count already past the Mono-ceiling proxy. Informational,
-    // not an alarm — `lsof` over-counts (mmap/assets/watchers) vs the
-    // IOSelector-registered descriptors that trip the hang. The router keys
-    // the operator warning off the TREND for this state.
+    // fd count at/past the Mono ceiling: every newly allocated descriptor
+    // number now lands above it, so the next IOSelector registration can
+    // trip the hang. The router alarms on this for real fd counts and
+    // downgrades only the Windows HandleCount approximation to a note.
     state = "over_ceiling";
   } else if (approximate) {
     // Windows HandleCount is naturally higher than Unix fds — only flag
