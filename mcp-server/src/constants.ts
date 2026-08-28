@@ -107,7 +107,7 @@ export const EXPECTED_BRIDGE_WIRE_CONTRACT = 1;
  * verify packages. Mirrors the C# `BridgeConstants.NpmPackage`. Kept in
  * sync by `scripts/sync-version.mjs`.
  */
-export const NPM_PACKAGE = "unity-open-mcp@1.2.0";
+export const NPM_PACKAGE = "unity-open-mcp@1.2.1";
 
 /**
  * Build the bridge base URL for a given port. Centralizes the loopback +
