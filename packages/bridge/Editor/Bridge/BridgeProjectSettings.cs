@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityOpenMcpBridge.Config;
 using UnityOpenMcpVerify.Cache;
@@ -182,6 +183,7 @@ namespace UnityOpenMcpBridge
                     Directory.CreateDirectory(dir);
 
                 var json = JsonUtility.ToJson(_data ?? new BridgeProjectSettingsData(), true);
+                json = CarryAcrossResourcePressure(path, json);
                 var tmp = path + TempSuffix;
                 File.WriteAllText(tmp, json);
                 if (File.Exists(path))
@@ -196,6 +198,91 @@ namespace UnityOpenMcpBridge
             }
 
             try { Changed?.Invoke(); } catch { }
+        }
+
+        // settings.json is shared with the MCP server, which owns the
+        // `resourcePressure` slice (the fd-ceiling override read by
+        // EditorFdPressure here and readFdCeiling server-side). JsonUtility
+        // round-trips only what BridgeProjectSettingsData models, so an
+        // unpatched Save would silently drop that slice — both fd surfaces
+        // would then fall back to the default ceiling, the exact
+        // cross-surface contradiction the fd advisory exists to avoid. The
+        // member's raw text is carried across the write instead of being
+        // modeled (a null nested object would serialize as a zeroed one:
+        // fdCeiling: 0). Reading the old file before the tmp write is safe:
+        // Save is main-thread and the file is only written here.
+        private static readonly Regex ResourcePressureOpener = new Regex(
+            "\"resourcePressure\"\\s*:\\s*\\{");
+
+        private static string CarryAcrossResourcePressure(string path, string json)
+        {
+            try
+            {
+                if (!File.Exists(path)) return json;
+                return MergeResourcePressureSlice(File.ReadAllText(path), json);
+            }
+            catch
+            {
+                return json; // A settings save must not fail on the shared slice.
+            }
+        }
+
+        /// <summary>
+        /// Re-inject the raw <c>"resourcePressure": { … }</c> member of
+        /// <paramref name="existingJson"/> into <paramref name="newJson"/>
+        /// (which never contains it — the data model does not have the field).
+        /// Pure string math so the carry-across is unit-testable; returns
+        /// <paramref name="newJson"/> unchanged when the member is absent or
+        /// unextractable. Internal for the test assembly.
+        /// </summary>
+        internal static string MergeResourcePressureSlice(string existingJson, string newJson)
+        {
+            if (string.IsNullOrEmpty(existingJson) || string.IsNullOrEmpty(newJson))
+                return newJson;
+
+            var opener = ResourcePressureOpener.Match(existingJson);
+            if (!opener.Success) return newJson;
+
+            var openBrace = opener.Index + opener.Length - 1;
+            var closeBrace = FindMatchingBrace(existingJson, openBrace);
+            if (closeBrace < 0) return newJson;
+
+            var slice = existingJson.Substring(opener.Index, closeBrace - opener.Index + 1);
+
+            var closing = newJson.LastIndexOf('}');
+            if (closing <= 0) return newJson;
+            var prefix = newJson.Substring(0, closing).TrimEnd();
+            if (prefix.Length == 0 || prefix.EndsWith(",")) return newJson;
+
+            return prefix + ",\n    " + slice + "\n}";
+        }
+
+        /// <summary>Index of the <c>}</c> matching the <c>{</c> at
+        /// <paramref name="open"/>, skipping string literals so braces inside
+        /// values cannot unbalance the walk. -1 when unbalanced. Internal —
+        /// EditorFdPressure scans the same shared slice with it.</summary>
+        internal static int FindMatchingBrace(string body, int open)
+        {
+            var depth = 0;
+            var inString = false;
+            for (var i = open; i < body.Length; i++)
+            {
+                var c = body[i];
+                if (inString)
+                {
+                    if (c == '\\') i++; // skip the escaped character
+                    else if (c == '"') inString = false;
+                    continue;
+                }
+                if (c == '"') inString = true;
+                else if (c == '{') depth++;
+                else if (c == '}')
+                {
+                    depth--;
+                    if (depth == 0) return i;
+                }
+            }
+            return -1;
         }
 
         public static IReadOnlyCollection<string> DisabledTools

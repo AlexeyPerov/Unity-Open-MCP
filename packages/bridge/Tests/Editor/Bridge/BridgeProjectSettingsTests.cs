@@ -304,5 +304,88 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(1, result.Length);
             Assert.AreEqual("File/Quit", result[0]);
         }
+
+        // -----------------------------------------------------------------------
+        // resourcePressure slice carry-across on Save
+        //
+        // The MCP server owns the `resourcePressure` member of settings.json
+        // (fd-ceiling override). JsonUtility round-trips only modeled fields,
+        // so Save must re-inject the member's raw text or the override is
+        // silently erased on the first bridge-side settings write.
+        // -----------------------------------------------------------------------
+
+        [Test]
+        public void MergeResourcePressureSlice_MemberPresent_IsCarriedAcross()
+        {
+            var existing =
+                "{\n  \"defaultGateMode\": \"enforce\",\n" +
+                "  \"resourcePressure\": {\n    \"fdCeiling\": 4096\n  }\n}";
+            var rewritten = "{\n    \"defaultGateMode\": \"warn\",\n    \"autoStart\": true\n}";
+
+            var merged = BridgeProjectSettings.MergeResourcePressureSlice(existing, rewritten);
+
+            StringAssert.Contains("\"fdCeiling\": 4096", merged,
+                "The override value must survive a bridge-side settings write byte-for-byte.");
+            StringAssert.Contains("\"defaultGateMode\": \"warn\"", merged,
+                "The bridge-side fields must still be the rewritten ones.");
+            Assert.IsTrue(merged.TrimEnd().EndsWith("}"), "The result must stay a closed object.");
+        }
+
+        [Test]
+        public void MergeResourcePressureSlice_MemberAbsent_LeavesRewrittenJsonAlone()
+        {
+            var existing = "{\n  \"defaultGateMode\": \"enforce\"\n}";
+            var rewritten = "{\n    \"autoStart\": false\n}";
+
+            Assert.AreEqual(
+                rewritten,
+                BridgeProjectSettings.MergeResourcePressureSlice(existing, rewritten));
+        }
+
+        [Test]
+        public void MergeResourcePressureSlice_NestedAndQuotedBraces_AreCarriedIntact()
+        {
+            // Braces inside nested objects and inside string values must not
+            // unbalance the extraction walk.
+            var existing =
+                "{\"resourcePressure\": {\"trend\": {\"window\": 5}, " +
+                "\"note\": \"a } in a string\", \"fdCeiling\": 2048}, \"autoStart\": true}";
+            var rewritten = "{\n    \"autoStart\": true\n}";
+
+            var merged = BridgeProjectSettings.MergeResourcePressureSlice(existing, rewritten);
+
+            StringAssert.Contains("\"trend\": {\"window\": 5}", merged);
+            StringAssert.Contains("\"note\": \"a } in a string\"", merged);
+            StringAssert.Contains("\"fdCeiling\": 2048", merged);
+            StringAssert.DoesNotContain(", \"autoStart\": true}", merged,
+                "The slice must end at its own closing brace, not swallow the rest of the existing file.");
+        }
+
+        [Test]
+        public void MergeResourcePressureSlice_TruncatedMember_ReturnsRewrittenJson()
+        {
+            // A hand-mangled file must never break a settings save.
+            var existing = "{\"resourcePressure\": {\"fdCeiling\": 4096";
+            var rewritten = "{\n    \"autoStart\": true\n}";
+
+            Assert.AreEqual(
+                rewritten,
+                BridgeProjectSettings.MergeResourcePressureSlice(existing, rewritten));
+        }
+
+        [Test]
+        public void MergeResourcePressureSlice_MergedJson_StillLoadsViaJsonUtility()
+        {
+            var existing =
+                "{\n  \"resourcePressure\": {\n    \"fdCeiling\": 4096\n  }\n}";
+            var rewritten = UnityEngine.JsonUtility.ToJson(
+                new BridgeProjectSettingsData { autoStart = false }, true);
+
+            var merged = BridgeProjectSettings.MergeResourcePressureSlice(existing, rewritten);
+            var parsed = UnityEngine.JsonUtility.FromJson<BridgeProjectSettingsData>(merged);
+
+            Assert.IsNotNull(parsed);
+            Assert.IsFalse(parsed.autoStart, "Modeled fields must round-trip through the merge.");
+        }
     }
 }

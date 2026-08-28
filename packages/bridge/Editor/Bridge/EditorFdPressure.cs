@@ -41,15 +41,28 @@ namespace UnityOpenMcpBridge
         /// FD_CEILING_MAX in mcp-server/src/project-settings.ts.</summary>
         internal const int FdCeilingMax = 1000000;
 
-        // `"resourcePressure": { … "fdCeiling": 4096 … }`. A regex rather than
-        // JsonUtility because BridgeProjectSettingsData deliberately does not
-        // model this slice (JsonUtility would have to round-trip it on every
-        // settings write, and a null nested object serializes as a zeroed one
-        // — it would start WRITING a bogus `fdCeiling: 0` into every project).
-        // The slice is read, never written, on this side.
+        // `"resourcePressure": { … }`. The member's span is closed with a
+        // string-aware brace walk (shared with BridgeProjectSettings) so a
+        // nested object before fdCeiling — e.g. "trend" — cannot hide the
+        // value, and a fdCeiling nested INSIDE a sibling object is not
+        // mistaken for the real one: JSON.parse semantics, as on the TS side
+        // (readFdCeiling). A regex reader rather than JsonUtility because
+        // BridgeProjectSettingsData deliberately does not model this slice
+        // (JsonUtility would have to round-trip it on every settings write,
+        // and a null nested object serializes as a zeroed one — it would
+        // start WRITING a bogus `fdCeiling: 0` into every project). The slice
+        // is owned by the MCP server; the bridge only reads it —
+        // BridgeProjectSettings.Save carries the raw member across writes.
+        private static readonly Regex ResourcePressureOpener = new Regex(
+            "\"resourcePressure\"\\s*:\\s*\\{");
+
+        // A fdCeiling VALUE: a full JSON number literal (integer, fraction,
+        // exponent) followed by a value delimiter, so `4096abc` — a file
+        // JSON.parse would reject whole — does not read as 4096 here.
         private static readonly Regex FdCeilingPattern = new Regex(
-            "\"resourcePressure\"\\s*:\\s*\\{[^{}]*\"fdCeiling\"\\s*:\\s*(-?\\d+)",
-            RegexOptions.Singleline);
+            "\"fdCeiling\"\\s*:\\s*"
+            + "(-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)"
+            + "(?=[\\s,}])");
 
         // Resolved ceiling + the settings-file stamp it was read from. The
         // advisory runs on EVERY execute_csharp response, so the file is
@@ -128,14 +141,17 @@ namespace UnityOpenMcpBridge
         }
 
         /// <summary>Clamp a configured ceiling the way the server's
-        /// resolveConfigured does: below the min is treated as "not
-        /// configured" (→ default), above the max clamps down, in-range is
-        /// kept. Split out so a test can pin the policy without a file.</summary>
-        internal static int ClampCeiling(long raw)
+        /// resolveConfigured does: non-finite (an exponent overflowing the
+        /// double range — JSON.parse yields Infinity and isFinite rejects it)
+        /// or below the min is treated as "not configured" (→ default), above
+        /// the max clamps down, in-range floors. Split out so a test can pin
+        /// the policy without a file.</summary>
+        internal static int ClampCeiling(double raw)
         {
+            if (double.IsNaN(raw) || double.IsInfinity(raw)) return MonoFdCeiling;
             if (raw < FdCeilingMin) return MonoFdCeiling;
             if (raw > FdCeilingMax) return FdCeilingMax;
-            return (int)raw;
+            return (int)Math.Floor(raw);
         }
 
         // The advisory line for agentNextSteps, or null when pressure is below
@@ -200,17 +216,66 @@ namespace UnityOpenMcpBridge
                 return MonoFdCeiling;
             }
 
-            var match = FdCeilingPattern.Match(body);
-            if (!match.Success) return MonoFdCeiling;
+            var member = FindResourcePressureMember(body);
+            if (member == null) return MonoFdCeiling;
+            var literal = FindTopLevelFdCeiling(member);
+            if (literal == null) return MonoFdCeiling;
 
-            long raw;
-            if (!long.TryParse(
-                    match.Groups[1].Value, NumberStyles.Integer,
+            double raw;
+            if (!double.TryParse(
+                    literal, NumberStyles.Float,
                     CultureInfo.InvariantCulture, out raw))
             {
                 return MonoFdCeiling;
             }
             return ClampCeiling(raw);
+        }
+
+        // The LAST "resourcePressure" member's text, from its opening brace
+        // to the matching close (JSON.parse keeps the last duplicate key), or
+        // null when no balanced member exists.
+        private static string FindResourcePressureMember(string body)
+        {
+            var openers = ResourcePressureOpener.Matches(body);
+            if (openers.Count == 0) return null;
+            var opener = openers[openers.Count - 1];
+            var openBrace = opener.Index + opener.Length - 1;
+            var closeBrace = BridgeProjectSettings.FindMatchingBrace(body, openBrace);
+            if (closeBrace < 0) return null;
+            return body.Substring(openBrace, closeBrace - openBrace + 1);
+        }
+
+        // The fdCeiling number literal DIRECTLY inside the member (not nested
+        // in a sibling object such as "trend"), last duplicate wins — the
+        // value JSON.parse would surface as resourcePressure.fdCeiling. Null
+        // when absent.
+        private static string FindTopLevelFdCeiling(string member)
+        {
+            var matches = FdCeilingPattern.Matches(member);
+            if (matches.Count == 0) return null;
+
+            var literal = null as string;
+            var depth = 0;
+            var inString = false;
+            var cursor = 1; // skip the member's opening brace
+            foreach (Match m in matches)
+            {
+                while (cursor < m.Index)
+                {
+                    var c = member[cursor];
+                    if (inString)
+                    {
+                        if (c == '\\') cursor++; // skip the escaped character
+                        else if (c == '"') inString = false;
+                    }
+                    else if (c == '"') inString = true;
+                    else if (c == '{') depth++;
+                    else if (c == '}') depth--;
+                    cursor++;
+                }
+                if (depth == 0) literal = m.Groups[1].Value;
+            }
+            return literal;
         }
     }
 }

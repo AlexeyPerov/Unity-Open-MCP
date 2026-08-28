@@ -135,6 +135,75 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void ClampCeiling_Fractional_FloorsLikeReadFdCeiling()
+        {
+            // TS: Math.floor(raw) — 4096.7 configures 4096, not 4097.
+            Assert.AreEqual(4096, EditorFdPressure.ClampCeiling(4096.7));
+        }
+
+        [Test]
+        public void ReadCeilingFromFile_ExponentNotation_ReadsTheFullNumber()
+        {
+            // JSON.parse reads 1e6 as 1000000; the old regex stopped at the
+            // digits and read "1" → below-min → default. One-sided ceiling.
+            var path = WriteSettings(
+                "{\n  \"resourcePressure\": { \"fdCeiling\": 1e6 }\n}");
+            Assert.AreEqual(1_000_000, EditorFdPressure.ReadCeilingFromFile(path));
+        }
+
+        [Test]
+        public void ReadCeilingFromFile_ExponentOverflowToInfinity_FallsBack()
+        {
+            // JSON.parse yields Infinity for 1e999 and readFdCeiling's
+            // isFinite check rejects it → default. ClampCeiling must not
+            // "fix" it to the max instead.
+            var path = WriteSettings(
+                "{\n  \"resourcePressure\": { \"fdCeiling\": 1e999 }\n}");
+            Assert.AreEqual(
+                EditorFdPressure.MonoFdCeiling, EditorFdPressure.ReadCeilingFromFile(path));
+        }
+
+        [Test]
+        public void ReadCeilingFromFile_FractionalValue_Floors()
+        {
+            var path = WriteSettings(
+                "{\n  \"resourcePressure\": { \"fdCeiling\": 4096.7 }\n}");
+            Assert.AreEqual(4096, EditorFdPressure.ReadCeilingFromFile(path));
+        }
+
+        [Test]
+        public void ReadCeilingFromFile_NestedObjectBeforeFdCeiling_StillReadsIt()
+        {
+            // JSON.parse has no trouble with a sibling object; the old
+            // `[^{}]*` span could not cross "trend"'s braces and defaulted.
+            var path = WriteSettings(
+                "{\n  \"resourcePressure\": { \"trend\": { \"window\": 5 }, \"fdCeiling\": 4096 }\n}");
+            Assert.AreEqual(4096, EditorFdPressure.ReadCeilingFromFile(path));
+        }
+
+        [Test]
+        public void ReadCeilingFromFile_FdCeilingNestedInASibling_IsIgnored()
+        {
+            // resourcePressure.fdCeiling does not exist here (the only
+            // fdCeiling lives inside "trend") — JSON.parse would surface
+            // undefined, so this side must default rather than read 8.
+            var path = WriteSettings(
+                "{\n  \"resourcePressure\": { \"trend\": { \"fdCeiling\": 8 } }\n}");
+            Assert.AreEqual(
+                EditorFdPressure.MonoFdCeiling, EditorFdPressure.ReadCeilingFromFile(path));
+        }
+
+        [Test]
+        public void ReadCeilingFromFile_QuotedValue_FallsBack()
+        {
+            // typeof "4096" is string — readFdCeiling rejects it.
+            var path = WriteSettings(
+                "{\n  \"resourcePressure\": { \"fdCeiling\": \"4096\" }\n}");
+            Assert.AreEqual(
+                EditorFdPressure.MonoFdCeiling, EditorFdPressure.ReadCeilingFromFile(path));
+        }
+
+        [Test]
         public void ResolveCeiling_NeverThrowsOnTheLiveProject()
         {
             // Runs on the dispatcher's worker thread in production, against
