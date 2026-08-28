@@ -115,6 +115,43 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void Classify_MatchingAndForeignPort_IsMixedAndNotRewritten()
+        {
+            // Two entries distinguished ONLY by port (no project env): the
+            // file serves two projects. A rewrite is whole-file, so moving
+            // our pin would move the other entry's pin too — the same hazard
+            // as the project-env Mixed case, one level harder to see.
+            var port = InstancePortResolver.ComputePort(Project);
+            var foreignPort = port > 30000 ? port - 1 : port + 1;
+            var body =
+                "\"UNITY_OPEN_MCP_BRIDGE_PORT\": \"" + port + "\"\n" +
+                "\"UNITY_OPEN_MCP_BRIDGE_PORT\": " + foreignPort;
+            var scope = UpgradeEntryScope.Classify(body, Project);
+
+            Assert.AreEqual(Ownership.Mixed, scope.Kind);
+            Assert.IsTrue(scope.ViaPort);
+            Assert.IsNull(scope.ForeignProject, "A port names no project to report.");
+            Assert.IsFalse(UpgradeEntryScope.ShouldRewrite(scope, isHomeScoped: true));
+            Assert.IsFalse(UpgradeEntryScope.ShouldRewrite(scope, isHomeScoped: false));
+            StringAssert.Contains("another project", scope.SkipReason);
+        }
+
+        [Test]
+        public void Classify_SamePortTwice_IsStillMatchedViaPort()
+        {
+            // Duplicate entries for ONE project (same port) are not mixed —
+            // this is the normal "two clients, one project" shape.
+            var port = InstancePortResolver.ComputePort(Project);
+            var body =
+                "\"UNITY_OPEN_MCP_BRIDGE_PORT\": \"" + port + "\"\n" +
+                "\"UNITY_OPEN_MCP_BRIDGE_PORT\": " + port;
+            var scope = UpgradeEntryScope.Classify(body, Project);
+
+            Assert.AreEqual(Ownership.Matched, scope.Kind);
+            Assert.IsTrue(scope.ViaPort);
+        }
+
+        [Test]
         public void Classify_NoProjectEnvAndForeignPort_IsUnknown()
         {
             var foreignPort = InstancePortResolver.ComputePort(Other);

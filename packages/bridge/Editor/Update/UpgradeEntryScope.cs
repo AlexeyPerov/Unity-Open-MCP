@@ -60,7 +60,9 @@ namespace UnityOpenMcpBridge.Update
             /// deterministic port rather than the project path.</summary>
             public readonly bool ViaPort;
             /// <summary>For <see cref="Ownership.Mixed"/>: the first foreign
-            /// project sharing this file. <c>null</c> otherwise.</summary>
+            /// project sharing this file. <c>null</c> otherwise — including a
+            /// port-only Mixed body, where the foreign entry names no project
+            /// we can report.</summary>
             public readonly string ForeignProject;
 
             public ScopeResult(Ownership kind, string[] projectPaths, bool viaPort, string foreignProject = null)
@@ -155,18 +157,31 @@ namespace UnityOpenMcpBridge.Update
 
             // No project env. The deterministic port is the second marker: it
             // is derived from the project path, so an entry pinning this
-            // project's port is this project's entry. (An explicit port
-            // override is the documented escape hatch and can produce a false
-            // negative here — that only costs a skip, never a wrong rewrite.)
+            // project's port is this project's entry. But a port does not
+            // name its project: two entries distinguished only by port can
+            // share one file (one per project), and a rewrite is whole-file,
+            // so a body carrying ours AND another port is Mixed. A body with
+            // only our port is Matched — with a residual hash-collision risk
+            // (the resolver buckets into 10k ports), which errs toward
+            // rewriting and cannot be removed without the project env.
+            // (An explicit port override is the documented escape hatch and
+            // can produce a false negative here — that only costs a skip.)
             var expectedPort = InstancePortResolver.ComputePort(projectPath);
+            var sawExpectedPort = false;
+            var sawForeignPort = false;
             foreach (Match m in PortPattern.Matches(body))
             {
                 int port;
                 if (!int.TryParse(m.Groups[1].Value, out port)) continue;
-                if (port == expectedPort)
-                {
-                    return new ScopeResult(Ownership.Matched, new string[0], true);
-                }
+                if (port == expectedPort) sawExpectedPort = true;
+                else sawForeignPort = true;
+            }
+
+            if (sawExpectedPort)
+            {
+                return sawForeignPort
+                    ? new ScopeResult(Ownership.Mixed, new string[0], true)
+                    : new ScopeResult(Ownership.Matched, new string[0], true);
             }
 
             return new ScopeResult(Ownership.Unknown, new string[0], false);
