@@ -32,8 +32,8 @@ namespace UnityOpenMcpBridge.Config
         {
             new ClientEntry("cursor", "Cursor", "mcpServers", Envelope.McpServersStdio, Scope.Global, "$HOME/.cursor/mcp.json"),
             new ClientEntry("cursor-project", "Cursor (project)", "mcpServers", Envelope.McpServersStdio, Scope.Project, ".cursor/mcp.json"),
-            new ClientEntry("claudeDesktop", "Claude Desktop", "mcpServers", Envelope.McpServersStdio, Scope.Global, null),
-            new ClientEntry("cline", "Cline (VS Code)", "mcpServers", Envelope.McpServersStdio, Scope.Global, null),
+            new ClientEntry("claudeDesktop", "Claude Desktop", "mcpServers", Envelope.McpServersStdio, Scope.Global, null, OsPath.ClaudeDesktop),
+            new ClientEntry("cline", "Cline (VS Code)", "mcpServers", Envelope.McpServersStdio, Scope.Global, null, OsPath.Cline),
             new ClientEntry("gemini", "Gemini CLI", "mcpServers", Envelope.McpServersStdio, Scope.Project, ".gemini/settings.json"),
             new ClientEntry("githubCopilotCli", "GitHub Copilot CLI", "mcpServers", Envelope.GithubCopilotCli, Scope.Project, ".mcp.json"),
             new ClientEntry("kiloCode", "Kilo Code", "mcpServers", Envelope.McpServersStdio, Scope.Project, ".kilocode/mcp.json"),
@@ -70,6 +70,17 @@ namespace UnityOpenMcpBridge.Config
 
         public enum Scope { Global, Project, None }
 
+        /// <summary>
+        /// Global clients whose config path is not one <c>$HOME</c>-relative
+        /// template but an OS-specific location. Kept as a kind rather than a
+        /// per-platform template string so the resolution lives in one
+        /// version-gated helper, mirroring the Hub wizard's Rust resolvers
+        /// (<c>claude_desktop_config_path</c> / <c>cline_settings_path</c>) —
+        /// the two must agree or "configured" detection and the config
+        /// rewriter would disagree about which file a client reads.
+        /// </summary>
+        public enum OsPath { None, ClaudeDesktop, Cline }
+
         public enum Envelope
         {
             McpServersStdio,
@@ -90,11 +101,14 @@ namespace UnityOpenMcpBridge.Config
             public readonly Envelope EnvelopeKind;
             public readonly Scope ScopeKind;
             /// <summary>Relative or <c>$HOME</c>-prefixed path template;
-            /// <c>null</c> for CLI/clipboard-only clients and for
-            /// OS-specific global paths resolved by the Hub wizard.</summary>
+            /// <c>null</c> for CLI/clipboard-only clients and for OS-specific
+            /// global paths, which carry an <see cref="OsPathKind"/> instead.</summary>
             public readonly string PathTemplate;
+            /// <summary>OS-specific global path family, when this client has no
+            /// single <c>$HOME</c> template. <see cref="OsPath.None"/> otherwise.</summary>
+            public readonly OsPath OsPathKind;
 
-            public ClientEntry(string id, string displayName, string mergeKey, Envelope envelope, Scope scope, string pathTemplate)
+            public ClientEntry(string id, string displayName, string mergeKey, Envelope envelope, Scope scope, string pathTemplate, OsPath osPath = OsPath.None)
             {
                 Id = id;
                 DisplayName = displayName;
@@ -102,6 +116,7 @@ namespace UnityOpenMcpBridge.Config
                 EnvelopeKind = envelope;
                 ScopeKind = scope;
                 PathTemplate = pathTemplate;
+                OsPathKind = osPath;
             }
 
             public bool IsFileBacked => EnvelopeKind != Envelope.CliOnly && EnvelopeKind != Envelope.Manual;
@@ -220,19 +235,62 @@ namespace UnityOpenMcpBridge.Config
 
         /// <summary>
         /// Resolve the on-disk target path for display. Global paths with
-        /// <c>$HOME</c> are resolved against the user profile dir.
-        /// Returns <c>null</c> for CLI/clipboard-only clients.
+        /// <c>$HOME</c> are resolved against the user profile dir (or
+        /// <paramref name="homePath"/>, which exists so the policy is
+        /// testable). Clients whose global path is OS-specific resolve through
+        /// <see cref="ResolveOsPath"/>. Returns <c>null</c> for
+        /// CLI/clipboard-only clients.
         /// </summary>
-        public static string ResolveDisplayPath(ClientEntry client, string projectPath)
+        public static string ResolveDisplayPath(ClientEntry client, string projectPath, string homePath = null)
         {
-            if (client.PathTemplate == null) return null;
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var home = homePath ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (client.PathTemplate == null)
+            {
+                return client.OsPathKind == OsPath.None ? null : ResolveOsPath(client.OsPathKind, home);
+            }
             var p = client.PathTemplate.Replace("$HOME", home);
             if (client.ScopeKind == Scope.Project)
             {
                 return Path.Combine(projectPath, p).Replace('\\', '/');
             }
             return p.Replace('\\', '/');
+        }
+
+        /// <summary>
+        /// Absolute path for an OS-specific global client config. Ported from
+        /// the Hub wizard's Rust resolvers so both writers target the same
+        /// file; keep the two in step when a client moves its config.
+        /// </summary>
+        public static string ResolveOsPath(OsPath kind, string homePath = null)
+        {
+            var home = homePath ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            switch (kind)
+            {
+                case OsPath.ClaudeDesktop:
+                    return Path.Combine(AppConfigRoot(home), "Claude", "claude_desktop_config.json")
+                        .Replace('\\', '/');
+                case OsPath.Cline:
+                    // VS Code globalStorage of the Cline extension.
+                    return Path.Combine(
+                            AppConfigRoot(home), "Code", "User", "globalStorage",
+                            "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")
+                        .Replace('\\', '/');
+                default:
+                    return null;
+            }
+        }
+
+        // Per-OS root for application config: %APPDATA% on Windows,
+        // ~/Library/Application Support on macOS, ~/.config elsewhere.
+        private static string AppConfigRoot(string home)
+        {
+#if UNITY_EDITOR_WIN
+            return Path.Combine(home, "AppData", "Roaming");
+#elif UNITY_EDITOR_OSX
+            return Path.Combine(home, "Library", "Application Support");
+#else
+            return Path.Combine(home, ".config");
+#endif
         }
 
         /// <summary>
@@ -261,21 +319,48 @@ namespace UnityOpenMcpBridge.Config
             string homePath = null,
             int maxAncestorLevels = MaxAncestorLevels)
         {
-            if (client.PathTemplate == null) return new string[0];
             if (client.ScopeKind != Scope.Project)
             {
-                var single = ResolveDisplayPath(client, projectPath);
+                var single = ResolveDisplayPath(client, projectPath, homePath);
                 return single == null ? new string[0] : new[] { single };
             }
+            if (client.PathTemplate == null) return new string[0];
+            if (string.IsNullOrEmpty(projectPath)) return new string[0];
+
+            var dirs = ResolveSearchDirectories(projectPath, homePath, maxAncestorLevels);
+            var results = new List<string>(dirs.Length);
+            foreach (var dir in dirs)
+            {
+                results.Add(Path.Combine(dir, client.PathTemplate).Replace('\\', '/'));
+            }
+            return results.ToArray();
+        }
+
+        /// <summary>
+        /// The directories a project-scoped config may live in, nearest first:
+        /// the Unity project folder and up to
+        /// <paramref name="maxAncestorLevels"/> ancestors, stopping before the
+        /// home directory and the filesystem root.
+        ///
+        /// Extracted from <see cref="ResolveSearchPaths"/> so everything that
+        /// walks up from a Unity project — client configs and the agent-facing
+        /// prose the updater rewrites — shares one boundary policy instead of
+        /// each re-deriving it.
+        /// </summary>
+        public static string[] ResolveSearchDirectories(
+            string projectPath,
+            string homePath = null,
+            int maxAncestorLevels = MaxAncestorLevels)
+        {
             if (string.IsNullOrEmpty(projectPath)) return new string[0];
 
             var home = NormalizeDir(
                 homePath ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-            var results = new List<string>();
+            var dirs = new List<string>();
             var dir = NormalizeDir(projectPath);
             for (var level = 0; dir != null && level <= maxAncestorLevels; level++)
             {
-                results.Add(Path.Combine(dir, client.PathTemplate).Replace('\\', '/'));
+                dirs.Add(dir);
                 var parent = ParentDir(dir);
                 if (parent == null) break;
                 if (!string.IsNullOrEmpty(home)
@@ -285,7 +370,7 @@ namespace UnityOpenMcpBridge.Config
                 }
                 dir = parent;
             }
-            return results.ToArray();
+            return dirs.ToArray();
         }
 
         /// <summary>Forward-slash form with any trailing separator removed, so

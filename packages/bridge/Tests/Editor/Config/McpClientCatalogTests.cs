@@ -311,15 +311,21 @@ namespace UnityOpenMcpBridge.Tests
         public void FileBackedClients_HavePathTemplate()
         {
             // The Copy path / Open target actions only render when a path
-            // resolves; every file-backed client must carry a template so
-            // the buttons are not silently disabled for a Tier A client.
+            // resolves; every file-backed client must therefore resolve to one
+            // — either from a $HOME/project template or, for the clients whose
+            // location is OS-specific, from the OsPath resolver. Claude Desktop
+            // and Cline are the second kind: before M32 Plan 4 they had neither
+            // and their buttons were silently disabled.
             foreach (var client in McpClientCatalog.Clients)
             {
-                if (client.IsFileBacked)
-                {
-                    Assert.IsFalse(string.IsNullOrEmpty(client.PathTemplate),
-                        $"File-backed client '{client.Id}' must declare a PathTemplate.");
-                }
+                if (!client.IsFileBacked) continue;
+                Assert.IsTrue(
+                    !string.IsNullOrEmpty(client.PathTemplate)
+                    || client.OsPathKind != McpClientCatalog.OsPath.None,
+                    $"File-backed client '{client.Id}' must declare a PathTemplate or an OsPath.");
+                Assert.IsFalse(
+                    string.IsNullOrEmpty(McpClientCatalog.ResolveDisplayPath(client, "/proj", "/Users/dev")),
+                    $"File-backed client '{client.Id}' must resolve to a target path.");
             }
         }
 
@@ -334,6 +340,93 @@ namespace UnityOpenMcpBridge.Tests
                         $"Client '{client.Id}' must not be file-backed.");
                 }
             }
+        }
+
+        // ---- ResolveSearchDirectories (shared walk-up policy) ------------
+        //
+        // M32 Plan 4 extracted the walk from ResolveSearchPaths so the project
+        // updater's prose scan visits exactly the directories a client config
+        // could live in. These pin that the two stayed one policy.
+
+        [Test]
+        public void ResolveSearchDirectories_ProjectFirstThenAncestors()
+        {
+            var dirs = McpClientCatalog.ResolveSearchDirectories(
+                "/Users/dev/repo/Client", "/Users/dev", 4);
+
+            Assert.AreEqual(new[] { "/Users/dev/repo/Client", "/Users/dev/repo" }, Normalize(dirs));
+        }
+
+        [Test]
+        public void ResolveSearchDirectories_AgreesWithResolveSearchPaths()
+        {
+            var client = FindById("cursor-project");
+            var dirs = McpClientCatalog.ResolveSearchDirectories("/Users/dev/a/b/Client", "/Users/dev", 4);
+            var paths = Normalize(McpClientCatalog.ResolveSearchPaths(
+                client, "/Users/dev/a/b/Client", "/Users/dev", 4));
+
+            Assert.AreEqual(dirs.Length, paths.Length);
+            for (var i = 0; i < dirs.Length; i++)
+            {
+                Assert.AreEqual(dirs[i].Replace('\\', '/') + "/" + client.PathTemplate, paths[i]);
+            }
+        }
+
+        [Test]
+        public void ResolveSearchDirectories_EmptyProjectPath_IsEmpty()
+        {
+            Assert.IsEmpty(McpClientCatalog.ResolveSearchDirectories("", "/Users/dev", 4));
+        }
+
+        // ---- OS-specific global paths ------------------------------------
+        //
+        // Claude Desktop and Cline have no single $HOME-relative template; the
+        // Hub wizard resolves them per platform and the bridge has to agree, or
+        // "configured" detection and the updater would target different files.
+
+        [Test]
+        public void ResolveOsPath_ClaudeDesktop_IsUnderTheGivenHome()
+        {
+            var path = McpClientCatalog.ResolveOsPath(McpClientCatalog.OsPath.ClaudeDesktop, "/Users/dev");
+
+            Assert.IsTrue(path.StartsWith("/Users/dev/"), $"Unexpected root: {path}");
+            Assert.IsTrue(path.EndsWith("/Claude/claude_desktop_config.json"), $"Unexpected tail: {path}");
+        }
+
+        [Test]
+        public void ResolveOsPath_Cline_PointsAtTheExtensionSettings()
+        {
+            var path = McpClientCatalog.ResolveOsPath(McpClientCatalog.OsPath.Cline, "/Users/dev");
+
+            Assert.IsTrue(path.StartsWith("/Users/dev/"), $"Unexpected root: {path}");
+            Assert.IsTrue(
+                path.EndsWith("/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"),
+                $"Unexpected tail: {path}");
+        }
+
+        [Test]
+        public void ResolveOsPath_None_IsNull()
+        {
+            Assert.IsNull(McpClientCatalog.ResolveOsPath(McpClientCatalog.OsPath.None, "/Users/dev"));
+        }
+
+        [Test]
+        public void ResolveDisplayPath_OsSpecificGlobalClient_ResolvesInsteadOfNull()
+        {
+            var path = McpClientCatalog.ResolveDisplayPath(FindById("claudeDesktop"), "/proj", "/Users/dev");
+
+            Assert.IsNotNull(path, "Claude Desktop has an OS-resolved path, not a null template.");
+            Assert.IsTrue(path.EndsWith("/claude_desktop_config.json"));
+        }
+
+        [Test]
+        public void ResolveSearchPaths_OsSpecificGlobalClient_IsSingleAbsolutePath()
+        {
+            var paths = McpClientCatalog.ResolveSearchPaths(FindById("cline"), "/proj", "/Users/dev", 4);
+
+            Assert.AreEqual(1, paths.Length);
+            Assert.AreEqual(
+                McpClientCatalog.ResolveOsPath(McpClientCatalog.OsPath.Cline, "/Users/dev"), paths[0]);
         }
 
         // ---- helper ------------------------------------------------------
