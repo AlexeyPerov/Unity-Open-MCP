@@ -3634,6 +3634,41 @@ test("route: resource_pressure over_ceiling from a real fd count warns at level 
   });
 });
 
+test("route: resource_pressure warns on a PARTIAL lsof count below the ceiling", async () => {
+  // A timed-out lsof returns `approximate: true` with a count that is a LOWER
+  // BOUND on real fds. Keying the threshold softening off `approximate` sent
+  // it down the Windows-HandleCount branch, where nothing below 90% ever
+  // warns — so 850/1024 (83%) reported `ok` on macOS, the platform this tool
+  // exists for. The softening belongs to the METRIC (handle_count), not to
+  // the precision, so this must read `warn`.
+  await withTmp("router-rp-partial-lsof-", async (tmp) => {
+    await setupProject(tmp);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 7777, projectPath: tmp }];
+      },
+    });
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        return { count: 850, method: "lsof", approximate: true, partial: true };
+      },
+    });
+    try {
+      const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
+      const result = await router.route("unity_open_mcp_resource_pressure", {});
+      const body = parseBody(result);
+      assert.equal(body.state, "warn", "a partial fd count still takes the real thresholds");
+      assert.equal(body.reliable, true, "it measures fds — it is just imprecise");
+      assert.equal(body.partial, true, "the lower-bound nature is surfaced explicitly");
+      const warning = body.warning as { level?: string };
+      assert.equal(warning.level, "warn");
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
 test("route: resource_pressure over_ceiling from Windows HandleCount stays a pressureNote (no warning)", async () => {
   // HandleCount covers kernel/GDI/user objects — far broader than Unix fds —
   // and routinely exceeds 1024 on a healthy Windows process. The absolute

@@ -87,12 +87,23 @@ export interface FdCountOk {
   count: number;
   method: FdCountMethod;
   /**
-   * `true` when the count is a Windows HandleCount approximation rather than
-   * a Unix fd count. Windows handles cover more than just fds (kernel +
-   * GDI + user objects), so the headroom math is looser there. The response
-   * flags this so an agent does not over-react to a naturally-higher number.
+   * `true` when the number should not be read as an exact fd count. TWO
+   * different situations set it, and they need different handling — use
+   * `method` / `partial` to tell them apart:
+   *
+   *   - `method: "handle_count"` — a Windows HandleCount, which counts more
+   *     than fds (kernel + GDI + user objects) and is naturally higher. The
+   *     headroom math is deliberately looser there.
+   *   - `partial: true` — a timed-out `lsof` whose captured rows are a
+   *     LOWER BOUND on the real fd count. Still real fds, so the normal
+   *     thresholds apply; the true pressure is only ever higher.
    */
   approximate: boolean;
+  /**
+   * `true` only for the timed-out-`lsof` lower bound above. Absent/false
+   * means the count is complete (or is a HandleCount).
+   */
+  partial?: boolean;
 }
 
 /** Failed fd-count probe. The count is unknown — callers must NOT treat
@@ -149,7 +160,15 @@ export interface FdHeadroom {
   /** The resolved ceiling (Mono ~1024 default, configurable per project). */
   ceiling: number;
   state: FdPressureState;
-  /** `false` when the underlying count was an approximation (Windows). */
+  /**
+   * `false` when the underlying metric counts MORE than Unix fds — i.e. the
+   * Windows `HandleCount` probe. This is about the metric, not about the
+   * count's precision: a timed-out `lsof` yields an imprecise count (a lower
+   * bound, flagged `approximate` / `partial` on the probe result) but still a
+   * count of real fds, so it stays `reliable: true` and gets the real
+   * warn/critical thresholds. Treating a truncated macOS listing as
+   * Windows-like was how a partial 900/1024 reported `ok`.
+   */
   reliable: boolean;
 }
 
@@ -264,6 +283,7 @@ export function classifyLsofError(
       count: countLsofFdRows(capturedLines),
       method: "lsof",
       approximate: timedOut,
+      partial: timedOut,
     };
   }
   if (timedOut) {
@@ -460,16 +480,22 @@ export function countFileDescriptors(pid: number): FdCountResult {
  *
  * `over_ceiling` (count >= ceiling) means new descriptor numbers now land
  * above the Mono IOSelector ceiling — see {@link FdPressureState} for why the
- * router treats a reliable (lsof//proc) over-ceiling count as critical and
- * only downgrades the Windows HandleCount approximation to a note.
+ * router treats a real-fd over-ceiling count as critical and only downgrades
+ * the Windows HandleCount metric to a note.
  *
+ * @param broaderThanFds `true` ONLY when the metric counts more than Unix fds
+ *   — the Windows `HandleCount` probe. Pass `probe.method === "handle_count"`,
+ *   NOT `probe.approximate`: a timed-out `lsof` is also flagged approximate,
+ *   but its count is a LOWER BOUND on real fds, so softening the thresholds
+ *   for it under-reports pressure (a partial 900/1024 read `ok` instead of
+ *   `warn`) on exactly the platform this tool targets.
  * @param ceiling the resolved fd ceiling (default {@link FD_CEILING_DEFAULT});
  *   passed in by the router from `readFdCeiling` so the math scales with a
  *   project-configured override.
  */
 export function computeFdHeadroom(
   count: number | null,
-  approximate = false,
+  broaderThanFds = false,
   ceiling: number = FD_CEILING_DEFAULT,
 ): FdHeadroom {
   if (count === null || !Number.isFinite(count)) {
@@ -491,9 +517,11 @@ export function computeFdHeadroom(
     // trip the hang. The router alarms on this for real fd counts and
     // downgrades only the Windows HandleCount approximation to a note.
     state = "over_ceiling";
-  } else if (approximate) {
+  } else if (broaderThanFds) {
     // Windows HandleCount is naturally higher than Unix fds — only flag
-    // critical, never warn, so an agent does not over-react.
+    // critical, never warn, so an agent does not over-react. Deliberately
+    // NOT reached by a partial (timed-out) lsof: that is a lower bound on
+    // REAL fds and takes the normal thresholds below.
     state = pressureRatio >= FD_CRITICAL_RATIO ? "critical" : "ok";
   } else if (pressureRatio >= FD_CRITICAL_RATIO) {
     state = "critical";
@@ -507,7 +535,7 @@ export function computeFdHeadroom(
     headroom,
     ceiling,
     state,
-    reliable: !approximate,
+    reliable: !broaderThanFds,
   };
 }
 

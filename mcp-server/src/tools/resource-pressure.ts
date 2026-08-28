@@ -43,7 +43,12 @@ export const resourcePressure = makeTool(
     "`unknown` when the probe failed), `trend` (`stable` | `rising` | " +
     "`leaking` — monotonic climb across successive samples = leak in progress), " +
     "and `samples[]` (the session-scoped in-memory ring of recent samples for " +
-    "this PID — no disk cache). IMPORTANT: with a real fd count (`fdMethod` " +
+    "this PID — no disk cache). `approximate` means \"do not read this as an " +
+    "exact fd count\" and covers TWO cases: a Windows HandleCount (`fdMethod` " +
+    "`handle_count` — counts more than fds, softer thresholds), and a " +
+    "timed-out `lsof` (`partial: true` — a LOWER BOUND on real fds, so the " +
+    "normal thresholds apply and the true pressure is only ever higher). " +
+    "IMPORTANT: with a real fd count (`fdMethod` " +
     "lsof/proc — only true numbered descriptors are counted, never mmap/txt " +
     "rows), `over_ceiling` IS an alarm: POSIX allocates the lowest free " +
     "descriptor number, so at/past the ceiling every NEW descriptor lands " +

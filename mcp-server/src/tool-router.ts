@@ -2616,7 +2616,14 @@ export class ToolRouter implements Router {
     const probe = countFileDescriptors(pid);
     const count = probe.count;
     const approximate = "approximate" in probe ? probe.approximate : false;
-    const headroom = computeFdHeadroom(count, approximate, ceiling);
+    const partial = "partial" in probe ? probe.partial === true : false;
+    // The threshold softening is about WHAT the metric counts, not about how
+    // precise the number is. Only Windows HandleCount counts more than fds; a
+    // timed-out lsof is imprecise but still counts real fds (a lower bound),
+    // so it takes the normal warn/critical thresholds — softening it made a
+    // partial 900/1024 report `ok` on the very platform this tool targets.
+    const broaderThanFds = probe.method === "handle_count";
+    const headroom = computeFdHeadroom(count, broaderThanFds, ceiling);
     const ts = Date.now();
     this.sessionState.recordFdSample({ ts, pid, count });
     const samples = this.sessionState.fdSamplesSnapshot();
@@ -2645,9 +2652,9 @@ export class ToolRouter implements Router {
 
     // A partial (timed-out) lsof listing is a LOWER BOUND on real fds, so an
     // over-ceiling verdict from it still stands; only the Windows HandleCount
-    // metric measures something broader than fds.
-    const overCeilingRealFds =
-      headroom.state === "over_ceiling" && fdMethod !== "handle_count";
+    // metric measures something broader than fds. Same predicate that picked
+    // the headroom thresholds above, so the two can never disagree.
+    const overCeilingRealFds = headroom.state === "over_ceiling" && !broaderThanFds;
 
     const shouldWarn =
       overCeilingRealFds ||
@@ -2712,6 +2719,7 @@ export class ToolRouter implements Router {
         fdCount: count,
         fdMethod,
         approximate,
+        ...(partial ? { partial } : {}),
         ceiling,
         ceilingSource,
         headroom: headroom.headroom,

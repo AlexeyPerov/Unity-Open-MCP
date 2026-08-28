@@ -308,10 +308,13 @@ and never depend on a reachable bridge.
   editor sits at ~160 fds). The one soft case is the Windows `HandleCount`
   probe — handle counts cover kernel/GDI/user objects and routinely exceed
   1024 on a healthy process, so an over-ceiling handle count carries an
-  informational `pressureNote` and only a `leaking` trend alarms there.
-  Override the ceiling for a runtime whose internal limit differs from Mono's
-  1024 (e.g. Unity 6 / CoreCLR) via `.unity-open-mcp/settings.json`
-  (`resourcePressure.fdCeiling`).
+  informational `pressureNote` and only a `leaking` trend alarms there. A
+  timed-out `lsof` (`partial: true`) is NOT soft: its count is a lower bound
+  on real fds, so the normal thresholds apply and the true pressure is only
+  ever higher. Override the ceiling for a runtime whose internal limit differs
+  from Mono's 1024 (e.g. Unity 6 / CoreCLR) via `.unity-open-mcp/settings.json`
+  (`resourcePressure.fdCeiling`) — the bridge's in-band `execute_csharp`
+  advisory reads the same key, so both surfaces alarm at the same pressure.
 
 Use `resource_pressure` after heavy automation (many recompiles / domain
 reloads) to catch fd growth before the Editor hangs; escalate to

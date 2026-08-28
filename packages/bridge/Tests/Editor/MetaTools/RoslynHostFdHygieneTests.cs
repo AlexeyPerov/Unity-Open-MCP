@@ -49,10 +49,27 @@ namespace UnityOpenMcpBridge.Tests
                 Assert.Ignore("No loadable Roslyn on this editor (Unity 6000.x needs the IL-only fallback installed).");
 
             var marker = Guid.NewGuid().ToString("N");
-            var (peA, errA) = RoslynHost.Compile(Src("A" + marker));
-            Assert.IsNotNull(peA, "warm-up compile must succeed: " + errA);
+
+            // Warm up until the reference count STOPS moving. Roslyn itself
+            // loads file-backed assemblies lazily during its first compiles
+            // (codegen pulls in System.Reflection.Metadata &c. after
+            // BuildMetadataReferences already sampled the domain), so the first
+            // one or two compiles legitimately rebuild. Those are Roslyn's own
+            // loads, not the thing under test — asserting from compile #1
+            // measured that confound instead of the invariant and failed on
+            // every editor.
+            byte[] peA = null;
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                var builds = RoslynHost.ReferenceBuildCount;
+                string warmupError;
+                (peA, warmupError) = RoslynHost.Compile(Src("Warm" + attempt + marker));
+                Assert.IsNotNull(peA, "warm-up compile must succeed: " + warmupError);
+                if (RoslynHost.ReferenceBuildCount == builds) break;
+            }
 
             var buildsBefore = RoslynHost.ReferenceBuildCount;
+            Assert.IsNotNull(peA);
 
             System.Reflection.Assembly.Load(peA);
 
@@ -84,6 +101,18 @@ namespace UnityOpenMcpBridge.Tests
             var after = CountOpenFds();
             Assert.LessOrEqual(after - before, 60,
                 $"a full metadata-reference rebuild leaked file descriptors: {before} -> {after}");
+
+            // The stronger, non-statistical half of the same claim. A reference
+            // built by CreateFromAssembly / CreateFromFile pins its PE for the
+            // life of the reference and Roslyn exposes NO way to release it —
+            // DisposeCachedReferences cannot close those, so every later
+            // rebuild re-leaks whatever they hold. Both fd-free factories
+            // (AssemblyMetadata.CreateFromStream, MetadataReference.
+            // CreateFromImage) exist on every Roslyn this host loads, so the
+            // file-backed pair must never be reached.
+            Assert.AreEqual(0, RoslynHost.FileBackedReferenceCount,
+                "no reference may come from a file-backed factory — those hold a descriptor " +
+                "that nothing can close short of a domain reload");
         }
 
         // The snippet-cache half of the fix: an identical snippet re-run must

@@ -543,7 +543,10 @@ metadata references are built once per domain through streams that hold no file
 descriptors open. As a tripwire, once the Editor process passes 80% of Mono's
 ~1024 fd ceiling the response's `agentNextSteps` carries an fd-pressure
 advisory (elevated at ≥80%, CRITICAL at ≥90%) recommending a domain reload —
-which releases leaked descriptors — and a `resource_pressure` check.
+which releases leaked descriptors — and a `resource_pressure` check. The
+advisory honours `resourcePressure.fdCeiling` from
+`.unity-open-mcp/settings.json`, the same override `resource_pressure` reads,
+so a project on a non-Mono ceiling does not get two contradicting verdicts.
 
 ### `unity_open_mcp_execute_menu`
 

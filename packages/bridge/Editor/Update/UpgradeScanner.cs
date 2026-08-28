@@ -7,8 +7,14 @@ namespace UnityOpenMcpBridge.Update
 {
     /// <summary>
     /// Collects the files that can carry a Unity Open MCP version pin for one
-    /// project: MCP client configs (project-scoped and <c>$HOME</c>-scoped) and
-    /// the agent-facing prose that documents the launch command.
+    /// project: MCP client configs (project-scoped and <c>$HOME</c>-scoped),
+    /// the agent-facing prose that documents the launch command, and the
+    /// project's UPM manifest + lock, which pin the bridge and verify packages.
+    ///
+    /// All three pin families <see cref="VersionPinRewriter"/> can move must
+    /// have a source here, or an "upgrade" moves the ones that do and silently
+    /// leaves the rest: an npm-only rewrite hands the project a new MCP server
+    /// talking to the bridge version it already had.
     ///
     /// The scan is deliberately <b>path-directed, not recursive</b>. Every
     /// candidate is derived from a known layout — the client catalog's path
@@ -42,6 +48,10 @@ namespace UnityOpenMcpBridge.Update
             HomeConfig,
             /// <summary>Agent-facing markdown / example file.</summary>
             Prose,
+            /// <summary>This Unity project's <c>Packages/manifest.json</c> or
+            /// <c>Packages/packages-lock.json</c> — where the bridge and verify
+            /// UPM packages are pinned.</summary>
+            UpmManifest,
         }
 
         internal readonly struct Candidate
@@ -70,6 +80,11 @@ namespace UnityOpenMcpBridge.Update
             public readonly bool ProjectConfigs;
             public readonly bool HomeConfigs;
             public readonly bool Prose;
+            /// <summary>Include this project's <c>Packages/manifest.json</c> and
+            /// <c>Packages/packages-lock.json</c>. On by default in
+            /// <see cref="All"/>: without them the npm pin moves and the UPM
+            /// packages silently stay on the old version.</summary>
+            public readonly bool UpmManifests;
             /// <summary>Home directory override. Exists so the scan is
             /// testable against a fixture tree; production leaves it null.</summary>
             public readonly string HomeOverride;
@@ -79,17 +94,19 @@ namespace UnityOpenMcpBridge.Update
                 bool projectConfigs,
                 bool homeConfigs,
                 bool prose,
+                bool upmManifests,
                 string homeOverride = null,
                 int maxAncestorLevels = McpClientCatalog.MaxAncestorLevels)
             {
                 ProjectConfigs = projectConfigs;
                 HomeConfigs = homeConfigs;
                 Prose = prose;
+                UpmManifests = upmManifests;
                 HomeOverride = homeOverride;
                 MaxAncestorLevels = maxAncestorLevels;
             }
 
-            public static ScanOptions All => new ScanOptions(true, true, true);
+            public static ScanOptions All => new ScanOptions(true, true, true, true);
         }
 
         /// <summary>
@@ -120,6 +137,26 @@ namespace UnityOpenMcpBridge.Update
 
         private const string SkillRelativePath = "skills/unity-open-mcp/SKILL.md";
 
+        /// <summary>
+        /// The UPM files that pin the bridge and verify packages. Relative to
+        /// the Unity project root and ONLY there — unlike a client config,
+        /// <c>Packages/</c> belongs to exactly one Unity project, so the
+        /// ancestor walk does not apply.
+        ///
+        /// These carry the <c>#bridge-vX.Y.Z</c> / <c>#verify-vX.Y.Z</c> git
+        /// tags and the lock's bridge→verify dependency pin, i.e. two of the
+        /// three pin families <see cref="VersionPinRewriter"/> knows how to
+        /// move. Omitting them is how an "upgrade" ends up moving only the npm
+        /// pin: the MCP server jumps a version while the Editor keeps loading
+        /// the old bridge, which is the exact version skew the updater exists
+        /// to prevent.
+        /// </summary>
+        private static readonly string[] UpmManifestRelativePaths =
+        {
+            "Packages/manifest.json",
+            "Packages/" + VersionPinRewriter.PackagesLockFileName,
+        };
+
         /// <summary>Suffix of a committed sample config (e.g.
         /// <c>.cursor/mcp.json.example</c>) — not read by any client, but
         /// copied by humans and agents, so a stale pin there propagates.</summary>
@@ -127,7 +164,8 @@ namespace UnityOpenMcpBridge.Update
 
         /// <summary>
         /// Every existing file that could carry a pin for this project, nearest
-        /// first: project configs, then home configs, then prose.
+        /// first: project configs, then the UPM manifest + lock, then home
+        /// configs, then prose.
         /// </summary>
         internal static List<Candidate> Collect(string projectPath, ScanOptions options)
         {
@@ -149,6 +187,14 @@ namespace UnityOpenMcpBridge.Update
                     {
                         Add(found, seen, path, CandidateKind.ProjectConfig, client.Id);
                     }
+                }
+            }
+
+            if (options.UpmManifests)
+            {
+                foreach (var relative in UpmManifestRelativePaths)
+                {
+                    Add(found, seen, Combine(projectPath, relative), CandidateKind.UpmManifest, null);
                 }
             }
 

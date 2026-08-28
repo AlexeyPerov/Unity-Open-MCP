@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using NUnit.Framework;
 using UnityOpenMcpBridge.Update;
 using PinKind = UnityOpenMcpBridge.Update.VersionPinRewriter.PinKind;
@@ -197,6 +198,114 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsTrue(VersionPinRewriter.IsVersion(VersionPinRewriter.NormalizeVersion("v1.2.3")));
             Assert.IsFalse(VersionPinRewriter.IsVersion("1.2"));
             Assert.IsFalse(VersionPinRewriter.IsVersion("1.2.3-rc.1"));
+        }
+
+        [Test]
+        public void IsVersion_RejectsSurroundingWhitespaceIncludingATrailingNewline()
+        {
+            // .NET's `$` also matches immediately BEFORE a trailing newline, so
+            // `^\d+\.\d+\.\d+$` accepted "1.2.3\n" — the shape a version read
+            // from a file or a `git describe` capture arrives in. It passed
+            // validation and then substituted a raw newline into every JSON /
+            // TOML string literal it rewrote. \A…\z is the fix.
+            Assert.IsFalse(VersionPinRewriter.IsVersion("1.2.3\n"));
+            Assert.IsFalse(VersionPinRewriter.IsVersion("1.2.3\r\n"));
+            Assert.IsFalse(VersionPinRewriter.IsVersion(" 1.2.3"));
+            Assert.Throws<ArgumentException>(
+                () => VersionPinRewriter.Rewrite("unity-open-mcp@1.0.0", "1.2.3\n"));
+            // NormalizeVersion is the documented way in.
+            Assert.IsTrue(VersionPinRewriter.IsVersion(VersionPinRewriter.NormalizeVersion("1.2.3\n")));
+        }
+
+        [Test]
+        public void NpmPackageName_IsDerivedFromTheSharedConstant()
+        {
+            // Not re-spelled here: a rename that moved BridgeConstants.NpmPackage
+            // (which the cross-tree parity test pins) would otherwise leave this
+            // rewriter matching a package that no longer exists, and every
+            // project would report "no pin found" instead of upgrading.
+            Assert.AreEqual("unity-open-mcp", VersionPinRewriter.NpmPackageName);
+            StringAssert.StartsWith(
+                VersionPinRewriter.NpmPackageName + "@",
+                UnityOpenMcpBridge.Config.BridgeConstants.NpmPackage);
+        }
+
+        // ---- packages-lock.json hash invalidation ---------------------------
+
+        private const string LockBody =
+            "{\n" +
+            "  \"dependencies\": {\n" +
+            "    \"com.alexeyperov.unity-open-mcp-bridge\": {\n" +
+            "      \"version\": \"https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v1.1.0\",\n" +
+            "      \"depth\": 0,\n" +
+            "      \"source\": \"git\",\n" +
+            "      \"dependencies\": {\n" +
+            "        \"com.alexeyperov.unity-open-mcp-verify\": \"1.1.0\"\n" +
+            "      },\n" +
+            "      \"hash\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n" +
+            "    },\n" +
+            "    \"com.alexeyperov.unity-open-mcp-verify\": {\n" +
+            "      \"version\": \"https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v1.1.0\",\n" +
+            "      \"hash\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n" +
+            "      \"depth\": 0\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+
+        [Test]
+        public void Rewrite_LockFile_DropsTheStaleResolvedHash()
+        {
+            // UPM records the commit it resolved a git dependency to. Moving
+            // only the tag leaves manifest and lock agreeing on the new version
+            // while the lock still names the OLD commit — UPM reuses it and the
+            // upgrade silently does not happen. The hash must go so UPM
+            // re-resolves; it writes the new value back on the next open.
+            var result = VersionPinRewriter.Rewrite(LockBody, Target, isPackagesLock: true);
+
+            Assert.IsTrue(result.Body.Contains("#bridge-v1.2.3"));
+            Assert.IsTrue(result.Body.Contains("#verify-v1.2.3"));
+            Assert.IsFalse(result.Body.Contains("\"hash\""), "both stale hashes dropped");
+            // The surrounding structure survives: hash was the LAST property of
+            // the bridge entry and a MIDDLE one of the verify entry.
+            Assert.IsTrue(result.Body.Contains("\"source\": \"git\""));
+            Assert.IsTrue(result.Body.Contains("\"depth\": 0"));
+
+            var hashChange = result.Changes.Single(c => c.Kind == PinKind.LockHash);
+            Assert.AreEqual(2, hashChange.Count);
+            StringAssert.Contains("hash", hashChange.Label);
+        }
+
+        [Test]
+        public void Rewrite_LockFile_LeavesTheHashAloneWhenNothingMoved()
+        {
+            // Dropping the hash of an entry already on the target would force a
+            // pointless re-resolve (a network round-trip) on the next open.
+            var current = VersionPinRewriter.Rewrite(LockBody, Target, isPackagesLock: true).Body;
+            var second = VersionPinRewriter.Rewrite(current, Target, isPackagesLock: true);
+
+            Assert.AreEqual(current, second.Body, "the lock pass is idempotent too");
+            Assert.IsFalse(second.Changes.Any(c => c.Kind == PinKind.LockHash));
+        }
+
+        [Test]
+        public void Rewrite_NonLockFile_NeverTouchesAHash()
+        {
+            // manifest.json carries the same git URLs but no resolved hash, and
+            // a client config that happened to contain a "hash" key is not ours
+            // to edit. The pass is opt-in per file.
+            var result = VersionPinRewriter.Rewrite(LockBody, Target);
+
+            Assert.IsTrue(result.Body.Contains("\"hash\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""));
+            Assert.IsFalse(result.Changes.Any(c => c.Kind == PinKind.LockHash));
+        }
+
+        [Test]
+        public void IsPackagesLockPath_RecognizesTheLockFileOnly()
+        {
+            Assert.IsTrue(VersionPinRewriter.IsPackagesLockPath("/p/Packages/packages-lock.json"));
+            Assert.IsTrue(VersionPinRewriter.IsPackagesLockPath(@"C:\p\Packages\packages-lock.json"));
+            Assert.IsFalse(VersionPinRewriter.IsPackagesLockPath("/p/Packages/manifest.json"));
+            Assert.IsFalse(VersionPinRewriter.IsPackagesLockPath(null));
         }
     }
 }

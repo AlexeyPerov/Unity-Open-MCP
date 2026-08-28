@@ -86,19 +86,31 @@ test("computeFdHeadroom: NaN count → unknown (defensive)", () => {
   assert.equal(h.reliable, false);
 });
 
-test("computeFdHeadroom: approximate (Windows) counts never warn — only critical", () => {
+test("computeFdHeadroom: broaderThanFds (Windows) counts never warn — only critical", () => {
   // Windows HandleCount is naturally higher than Unix fds; the plan says flag
   // only critical, never warn, so an agent does not over-react.
   const warnLevel = computeFdHeadroom(850, true);
-  assert.equal(warnLevel.state, "ok", "approximate count at warn-level → ok");
+  assert.equal(warnLevel.state, "ok", "handle count at warn-level → ok");
   assert.equal(warnLevel.reliable, false);
 
   const criticalLevel = computeFdHeadroom(
     Math.ceil(FD_CEILING * FD_CRITICAL_RATIO),
     true,
   );
-  assert.equal(criticalLevel.state, "critical", "approximate at critical still critical");
+  assert.equal(criticalLevel.state, "critical", "handle count at critical still critical");
   assert.equal(criticalLevel.reliable, false);
+});
+
+test("computeFdHeadroom: the softening is about the METRIC, not the precision", () => {
+  // A timed-out lsof is flagged `approximate` (its count is a LOWER BOUND on
+  // real fds), but it still counts real fds — so it must NOT take the
+  // Windows-HandleCount branch. Softening it made a partial 900/1024 report
+  // `ok` instead of `warn`, under-reporting pressure on the very platform the
+  // tool targets. `broaderThanFds` is false for it, and the router derives
+  // that flag from `method === "handle_count"`, never from `approximate`.
+  const partialLsof = computeFdHeadroom(850, false);
+  assert.equal(partialLsof.state, "warn", "a partial lsof count takes the real thresholds");
+  assert.equal(partialLsof.reliable, true, "it is an fd metric, just an imprecise one");
 });
 
 test("FD_CEILING_DEFAULT is 1024 (Mono internal ceiling, not OS soft limit)", () => {
@@ -531,6 +543,13 @@ test("H2: classifyLsofError flags a timed-out probe's partial stdout as approxim
   const r = classifyLsofError(err, 1234);
   assert.equal(r.count, 2, "partial rows still parsed");
   assert.equal((r as { approximate?: boolean }).approximate, true, "timeout partial output must be approximate");
+  assert.equal(
+    (r as { partial?: boolean }).partial,
+    true,
+    "and explicitly PARTIAL — the flag that tells a lower-bound fd count apart " +
+      "from a Windows HandleCount, which the headroom softening keys off",
+  );
+  assert.equal(r.method, "lsof", "still an fd metric, so the normal thresholds apply");
 });
 
 test("H2: classifyLsofError maps a timeout with NO output to lsof_failed", () => {

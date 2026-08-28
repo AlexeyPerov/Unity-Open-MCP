@@ -44,6 +44,14 @@ namespace UnityOpenMcpBridge.Tests
             // A git worktree: a separate checkout with its own bridge.
             Write(_repo + "/.claude/worktrees/wt/MCP.md", "unity-open-mcp@0.9.0");
 
+            // The UPM pins — the OTHER half of a version move. These live in
+            // the Unity project itself, never in an ancestor.
+            Write(_project + "/Packages/manifest.json",
+                "{\"dependencies\":{\"com.alexeyperov.unity-open-mcp-bridge\":" +
+                "\"https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v1.0.0\"}}");
+            Write(_project + "/Packages/packages-lock.json",
+                "{\"dependencies\":{\"com.alexeyperov.unity-open-mcp-bridge\":{\"version\":\"1.0.0\"}}}");
+
             // Machine-wide configs.
             Write(_home + "/.cursor/mcp.json", "{\"mcpServers\":{\"unity-open-mcp\":{}}}");
             Write(McpClientCatalog.ResolveOsPath(McpClientCatalog.OsPath.ClaudeDesktop, _home),
@@ -67,7 +75,7 @@ namespace UnityOpenMcpBridge.Tests
             return UpgradeScanner.Collect(_project, options).Select(c => c.Path).ToArray();
         }
 
-        private ScanOptions All => new ScanOptions(true, true, true, _home);
+        private ScanOptions All => new ScanOptions(true, true, true, true, _home);
 
         // ---- What is collected --------------------------------------------
 
@@ -116,6 +124,49 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void Collect_FindsTheProjectsUpmManifestAndLock()
+        {
+            // Without these, two of the three pin families VersionPinRewriter
+            // can move (the #bridge-v / #verify-v git tags and the lock's
+            // bridge→verify dependency) have no source file: an "upgrade"
+            // moves the npm pin and silently leaves the Editor on the bridge
+            // version it already had.
+            var upm = UpgradeScanner.Collect(_project, All)
+                .Where(c => c.Kind == CandidateKind.UpmManifest)
+                .Select(c => c.Path)
+                .ToArray();
+
+            CollectionAssert.Contains(upm, _project + "/Packages/manifest.json");
+            CollectionAssert.Contains(upm, _project + "/Packages/packages-lock.json");
+            Assert.IsTrue(
+                UpgradeScanner.Collect(_project, All)
+                    .Where(c => c.Kind == CandidateKind.UpmManifest)
+                    .All(c => !c.IsHomeScoped),
+                "the UPM files are project-scoped — Unknown ownership must still rewrite");
+        }
+
+        [Test]
+        public void Collect_DoesNotWalkUpForUpmManifests()
+        {
+            // Packages/ belongs to exactly ONE Unity project, so an ancestor's
+            // copy (another project in the same repo) is not ours to move.
+            Write(_repo + "/Packages/manifest.json", "{\"dependencies\":{}}");
+
+            CollectionAssert.DoesNotContain(Paths(All), _repo + "/Packages/manifest.json");
+        }
+
+        [Test]
+        public void Collect_UpmManifestsToggleOff()
+        {
+            var kinds = UpgradeScanner.Collect(_project, new ScanOptions(true, true, true, false, _home))
+                .Select(c => c.Kind)
+                .Distinct()
+                .ToArray();
+
+            CollectionAssert.DoesNotContain(kinds, CandidateKind.UpmManifest);
+        }
+
+        [Test]
         public void Collect_SkipsGitWorktreeCopies()
         {
             // Not a prune rule but a consequence of the scan being
@@ -142,7 +193,7 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public void Collect_ProseOnly_LeavesConfigsAlone()
         {
-            var kinds = UpgradeScanner.Collect(_project, new ScanOptions(false, false, true, _home))
+            var kinds = UpgradeScanner.Collect(_project, new ScanOptions(false, false, true, false, _home))
                 .Select(c => c.Kind)
                 .Distinct()
                 .ToArray();
@@ -153,7 +204,7 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public void Collect_ProjectConfigsOnly_ExcludesHomeConfigs()
         {
-            var paths = Paths(new ScanOptions(true, false, false, _home));
+            var paths = Paths(new ScanOptions(true, false, false, false, _home));
 
             CollectionAssert.Contains(paths, _repo + "/.cursor/mcp.json");
             CollectionAssert.DoesNotContain(paths, _home + "/.cursor/mcp.json");
@@ -162,7 +213,7 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public void Collect_HomeConfigsOnly_ExcludesProjectConfigs()
         {
-            var paths = Paths(new ScanOptions(false, true, false, _home));
+            var paths = Paths(new ScanOptions(false, true, false, false, _home));
 
             CollectionAssert.Contains(paths, _home + "/.cursor/mcp.json");
             CollectionAssert.DoesNotContain(paths, _repo + "/.cursor/mcp.json");
@@ -196,7 +247,7 @@ namespace UnityOpenMcpBridge.Tests
             var bare = _root + "/bare/Client";
             Directory.CreateDirectory(bare + "/Assets");
 
-            Assert.IsEmpty(UpgradeScanner.Collect(bare, new ScanOptions(true, false, true, _home)));
+            Assert.IsEmpty(UpgradeScanner.Collect(bare, new ScanOptions(true, false, true, true, _home)));
         }
     }
 }

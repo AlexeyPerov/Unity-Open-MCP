@@ -57,5 +57,89 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsTrue(EditorFdPressure.TryCountOpenFds(out var count));
             Assert.Greater(count, 0, "a live editor process always has open descriptors");
         }
+
+        // ---- Ceiling resolution --------------------------------------------
+        //
+        // The advisory rides EVERY execute_csharp response, so it must resolve
+        // the same ceiling `resource_pressure` does. A hard-coded 1024 against
+        // a project that set `resourcePressure.fdCeiling: 4096` (the documented
+        // Unity 6 / CoreCLR knob) would scream "CRITICAL, restart the Editor"
+        // in-band on every call while the server-side tool reported `ok`.
+
+        private string _dir;
+
+        [TearDown]
+        public void TearDown()
+        {
+            if (_dir != null && Directory.Exists(_dir)) Directory.Delete(_dir, true);
+            _dir = null;
+        }
+
+        private string WriteSettings(string body)
+        {
+            _dir = Path.Combine(Path.GetTempPath(), "uom-fd-" + Path.GetRandomFileName());
+            Directory.CreateDirectory(_dir);
+            var path = Path.Combine(_dir, "settings.json");
+            File.WriteAllText(path, body);
+            return path;
+        }
+
+        [Test]
+        public void ReadCeilingFromFile_HonorsAConfiguredOverride()
+        {
+            var path = WriteSettings(
+                "{\n  \"autoStart\": true,\n  \"resourcePressure\": { \"fdCeiling\": 4096 }\n}");
+            Assert.AreEqual(4096, EditorFdPressure.ReadCeilingFromFile(path));
+
+            // …and the advisory then stays silent where 1024 would have fired.
+            Assert.IsNull(EditorFdPressure.BuildAdvisory(900, 4096));
+            Assert.IsNotNull(EditorFdPressure.BuildAdvisory(900, 1024));
+        }
+
+        [Test]
+        public void ReadCeilingFromFile_FallsBackOnAbsentOrUnusableValues()
+        {
+            Assert.AreEqual(
+                EditorFdPressure.MonoFdCeiling,
+                EditorFdPressure.ReadCeilingFromFile(WriteSettings("{\"autoStart\": true}")),
+                "no resourcePressure slice → default");
+            TearDown();
+            Assert.AreEqual(
+                EditorFdPressure.MonoFdCeiling,
+                EditorFdPressure.ReadCeilingFromFile(WriteSettings("{ not json at all")),
+                "unparseable file → default, never a throw");
+            TearDown();
+            Assert.AreEqual(
+                EditorFdPressure.MonoFdCeiling,
+                EditorFdPressure.ReadCeilingFromFile(Path.Combine(Path.GetTempPath(), "uom-absent.json")),
+                "missing file → default");
+        }
+
+        [Test]
+        public void ClampCeiling_MirrorsTheServersResolveConfigured()
+        {
+            // Below the min is treated as "not configured"; above the max
+            // clamps down; in range is kept. Same policy as readFdCeiling in
+            // mcp-server/src/project-settings.ts.
+            Assert.AreEqual(EditorFdPressure.MonoFdCeiling, EditorFdPressure.ClampCeiling(0));
+            Assert.AreEqual(
+                EditorFdPressure.MonoFdCeiling,
+                EditorFdPressure.ClampCeiling(EditorFdPressure.FdCeilingMin - 1));
+            Assert.AreEqual(
+                EditorFdPressure.FdCeilingMin,
+                EditorFdPressure.ClampCeiling(EditorFdPressure.FdCeilingMin));
+            Assert.AreEqual(
+                EditorFdPressure.FdCeilingMax,
+                EditorFdPressure.ClampCeiling((long)EditorFdPressure.FdCeilingMax + 1));
+            Assert.AreEqual(4096, EditorFdPressure.ClampCeiling(4096));
+        }
+
+        [Test]
+        public void ResolveCeiling_NeverThrowsOnTheLiveProject()
+        {
+            // Runs on the dispatcher's worker thread in production, against
+            // whatever the project's settings file happens to be.
+            Assert.Greater(EditorFdPressure.ResolveCeiling(), 0);
+        }
     }
 }

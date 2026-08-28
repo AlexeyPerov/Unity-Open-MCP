@@ -44,6 +44,25 @@ namespace UnityOpenMcpBridge.MetaTools
         private static object _prefetchMetadataFlag;
         private static MethodInfo _metadataGetReference;
 
+        // Reflection handle for the SECOND fd-free factory:
+        // MetadataReference.CreateFromImage(IEnumerable<byte>, …), which copies
+        // a PE we read ourselves into a managed image. Slower and heavier than
+        // the stream factory (whole image instead of the metadata section), but
+        // it also holds no descriptor, so it — not CreateFromAssembly /
+        // CreateFromFile — is the fallback when the stream API is missing or
+        // fails for one assembly. Latched like the stream probe.
+        private static bool _imageFactoryProbed;
+        private static MethodInfo _metadataCreateFromImage;
+
+        // Test seam: how many references in the CURRENT cached list came from
+        // the file-backed factories (CreateFromAssembly / CreateFromFile).
+        // Those are the only references that still pin a descriptor for the
+        // life of the cache, and nothing can close them — Roslyn exposes no
+        // disposal path for a reference built that way. Non-zero means the
+        // fd-free factories were both unavailable, which is worth pinning in a
+        // test and worth knowing when triaging a leak.
+        internal static int FileBackedReferenceCount;
+
         public static bool IsAvailable { get; private set; }
         public static string LastInitError { get; private set; }
 
@@ -84,6 +103,8 @@ namespace UnityOpenMcpBridge.MetaTools
             _metadataCreateFromStream = null;
             _prefetchMetadataFlag = null;
             _metadataGetReference = null;
+            _imageFactoryProbed = false;
+            _metadataCreateFromImage = null;
             // Detach any previously registered fallback resolver and clear its
             // one-shot latch. Without this, a re-install (e.g. to a different
             // RoslynDirOverride, or after an atomic dir swap deleted the old
@@ -515,17 +536,30 @@ namespace UnityOpenMcpBridge.MetaTools
             // PrefetchMetadata — the PE's metadata section (all a compilation
             // reference ever needs) is copied into memory during the call and
             // the FileStream closes before it returns, so a reference holds NO
-            // file descriptor (per-assembly fallback to the old file-backed
-            // factories when the API is unavailable); and (2) keying the cache
-            // on the count of REFERENCABLE assemblies (IsReferencableAssembly)
-            // instead of the raw domain count. Snippet assemblies are
-            // byte-loaded (empty Location) and can never be referenced, so
-            // they are outside the key — and since assemblies cannot unload
-            // without a domain reload, the referencable set only grows, making
-            // the count an exact key. The previous list's prefetched metadata
-            // is disposed before a rebuild; safe because rebuilds only happen
-            // between compiles (Compile runs synchronously on the main
-            // thread), so no compilation can still hold the old references.
+            // file descriptor; and (2) keying the cache on the count of
+            // REFERENCABLE assemblies (IsReferencableAssembly) instead of the
+            // raw domain count. Snippet assemblies are byte-loaded (empty
+            // Location) and can never be referenced, so they are outside the
+            // key — and since assemblies cannot unload without a domain
+            // reload, the referencable set only grows, making the count an
+            // exact key. The previous list's prefetched metadata is disposed
+            // before a rebuild; safe because rebuilds only happen between
+            // compiles (Compile runs synchronously on the main thread), so no
+            // compilation can still hold the old references.
+            //
+            // Fallback ORDER matters, and it is deliberately fd-free twice
+            // over before it is file-backed at all. The file-backed factories
+            // (CreateFromAssembly / CreateFromFile) pin their PE for the life
+            // of the reference and Roslyn exposes NO disposal path for a
+            // reference built that way — DisposeCachedReferences cannot close
+            // them, so any rebuild re-leaks whatever they hold. So a
+            // per-assembly failure of the stream factory falls to
+            // MetadataReference.CreateFromImage over bytes we read and close
+            // ourselves (heavier: the whole image instead of the metadata
+            // section, but still no descriptor). Only when BOTH fd-free
+            // factories are unavailable does a reference come from the
+            // file-backed pair, and FileBackedReferenceCount records how many
+            // did so the state is observable instead of silent.
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
             int referencable = 0;
             foreach (var asm in assemblies)
@@ -535,12 +569,14 @@ namespace UnityOpenMcpBridge.MetaTools
                 return _cachedReferences;
 
             bool useStreamFactory = TryResolveMetadataStreamFactory();
+            var createFromImage = TryResolveMetadataImageFactory(metadataRefType);
 
-            // Legacy file-backed factories — the per-assembly fallback, and the
-            // only path on a Roslyn without the AssemblyMetadata stream API.
+            // Legacy file-backed factories — the last resort, and the only
+            // path on a Roslyn exposing neither fd-free factory.
             var createFromAssembly = FindStaticMethodMinimal(metadataRefType, "CreateFromAssembly", typeof(Assembly));
             var createFromFile = FindStaticMethod(metadataRefType, "CreateFromFile", typeof(string));
-            if (!useStreamFactory && createFromAssembly == null && createFromFile == null)
+            if (!useStreamFactory && createFromImage == null
+                && createFromAssembly == null && createFromFile == null)
                 return null;
 
             DisposeCachedReferences();
@@ -548,6 +584,7 @@ namespace UnityOpenMcpBridge.MetaTools
 
             var references = new List<object>(referencable);
             var owned = new List<IDisposable>(referencable);
+            var fileBacked = 0;
             foreach (var asm in assemblies)
             {
                 if (!IsReferencableAssembly(asm)) continue;
@@ -556,15 +593,26 @@ namespace UnityOpenMcpBridge.MetaTools
                 if (useStreamFactory)
                     reference = TryCreateReferenceFromMetadataStream(asm.Location, owned);
 
+                if (reference == null && createFromImage != null)
+                    reference = TryCreateReferenceFromImage(createFromImage, asm.Location);
+
                 if (reference == null && createFromAssembly != null)
                 {
-                    try { reference = InvokeWithOptionalDefaults(createFromAssembly, null, asm); }
+                    try
+                    {
+                        reference = InvokeWithOptionalDefaults(createFromAssembly, null, asm);
+                        if (reference != null) fileBacked++;
+                    }
                     catch { }
                 }
 
                 if (reference == null && createFromFile != null)
                 {
-                    try { reference = InvokeWithOptionalDefaults(createFromFile, null, asm.Location); }
+                    try
+                    {
+                        reference = InvokeWithOptionalDefaults(createFromFile, null, asm.Location);
+                        if (reference != null) fileBacked++;
+                    }
                     catch { }
                 }
 
@@ -575,7 +623,53 @@ namespace UnityOpenMcpBridge.MetaTools
             _cachedReferences = references;
             _cachedReferenceMetadata = owned;
             _cachedReferenceAssemblyCount = referencable;
+            FileBackedReferenceCount = fileBacked;
             return references;
+        }
+
+        // Build one reference from a managed copy of the PE image. We open,
+        // read and CLOSE the file ourselves, so — unlike CreateFromFile, which
+        // hands Roslyn a path and lets it hold the handle — nothing survives
+        // the call but bytes. Returns null on any failure so the caller can
+        // drop to the file-backed factories for that one assembly.
+        private static object TryCreateReferenceFromImage(MethodInfo createFromImage, string location)
+        {
+            try
+            {
+                var image = File.ReadAllBytes(location);
+                return InvokeWithOptionalDefaults(createFromImage, null, image);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        // Resolve MetadataReference.CreateFromImage(IEnumerable<byte>, …) once
+        // per domain. The ImmutableArray<byte> overload is deliberately not
+        // matched (we hand it a byte[]); IsAssignableFrom picks the
+        // IEnumerable<byte> one. Latched like the stream probe so a Roslyn
+        // without it is probed once, not on every rebuild.
+        private static MethodInfo TryResolveMetadataImageFactory(Type metadataRefType)
+        {
+            if (_imageFactoryProbed) return _metadataCreateFromImage;
+            _imageFactoryProbed = true;
+            try
+            {
+                _metadataCreateFromImage = metadataRefType
+                    .GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .Where(m => m.Name == "CreateFromImage"
+                                && m.GetParameters().Length >= 1
+                                && m.GetParameters()[0].ParameterType.IsAssignableFrom(typeof(byte[]))
+                                && m.GetParameters().Skip(1).All(p => p.IsOptional))
+                    .OrderBy(m => m.GetParameters().Length)
+                    .FirstOrDefault();
+            }
+            catch
+            {
+                _metadataCreateFromImage = null;
+            }
+            return _metadataCreateFromImage;
         }
 
         // Build one PortableExecutableReference for a file-backed assembly
@@ -585,7 +679,8 @@ namespace UnityOpenMcpBridge.MetaTools
         // reference is ever used. The created AssemblyMetadata is added to
         // `owned` so a cache rebuild can dispose the prefetched blob. Returns
         // null on any failure (file deleted since load, exotic PE) — the
-        // caller falls back to the file-backed factories for that assembly.
+        // caller then tries CreateFromImage, and only then the file-backed
+        // factories, for that one assembly.
         private static object TryCreateReferenceFromMetadataStream(string location, List<IDisposable> owned)
         {
             object metadata = null;
@@ -679,12 +774,18 @@ namespace UnityOpenMcpBridge.MetaTools
         // owned. Safe only between compiles (Compile is synchronous on the main
         // thread): a disposed AssemblyMetadata throws on any later use, so this
         // must never run while a compilation still holds the references.
+        //
+        // NOTE: only stream-factory metadata is disposable. Roslyn exposes no
+        // way to release a reference built by CreateFromAssembly /
+        // CreateFromFile, which is exactly why BuildMetadataReferences puts
+        // CreateFromImage ahead of them — see FileBackedReferenceCount.
         private static void DisposeCachedReferences()
         {
             var owned = _cachedReferenceMetadata;
             _cachedReferenceMetadata = null;
             _cachedReferences = null;
             _cachedReferenceAssemblyCount = -1;
+            FileBackedReferenceCount = 0;
             if (owned == null) return;
             foreach (var metadata in owned)
             {

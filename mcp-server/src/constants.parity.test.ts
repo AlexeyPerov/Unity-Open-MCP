@@ -28,6 +28,7 @@ import {
   FD_WARN_RATIO,
   FD_CRITICAL_RATIO,
 } from "./process-diagnostics.js";
+import { FD_CEILING_MIN, FD_CEILING_MAX } from "./project-settings.js";
 
 // ---------------------------------------------------------------------------
 // Cross-tree parity tests.
@@ -173,6 +174,26 @@ test("fd-pressure thresholds match across bridge C# (EditorFdPressure) and TS", 
     extractCsDoubleConst(src, "CriticalRatio"),
     FD_CRITICAL_RATIO,
     "bridge CriticalRatio drifted from TS FD_CRITICAL_RATIO",
+  );
+  // The ceiling OVERRIDE bounds must match too, not just the default. The
+  // bridge advisory fires on every execute_csharp response, so a project that
+  // sets `resourcePressure.fdCeiling` (the documented Unity 6 / CoreCLR knob)
+  // would otherwise get "CRITICAL, restart the Editor" in-band while
+  // resource_pressure reported `ok` — the two surfaces contradicting each
+  // other on every single call.
+  assert.equal(
+    extractCsIntConst(src, "FdCeilingMin"),
+    String(FD_CEILING_MIN),
+    "bridge FdCeilingMin drifted from TS FD_CEILING_MIN",
+  );
+  assert.equal(
+    extractCsIntConst(src, "FdCeilingMax"),
+    String(FD_CEILING_MAX),
+    "bridge FdCeilingMax drifted from TS FD_CEILING_MAX",
+  );
+  assert.ok(
+    src.includes("\\\"resourcePressure\\\"") && src.includes("\\\"fdCeiling\\\""),
+    "the bridge must read the SAME settings keys the server's readFdCeiling reads",
   );
 });
 
