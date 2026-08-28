@@ -128,14 +128,17 @@ namespace UnityOpenMcpBridge.Update
         /// <c>skills/client-paths.json</c> (consumed by the Hub and
         /// <c>generate_skill</c>); this list mirrors its client directories so
         /// the bridge can find installed copies without shipping that file.
+        /// Internal — UpgradeScannerTests pins the mirror against the real
+        /// manifest in a dev checkout, so a client added there cannot silently
+        /// drop out of the scan here.
         /// </summary>
-        private static readonly string[] SkillClientDirs =
+        internal static readonly string[] SkillClientDirs =
         {
             ".cursor", ".claude", ".opencode", ".agents", ".cline", ".gemini",
             ".kilocode", ".roo", ".agent", ".junie", ".vscode", ".vs", ".github",
         };
 
-        private const string SkillRelativePath = "skills/unity-open-mcp/SKILL.md";
+        internal const string SkillRelativePath = "skills/unity-open-mcp/SKILL.md";
 
         /// <summary>
         /// The UPM files that pin the bridge and verify packages. Relative to

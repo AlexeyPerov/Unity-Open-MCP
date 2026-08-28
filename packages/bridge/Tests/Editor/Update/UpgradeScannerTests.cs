@@ -268,5 +268,68 @@ namespace UnityOpenMcpBridge.Tests
 
             Assert.IsEmpty(UpgradeScanner.Collect(bare, new ScanOptions(true, false, true, true, _home)));
         }
+
+        // ---- Manifest mirror drift guard -----------------------------------
+        //
+        // SkillClientDirs / SkillRelativePath hand-mirror skills/client-paths.json
+        // (the manifest is not shipped inside user projects). In a dev checkout,
+        // pin the mirror against the real source of truth so a client added to
+        // the manifest cannot silently drop out of the scan.
+
+        [Test]
+        public void SkillClientDirs_MirrorTheSkillsManifest()
+        {
+            var manifestPath = FindRepoFile("skills/client-paths.json", 6);
+            if (manifestPath == null)
+            {
+                Assert.Ignore(
+                    "No skills/client-paths.json above this project (embedded bridge checkout) — no manifest to mirror.");
+            }
+
+            var manifest = File.ReadAllText(manifestPath);
+            var dirs = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
+            string tail = null;
+            var relatives = System.Text.RegularExpressions.Regex.Matches(
+                manifest, "\"relativePath\"\\s*:\\s*\"([^\"]+)\"");
+            Assert.Greater(
+                relatives.Count, 0, "client-paths.json must list client relativePath entries.");
+
+            foreach (System.Text.RegularExpressions.Match m in relatives)
+            {
+                var value = m.Groups[1].Value; // ".cursor/skills/unity-open-mcp/SKILL.md"
+                var separator = value.IndexOf('/');
+                Assert.Greater(separator, 0,
+                    $"relativePath '{value}' must be <client-dir>/<tail>.");
+                dirs.Add(value.Substring(0, separator));
+                var entryTail = value.Substring(separator + 1);
+                if (tail == null) tail = entryTail;
+                Assert.AreEqual(tail, entryTail,
+                    "Every client installs the skill at one tail — SkillRelativePath is a single constant.");
+            }
+
+            CollectionAssert.AreEquivalent(
+                new System.Collections.Generic.HashSet<string>(UpgradeScanner.SkillClientDirs),
+                dirs,
+                "SkillClientDirs must mirror the client directories of skills/client-paths.json.");
+            Assert.AreEqual(
+                UpgradeScanner.SkillRelativePath, tail,
+                "SkillRelativePath must mirror the per-client install tail of skills/client-paths.json.");
+        }
+
+        /// <summary>Path of <paramref name="relative"/> in the nearest
+        /// ancestor of this Unity project that has it (a dev checkout of the
+        /// repo), or null within <paramref name="maxLevels"/> — an embedded
+        /// bridge in a user project finds nothing.</summary>
+        private static string FindRepoFile(string relative, int maxLevels)
+        {
+            var dir = new DirectoryInfo(UnityEngine.Application.dataPath);
+            for (var i = 0; i <= maxLevels && dir != null; i++)
+            {
+                var candidate = Path.Combine(dir.FullName, relative);
+                if (File.Exists(candidate)) return candidate;
+                dir = dir.Parent;
+            }
+            return null;
+        }
     }
 }
