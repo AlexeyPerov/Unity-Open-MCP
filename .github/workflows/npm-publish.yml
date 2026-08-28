@@ -1,5 +1,5 @@
 # npm publish — publishes the `unity-open-mcp` MCP server to the public npm
-# registry when a `v*` tag is pushed, and creates a matching GitHub Release so
+# registry when a vX.Y.Z tag is pushed, and creates a matching GitHub Release so
 # the trio release shows up in the repo's Releases section alongside the Unity
 # Hub Pro releases. Mirrors the conventions of typescript.yml (Node 22,
 # working-directory: mcp-server).
@@ -21,7 +21,10 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - "v*"
+      # vX.Y.Z only — the leading digit keeps trio pin tags (verify-vX.Y.Z)
+      # out of this workflow: `*` in a GitHub Actions filter matches any
+      # characters, so a bare `v*` glob also matched verify-v* tags.
+      - "v[0-9]*"
 
 jobs:
   publish:
@@ -65,7 +68,7 @@ jobs:
           echo "Tag version: $TAG"
           echo "Package version: $PKG_VERSION"
           if [ "$TAG" != "$PKG_VERSION" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION. Run 'npm version <patch|minor|major>' in mcp-server/ before tagging."
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION. This workflow only releases vX.Y.Z tags; cut releases with 'node scripts/release.mjs X.Y.Z' from the repo root."
             exit 1
           fi
 
