@@ -665,7 +665,7 @@ namespace UnityOpenMcpBridge
                 // inlined) so this pre-init body can never drift from the one
                 // BuildPingJson reports. The bridgeVersion literal stays a
                 // literal — the version-sync script rewrites it in place.
-                var fallback = "{\"connected\":false,\"projectPath\":null,\"unityVersion\":null,\"bridgeVersion\":\"1.2.2\",\"wireContract\":"
+                var fallback = "{\"connected\":false,\"projectPath\":null,\"unityVersion\":null,\"bridgeVersion\":\"1.2.3\",\"wireContract\":"
                     + BridgeSession.WireContract
                     + ",\"mode\":\"live\",\"compiling\":true,\"isPlaying\":false}";
                 BridgeHttpResponse.SendJson(context, 503, fallback);
