@@ -34,8 +34,10 @@ definitions live in `mcp-server/src/tools/`.
   the fd-exhaustion signature is absent), and proactive fd-usage prediction
   (`resource_pressure` — headroom against the Mono fd ceiling (default ~1024,
   configurable) + leak-trend detection; a real fd count at/past the ceiling
-  (`over_ceiling` from lsof/proc) warns at critical level — only the broader
-  Windows HandleCount metric stays informational). All
+  (`over_ceiling` from lsof/proc) warns at critical level; the broader
+  Windows HandleCount metric stays informational over the ceiling proxy — in
+  the ≥90% band below it, it still warns, with handle-aware wording rather
+  than fd-hang claims). All
   local-routed; they act on the OS process and survive a dead bridge.
 - **Gate and validation** — validation, checkpoints, deltas, references,
   dependencies, scans, baselines, regression checks, and targeted fixes.

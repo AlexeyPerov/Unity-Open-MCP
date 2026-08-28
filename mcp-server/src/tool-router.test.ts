@@ -3703,6 +3703,81 @@ test("route: resource_pressure over_ceiling from Windows HandleCount stays a pre
   });
 });
 
+test("route: resource_pressure critical HandleCount message is handle-aware, not fd-hang", async () => {
+  // HandleCount in [0.9, 1.0) of the ceiling proxy still reads `critical`
+  // (pinned in process-diagnostics tests), but the message must not assert
+  // fd-specific Bee-hang risk for a metric counting kernel/GDI/user objects.
+  await withTmp("router-rp-critical-handles-", async (tmp) => {
+    await setupProject(tmp);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 7777, projectPath: tmp }];
+      },
+    });
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        return { count: 980, method: "handle_count", approximate: true };
+      },
+    });
+    try {
+      const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
+      const result = await router.route("unity_open_mcp_resource_pressure", {});
+      const body = parseBody(result);
+      assert.equal(body.state, "critical");
+      const warning = body.warning as { level?: string; message?: string };
+      assert.equal(warning.level, "critical");
+      assert.ok(
+        typeof warning.message === "string" && warning.message.includes("handle count"),
+        "message names the handle-count metric",
+      );
+      assert.ok(
+        !(warning.message as string).includes("Bee build-driver"),
+        "no fd-hang claim for a broader-than-fd metric",
+      );
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
+test("route: resource_pressure samples[] is filtered to the resolved PID", async () => {
+  // The ring is session-scoped; after an Editor restart it still holds the
+  // previous PID's samples. The response (and its sampleCount) must report
+  // only the resolved PID's series, as the tool description promises.
+  await withTmp("router-rp-pidfilter-", async (tmp) => {
+    await setupProject(tmp);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 7777, projectPath: tmp }];
+      },
+    });
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        return { count: 100, method: "lsof", approximate: false };
+      },
+    });
+    try {
+      const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
+      // A sample for a foreign PID first (explicit pid arg)...
+      await router.route("unity_open_mcp_resource_pressure", { pid: 8888 });
+      // ...then the resolved one.
+      const result = await router.route("unity_open_mcp_resource_pressure", {});
+      const body = parseBody(result);
+      const samples = body.samples as Array<{ pid: number }>;
+      assert.ok(samples.length > 0, "the resolved PID's sample is present");
+      assert.ok(
+        samples.every((s) => s.pid === 7777),
+        "samples[] carries only the resolved PID's entries",
+      );
+      assert.equal(body.sampleCount, samples.length);
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
 test("route: resource_pressure over_ceiling + LEAKING trend warns critical and mentions the climb", async () => {
   // Over the ceiling AND a qualifying monotonic leak: the over-ceiling state
   // already carries the critical level; the message additionally reports the

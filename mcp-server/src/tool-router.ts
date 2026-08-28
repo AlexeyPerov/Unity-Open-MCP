@@ -2628,6 +2628,10 @@ export class ToolRouter implements Router {
     this.sessionState.recordFdSample({ ts, pid, count });
     const samples = this.sessionState.fdSamplesSnapshot();
     const trend = analyzeFdTrend(samples, ceiling);
+    // Samples are per-PID (as the tool description states): after an Editor
+    // restart the ring still holds the previous process's entries — report
+    // only this PID's series. The trend already analyzes the latest PID only.
+    const pidSamples = samples.filter((s) => s.pid === pid);
 
     // 4. Decide whether to raise an operator warning. Alarm on:
     //    - a real fd count at/past the ceiling (`over_ceiling` from lsof//proc):
@@ -2681,10 +2685,16 @@ export class ToolRouter implements Router {
                 : "") +
               `. Save scene work and restart Unity via the Hub now.`
             : headroom.state === "critical"
-              ? `Editor fd usage is at ${Math.round(headroom.pressureRatio * 100)}% of ` +
-                `the ${ceiling}-descriptor ceiling — the next domain reload is ` +
-                `likely to trip the Bee build-driver hang. Save scene work and restart ` +
-                `Unity via the Hub now, before the Editor hangs.`
+              ? broaderThanFds
+                ? `Windows handle count is at ${Math.floor(headroom.pressureRatio * 100)}% ` +
+                  `of the ${ceiling}-descriptor ceiling proxy. HandleCount covers ` +
+                  `kernel/GDI/user objects — far broader than fds — so this is a soft ` +
+                  `signal, not fd risk: watch the trend, and treat a monotonic climb ` +
+                  `(trend.state "leaking") as the real alarm.`
+                : `Editor fd usage is at ${Math.floor(headroom.pressureRatio * 100)}% of ` +
+                  `the ${ceiling}-descriptor ceiling — the next domain reload is ` +
+                  `likely to trip the Bee build-driver hang. Save scene work and restart ` +
+                  `Unity via the Hub now, before the Editor hangs.`
               : trend.state === "leaking"
                 ? headroom.state === "over_ceiling"
                   ? `Editor handle count (${count}) is ABOVE the ${ceiling} ceiling ` +
@@ -2695,7 +2705,7 @@ export class ToolRouter implements Router {
                     `progress): trend delta ${trend.delta} over ${trend.sampleCount} ` +
                     `sample(s). Save scene work and plan a restart before the count ` +
                     `crosses the ${ceiling}-descriptor ceiling.`
-                : `Editor fd usage is at ${Math.round(headroom.pressureRatio * 100)}% of ` +
+                : `Editor fd usage is at ${Math.floor(headroom.pressureRatio * 100)}% of ` +
                   `the ${ceiling}-descriptor ceiling. Monitor the trend; if it keeps ` +
                   `climbing across domain reloads, save scene work and restart Unity ` +
                   `via the Hub before the Editor hangs.`,
@@ -2727,12 +2737,12 @@ export class ToolRouter implements Router {
         state: headroom.state,
         reliable: headroom.reliable,
         trend,
-        samples: samples.map((s) => ({
+        samples: pidSamples.map((s) => ({
           ts: s.ts,
           pid: s.pid,
           count: s.count,
         })),
-        sampleCount: samples.length,
+        sampleCount: pidSamples.length,
         launchContextCaveat: LAUNCH_CONTEXT_CAVEAT,
         ...(probeReason !== null ? { probeReason } : {}),
         ...(probeMessage !== null ? { probeMessage } : {}),
