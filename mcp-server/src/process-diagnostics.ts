@@ -310,11 +310,15 @@ export function classifyLsofError(
   };
 }
 
-/** macOS `lsof -p <pid>` scanner. Returns the line count (one line per fd). */
+/** macOS `lsof -n -P -p <pid>` scanner. Returns the line count (one line per
+ * fd). `-n`/`-P` skip reverse-DNS and port-name resolution — the slowest part
+ * of an lsof walk and the main way a healthy editor with a slow resolver
+ * blows FD_PROBE_TIMEOUT_MS and degrades to a partial (lower-bound) count.
+ * The FD column, the only thing this parser reads, is unaffected. */
 function probeMacos(pid: number): FdCountResult {
   let stdout: string;
   try {
-    stdout = execFileSync("lsof", ["-p", String(pid)], {
+    stdout = execFileSync("lsof", ["-n", "-P", "-p", String(pid)], {
       encoding: "utf8",
       timeout: FD_PROBE_TIMEOUT_MS,
       stdio: ["ignore", "pipe", "ignore"],
