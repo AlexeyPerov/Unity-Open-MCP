@@ -235,6 +235,25 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void Collect_ProjectRootIsHome_HomeConfigsStayHomeScoped()
+        {
+            // The degenerate layout: the Unity project root IS $HOME. Home
+            // must still be the boundary — $HOME/.cursor/mcp.json promoted to
+            // a ProjectConfig would dedupe ahead of the HomeConfig pass and
+            // read as project-owned, i.e. rewritable with no ownership check.
+            var homeConfig = UpgradeScanner.Collect(_home, All)
+                .FirstOrDefault(c => c.Path == _home + "/.cursor/mcp.json");
+
+            Assert.IsNotNull(homeConfig, "The global cursor config must still be collected.");
+            Assert.AreEqual(CandidateKind.HomeConfig, homeConfig.Kind);
+            Assert.IsTrue(homeConfig.IsHomeScoped);
+            var projectScoped = UpgradeScanner.Collect(_home, All)
+                .Where(c => c.Kind == CandidateKind.ProjectConfig)
+                .Select(c => c.Path);
+            CollectionAssert.DoesNotContain(projectScoped, _home + "/.cursor/mcp.json");
+        }
+
+        [Test]
         public void Collect_EmptyProjectPath_IsEmpty()
         {
             Assert.IsEmpty(UpgradeScanner.Collect("", All));

@@ -378,6 +378,16 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsEmpty(McpClientCatalog.ResolveSearchDirectories("", "/Users/dev", 4));
         }
 
+        [Test]
+        public void ResolveSearchDirectories_ProjectRootIsHome_IsEmpty()
+        {
+            // Home is excluded even as the STARTING directory — nothing
+            // prevents a Unity project root from being $HOME itself. Treating
+            // home as a project dir would probe $HOME/.cursor/mcp.json & co.
+            // as project configs: machine-wide files claimed for one project.
+            Assert.IsEmpty(McpClientCatalog.ResolveSearchDirectories("/Users/dev", "/Users/dev", 4));
+        }
+
         // ---- OS-specific global paths ------------------------------------
         //
         // Claude Desktop and Cline have no single $HOME-relative template; the

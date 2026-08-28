@@ -340,7 +340,8 @@ namespace UnityOpenMcpBridge.Config
         /// The directories a project-scoped config may live in, nearest first:
         /// the Unity project folder and up to
         /// <paramref name="maxAncestorLevels"/> ancestors, stopping before the
-        /// home directory and the filesystem root.
+        /// home directory and the filesystem root. Home is the boundary from
+        /// either side — it is excluded even when it IS the project root.
         ///
         /// Extracted from <see cref="ResolveSearchPaths"/> so everything that
         /// walks up from a Unity project — client configs and the agent-facing
@@ -360,14 +361,20 @@ namespace UnityOpenMcpBridge.Config
             var dir = NormalizeDir(projectPath);
             for (var level = 0; dir != null && level <= maxAncestorLevels; level++)
             {
-                dirs.Add(dir);
-                var parent = ParentDir(dir);
-                if (parent == null) break;
+                // Home is the walk's boundary from either side: never a search
+                // directory itself, not even when the Unity project root IS
+                // home. `$HOME/.cursor/mcp.json` and friends are global-scope
+                // rows; probing one as a project config would claim a
+                // machine-wide file for whatever project is open (it dedupes
+                // ahead of the HomeConfig pass and looks project-owned).
                 if (!string.IsNullOrEmpty(home)
-                    && string.Equals(parent, home, StringComparison.OrdinalIgnoreCase))
+                    && string.Equals(dir, home, StringComparison.OrdinalIgnoreCase))
                 {
                     break;
                 }
+                dirs.Add(dir);
+                var parent = ParentDir(dir);
+                if (parent == null) break;
                 dir = parent;
             }
             return dirs.ToArray();
