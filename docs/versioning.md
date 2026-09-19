@@ -6,6 +6,8 @@ how to recover from a mismatch.
 
 Maintainers: repository synchronization, bumps, tags, and release workflows
 live in [Maintainer versioning and releases](contributing/versioning.md).
+For the end-to-end Hub, MCP, and Unity package procedure—including offline
+installation—see [Updating](updating.md).
 
 ## How versions are organized
 
@@ -52,6 +54,10 @@ These are illustrative values, not current release numbers. After 1.0,
 standard major-version compatibility applies.
 
 ## Resolve a mismatch
+
+For a normal upgrade, start with `unity-open-mcp update` and follow the complete
+[update order](updating.md#update-everything). The manual pins below remain the
+fallback when you need a specific version.
 
 When the bridge is older:
 

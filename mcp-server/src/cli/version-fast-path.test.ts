@@ -106,7 +106,7 @@ test("T6.6 help-text module exports byte-identical versionText/helpText to comma
   // helpText must mention every subcommand (same contract commands.test.ts
   // asserts on its own import).
   const text = helpText("unity-open-mcp");
-  for (const cmd of ["ping", "wait-for-ready", "status", "run-tool", "stream-events", "verify", "baseline", "regression"]) {
+  for (const cmd of ["ping", "wait-for-ready", "status", "run-tool", "stream-events", "verify", "baseline", "regression", "update"]) {
     assert.ok(text.includes(cmd), `helpText mentions ${cmd}`);
   }
 });

@@ -68,6 +68,14 @@ test("parseCliArgs: --json is captured", () => {
   assert.equal(p.json, true);
 });
 
+test("parseCliArgs: update --check is captured", () => {
+  const p = parse(["update", "--check", "--json"]);
+  assert.equal(p.command, "update");
+  assert.equal(p.check, true);
+  assert.equal(p.json, true);
+  assert.equal(p.error, undefined);
+});
+
 test("parseCliArgs: --project / -P override", () => {
   assert.equal(parse(["ping", "--project", "/p"]).projectPath, "/p");
   assert.equal(parse(["ping", "-P", "/p"]).projectPath, "/p");

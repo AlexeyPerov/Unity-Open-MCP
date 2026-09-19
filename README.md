@@ -138,6 +138,7 @@ For users:
 - [Dialog policy](docs/dialog-policy.md) — startup modal handling and automation.
 - [Skills](docs/skills.md) — agent playbooks installed into Unity projects.
 - [Version compatibility](docs/versioning.md) — version matching and mismatch recovery.
+- [Updating](docs/updating.md) — Hub, MCP, Unity package, and air-gapped update paths.
 
 For contributors:
 

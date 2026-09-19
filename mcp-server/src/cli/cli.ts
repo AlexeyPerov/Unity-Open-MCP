@@ -100,6 +100,20 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
     return { handled: true, exitCode: 2 };
   }
 
+  // Update is project-independent and must work in CI or an air-gapped shell
+  // without UNITY_PROJECT_PATH. Keep it ahead of the heavy router import and
+  // project-path resolution, just like the help/version fast paths.
+  if (parsed.command === "update") {
+    const { runUpdateCommand } = await import("./update-command.js");
+    const result = await runUpdateCommand({
+      currentVersion: opts.version || readPackageVersion(),
+      check: parsed.check,
+      json: parsed.json,
+    });
+    await emitResult(result, parsed.json);
+    return { handled: true, exitCode: result.exitCode };
+  }
+
   // M31 Plan 6 / T6.6 — first real subcommand: dynamically import the heavy
   // command/router modules. `commands.js` transitively imports ALL_TOOLS; up
   // to this point (help / version / no-command) none of that graph ran.

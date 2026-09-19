@@ -4,7 +4,7 @@ Provider-agnostic CI templates for running Unity health checks, verify scans, an
 
 ## What the CLI surface gives you
 
-The `unity-open-mcp` CLI ships six automation commands (see `unity-open-mcp --help`):
+The `unity-open-mcp` CLI ships seven automation commands (see `unity-open-mcp --help`):
 
 | Command | Purpose | Exit codes |
 |---|---|---|
@@ -14,6 +14,7 @@ The `unity-open-mcp` CLI ships six automation commands (see `unity-open-mcp --he
 | `verify [paths]` | Run a verify scan (scan_paths / validate_edit / scan_all) | 0 / 1 warnings / 2 errors / 3 timeout |
 | `baseline create\|update` | Create or refresh the regression baseline | 0 ok / 2 error / 3 timeout |
 | `regression check` | Compare current scan against the baseline | 0 ok / 2 regression / 3 timeout |
+| `update --check` | Check the published MCP server version without a Unity project | 0 current / 10 update available / 11 lookup failed |
 
 ### Exit-code contract
 
@@ -23,6 +24,13 @@ The `unity-open-mcp` CLI ships six automation commands (see `unity-open-mcp --he
 | 1 | Warnings only — below the fail threshold | continue (advisory) |
 | 2 | Errors — issues at/above threshold, a regression, **or an incomplete scan** | **fail the job** |
 | 3 | Timeout — bridge unreachable or a call timed out | **fail the job** |
+| 10 | MCP server update available (`update --check`) | update the pin or fail according to repository policy |
+| 11 | Update lookup failed on both npm and GitHub | **fail the job** or retry as infrastructure failure |
+| 12 | `update` resolved a release but npm installation failed | **fail the job** |
+
+Codes 10–12 belong only to `update`; verify and regression retain the four-level
+0–3 contract. See [Updating](../updating.md) for install-mode behavior and the
+air-gapped path.
 
 **Incomplete scans fail like errors.** When a verify rule throws mid-scan,
 `verify`, `baseline`, and `regression check` all exit **2**: the issue list is

@@ -39,7 +39,7 @@ npm install -g unity-open-mcp
 
 Then use `"command": "unity-open-mcp", "args": []` (Cursor / Claude Desktop) or
 `"command": ["unity-open-mcp"]` (OpenCode) in your client config. Update with
-`npm update -g unity-open-mcp`.
+`unity-open-mcp update` (or `npm update -g unity-open-mcp`).
 
 Core environment variables and modal-policy options are documented in the
 [client configuration reference](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/client-configuration.md)
@@ -76,6 +76,19 @@ Commands also include event streaming, verify, baseline, and regression
 automation. All accept `--json` for machine-readable output. See the
 [CLI and automation reference](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/api/cli-automation.md)
 for the full option reference.
+
+Check or apply an MCP server update without a Unity project path:
+
+```bash
+unity-open-mcp update --check
+unity-open-mcp update
+```
+
+The command updates global and project-local npm installs. When launched by
+`npx`, it prints the pin to change instead of modifying the npx cache. It never
+changes Unity package pins or MCP client configuration; use the repository's
+[Updating guide](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/updating.md)
+for the coordinated and air-gapped paths.
 
 ## Version pinning
 

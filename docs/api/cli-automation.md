@@ -16,6 +16,7 @@ uses the same routing stack from a terminal or CI job.
 | `verify [paths...]` | Run a scoped or full verify scan. | `scan_paths`, `validate_edit`, or `scan_all` |
 | `baseline create\|update` | Create or refresh a regression baseline. | `unity_open_mcp_baseline_create` |
 | `regression check` | Compare the project with its baseline. | `unity_open_mcp_regression_check` |
+| `update [--check]` | Check for or apply an MCP server update; no Unity project is required. | npm registry, then GitHub Releases fallback |
 
 Use `unity-open-mcp --help` or
 `unity-open-mcp <command> --help` for the current option list.
@@ -44,9 +45,28 @@ npx -y unity-open-mcp@1.2.3 run-tool unity_open_mcp_capabilities \
 
 `run-tool` returns the same JSON payload as an MCP call to that tool.
 
+## MCP server updates
+
+```bash
+unity-open-mcp update --check
+unity-open-mcp update
+```
+
+The check exits `0` when current, `10` when an update is available, and `11`
+when neither npm nor the GitHub fallback can resolve a version. Apply exits `12`
+if npm cannot install the resolved release. `--json` provides the same outcome
+as structured data.
+
+Global and project-local npm installs update in place. An `npx` invocation
+prints pin/`@latest` guidance because a running npx cache cannot safely replace
+itself. The command changes only the MCP npm install—never Unity package pins or
+MCP client configuration. Follow [Updating](../updating.md) to move the whole
+installation together or to update without network access.
+
 ## Environment
 
 `UNITY_PROJECT_PATH` can provide the project path when `--project` is omitted.
+The `update` command does not need a Unity project path.
 Batch fallback may also need `UNITY_PATH`. For unattended startup modal
 handling, use [Dialog policy](../dialog-policy.md).
 

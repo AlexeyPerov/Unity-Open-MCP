@@ -1,7 +1,7 @@
 // M15 T6.1 — Thin CLI argument parsing.
 //
 // No runtime deps (mcp-server/AGENTS.md: only @modelcontextprotocol/sdk). The
-// parser is hand-rolled and intentionally small — it covers the four CLI
+// parser is hand-rolled and intentionally small — it covers the CLI
 // subcommands and their shared options. Anything more complex should go through
 // the MCP server proper.
 //
@@ -21,6 +21,7 @@
 //   unity-open-mcp regression check [--json] [--baseline-path <path>]
 //                                   [--regression-threshold N]
 //                                   [--platform-profile ...]
+//   unity-open-mcp update [--check] [--json]
 //   unity-open-mcp --help | -h
 //   unity-open-mcp --version | -V
 //
@@ -40,6 +41,7 @@ export type CliCommand =
   | "verify"
   | "baseline"
   | "regression"
+  | "update"
   | "help"
   | "version";
 
@@ -55,6 +57,7 @@ export const KNOWN_COMMANDS: readonly string[] = [
   "verify",
   "baseline",
   "regression",
+  "update",
 ];
 
 /**
@@ -88,6 +91,8 @@ export interface ParsedCli {
   maxEvents: number | undefined;
   /** stream-events: keep polling until interrupted (follow mode). */
   follow: boolean;
+  /** update: check availability without changing the active npm install. */
+  check: boolean;
   // --- verify ---
   /** verify: asset paths to scan (variadic positional). Empty = whole project (scan_all). */
   verifyPaths: string[];
@@ -127,6 +132,7 @@ export function emptyParsed(): ParsedCli {
     toolArgs: {},
     maxEvents: undefined,
     follow: false,
+    check: false,
     verifyPaths: [],
     verifyMode: undefined,
     failOnSeverity: undefined,
@@ -235,6 +241,11 @@ export function parseCliArgs(argv: string[]): ParsedCli {
     }
     if (tok === "--follow") {
       parsed.follow = true;
+      i++;
+      continue;
+    }
+    if (tok === "--check") {
+      parsed.check = true;
       i++;
       continue;
     }

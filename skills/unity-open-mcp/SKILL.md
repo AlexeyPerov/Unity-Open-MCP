@@ -34,6 +34,18 @@ Practical skill for AI agents driving a Unity project through the `unity-open-mc
 6. On gate failure, prefer `unity_open_mcp_apply_fix` with `dry_run: true` first.
 7. Re-run mutation; confirm `newErrors == 0` or `resolvedErrors > 0`.
 
+## Version drift and updates
+
+Use `unity-open-mcp status` to compare the running server and bridge versions.
+`unity-open-mcp update --check` checks the MCP npm release only: exit `0` means
+current, `10` means an update is available, and `11` means npm and the GitHub
+fallback were unreachable or invalid. `unity-open-mcp update` can update a
+global or project-local npm install; under `npx` it prints the pin to change.
+It intentionally does **not** edit Unity package pins, client configuration, or
+project prose. Move the Bridge and Verify packages together through the bridge
+Updates UI when available, or use the setup/manual package path, then restart
+the MCP client and confirm with `ping` / `status`.
+
 ## Tool groups and session visibility
 
 Sessions start with two main groups visible in `ListTools`: `core` and `gate-and-verify`. Every other group is hidden until you activate it (or auto-activates when its Unity package is installed — see below) — this keeps the **250+ tool** surface out of the prompt. Call `unity_open_mcp_manage_tools` to toggle:
