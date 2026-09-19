@@ -1613,6 +1613,7 @@ dependencies = [
  "env_logger",
  "libc",
  "log",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

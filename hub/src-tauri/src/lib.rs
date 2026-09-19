@@ -105,6 +105,10 @@ pub fn run() {
             config::command_runner::stop_project_command,
             config::command_runner::project_command_running,
             config::command_runner::run_project_sync_version,
+            config::hub_update::check_hub_update,
+            config::hub_update::set_hub_update_notice,
+            config::hub_update::apply_hub_update,
+            config::hub_update::relaunch_hub,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

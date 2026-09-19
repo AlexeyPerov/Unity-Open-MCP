@@ -4,6 +4,16 @@ use std::path::PathBuf;
 fn main() {
     tauri_build::build();
 
+    // Only CI-produced Hub installers probe/apply releases. Debug builds and
+    // arbitrary local `cargo build --release` binaries deliberately skip the
+    // network check; the release workflow sets HUB_OFFICIAL_RELEASE=1.
+    let official_release = std::env::var("HUB_OFFICIAL_RELEASE")
+        .ok()
+        .filter(|value| value == "1")
+        .unwrap_or_else(|| "0".to_string());
+    println!("cargo:rustc-env=HUB_OFFICIAL_RELEASE={official_release}");
+    println!("cargo:rerun-if-env-changed=HUB_OFFICIAL_RELEASE");
+
     // M28 Plan 5 — the wizard's default bridge/verify git-URL tag pins must
     // derive from the shared trio version source (repo-root `version.json`)
     // so they can never drift to a nonexistent tag. We read the version here

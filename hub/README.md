@@ -32,6 +32,23 @@ Versions match the pinned stack:
   - `shell:default`
   - `opener:default`
 - Split JSON config persistence (`settings.json` + `projects.json`).
+- Throttled background check of the Hub's `hub-v*` GitHub Releases, with a
+  dismissible banner and user-initiated platform-installer download.
+
+## Hub self-update
+
+Official workflow builds are compiled with `HUB_OFFICIAL_RELEASE=1`. After the
+first interactive paint, the frontend calls `check_hub_update`; the Rust command
+reads `<config_dir>/cache/hub-update.json`, respects a one-hour throttle, and
+queries only `hub-v*` GitHub Releases. Debug and arbitrary local release builds
+return `skipped` without making a network request.
+
+`apply_hub_update` accepts only the release asset previously surfaced to the UI,
+revalidates its repository URL, filename, OS, and architecture, downloads it to
+`<config_dir>/cache/updates/<version>/`, and opens the OS installer. The current
+release workflow does not publish updater signatures or checksums, so the Hub
+does not perform a silent in-place replacement; the platform installer owns the
+replace/rollback step and the UI asks the user to relaunch afterward.
 
 ## Config directory
 

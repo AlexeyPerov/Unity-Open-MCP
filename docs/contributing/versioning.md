@@ -23,8 +23,8 @@ The shared source updates:
 - setup/client/CI version examples registered in the sync script
 
 The Hub source updates its Tauri config, Cargo package, Cargo.lock workspace
-package version, and npm package version. Community extension packs and the
-private root package are independent.
+package version, npm package version, and the frontend version shown in
+Settings. Community extension packs and the private root package are independent.
 
 ## Sync and drift checks
 
@@ -126,7 +126,16 @@ The npm workflow checks the tag and all shared targets, builds the MCP package,
 publishes it, and creates a GitHub Release with generated notes. Bridge and
 verify have no registry publish step; their tags are the installable UPM refs.
 The Hub workflow checks its independent version before building installers and
-creating its release.
+creating its release. It sets `HUB_OFFICIAL_RELEASE=1` while compiling so only
+workflow-produced binaries perform background update checks; local release
+builds remain network-silent unless produced by that workflow.
+
+Hub releases currently contain DMG/MSI/NSIS installers but no checksum manifest
+or signed Tauri updater artifacts. The in-app flow downloads the matching asset
+over HTTPS and opens the platform installer, which owns replacement and rollback.
+Do not describe this as a verified silent update. A future move to Tauri's
+in-place updater must first add signing keys, signed updater artifacts, and
+release metadata to this workflow.
 
 GitHub Releases are the release-note/changelog owner; do not add a second
 hand-maintained changelog.

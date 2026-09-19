@@ -35,3 +35,4 @@ pub mod render_pipeline;
 pub mod line_count;
 pub mod upm;
 pub mod command_runner;
+pub mod hub_update;

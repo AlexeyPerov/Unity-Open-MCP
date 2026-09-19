@@ -410,6 +410,16 @@ const HUB_TARGETS = [
     description: "Hub npm package.json",
     replace: (b, v) => setJsonVersion(b, v),
   },
+  {
+    file: "hub/src/lib/version.ts",
+    kind: "ts",
+    description: "Hub frontend About/settings version",
+    replace: (b, v) =>
+      b.replace(
+        /(export const APP_VERSION = ")[^"]*(";)/,
+        (_, pre, post) => `${pre}${v}${post}`,
+      ),
+  },
 ];
 
 // ---------------------------------------------------------------------------

@@ -10,8 +10,9 @@ permissions:
 
 jobs:
   # Preflight: refuse to build if the hub-v* tag disagrees with hub/version.json
-  # or if any Hub target (tauri.conf.json, Cargo.toml, hub/package.json) has
-  # drifted from hub/version.json. Better to fail here in ~20s than after the
+  # or if any Hub target (Tauri config, Cargo files, package.json, or the
+  # frontend Settings version) has drifted from hub/version.json. Better to
+  # fail here in ~20s than after the
   # full macos/windows matrix build. See docs/versioning.md.
   verify-version:
     name: Verify Hub version matches tag + sync
@@ -87,6 +88,8 @@ jobs:
 
       - name: Build Tauri app
         working-directory: hub
+        env:
+          HUB_OFFICIAL_RELEASE: '1'
         run: npm run tauri build -- --target ${{ matrix.rust_target }}
 
       - name: Upload build artifacts

@@ -30,6 +30,8 @@ from one UI.
 - Manages per-project launch options and environment variables.
 - Shows git status and line-count views in project settings.
 - Provides maintainer actions for Open MCP repositories (build, test, version bump, publish dry-run, publish).
+- Checks the Hub's own `hub-v*` release line after startup and offers an
+  explicit, non-blocking update action when a newer installer is available.
 
 | Projects                            | Tools                                |
 |------------------------------------------|-------------------------------------------------|
@@ -95,6 +97,34 @@ any build toolchain to run it. Grab the latest release for your operating system
 Open the app and add a Unity project from disk — it should appear in the project
 list. Click the **AI** action on that row to start the wizard (see
 [wizard-setup.md](setup/wizard-setup.md)).
+
+## Hub updates
+
+Official release builds check GitHub Releases after the main window is ready.
+Checks are limited to once per hour, including failed attempts, and a cached
+newer release remains visible while GitHub is unavailable. Development and
+locally-built binaries do not make this request.
+
+When a newer `hub-v*` release exists, a non-modal banner offers:
+
+- **Update** — downloads the installer for the current OS and CPU, then opens
+  the platform installer. On macOS, replace the app from the opened disk image;
+  on Windows, finish the launched setup program. Relaunch the Hub afterward.
+- **Release notes** — opens the matching GitHub Release.
+- **Remind later** — hides the notice for 24 hours.
+- **Dismiss** — hides that release; a later version appears normally.
+
+An update never changes MCP client configuration, Unity package pins, or any
+project files. Those components have an independent release cadence; see
+[Version compatibility](versioning.md). If download or installer launch fails,
+use the release-page link in the error state and install manually.
+
+The current release pipeline publishes ordinary HTTPS-hosted GitHub installers,
+not a checksum manifest or signed Tauri updater bundle. The Hub therefore hands
+off replacement and rollback to the operating-system installer and does not
+claim an install succeeded merely because the download completed. Adding
+cryptographically signed updater bundles is a release-pipeline follow-up; the
+app never applies an update silently.
 
 ## For developers (build from source)
 

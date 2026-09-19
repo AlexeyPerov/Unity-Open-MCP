@@ -12,6 +12,8 @@
   import UnityVersionsTab from "$lib/tabs/UnityVersionsTab.svelte";
   import ToolsTab from "$lib/tabs/ToolsTab.svelte";
   import SettingsTab from "$lib/tabs/SettingsTab.svelte";
+  import HubUpdateBanner from "$lib/components/shell/HubUpdateBanner.svelte";
+  import { hubUpdateStore } from "$lib/state/hub_update.svelte";
 
   // Multi-type (Open-MCP): stream spawned-command output to the
   // per-(project, panel) log store. The Rust command runner emits a
@@ -30,6 +32,18 @@
       }
     }).then((u) => unsubs.push(u));
     return () => unsubs.forEach((u) => u());
+  });
+
+  // Let the first paint and normal startup data load finish before touching
+  // the network. The Rust side also enforces the one-hour throttle and records
+  // failed attempts, so interval ticks stay harmless while offline.
+  onMount(() => {
+    const initial = setTimeout(() => void hubUpdateStore.check(false), 1500);
+    const periodic = setInterval(() => void hubUpdateStore.check(false), 60 * 60 * 1000);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(periodic);
+    };
   });
 
   // Boot diagnostics: trace every `activeTab` transition. ProjectsTab is
@@ -54,6 +68,7 @@
     <TopBar />
 
     <TabPanel>
+      <HubUpdateBanner />
       {#if S.activeTab === "projects"}
         <ProjectsTab />
       {:else if S.activeTab === "unityVersions"}

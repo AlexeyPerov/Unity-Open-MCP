@@ -144,4 +144,7 @@ Editor version.
 
 Unity Hub Pro is a separate desktop app with an independent version and release
 cadence. It does not need to match the server/bridge/verify set. Installers are
-published through `hub-v*` GitHub Releases.
+published through `hub-v*` GitHub Releases. Official Hub builds check that
+release line in the background (at most once per hour) and show a user-initiated
+installer action when a newer version is available. Installing the Hub does not
+mutate MCP configuration or project package pins.

@@ -27,6 +27,7 @@ on:
       - hub/src-tauri/tauri.conf.json
       - hub/src-tauri/Cargo.toml
       - hub/package.json
+      - hub/src/lib/version.ts
       - docs/setup/manual-setup.md
       - docs/setup/agent-setup.md
       - docs/setup/wizard-setup.md
@@ -57,6 +58,7 @@ on:
       - hub/src-tauri/tauri.conf.json
       - hub/src-tauri/Cargo.toml
       - hub/package.json
+      - hub/src/lib/version.ts
       - docs/setup/manual-setup.md
       - docs/setup/agent-setup.md
       - docs/setup/wizard-setup.md
@@ -98,8 +100,9 @@ jobs:
           node-version: "22"
 
       - name: Verify Hub targets match hub/version.json
-        # Read-only: --check --hub exits non-zero if tauri.conf.json,
-        # Cargo.toml, or hub/package.json disagree with hub/version.json.
+        # Read-only: --check --hub exits non-zero if the Tauri config, Cargo
+        # files, package.json, or frontend Settings version disagree with
+        # hub/version.json.
         run: node scripts/sync-version.mjs --check --hub
 
   check-token-estimates:

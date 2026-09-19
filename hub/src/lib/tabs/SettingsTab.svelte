@@ -13,6 +13,7 @@
   } from "$lib/services/config";
   import Button from "$lib/components/shell/Button.svelte";
   import { APP_NAME, APP_VERSION } from "$lib/version";
+  import HubUpdateSettings from "$lib/components/settings/HubUpdateSettings.svelte";
 
   let addingFolder = $state(false);
   let addingWalkUpRoot = $state(false);
@@ -498,7 +499,8 @@
     | "appearance"
     | "safety"
     | "discovery"
-    | "diagnostics";
+    | "diagnostics"
+    | "updates";
 
   let openGroups = $state<Record<SettingsGroupId, boolean>>({
     launch: true,
@@ -507,6 +509,7 @@
     safety: true,
     discovery: true,
     diagnostics: true,
+    updates: true,
   });
 
   function toggleGroup(id: SettingsGroupId) {
@@ -1072,6 +1075,30 @@
                 </span>
               </label>
             </div>
+          </div>
+        {/if}
+      </section>
+
+      <section class="group" aria-labelledby="group-updates">
+        <button
+          type="button"
+          class="group-header"
+          aria-expanded={openGroups.updates}
+          aria-controls="group-updates-body"
+          onclick={() => toggleGroup("updates")}
+        >
+          <span class="group-chevron" class:group-chevron-open={openGroups.updates} aria-hidden="true">▸</span>
+          <span class="group-header-text">
+            <h3 id="group-updates" class="group-title">Updates</h3>
+            <p class="group-hint">
+              The Hub checks its own GitHub release line in the background.
+              Installing a Hub update never changes your Unity projects.
+            </p>
+          </span>
+        </button>
+        {#if openGroups.updates}
+          <div id="group-updates-body" class="group-body">
+            <HubUpdateSettings />
           </div>
         {/if}
       </section>

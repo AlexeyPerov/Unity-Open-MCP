@@ -20,5 +20,6 @@
     min-height: 0;
     min-width: 0;
     overflow: hidden;
+    gap: 0.65rem;
   }
 </style>
