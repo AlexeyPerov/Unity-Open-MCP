@@ -13,8 +13,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc",
-    "build:test": "tsc -p tsconfig.test.json",
+    "build": "tsc && node scripts/copy-skill.mjs",
+    "build:test": "npm run build && tsc -p tsconfig.test.json",
     "typecheck": "tsc --noEmit",
     "test": "npm run build:test && node --test 'dist-test/**/*.test.js'",
     "prepublishOnly": "npm run build"

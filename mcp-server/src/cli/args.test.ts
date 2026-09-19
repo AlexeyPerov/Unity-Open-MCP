@@ -76,6 +76,34 @@ test("parseCliArgs: update --check is captured", () => {
   assert.equal(p.error, undefined);
 });
 
+test("parseCliArgs: setup flags are captured", () => {
+  const p = parse([
+    "setup",
+    "--project", "/UnityProject",
+    "--client", "cursor",
+    "--skip-skill",
+    "--dry-run",
+    "--json",
+  ]);
+  assert.equal(p.command, "setup");
+  assert.equal(p.projectPath, "/UnityProject");
+  assert.equal(p.setupClient, "cursor");
+  assert.equal(p.skipSkill, true);
+  assert.equal(p.dryRun, true);
+  assert.equal(p.json, true);
+});
+
+test("parseCliArgs: setup --help remembers dedicated help target", () => {
+  const p = parse(["setup", "--help"]);
+  assert.equal(p.command, "help");
+  assert.equal(p.helpCommand, "setup");
+  assert.equal(p.error, undefined);
+});
+
+test("parseCliArgs: --client requires a value", () => {
+  assert.match(parse(["setup", "--client"]).error ?? "", /--client/);
+});
+
 test("parseCliArgs: --project / -P override", () => {
   assert.equal(parse(["ping", "--project", "/p"]).projectPath, "/p");
   assert.equal(parse(["ping", "-P", "/p"]).projectPath, "/p");

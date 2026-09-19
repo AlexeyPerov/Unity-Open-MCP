@@ -24,7 +24,7 @@
 // documented exceptional lazy-loading").
 
 import { parseCliArgs } from "./args.js";
-import { helpText, versionText } from "./help-text.js";
+import { helpText, setupHelpText, versionText } from "./help-text.js";
 import { readPackageVersion } from "../package-version.js";
 // Light supervision hook (type-only node:child_process import, no runtime
 // deps) — keeps the CLI entry lazy-load contract intact while covering the
@@ -73,7 +73,10 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
   // write goes through writeAndDrain so the caller's process.exit() can't
   // truncate output that's still in the pipe buffer.
   if (parsed.command === "help") {
-    await writeAndDrain(process.stdout, helpText(binName) + "\n");
+    const text = parsed.helpCommand === "setup"
+      ? setupHelpText(binName)
+      : helpText(binName);
+    await writeAndDrain(process.stdout, text + "\n");
     return { handled: true, exitCode: 0 };
   }
   if (parsed.command === "version") {
@@ -109,6 +112,22 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
       currentVersion: opts.version || readPackageVersion(),
       check: parsed.check,
       json: parsed.json,
+    });
+    await emitResult(result, parsed.json);
+    return { handled: true, exitCode: result.exitCode };
+  }
+
+  // Setup edits project files but never connects to a bridge or starts Unity.
+  // Keep it on the light CLI path so first-time installation works while the
+  // Editor is closed and before UNITY_PROJECT_PATH exists in a client config.
+  if (parsed.command === "setup") {
+    const { runSetupCommand } = await import("./setup-command.js");
+    const result = await runSetupCommand({
+      version: opts.version || readPackageVersion(),
+      projectPath: parsed.projectPath,
+      client: parsed.setupClient,
+      skipSkill: parsed.skipSkill,
+      dryRun: parsed.dryRun,
     });
     await emitResult(result, parsed.json);
     return { handled: true, exitCode: result.exitCode };

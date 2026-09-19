@@ -16,6 +16,19 @@ You do not need to install this package yourself — your MCP client spawns it v
 `npx`. The sections below show both the zero-install `npx` path and the optional
 global install.
 
+For a first installation, the setup command merges the Unity package pins,
+project MCP config, and bundled core skill without requiring a running Editor:
+
+```bash
+npx -y unity-open-mcp@latest setup \
+  --project /absolute/path/to/MyGame \
+  --client cursor
+```
+
+Supported project-config ids are `cursor`, `claude`, `opencode`, and `agents`.
+Run `npx -y unity-open-mcp@latest setup --help` for dry-run, skill-skip, JSON,
+and exit-code details.
+
 ### Configure your MCP client
 
 Pick your client and merge a `unity-open-mcp` entry using the canonical
@@ -73,7 +86,8 @@ npx unity-open-mcp run-tool unity_open_mcp_capabilities \
 ```
 
 Commands also include event streaming, verify, baseline, and regression
-automation. All accept `--json` for machine-readable output. See the
+automation, plus bridge-independent project setup. All accept `--json` for
+machine-readable output. See the
 [CLI and automation reference](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/api/cli-automation.md)
 for the full option reference.
 

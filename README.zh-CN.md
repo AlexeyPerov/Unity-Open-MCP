@@ -97,10 +97,11 @@ GameObject、场景、预制体、材质、包管理，以及依赖包门控的�
 按照
 https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/docs/setup/agent-setup.md
 的说明，在这个 Unity 项目中安装 Unity Open MCP（重新获取该流程；不要凭记忆即兴安装）。
-先读取同一仓库的 version.json，所有锁定只用该版本——绝不要编造或回忆旧的 0.x.y。
-用 curl/cp 复制 SKILL.md；不要重写，也不要调用 generate_skill。
-自己完成每一个智能体步骤；只有在需要人工操作时才停下来告诉我。
-如果这个 monorepo 已经在本地打开，请从磁盘读取 docs/setup/agent-setup.md 和 version.json，而不要去网络获取。
+确定此 Unity 项目的绝对根目录和我的客户端，然后运行
+npx -y unity-open-mcp@latest setup --project <绝对项目路径> --client <id>。
+让该包决定所有版本锁定并复制其内置 SKILL.md；不要编造版本、重写技能或调用 generate_skill。
+自行完成所有智能体步骤，只在需要用户操作时停下。如果 monorepo 已在本地打开，
+请从磁盘读取 docs/setup/agent-setup.md。
 ```
 
 完整流程见 [Agent 安装](docs/zh-CN/setup/agent-setup.md)。

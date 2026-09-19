@@ -119,11 +119,12 @@ Requires **Unity 2022.3 LTS or newer**.
 Install Unity Open MCP in this Unity project by following
 https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/docs/setup/agent-setup.md
 exactly (fetch it fresh; do not improvise from memory).
-First read version.json from the same repo and use ONLY that version for all pins —
-never invent or recall an older 0.x.y. Copy SKILL.md with curl/cp; do not rewrite it
-or call generate_skill. Do every agent step yourself; stop and tell me only when a
-human action is required. If this monorepo is already open locally, read
-docs/setup/agent-setup.md and version.json from disk instead of fetching.
+Resolve this project's absolute Unity root and my client, then run
+npx -y unity-open-mcp@latest setup --project <absolute-project> --client <id>.
+Let that package choose all version pins and copy its bundled SKILL.md; do not
+invent versions, rewrite the skill, or call generate_skill. Do every agent step
+yourself and stop only when human action is required. If this monorepo is already
+open locally, read docs/setup/agent-setup.md from disk instead of fetching it.
 ```
 
 Full procedure: [Agent setup](docs/setup/agent-setup.md).

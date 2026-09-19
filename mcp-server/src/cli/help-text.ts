@@ -32,6 +32,7 @@ export function helpText(binName: string): string {
     "  baseline create|update        Create/refresh the regression baseline JSON file.",
     "  regression check              Compare current scan against the baseline; exit on regression.",
     "  update [--check]              Check for or apply an MCP server update.",
+    "  setup --project P --client C  Install packages, MCP config, and the core skill.",
     "  --help, -h                    Show this help.",
     "  --version, -V                 Print the package version.",
     "",
@@ -55,6 +56,9 @@ export function helpText(binName: string): string {
     "  --max-events <n>              stream-events: max events to drain per pull.",
     "  --follow                      stream-events: keep polling until interrupted (CI log tap).",
     "  --check                       update: check only; do not change the install.",
+    "  --client <id>                 setup: skill/client id (for example cursor).",
+    "  --skip-skill                  setup: do not copy the bundled core skill.",
+    "  --dry-run                     setup: report intended writes without changing files.",
     "  --mode <m>                    verify: auto (default) | scan-paths | validate-edit.",
     "  --fail-on-severity <s>        verify: error | warn | info | verbose | never.",
     "  --profile <p>                 verify: compact (default) | balanced | full.",
@@ -80,6 +84,38 @@ export function helpText(binName: string): string {
     `  ${binName} regression check --baseline-path CI/baseline.json --json`,
     `  ${binName} status --json`,
     `  ${binName} update --check`,
+    `  ${binName} setup --project /absolute/UnityProject --client cursor`,
+  ].join("\n");
+}
+
+export function setupHelpText(binName: string): string {
+  return [
+    `Usage: ${binName} setup --project <absolute-path> --client <id> [options]`,
+    "",
+    "Install or repair Unity Open MCP for one Unity project. This command does",
+    "not require a running Unity Editor or bridge.",
+    "",
+    "Required:",
+    "  --project <absolute-path>  Unity root containing Assets, Packages, and ProjectSettings.",
+    "  --client <id>              Skill client id. Config writers: cursor, claude, opencode, agents.",
+    "",
+    "Options:",
+    "  --skip-skill              Do not copy the bundled core skill.",
+    "  --dry-run                 Show intended writes without changing files.",
+    "  --json                    Emit a stable machine-readable report.",
+    "  --help, -h                Show this help without requiring other flags.",
+    "",
+    "Pins:",
+    "  Every npm and UPM pin comes from this running package version. The command",
+    "  installs only the bridge and verify Unity packages; domain packages are not installed.",
+    "",
+    "Exit codes:",
+    "  0  success, including a successful dry-run",
+    "  1  file read, JSON parse, or write failure",
+    "  2  usage or validation error (project/client)",
+    "",
+    `Use '${binName} update' to update an existing MCP server installation;`,
+    "use setup for first installation or repair of a Unity project.",
   ].join("\n");
 }
 

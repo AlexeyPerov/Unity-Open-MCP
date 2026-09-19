@@ -22,6 +22,7 @@
 //                                   [--regression-threshold N]
 //                                   [--platform-profile ...]
 //   unity-open-mcp update [--check] [--json]
+//   unity-open-mcp setup --project <abs> --client <id> [--skip-skill] [--dry-run] [--json]
 //   unity-open-mcp --help | -h
 //   unity-open-mcp --version | -V
 //
@@ -42,6 +43,7 @@ export type CliCommand =
   | "baseline"
   | "regression"
   | "update"
+  | "setup"
   | "help"
   | "version";
 
@@ -58,6 +60,7 @@ export const KNOWN_COMMANDS: readonly string[] = [
   "baseline",
   "regression",
   "update",
+  "setup",
 ];
 
 /**
@@ -93,6 +96,14 @@ export interface ParsedCli {
   follow: boolean;
   /** update: check availability without changing the active npm install. */
   check: boolean;
+  /** setup: skill client id from skills/client-paths.json. */
+  setupClient: string | undefined;
+  /** setup: do not copy the bundled core skill. */
+  skipSkill: boolean;
+  /** setup: report intended writes without changing the project. */
+  dryRun: boolean;
+  /** Command whose dedicated help was requested, when applicable. */
+  helpCommand: CliCommand | undefined;
   // --- verify ---
   /** verify: asset paths to scan (variadic positional). Empty = whole project (scan_all). */
   verifyPaths: string[];
@@ -133,6 +144,10 @@ export function emptyParsed(): ParsedCli {
     maxEvents: undefined,
     follow: false,
     check: false,
+    setupClient: undefined,
+    skipSkill: false,
+    dryRun: false,
+    helpCommand: undefined,
     verifyPaths: [],
     verifyMode: undefined,
     failOnSeverity: undefined,
@@ -174,6 +189,7 @@ export function parseCliArgs(argv: string[]): ParsedCli {
       continue;
     }
     if (tok === "-h" || tok === "--help") {
+      parsed.helpCommand = parsed.command ?? undefined;
       parsed.command = "help";
       return parsed;
     }
@@ -246,6 +262,26 @@ export function parseCliArgs(argv: string[]): ParsedCli {
     }
     if (tok === "--check") {
       parsed.check = true;
+      i++;
+      continue;
+    }
+    if (tok === "--client") {
+      const v = args[i + 1];
+      if (!v || v.startsWith("-")) {
+        parsed.error = "--client requires a client id.";
+        return parsed;
+      }
+      parsed.setupClient = v;
+      i += 2;
+      continue;
+    }
+    if (tok === "--skip-skill") {
+      parsed.skipSkill = true;
+      i++;
+      continue;
+    }
+    if (tok === "--dry-run") {
+      parsed.dryRun = true;
       i++;
       continue;
     }

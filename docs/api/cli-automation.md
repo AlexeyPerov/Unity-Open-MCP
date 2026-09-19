@@ -17,6 +17,7 @@ uses the same routing stack from a terminal or CI job.
 | `baseline create\|update` | Create or refresh a regression baseline. | `unity_open_mcp_baseline_create` |
 | `regression check` | Compare the project with its baseline. | `unity_open_mcp_regression_check` |
 | `update [--check]` | Check for or apply an MCP server update; no Unity project is required. | npm registry, then GitHub Releases fallback |
+| `setup --project P --client C` | Install or repair Unity package pins, project MCP config, and the bundled core skill. | Local files only; no bridge required |
 
 Use `unity-open-mcp --help` or
 `unity-open-mcp <command> --help` for the current option list.
@@ -45,6 +46,26 @@ npx -y unity-open-mcp@1.2.3 run-tool unity_open_mcp_capabilities \
 
 `run-tool` returns the same JSON payload as an MCP call to that tool.
 
+## Project setup
+
+```bash
+npx -y unity-open-mcp@latest setup \
+  --project /absolute/path/to/MyGame \
+  --client cursor
+```
+
+`setup` pins the bridge, verify package, and MCP server to the version of the
+package currently running. It accepts the project-config writers `cursor`,
+`claude`, `opencode`, and `agents`. The command preserves unrelated Unity
+dependencies, MCP servers, and environment keys, then byte-copies the core
+skill bundled in the npm package. It never needs a live Editor or bridge and
+does not install optional domain packages.
+
+Use `--dry-run` to preview without writes, `--skip-skill` to leave the skill
+untouched, and `--json` for a stable report. Exit `0` means success, `2` means
+project/client validation failed, and `1` means a read, parse, or write failed.
+See [Agent setup](../setup/agent-setup.md) for the handoff flow.
+
 ## MCP server updates
 
 ```bash
@@ -65,8 +86,9 @@ installation together or to update without network access.
 
 ## Environment
 
-`UNITY_PROJECT_PATH` can provide the project path when `--project` is omitted.
-The `update` command does not need a Unity project path.
+`UNITY_PROJECT_PATH` can provide the project path when `--project` is omitted
+for bridge-backed commands. `setup` deliberately requires an explicit absolute
+`--project`; `update` does not need a Unity project path.
 Batch fallback may also need `UNITY_PATH`. For unattended startup modal
 handling, use [Dialog policy](../dialog-policy.md).
 
