@@ -18,6 +18,14 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { KNOWN_COMMANDS } from "./cli/args.js";
 import { runCli } from "./cli/cli.js";
 import { readPackageVersion } from "./package-version.js";
+import { PROJECT_PATH_ENV_VAR } from "./constants.js";
+import {
+  notUnityProjectMessage,
+  parseServerFlags,
+  ProjectPathError,
+  resolveProjectPath,
+  validateUnityProjectRoot,
+} from "./project-path.js";
 
 // Read the version from package.json at runtime so `npm version` (and the
 // maintainer-panel version-bump in the Hub) keep the reported server + CLI
@@ -46,15 +54,71 @@ async function main() {
     // in that case fall through to the stdio server below.
   }
 
+  // Portable project-path resolution runs BEFORE the heavy import so a
+  // misconfigured spawn fails in milliseconds instead of after the ~270-tool
+  // graph is built. `UNITY_PROJECT_PATH` still wins over the flags, so every
+  // existing client config behaves exactly as before; `--project-from-cwd`
+  // (optionally with `--unity-subpath <rel>`) is what makes a committed,
+  // machine-independent config possible.
+  const flags = parseServerFlags(process.argv.slice(2));
+  if (flags.error) {
+    console.error(`unity-open-mcp: ${flags.error}`);
+    process.exit(2);
+  }
+  const projectRoot = resolveStdioProjectPath(flags);
+
   // M31 Plan 6 / T6.6 — first stdio-server boot: dynamically import the heavy
   // server module. Up to this point (--version / --help / CLI subcommands /
   // no-command fallthrough that didn't match a subcommand) the ALL_TOOLS graph
   // has not been evaluated.
   const { getEnv, createServer } = await import("./server.js");
-  const { port, projectPath, authToken, envPort } = getEnv();
+  const { port, projectPath, authToken, envPort } = getEnv({
+    projectPath: projectRoot,
+  });
   const server = createServer(projectPath, port, authToken, envPort);
   const transport = new StdioServerTransport();
   await server.connect(transport);
+}
+
+/**
+ * Resolve + report the Unity project root for the stdio server. A path derived
+ * from the spawn cwd is a hard error when it is not a Unity root (the user
+ * almost certainly opened the client on the wrong folder, or needs
+ * `--unity-subpath`); an explicit `UNITY_PROJECT_PATH` only warns, because
+ * that path has always been accepted unchecked and the bridge reports the same
+ * problem in more detail once it connects.
+ */
+function resolveStdioProjectPath(flags: ReturnType<typeof parseServerFlags>): string {
+  let resolved;
+  try {
+    resolved = resolveProjectPath({
+      envPath: process.env[PROJECT_PATH_ENV_VAR],
+      cwd: process.cwd(),
+      projectFromCwd: flags.projectFromCwd,
+      unitySubpath: flags.unitySubpath,
+    });
+  } catch (err) {
+    const message = err instanceof ProjectPathError ? err.message : String(err);
+    console.error(`unity-open-mcp: ${message}`);
+    return process.exit(1);
+  }
+  console.error(
+    `[unity-open-mcp] Unity project resolved to ${resolved.absolute} (source: ${resolved.source})`,
+  );
+  const validation = validateUnityProjectRoot(resolved.absolute);
+  if (!validation.valid) {
+    const message = notUnityProjectMessage(resolved, validation);
+    if (resolved.source === "env") {
+      console.error(`[unity-open-mcp] Warning: ${message}`);
+    } else {
+      console.error(`unity-open-mcp: ${message}`);
+      console.error(
+        "unity-open-mcp: pass --unity-subpath <relative-path> when the Unity project is a subfolder of the workspace.",
+      );
+      return process.exit(1);
+    }
+  }
+  return resolved.absolute;
 }
 
 main().catch((err) => {

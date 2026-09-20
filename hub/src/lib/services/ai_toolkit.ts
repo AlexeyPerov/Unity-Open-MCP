@@ -292,3 +292,96 @@ export function mcpClientConfigTarget(
       };
   }
 }
+
+// --- Portable (committable) config ----------------------------------------
+//
+// A monorepo team wants ONE MCP client config in the repository, with no
+// per-developer absolute path in it. Two shapes make that possible; which one
+// a client accepts is fixed per client and mirrored in the Rust writer
+// (`hub/src-tauri/src/config/mcp_config.rs`) and the `setup` CLI catalog:
+//
+//   interpolation  the client expands `${workspaceFolder}` inside env values
+//   args           the server resolves the path from its own spawn cwd
+//                  (`--project-from-cwd [--unity-subpath Client]`)
+//   absolute       no portable form: a global config, or a client that needs
+//                  the committed wrapper script the `setup` CLI writes
+//
+// These helpers are the preview side; the Rust writer owns the on-disk merge.
+
+export type PortableStrategy = "interpolation" | "args" | "absolute";
+
+/** Workspace variable the interpolating clients expand. */
+export const WORKSPACE_FOLDER_VAR = "${workspaceFolder}";
+
+/**
+ * Which portable form a client accepts. `scope` matters: the same client is
+ * `absolute` for its global config (no workspace to resolve against) and
+ * portable for a project-scoped one.
+ */
+export function portableStrategy(
+  client: McpClientId,
+  scope: "global" | "project" | "none"
+): PortableStrategy {
+  if (scope === "global") return "absolute";
+  switch (client) {
+    case "cursor":
+    case "vscode-copilot":
+    case "vs-copilot":
+      return "interpolation";
+    case "claude-code":
+    case "opencode-project":
+    case "gemini":
+    case "github-copilot-cli":
+    case "kilo-code":
+    case "rider":
+    case "unity-ai":
+    case "zoocode":
+    case "manual":
+    case "custom":
+      return "args";
+    default:
+      return "absolute";
+  }
+}
+
+/**
+ * `${workspaceFolder}` or `${workspaceFolder}/<subpath>` for an
+ * interpolation client. `unitySubpath` is the Unity root relative to the
+ * workspace, POSIX-separated; empty when they are the same folder.
+ */
+export function workspaceFolderPath(unitySubpath: string): string {
+  const trimmed = unitySubpath.replace(/^\/+|\/+$/g, "");
+  return trimmed ? `${WORKSPACE_FOLDER_VAR}/${trimmed}` : WORKSPACE_FOLDER_VAR;
+}
+
+/**
+ * Extra server arguments an `args`-strategy entry needs. Empty for every
+ * other strategy — those carry the path in `env` (or not at all).
+ */
+export function portableServerArgs(
+  strategy: PortableStrategy,
+  unitySubpath: string
+): string[] {
+  if (strategy !== "args") return [];
+  const trimmed = unitySubpath.replace(/^\/+|\/+$/g, "");
+  return trimmed
+    ? ["--project-from-cwd", "--unity-subpath", trimmed]
+    : ["--project-from-cwd"];
+}
+
+/**
+ * Env map for a portable entry. An interpolating client carries the
+ * interpolated `UNITY_PROJECT_PATH`; everything else carries nothing.
+ *
+ * `UNITY_OPEN_MCP_BRIDGE_PORT` is deliberately absent: the port is a hash of
+ * the ABSOLUTE project path, so a committed value would be wrong on every
+ * other machine. Instance discovery re-derives it there.
+ */
+export function buildPortableMcpEnv(
+  strategy: PortableStrategy,
+  unitySubpath: string
+): McpEnv {
+  return strategy === "interpolation"
+    ? { UNITY_PROJECT_PATH: workspaceFolderPath(unitySubpath) }
+    : {};
+}

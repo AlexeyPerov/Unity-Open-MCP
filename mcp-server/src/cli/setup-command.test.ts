@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { packagePins, runSetupCommand } from "./setup-command.js";
+import { packagePins, runSetupCommand, type SetupReport } from "./setup-command.js";
 
 test("build bundles the canonical core skill bytes", async () => {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -239,4 +239,237 @@ test("setup parse failures use exit 1", async (t) => {
   });
   assert.equal(result.exitCode, 1);
   assert.equal(result.errorLabel, "invalid_json");
+});
+
+// --- portable / monorepo config --------------------------------------------
+
+/** Monorepo fixture: `<repo>/Client` is the Unity project, `<repo>` the workspace. */
+async function monorepoFixture(t: TestContext) {
+  const workspace = await mkdtemp(join(tmpdir(), "unity-open-mcp-monorepo-"));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  const project = join(workspace, "Client");
+  for (const directory of ["Assets", "Packages", "ProjectSettings"]) {
+    await mkdir(join(project, directory), { recursive: true });
+  }
+  await writeFile(
+    join(project, "Packages", "manifest.json"),
+    JSON.stringify({ dependencies: {} }, null, 2) + "\n",
+  );
+  const skillSourcePath = join(workspace, "source-skill.md");
+  await writeFile(skillSourcePath, "# skill\n");
+  return { workspace, project, skillSourcePath };
+}
+
+function setupOpts(
+  f: { project: string; skillSourcePath: string },
+  overrides: Record<string, unknown>,
+) {
+  return {
+    version: "1.2.3",
+    projectPath: f.project,
+    client: "cursor",
+    skipSkill: true,
+    dryRun: false,
+    skillSourcePath: f.skillSourcePath,
+    ...overrides,
+  } as Parameters<typeof runSetupCommand>[0];
+}
+
+test("monorepo Cursor setup writes a committable ${workspaceFolder} snippet", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(
+    setupOpts(f, { layout: "monorepo", unitySubpath: "Client" }),
+  );
+  assert.equal(result.exitCode, 0);
+  const report = result.json as SetupReport;
+  assert.equal(report.portable, true);
+  assert.equal(report.layout, "monorepo");
+  assert.equal(report.unitySubpath, "Client");
+  assert.equal(report.configStrategy, "interpolation");
+  assert.equal(report.workspace, f.workspace);
+
+  // Config lands at the repo root, not inside the Unity project.
+  const configPath = join(f.workspace, ".cursor", "mcp.json");
+  assert.equal(report.mcpConfig.path, configPath);
+  const body = await readFile(configPath, "utf8");
+  assert.ok(!body.includes(f.workspace), "no machine path in the committed snippet");
+  const config = JSON.parse(body);
+  assert.equal(
+    config.mcpServers["unity-open-mcp"].env.UNITY_PROJECT_PATH,
+    "${workspaceFolder}/Client",
+  );
+  assert.deepEqual(config.mcpServers["unity-open-mcp"].args, [
+    "-y",
+    "unity-open-mcp@1.2.3",
+  ]);
+
+  // UPM pins still go to the Unity project, not the workspace.
+  const manifest = JSON.parse(
+    await readFile(join(f.project, "Packages", "manifest.json"), "utf8"),
+  );
+  assert.equal(
+    manifest.dependencies["com.alexeyperov.unity-open-mcp-bridge"],
+    packagePins("1.2.3").bridge,
+  );
+});
+
+test("monorepo Claude Code setup writes args-only resolution flags", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(
+    setupOpts(f, { client: "claude", layout: "monorepo", unitySubpath: "Client" }),
+  );
+  assert.equal(result.exitCode, 0);
+  const report = result.json as SetupReport;
+  assert.equal(report.configStrategy, "args");
+  const config = JSON.parse(await readFile(join(f.workspace, ".mcp.json"), "utf8"));
+  const entry = config.mcpServers["unity-open-mcp"];
+  assert.deepEqual(entry.args, [
+    "-y",
+    "unity-open-mcp@1.2.3",
+    "--project-from-cwd",
+    "--unity-subpath",
+    "Client",
+  ]);
+  assert.deepEqual(entry.env, {});
+});
+
+test("--workspace derives the subpath, and --unity-subpath derives the workspace", async (t) => {
+  const f = await monorepoFixture(t);
+  const fromWorkspace = await runSetupCommand(
+    setupOpts(f, { workspacePath: f.workspace, dryRun: true }),
+  );
+  assert.equal((fromWorkspace.json as SetupReport).unitySubpath, "Client");
+  assert.equal((fromWorkspace.json as SetupReport).layout, "monorepo");
+
+  const fromSubpath = await runSetupCommand(
+    setupOpts(f, { unitySubpath: "Client", dryRun: true }),
+  );
+  assert.equal((fromSubpath.json as SetupReport).workspace, f.workspace);
+});
+
+test("a dry-run monorepo report contains no absolute path in the snippet", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(
+    setupOpts(f, { layout: "monorepo", unitySubpath: "Client", dryRun: true }),
+  );
+  const report = result.json as SetupReport;
+  assert.equal(report.mcpConfig.written, false);
+  assert.ok(!JSON.stringify(report.mcpConfig.entry).includes(f.workspace));
+});
+
+test("a portable re-run replaces the absolute path left by an earlier run", async (t) => {
+  const f = await monorepoFixture(t);
+  const absolute = await runSetupCommand(
+    setupOpts(f, { workspacePath: f.workspace, portable: false }),
+  );
+  assert.equal((absolute.json as SetupReport).portable, false);
+  let config = JSON.parse(
+    await readFile(join(f.workspace, ".cursor", "mcp.json"), "utf8"),
+  );
+  assert.equal(config.mcpServers["unity-open-mcp"].env.UNITY_PROJECT_PATH, f.project);
+
+  const portable = await runSetupCommand(
+    setupOpts(f, { workspacePath: f.workspace, portable: true }),
+  );
+  assert.equal((portable.json as SetupReport).portable, true);
+  config = JSON.parse(await readFile(join(f.workspace, ".cursor", "mcp.json"), "utf8"));
+  assert.equal(
+    config.mcpServers["unity-open-mcp"].env.UNITY_PROJECT_PATH,
+    "${workspaceFolder}/Client",
+  );
+});
+
+test("an args-strategy re-run drops a stale absolute UNITY_PROJECT_PATH", async (t) => {
+  const f = await monorepoFixture(t);
+  await runSetupCommand(
+    setupOpts(f, { client: "claude", workspacePath: f.workspace, portable: false }),
+  );
+  await runSetupCommand(
+    setupOpts(f, { client: "claude", workspacePath: f.workspace, portable: true }),
+  );
+  const config = JSON.parse(await readFile(join(f.workspace, ".mcp.json"), "utf8"));
+  const entry = config.mcpServers["unity-open-mcp"];
+  assert.equal(entry.env.UNITY_PROJECT_PATH, undefined);
+  assert.ok(entry.args.includes("--project-from-cwd"));
+});
+
+test("--wrapper writes an executable, version-pinned wrapper script", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(
+    setupOpts(f, { layout: "monorepo", unitySubpath: "Client", wrapper: true }),
+  );
+  const report = result.json as SetupReport;
+  const wrapperPath = join(f.workspace, "scripts", "mcp", "unity-open-mcp.sh");
+  assert.equal(report.wrapper.path, wrapperPath);
+  assert.equal(report.wrapper.written, true);
+  const body = await readFile(wrapperPath, "utf8");
+  assert.match(body, /unity-open-mcp@1\.2\.3/);
+  assert.ok(!body.includes(f.workspace), "the wrapper carries no machine path");
+});
+
+test("the unity-root layout keeps the absolute path by default (regression)", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(setupOpts(f, {}));
+  const report = result.json as SetupReport;
+  assert.equal(report.layout, "unity-root");
+  assert.equal(report.portable, false);
+  assert.equal(report.workspace, f.project);
+  const config = JSON.parse(
+    await readFile(join(f.project, ".cursor", "mcp.json"), "utf8"),
+  );
+  assert.equal(config.mcpServers["unity-open-mcp"].env.UNITY_PROJECT_PATH, f.project);
+});
+
+test("--portable on a unity-root layout emits ${workspaceFolder}", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(setupOpts(f, { portable: true, dryRun: true }));
+  const entry = (result.json as SetupReport).mcpConfig.entry as {
+    env: Record<string, string>;
+  };
+  assert.equal(entry.env.UNITY_PROJECT_PATH, "${workspaceFolder}");
+});
+
+test("layout and subpath conflicts are usage errors", async (t) => {
+  const f = await monorepoFixture(t);
+
+  const missingSubpath = await runSetupCommand(setupOpts(f, { layout: "monorepo" }));
+  assert.equal(missingSubpath.exitCode, 2);
+  assert.equal(missingSubpath.errorLabel, "missing_unity_subpath");
+
+  const conflict = await runSetupCommand(
+    setupOpts(f, { layout: "unity-root", unitySubpath: "Client" }),
+  );
+  assert.equal(conflict.exitCode, 2);
+  assert.equal(conflict.errorLabel, "layout_conflict");
+
+  const mismatch = await runSetupCommand(
+    setupOpts(f, { workspacePath: f.workspace, unitySubpath: "Server" }),
+  );
+  assert.equal(mismatch.exitCode, 2);
+  assert.equal(mismatch.errorLabel, "subpath_mismatch");
+
+  const outside = await runSetupCommand(
+    setupOpts(f, { workspacePath: join(f.workspace, "Client", "Assets") }),
+  );
+  assert.equal(outside.exitCode, 2);
+  assert.equal(outside.errorLabel, "project_outside_workspace");
+
+  const relativeWorkspace = await runSetupCommand(
+    setupOpts(f, { workspacePath: "relative/repo" }),
+  );
+  assert.equal(relativeWorkspace.exitCode, 2);
+  assert.equal(relativeWorkspace.errorLabel, "workspace_not_absolute");
+});
+
+test("the monorepo skill copy lands at the workspace root", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(
+    setupOpts(f, { layout: "monorepo", unitySubpath: "Client", skipSkill: false }),
+  );
+  const report = result.json as SetupReport;
+  assert.equal(
+    report.skill.path,
+    join(f.workspace, ".cursor", "skills", "unity-open-mcp", "SKILL.md"),
+  );
+  assert.equal(await readFile(report.skill.path!, "utf8"), "# skill\n");
 });

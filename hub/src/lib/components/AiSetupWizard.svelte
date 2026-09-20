@@ -241,6 +241,11 @@
   // Step 4 — MCP client state.
   let mcpClient = $state<McpClientId>("cursor");
   let cursorProjectScope = $state(true);
+  // Portable MCP config: write `${workspaceFolder}` / `--project-from-cwd`
+  // instead of this machine's absolute path, so the entry can be committed.
+  // The planner reports the repository root it found above the Unity project
+  // (`McpConfigPlan.detectedWorkspaceRoot`); the toggle is offered only then.
+  let portableConfig = $state(false);
   let bridgePort = $state("");
   let resolvedBridgePort = $state<number | null>(null);
   let copyToast = $state<string | null>(null);
@@ -1032,6 +1037,10 @@
     const root = toolkitRoot;
     const client = mcpClient;
     const projectScope = cursorProjectScope;
+    // The Rust writer detects the repository root itself, so the request
+    // carries only the intent — no workspace path round-trips through the
+    // plan (that would make the planning effect depend on its own output).
+    const portable = portableConfig;
     const port = bridgePort;
     const override = mcpIndexOverride;
     const localCheckout = useLocalCheckout;
@@ -1062,6 +1071,7 @@
           client: clientToWire(client),
           cursorProjectScope: projectScope,
           launchMode: mode,
+          portable,
         };
         const plan = await planMcpConfig(params);
         if (!cancelled) {
@@ -1223,6 +1233,7 @@
         client: clientToWire(mcpClient),
         cursorProjectScope,
         launchMode: mode,
+        portable: portableConfig,
       };
       const result = await writeMcpConfig(params);
       mcpWriteResult = result;
@@ -1988,6 +1999,7 @@
     canSkipStep3: canSkipStep3(),
     mcpClient,
     cursorProjectScope,
+    portableConfig,
     bridgePort,
     resolvedBridgePort,
     resolvedMcpPath,
@@ -2068,6 +2080,7 @@
     skipToMcpClient: () => goToStep("step4"),
     setMcpClient: (v: McpClientId) => (mcpClient = v),
     setCursorProjectScope: (v: boolean) => (cursorProjectScope = v),
+    setPortableConfig: (v: boolean) => (portableConfig = v),
     setBridgePort: (v: string) => (bridgePort = v),
     setMcpClientSearch: (v: string) => (mcpClientSearch = v),
     primaryMcpAction: () => void primaryMcpAction(),

@@ -293,6 +293,19 @@ pub struct McpConfigParams {
     /// override field promotes it to `LocalOverride`.
     #[serde(default)]
     pub launch_mode: McpLaunchMode,
+    /// Repository root the AI client is opened on, when it is not
+    /// the Unity project itself (`<repo>` for a `<repo>/Client`
+    /// layout). Empty means "same as the Unity project".
+    #[serde(default)]
+    pub workspace_path: String,
+    /// `true` to emit a committable entry with no machine-specific
+    /// path — `${workspaceFolder}` for clients that interpolate it,
+    /// `--project-from-cwd` for clients that do not. Ignored (with a
+    /// silent fallback to the absolute path) for global configs, for
+    /// local-checkout launch modes, and for clients that support
+    /// neither form.
+    #[serde(default)]
+    pub portable: bool,
 }
 
 /// The merge plan the Step 4 UI previews. Includes the
@@ -337,6 +350,19 @@ pub struct McpConfigPlan {
     /// run. Surfaced for debugging / "what did I just write"
     /// UX.
     pub resolved_mcp_index: String,
+    /// `true` when the emitted entry really is machine-independent.
+    /// `false` even with `params.portable` when the client, scope, or
+    /// launch mode forced the absolute fallback.
+    pub portable: bool,
+    /// Repository root the wizard detected above the Unity project
+    /// (nearest ancestor with a `.git` entry, within four levels).
+    /// `None` when the Unity project is the repository root or no
+    /// repository was found — the UI offers the portable path only
+    /// when this is set.
+    pub detected_workspace_root: Option<String>,
+    /// Unity root relative to `detected_workspace_root`, POSIX
+    /// separators. `None` alongside a `None` workspace root.
+    pub detected_unity_subpath: Option<String>,
 }
 
 /// What the writer actually did. Surfaces the backup path
@@ -427,6 +453,7 @@ pub async fn write_mcp_config(
 }
 
 fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfigPlan, McpConfigError> {
+    let detected = detect_layout(params);
     let scope = match resolve_scope(params) {
         Ok(s) => s,
         Err(McpScopeSkip::CliOnly) => {
@@ -441,6 +468,9 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
                 proposed_json: None,
                 command: Some(command_for(params, &resolved_str, true)),
                 resolved_mcp_index: resolved_str,
+                portable: effective_placement(params).is_some(),
+                detected_workspace_root: detected.root,
+                detected_unity_subpath: detected.subpath,
             });
         }
         Err(McpScopeSkip::Manual) => {
@@ -463,10 +493,13 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
                 proposed_json: Some(proposed_str),
                 command: None,
                 resolved_mcp_index: resolved_str,
+                portable: effective_placement(params).is_some(),
+                detected_workspace_root: detected.root,
+                detected_unity_subpath: detected.subpath,
             });
         }
     };
-    let target = resolve_target_path(params.client, scope, &params.project_path, home)
+    let target = resolve_target_path(params.client, scope, &config_root_for(params, scope), home)
         .ok_or_else(|| {
             McpConfigError::new(
                 "homeMissing",
@@ -509,6 +542,9 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
         proposed_json: Some(proposed_str),
         command: None,
         resolved_mcp_index: resolved_str,
+        portable: portable_placement(params, scope).is_some(),
+        detected_workspace_root: detected.root,
+        detected_unity_subpath: detected.subpath,
     })
 }
 
@@ -528,7 +564,7 @@ fn write_mcp_config_at(
             ));
         }
     };
-    let target = resolve_target_path(params.client, scope, &params.project_path, home)
+    let target = resolve_target_path(params.client, scope, &config_root_for(params, scope), home)
         .ok_or_else(|| {
             McpConfigError::new(
                 "homeMissing",
@@ -682,6 +718,191 @@ fn resolve_scope(params: &McpConfigParams) -> Result<ClientScope, McpScopeSkip> 
 /// Project-scoped paths are resolved relative to `project_path`; global
 /// paths are resolved under `home` (or the OS config dir for Claude
 /// Desktop / Cline).
+/// How a client can be pointed at a Unity project without a machine path.
+///
+/// Mirrors the catalog the `setup` CLI and the setup docs publish, with one
+/// Hub-specific narrowing: clients whose only portable form is the committed
+/// wrapper script (Codex, ZCode) resolve to [`PortableStrategy::Absolute`]
+/// here, because the Hub writes config files but does not ship that script —
+/// `unity-open-mcp setup --wrapper` does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PortableStrategy {
+    /// The client expands `${workspaceFolder}` inside env values.
+    Interpolation,
+    /// The server resolves the path from its own spawn cwd.
+    Args,
+    /// No portable form: global config, wrapper-only client, or local launch.
+    Absolute,
+}
+
+/// Workspace variable the interpolating clients expand.
+const WORKSPACE_FOLDER_VAR: &str = "${workspaceFolder}";
+
+/// How many folders above the Unity project the wizard looks for a repository
+/// root. Matches the bridge Configure panel's upward config search.
+const WORKSPACE_DETECT_DEPTH: usize = 4;
+
+pub(crate) fn portable_strategy(client: McpClientId, scope: ClientScope) -> PortableStrategy {
+    // A global config has no workspace to resolve against.
+    if matches!(scope, ClientScope::Global) {
+        return PortableStrategy::Absolute;
+    }
+    match client {
+        McpClientId::Cursor | McpClientId::VscodeCopilot | McpClientId::VsCopilot => {
+            PortableStrategy::Interpolation
+        }
+        McpClientId::ClaudeCode
+        | McpClientId::OpencodeProject
+        | McpClientId::Gemini
+        | McpClientId::GithubCopilotCli
+        | McpClientId::KiloCode
+        | McpClientId::Rider
+        | McpClientId::UnityAi
+        | McpClientId::ZooCode
+        | McpClientId::Manual
+        | McpClientId::Custom => PortableStrategy::Args,
+        // Global-only clients, and the two that need the wrapper script.
+        McpClientId::ClaudeDesktop
+        | McpClientId::Cline
+        | McpClientId::Antigravity
+        | McpClientId::Codex
+        | McpClientId::ZcodeGlobal
+        | McpClientId::ZcodeProject
+        | McpClientId::OpencodeGlobal => PortableStrategy::Absolute,
+    }
+}
+
+/// Resolved portable placement for one write: which strategy applies and where
+/// the Unity project sits under the workspace. `None` whenever the entry must
+/// carry the absolute path after all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PortablePlacement {
+    pub strategy: PortableStrategy,
+    /// Unity root relative to the workspace, POSIX separators; empty when the
+    /// workspace IS the Unity project.
+    pub unity_subpath: String,
+}
+
+pub(crate) fn portable_placement(
+    params: &McpConfigParams,
+    scope: ClientScope,
+) -> Option<PortablePlacement> {
+    if !params.portable {
+        return None;
+    }
+    // A local-checkout launch already embeds an absolute index.js path, so
+    // there is nothing portable left to write.
+    if params.launch_mode.requires_local_index() {
+        return None;
+    }
+    let strategy = portable_strategy(params.client, scope);
+    if matches!(strategy, PortableStrategy::Absolute) {
+        return None;
+    }
+    let workspace = workspace_root_for(params);
+    let unity_subpath =
+        relative_subpath(Path::new(&workspace), Path::new(&params.unity_project_path))?;
+    Some(PortablePlacement {
+        strategy,
+        unity_subpath,
+    })
+}
+
+/// [`portable_placement`] for callers that only have `params` — the builders
+/// below run after scope resolution has already succeeded. CLI-only and
+/// clipboard clients are treated as project-scoped: their snippet is pasted
+/// into a workspace, not into a global config.
+pub(crate) fn effective_placement(params: &McpConfigParams) -> Option<PortablePlacement> {
+    let scope = resolve_scope(params).unwrap_or(ClientScope::Project);
+    portable_placement(params, scope)
+}
+
+/// Folder the client config file lives under. A portable monorepo write puts
+/// it at the workspace root (where the AI client is opened); Unity AI keeps
+/// its config inside the Unity project, so it never moves.
+fn config_root_for(params: &McpConfigParams, scope: ClientScope) -> String {
+    if matches!(params.client, McpClientId::UnityAi) {
+        return params.project_path.clone();
+    }
+    match portable_placement(params, scope) {
+        Some(_) => workspace_root_for(params),
+        None => params.project_path.clone(),
+    }
+}
+
+/// The folder the AI client is opened on: the explicit workspace when the
+/// caller set one, else the detected repository root above the Unity project,
+/// else the Unity project itself. Falling back to detection lets a caller ask
+/// for a portable write with nothing but `portable: true`.
+fn workspace_root_for(params: &McpConfigParams) -> String {
+    let workspace = params.workspace_path.trim();
+    if !workspace.is_empty() {
+        return workspace.to_string();
+    }
+    match detect_workspace_root(Path::new(&params.unity_project_path), WORKSPACE_DETECT_DEPTH) {
+        Some(root) => root.to_string_lossy().into_owned(),
+        None => params.unity_project_path.clone(),
+    }
+}
+
+/// POSIX-separated path from `workspace` down to `project`; empty when they
+/// are the same folder, `None` when `project` is not inside `workspace`.
+pub(crate) fn relative_subpath(workspace: &Path, project: &Path) -> Option<String> {
+    let rel = project.strip_prefix(workspace).ok()?;
+    Some(
+        rel.components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/"),
+    )
+}
+
+/// Nearest ancestor of `project` (up to `max_depth` levels above it) that
+/// holds a `.git` entry — the repository root an AI client is usually opened
+/// on. Returns `None` when the Unity project is itself that root, so the
+/// caller only offers the portable path for a real monorepo layout.
+pub(crate) fn detect_workspace_root(project: &Path, max_depth: usize) -> Option<PathBuf> {
+    if project.join(".git").exists() {
+        return None;
+    }
+    let mut current = project.parent()?.to_path_buf();
+    for _ in 0..max_depth {
+        if current.join(".git").exists() {
+            return Some(current);
+        }
+        current = match current.parent() {
+            Some(parent) => parent.to_path_buf(),
+            None => return None,
+        };
+    }
+    None
+}
+
+/// What the wizard can offer for this project: the repository root above the
+/// Unity project, and the Unity folder relative to it. Both `None` for the
+/// common "Unity project IS the repository" layout.
+struct DetectedLayout {
+    root: Option<String>,
+    subpath: Option<String>,
+}
+
+fn detect_layout(params: &McpConfigParams) -> DetectedLayout {
+    let project = Path::new(&params.unity_project_path);
+    match detect_workspace_root(project, WORKSPACE_DETECT_DEPTH) {
+        Some(root) => {
+            let subpath = relative_subpath(&root, project);
+            DetectedLayout {
+                root: Some(root.to_string_lossy().into_owned()),
+                subpath,
+            }
+        }
+        None => DetectedLayout {
+            root: None,
+            subpath: None,
+        },
+    }
+}
+
 fn resolve_target_path(
     client: McpClientId,
     scope: ClientScope,
@@ -818,7 +1039,8 @@ fn launch_command_parts(mode: McpLaunchMode, resolved_index: &str) -> (String, V
 
 fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
     let env = build_env_map(params);
-    let (command, args) = launch_command_parts(params.launch_mode, resolved_index);
+    let (command, mut args) = launch_command_parts(params.launch_mode, resolved_index);
+    args.extend(portable_server_args(params));
     let args_value: Value = args.into_iter().map(Value::String).collect();
     match params.client {
         McpClientId::Cursor | McpClientId::ClaudeDesktop => json!({
@@ -908,6 +1130,20 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
 /// builder can layer the same env into `[mcp_servers.<name>.env]`.
 fn build_env_map(params: &McpConfigParams) -> Map<String, Value> {
     let mut env = Map::new();
+    // A portable entry carries no machine path — and no pinned bridge port
+    // either: the port is a hash of the ABSOLUTE project path, so a committed
+    // value would be wrong on every other machine. Instance discovery
+    // re-derives it there. `UNITY_PATH` is machine-specific for the same
+    // reason and is left to the environment.
+    if let Some(placement) = effective_placement(params) {
+        if matches!(placement.strategy, PortableStrategy::Interpolation) {
+            env.insert(
+                PROJECT_PATH_ENV_VAR.to_string(),
+                Value::String(workspace_folder_value(&placement.unity_subpath)),
+            );
+        }
+        return env;
+    }
     env.insert(
         PROJECT_PATH_ENV_VAR.to_string(),
         Value::String(params.unity_project_path.clone()),
@@ -922,6 +1158,31 @@ fn build_env_map(params: &McpConfigParams) -> Map<String, Value> {
         );
     }
     env
+}
+
+/// `${workspaceFolder}` or `${workspaceFolder}/<subpath>`.
+fn workspace_folder_value(unity_subpath: &str) -> String {
+    if unity_subpath.is_empty() {
+        WORKSPACE_FOLDER_VAR.to_string()
+    } else {
+        format!("{WORKSPACE_FOLDER_VAR}/{unity_subpath}")
+    }
+}
+
+/// Extra server arguments a portable `args`-strategy entry needs. Empty for
+/// every other strategy and for absolute entries.
+fn portable_server_args(params: &McpConfigParams) -> Vec<String> {
+    match effective_placement(params) {
+        Some(placement) if matches!(placement.strategy, PortableStrategy::Args) => {
+            let mut args = vec!["--project-from-cwd".to_string()];
+            if !placement.unity_subpath.is_empty() {
+                args.push("--unity-subpath".to_string());
+                args.push(placement.unity_subpath.clone());
+            }
+            args
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// Resolve the Cline global settings JSON path (VS Code globalStorage).
@@ -991,7 +1252,8 @@ fn build_codex_toml(
 
     // Build the unity-open-mcp entry as a toml::Value.
     let env = build_env_map(params);
-    let (command, args) = launch_command_parts(params.launch_mode, resolved_index);
+    let (command, mut args) = launch_command_parts(params.launch_mode, resolved_index);
+    args.extend(portable_server_args(params));
     let mut entry = toml::value::Table::new();
     entry.insert("enabled".to_string(), toml::Value::Boolean(true));
     entry.insert("command".to_string(), toml::Value::String(command));
@@ -1145,13 +1407,7 @@ pub fn claude_mcp_add_command(
     resolved_index: &str,
 ) -> String {
     let port = resolve_port(unity_project_path, parse_override(bridge_port)).to_string();
-    let invocation = match launch_mode {
-        McpLaunchMode::Npx => format!("npx -y {}", NPM_PACKAGE),
-        McpLaunchMode::Global => "unity-open-mcp".to_string(),
-        McpLaunchMode::Local | McpLaunchMode::LocalOverride => {
-            format!("node {}", resolved_index)
-        }
-    };
+    let invocation = launch_invocation(launch_mode, resolved_index);
     format!(
         "claude mcp add {name} --env UNITY_PROJECT_PATH={project} --env UNITY_OPEN_MCP_BRIDGE_PORT={port} -- {invocation}",
         name = MCP_SERVER_KEY,
@@ -1161,14 +1417,50 @@ pub fn claude_mcp_add_command(
     )
 }
 
+/// Portable variant: no `--env` pair at all. The server resolves the project
+/// from the directory Claude Code spawns it in, so the same command works on
+/// every machine and can live in a team runbook.
+pub fn claude_mcp_add_command_portable(
+    launch_mode: McpLaunchMode,
+    resolved_index: &str,
+    unity_subpath: &str,
+) -> String {
+    let mut command = format!(
+        "claude mcp add {name} -- {invocation} --project-from-cwd",
+        name = MCP_SERVER_KEY,
+        invocation = launch_invocation(launch_mode, resolved_index),
+    );
+    if !unity_subpath.is_empty() {
+        command.push_str(&format!(" --unity-subpath {unity_subpath}"));
+    }
+    command
+}
+
+fn launch_invocation(launch_mode: McpLaunchMode, resolved_index: &str) -> String {
+    match launch_mode {
+        McpLaunchMode::Npx => format!("npx -y {}", NPM_PACKAGE),
+        McpLaunchMode::Global => "unity-open-mcp".to_string(),
+        McpLaunchMode::Local | McpLaunchMode::LocalOverride => {
+            format!("node {}", resolved_index)
+        }
+    }
+}
+
 fn command_for(params: &McpConfigParams, resolved_index: &str, _is_cli_only: bool) -> String {
     match params.client {
-        McpClientId::ClaudeCode => claude_mcp_add_command(
-            &params.unity_project_path,
-            &params.bridge_port,
-            params.launch_mode,
-            resolved_index,
-        ),
+        McpClientId::ClaudeCode => match effective_placement(params) {
+            Some(placement) => claude_mcp_add_command_portable(
+                params.launch_mode,
+                resolved_index,
+                &placement.unity_subpath,
+            ),
+            None => claude_mcp_add_command(
+                &params.unity_project_path,
+                &params.bridge_port,
+                params.launch_mode,
+                resolved_index,
+            ),
+        },
         _ => String::new(),
     }
 }
@@ -2019,6 +2311,8 @@ mod tests {
 
     fn make_cursor_params(_home: &Path, project: &Path, toolkit_root: &Path) -> McpConfigParams {
         McpConfigParams {
+            workspace_path: String::new(),
+            portable: false,
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: toolkit_root.to_string_lossy().into_owned(),
             mcp_index_override: String::new(),
@@ -2034,6 +2328,8 @@ mod tests {
 
     fn make_opencode_project_params(project: &Path, toolkit_root: &Path) -> McpConfigParams {
         McpConfigParams {
+            workspace_path: String::new(),
+            portable: false,
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: toolkit_root.to_string_lossy().into_owned(),
             mcp_index_override: String::new(),
@@ -2054,6 +2350,8 @@ mod tests {
         toolkit_root: &Path,
     ) -> McpConfigParams {
         McpConfigParams {
+            workspace_path: String::new(),
+            portable: false,
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: toolkit_root.to_string_lossy().into_owned(),
             mcp_index_override: String::new(),
@@ -2071,6 +2369,8 @@ mod tests {
     /// Uses npx launch mode so no toolkit root validation is required.
     fn make_client_params(client: McpClientId, project: &Path) -> McpConfigParams {
         McpConfigParams {
+            workspace_path: String::new(),
+            portable: false,
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: String::new(),
             mcp_index_override: String::new(),
@@ -2130,6 +2430,8 @@ mod tests {
         let project = home.join("proj");
         fs::create_dir_all(&project).unwrap();
         let params = McpConfigParams {
+            workspace_path: String::new(),
+            portable: false,
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: String::new(),
             mcp_index_override: String::new(),
@@ -2164,6 +2466,8 @@ mod tests {
         let project = home.join("proj");
         fs::create_dir_all(&project).unwrap();
         let params = McpConfigParams {
+            workspace_path: String::new(),
+            portable: false,
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: String::new(),
             mcp_index_override: String::new(),
@@ -2196,6 +2500,8 @@ mod tests {
         let project = home.join("proj");
         fs::create_dir_all(&project).unwrap();
         let params = McpConfigParams {
+            workspace_path: String::new(),
+            portable: false,
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: String::new(),
             mcp_index_override: String::new(),
@@ -2313,6 +2619,8 @@ mod tests {
         // Seed the file with the exact value the writer would
         // produce (no advanced override, default port).
         let seed = McpConfigParams {
+            workspace_path: String::new(),
+            portable: false,
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: toolkit.path().to_string_lossy().into_owned(),
             mcp_index_override: String::new(),
@@ -2336,6 +2644,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let project = dir.path();
         let params = McpConfigParams {
+            workspace_path: String::new(),
+            portable: false,
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: "/repos/this/does/not/exist".to_string(),
             mcp_index_override: "/nope/index.js".to_string(),
@@ -2356,6 +2666,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let project = dir.path();
         let params = McpConfigParams {
+            workspace_path: String::new(),
+            portable: false,
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             mcp_index_override: String::new(),
@@ -2385,6 +2697,8 @@ mod tests {
         fs::create_dir_all(&mcp_dir).unwrap();
         fs::write(mcp_dir.join("index.js"), "module.exports = {};").unwrap();
         let params = McpConfigParams {
+            workspace_path: String::new(),
+            portable: false,
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: fake_root.path().to_string_lossy().into_owned(),
             mcp_index_override: String::new(),
@@ -3323,4 +3637,157 @@ mod tests {
             .is_some());
     }
 
+
+    // --- portable (committable) config ------------------------------------
+
+    /// `<repo>/Client` monorepo: `.git` at the repo root, Unity below it.
+    fn monorepo_tree() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().join("repo");
+        let project = workspace.join("Client");
+        fs::create_dir_all(workspace.join(".git")).unwrap();
+        fs::create_dir_all(project.join("Assets")).unwrap();
+        (tmp, workspace, project)
+    }
+
+    fn portable_params(
+        client: McpClientId,
+        workspace: &Path,
+        project: &Path,
+    ) -> McpConfigParams {
+        let mut params = make_client_params(client, project);
+        params.workspace_path = workspace.to_string_lossy().into_owned();
+        params.portable = true;
+        params.launch_mode = McpLaunchMode::Npx;
+        params
+    }
+
+    #[test]
+    fn portable_cursor_entry_uses_workspace_folder_and_no_machine_path() {
+        let (_tmp, workspace, project) = monorepo_tree();
+        let mut params = portable_params(McpClientId::Cursor, &workspace, &project);
+        params.cursor_project_scope = true;
+        let entry = build_entry_json(&params, NPM_RESOLVED_LABEL);
+        assert_eq!(
+            entry["env"][PROJECT_PATH_ENV_VAR],
+            json!("${workspaceFolder}/Client")
+        );
+        // The bridge port is a hash of the absolute path, so a committed
+        // entry must NOT pin it.
+        assert!(entry["env"].get(PORT_ENV_VAR).is_none());
+        assert_eq!(entry["args"], json!(["-y", NPM_PACKAGE]));
+        assert!(!entry.to_string().contains(&workspace.to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn portable_args_client_resolves_from_cwd_with_the_subpath() {
+        let (_tmp, workspace, project) = monorepo_tree();
+        let params = portable_params(McpClientId::GithubCopilotCli, &workspace, &project);
+        let entry = build_entry_json(&params, NPM_RESOLVED_LABEL);
+        assert_eq!(
+            entry["args"],
+            json!(["-y", NPM_PACKAGE, "--project-from-cwd", "--unity-subpath", "Client"])
+        );
+        assert!(entry["env"].as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn portable_write_targets_the_workspace_root_not_the_unity_project() {
+        let (_tmp, workspace, project) = monorepo_tree();
+        let mut params = portable_params(McpClientId::Cursor, &workspace, &project);
+        params.cursor_project_scope = true;
+        let home = tempfile::tempdir().unwrap();
+        let plan = plan_mcp_config_at(&params, home.path()).unwrap();
+        assert_eq!(
+            plan.target_path.as_deref(),
+            Some(workspace.join(".cursor").join("mcp.json").to_string_lossy().as_ref())
+        );
+        assert!(plan.portable);
+        assert!(!plan.proposed_json.unwrap().contains(&workspace.to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn a_global_config_never_goes_portable() {
+        let (_tmp, workspace, project) = monorepo_tree();
+        let params = portable_params(McpClientId::ClaudeDesktop, &workspace, &project);
+        let entry = build_entry_json(&params, NPM_RESOLVED_LABEL);
+        assert_eq!(
+            entry["env"][PROJECT_PATH_ENV_VAR],
+            json!(project.to_string_lossy().into_owned())
+        );
+        assert!(effective_placement(&params).is_none());
+    }
+
+    #[test]
+    fn a_local_checkout_launch_never_goes_portable() {
+        let (_tmp, workspace, project) = monorepo_tree();
+        let mut params = portable_params(McpClientId::GithubCopilotCli, &workspace, &project);
+        params.launch_mode = McpLaunchMode::Local;
+        assert!(effective_placement(&params).is_none());
+    }
+
+    #[test]
+    fn portable_falls_back_to_the_detected_repository_root() {
+        // No explicit workspace_path: the writer detects `<repo>` above
+        // `<repo>/Client` and derives the subpath from it.
+        let (_tmp, workspace, project) = monorepo_tree();
+        let mut params = portable_params(McpClientId::GithubCopilotCli, &workspace, &project);
+        params.workspace_path = String::new();
+        let placement = effective_placement(&params).unwrap();
+        assert_eq!(placement.unity_subpath, "Client");
+    }
+
+    #[test]
+    fn portable_is_ignored_when_the_unity_project_is_outside_the_workspace() {
+        let (_tmp, workspace, project) = monorepo_tree();
+        let mut params = portable_params(McpClientId::GithubCopilotCli, &workspace, &project);
+        params.unity_project_path = "/somewhere/else".to_string();
+        assert!(effective_placement(&params).is_none());
+    }
+
+    #[test]
+    fn claude_code_portable_command_drops_the_env_pairs() {
+        let (_tmp, workspace, project) = monorepo_tree();
+        let params = portable_params(McpClientId::ClaudeCode, &workspace, &project);
+        let home = tempfile::tempdir().unwrap();
+        let plan = plan_mcp_config_at(&params, home.path()).unwrap();
+        let command = plan.command.unwrap();
+        assert!(!command.contains("--env"));
+        assert!(command.contains("--project-from-cwd --unity-subpath Client"));
+    }
+
+    #[test]
+    fn the_plan_reports_the_detected_repository_root() {
+        let (_tmp, workspace, project) = monorepo_tree();
+        let params = make_client_params(McpClientId::GithubCopilotCli, &project);
+        let home = tempfile::tempdir().unwrap();
+        let plan = plan_mcp_config_at(&params, home.path()).unwrap();
+        assert_eq!(
+            plan.detected_workspace_root.as_deref(),
+            Some(workspace.to_string_lossy().as_ref())
+        );
+        assert_eq!(plan.detected_unity_subpath.as_deref(), Some("Client"));
+        // Not portable until the user opts in.
+        assert!(!plan.portable);
+    }
+
+    #[test]
+    fn no_repository_root_is_offered_when_the_unity_project_is_the_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("MyGame");
+        fs::create_dir_all(project.join(".git")).unwrap();
+        fs::create_dir_all(project.join("Assets")).unwrap();
+        assert!(detect_workspace_root(&project, 4).is_none());
+    }
+
+    #[test]
+    fn relative_subpath_is_empty_for_the_same_folder_and_none_when_outside() {
+        let root = Path::new("/repo");
+        assert_eq!(relative_subpath(root, Path::new("/repo")), Some(String::new()));
+        assert_eq!(
+            relative_subpath(root, Path::new("/repo/games/Client")),
+            Some("games/Client".to_string())
+        );
+        assert_eq!(relative_subpath(root, Path::new("/other")), None);
+    }
 }

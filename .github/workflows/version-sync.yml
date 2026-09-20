@@ -32,6 +32,7 @@ on:
       - docs/setup/agent-setup.md
       - docs/setup/wizard-setup.md
       - docs/setup/client-configuration.md
+      - docs/setup/portable-config.md
       - docs/api/cli-automation.md
       - docs/ci/github-actions/unity-verify.yml
       - docs/ci/gitlab-ci/unity-verify.yml
@@ -63,6 +64,7 @@ on:
       - docs/setup/agent-setup.md
       - docs/setup/wizard-setup.md
       - docs/setup/client-configuration.md
+      - docs/setup/portable-config.md
       - docs/api/cli-automation.md
       - docs/ci/github-actions/unity-verify.yml
       - docs/ci/gitlab-ci/unity-verify.yml

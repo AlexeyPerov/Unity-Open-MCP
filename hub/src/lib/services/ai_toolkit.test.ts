@@ -15,6 +15,11 @@ import {
   MCP_SERVER_KEY,
   mcpClientConfigTarget,
   type McpClientId,
+  buildPortableMcpEnv,
+  type McpEnv,
+  portableServerArgs,
+  portableStrategy,
+  workspaceFolderPath,
 } from "./ai_toolkit.ts";
 
 // The wizard resolves the bridge port via the `resolve_bridge_port` Tauri
@@ -177,4 +182,47 @@ test("custom returns null path like manual (clipboard-only)", () => {
   const t = mcpClientConfigTarget("custom", "/home/dev");
   assert.equal(t.path, null);
   assert.equal(t.scope, "none");
+});
+
+// --- portable (committable) config ----------------------------------------
+
+test("portableStrategy: Cursor interpolates ${workspaceFolder} when project-scoped", () => {
+  assert.equal(portableStrategy("cursor", "project"), "interpolation");
+});
+
+test("portableStrategy: a global config has no portable form", () => {
+  assert.equal(portableStrategy("cursor", "global"), "absolute");
+  assert.equal(portableStrategy("claude-desktop", "global"), "absolute");
+});
+
+test("portableStrategy: Claude Code resolves the project from its spawn cwd", () => {
+  assert.equal(portableStrategy("claude-code", "none"), "args");
+});
+
+test("portableStrategy: wrapper-only clients fall back to absolute in the Hub", () => {
+  assert.equal(portableStrategy("codex", "project"), "absolute");
+  assert.equal(portableStrategy("zcode-project", "project"), "absolute");
+});
+
+test("workspaceFolderPath appends the Unity subfolder", () => {
+  assert.equal(workspaceFolderPath("Client"), "${workspaceFolder}/Client");
+  assert.equal(workspaceFolderPath(""), "${workspaceFolder}");
+  assert.equal(workspaceFolderPath("/Client/"), "${workspaceFolder}/Client");
+});
+
+test("portableServerArgs emits the resolution flags for args clients only", () => {
+  assert.deepEqual(portableServerArgs("args", "Client"), [
+    "--project-from-cwd",
+    "--unity-subpath",
+    "Client",
+  ]);
+  assert.deepEqual(portableServerArgs("args", ""), ["--project-from-cwd"]);
+  assert.deepEqual(portableServerArgs("interpolation", "Client"), []);
+});
+
+test("buildPortableMcpEnv never pins the bridge port (it is a per-machine hash)", () => {
+  const env: McpEnv = buildPortableMcpEnv("interpolation", "Client");
+  assert.deepEqual(env, { UNITY_PROJECT_PATH: "${workspaceFolder}/Client" });
+  assert.deepEqual(Object.keys(env), ["UNITY_PROJECT_PATH"]);
+  assert.deepEqual(buildPortableMcpEnv("args", "Client"), {});
 });

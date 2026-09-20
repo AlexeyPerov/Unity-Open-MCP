@@ -7,6 +7,10 @@ For first-time setup with Cursor, Claude, OpenCode, or a generic
 agent, prefer the merge-safe [`unity-open-mcp setup`](agent-setup.md) command.
 Use the catalog below for other clients or manual configuration.
 
+Every snippet on this page names **your** absolute project path, so the file
+stays on your machine. To commit one config for the whole team instead, see
+[Portable MCP config](portable-config.md).
+
 ## Do this
 
 1. Find your client in the [table](#where-to-put-it) and note the config file path.
@@ -59,6 +63,10 @@ my-game/                    <- AI client opened here, config lives here
 The bridge window's **Configure AI client** panel searches the Unity project and
 up to four parent folders, so a layout like this reports **Configured: yes** and
 names the file it found under **Found in**.
+
+A repository-root config does not have to name an absolute path at all — see
+[Portable MCP config](portable-config.md) for the committable form of this
+layout.
 
 ## Copy these
 
@@ -152,12 +160,29 @@ claude mcp add unity-open-mcp \
 If the server is already registered, remove and re-add it when the command,
 version pin, or project path must change.
 
+## Project path resolution
+
+The server takes the first of these that is set, and normalizes the result to
+an absolute path:
+
+| Priority | Input | Result |
+|---|---|---|
+| 1 | `--project <path>` (CLI subcommands only) | absolute, or resolved against the working directory |
+| 2 | `UNITY_PROJECT_PATH` | absolute, or resolved against the working directory |
+| 3 | `--project-from-cwd` + optional `--unity-subpath <rel>` | working directory, plus the subfolder |
+| 4 | none | startup error listing these options |
+
+`UNITY_PROJECT_PATH` wins over `--project-from-cwd`, so an environment override
+still redirects a config that uses the flags. The resolved path and which input
+produced it are logged on stderr at startup. Options 3 and 4 are what make a
+committed config possible — [Portable MCP config](portable-config.md).
+
 ## Optional
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `UNITY_PROJECT_PATH` | yes | Absolute Unity project root. |
-| `UNITY_OPEN_MCP_BRIDGE_PORT` | no | Pin a bridge port instead of path-based discovery. |
+| `UNITY_PROJECT_PATH` | yes, unless `--project-from-cwd` is passed | Unity project root; absolute, or relative to the working directory. |
+| `UNITY_OPEN_MCP_BRIDGE_PORT` | no | Pin a bridge port instead of path-based discovery. Machine-specific — do not commit it. |
 | `UNITY_PATH` | no | Explicit Unity executable for batch fallback. |
 
 Startup modal env vars: [Dialog policy](../dialog-policy.md).
@@ -169,5 +194,9 @@ Startup modal env vars: [Dialog policy](../dialog-policy.md).
 **Local checkout:** build `mcp-server/` and point at
 `node /absolute/path/to/unity-open-mcp/mcp-server/dist/index.js` — see
 [Development setup](development-setup.md).
+
+**Team committed config:** [Portable MCP config](portable-config.md) replaces
+the absolute path with `${workspaceFolder}` or `--project-from-cwd` so one file
+works for everyone.
 
 For connection problems after setup, see [Troubleshooting](../troubleshooting.md).

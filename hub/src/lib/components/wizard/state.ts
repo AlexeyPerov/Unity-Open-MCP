@@ -113,6 +113,8 @@ export interface WizardState {
   // --- Step 4 — MCP client ---
   mcpClient: McpClientId;
   cursorProjectScope: boolean;
+  /** Write a committable entry with no machine path (monorepo layouts). */
+  portableConfig: boolean;
   bridgePort: string;
   resolvedBridgePort: number | null;
   resolvedMcpPath: string | null;
@@ -205,6 +207,7 @@ export interface WizardHandlers {
   // Step 4
   setMcpClient: (value: McpClientId) => void;
   setCursorProjectScope: (value: boolean) => void;
+  setPortableConfig: (value: boolean) => void;
   setBridgePort: (value: string) => void;
   setMcpClientSearch: (value: string) => void;
   primaryMcpAction: () => void;

@@ -57,19 +57,30 @@ const TOOL_BY_NAME = new Map<string, Tool>(
 );
 
 /**
- * Resolve env for the MCP server. UNITY_PROJECT_PATH is mandatory. The port
- * uses M13 T4.3 instance discovery:
+ * Resolve env for the MCP server. The port uses M13 T4.3 instance discovery:
  *   1. UNITY_OPEN_MCP_BRIDGE_PORT env var (override wins; users who pin a
  *      port keep working as before)
  *   2. ~/.unity-open-mcp/instances/<hash>.json lock file (when its pid is alive)
  *   3. deterministic hash of the project path (20000 + sha256 % 10000)
  * The resolved port is logged so users can see which bridge was picked.
+ *
+ * The project path is normally resolved by the caller (`index.ts`, via
+ * `resolveProjectPath`) and passed in already absolute, so a portable spawn
+ * (`--project-from-cwd`) never has to round-trip through the environment.
+ * When no path is supplied this falls back to raw `UNITY_PROJECT_PATH` for
+ * embedders that call `getEnv()` directly.
  */
-export function getEnv(): { projectPath: string; port: number; authToken?: string; envPort?: number } {
-  const projectPath = process.env[PROJECT_PATH_ENV_VAR];
+export function getEnv(options: { projectPath?: string } = {}): {
+  projectPath: string;
+  port: number;
+  authToken?: string;
+  envPort?: number;
+} {
+  const projectPath = options.projectPath ?? process.env[PROJECT_PATH_ENV_VAR];
   if (!projectPath) {
     console.error(
-      `unity-open-mcp: ${PROJECT_PATH_ENV_VAR} environment variable is required.`,
+      `unity-open-mcp: ${PROJECT_PATH_ENV_VAR} environment variable is required ` +
+        "(or pass --project-from-cwd).",
     );
     process.exit(1);
   }

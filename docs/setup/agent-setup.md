@@ -29,6 +29,11 @@ operation.
 Find the absolute Unity project root: the directory containing `Assets/`,
 `Packages/`, and `ProjectSettings/`. Remove any trailing slash.
 
+Also note whether that root is the folder the human's AI client is opened on.
+If the Unity project is a subfolder of a larger repository (`<repo>/Client`),
+this is a monorepo — use the committed-config command in step 2 instead of the
+default one.
+
 Choose one setup client id:
 
 | Client | `--client` | Project config written |
@@ -64,12 +69,37 @@ The downloaded package pins all three components to **its own version**. It:
 - copies its bundled core skill byte-for-byte to the selected client path;
 - does not start Unity, connect to a bridge, or install domain packages.
 
+### Monorepo: write a committed config
+
+When the Unity project is a subfolder of the repository, name the layout. The
+config and skill then go to the repository root (where the client is opened),
+the Unity pins still go to the Unity project, and the written entry carries no
+machine-specific path — so the team commits it once:
+
+```bash
+npx -y unity-open-mcp@latest setup \
+  --project /absolute/path/to/repo/Client \
+  --client cursor \
+  --layout monorepo --unity-subpath Client
+```
+
+This is the happy path for a monorepo: prefer it over asking every developer to
+edit an absolute path. Details and the per-client matrix:
+[Portable MCP config](portable-config.md).
+
 Useful options:
 
 - `--dry-run` reports every target and intended value without writing files.
 - `--skip-skill` installs packages and MCP config without touching a skill.
 - `--json` returns a stable report containing the package version, project,
   client, target paths, pins, byte count, and warnings.
+- `--layout monorepo --unity-subpath <rel>` writes the committed form described
+  above; `--portable` does the same for a single-project repository, and
+  `--no-portable` forces the absolute path.
+- `--workspace <abs>` names the repository root explicitly instead of deriving
+  it from `--project` minus `--unity-subpath`.
+- `--wrapper` also writes the committed wrapper script, for clients that expand
+  neither a workspace variable nor an environment variable.
 - `setup --help` works without the required setup flags.
 
 Exit `0` means success (including dry-run), `2` means a project/client usage
@@ -84,7 +114,10 @@ Before handoff, confirm the report contains:
 - bridge and verify pins ending in that same version;
 - the MCP config target and `unity-open-mcp@VERSION` launch entry;
 - one skill path and its byte count, unless `--skip-skill` was requested;
-- a dry-run marker when applicable.
+- a dry-run marker when applicable;
+- for a monorepo or `--portable` run: the workspace root, the layout, and a
+  `Config: portable — safe to commit` line. If the snippet still contains an
+  absolute path, report that instead of committing it.
 
 ## 4) USER ACTION
 

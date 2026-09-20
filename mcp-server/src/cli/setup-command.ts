@@ -1,5 +1,5 @@
 import { readFile, stat, mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -7,6 +7,19 @@ import {
   knownClientKeys,
   resolveTemplateSkillPath,
 } from "../skill/client-paths.js";
+import { PROJECT_PATH_ENV_VAR } from "../constants.js";
+import {
+  catalogIdForSetupClient,
+  portableEnv,
+  portableServerArgs,
+  portableSupportFor,
+  renderWrapperScript,
+  wrapperRelativePath,
+  type ConfigStrategy,
+  type PortableClientSupport,
+  type PortableTargetOptions,
+  type ProjectLayout,
+} from "../setup/portable-config.js";
 
 const BRIDGE_PACKAGE = "com.alexeyperov.unity-open-mcp-bridge";
 const VERIFY_PACKAGE = "com.alexeyperov.unity-open-mcp-verify";
@@ -22,6 +35,23 @@ export interface SetupCommandOptions {
   client: string | undefined;
   skipSkill: boolean;
   dryRun: boolean;
+  /**
+   * Which portable template family to emit. Defaults to `monorepo` when the
+   * Unity root is below the workspace root, otherwise `unity-root`.
+   */
+  layout?: ProjectLayout;
+  /** Repository root the AI client is opened on. Defaults to the Unity root. */
+  workspacePath?: string;
+  /** Unity project folder relative to the workspace root (for example "Client"). */
+  unitySubpath?: string;
+  /**
+   * Force a committable config with no machine path (`--portable`) or the
+   * absolute form (`--no-portable`). Defaults to portable for monorepo
+   * layouts and absolute for a plain Unity-root workspace.
+   */
+  portable?: boolean;
+  /** Also write the shipped wrapper script, even when the client does not need it. */
+  wrapper?: boolean;
   /** Test/development override; published builds use dist/skill/SKILL.md. */
   skillSourcePath?: string;
 }
@@ -38,6 +68,15 @@ export interface SetupReport {
   project: string;
   client: string;
   dryRun: boolean;
+  /** Repository root the client config and skill are written under. */
+  workspace: string;
+  layout: ProjectLayout;
+  /** Unity root relative to the workspace, POSIX-separated; "" for unity-root. */
+  unitySubpath: string;
+  /** True when the written config carries no machine-specific path. */
+  portable: boolean;
+  configStrategy: ConfigStrategy;
+  wrapper: { path: string | null; written: boolean };
   manifest: {
     path: string;
     written: boolean;
@@ -85,6 +124,8 @@ export async function runSetupCommand(
     const project = await validateProject(opts.projectPath);
     const client = validateClient(opts.client);
     const pins = packagePins(opts.version);
+    const placement = resolvePlacement(project, client, opts);
+    const warnings = [...placement.warnings];
 
     const manifestPath = join(project, "Packages", "manifest.json");
     const manifest = await readJsonObject(manifestPath, false);
@@ -99,14 +140,27 @@ export async function runSetupCommand(
     dependencies[BRIDGE_PACKAGE] = pins.bridge;
     dependencies[VERIFY_PACKAGE] = pins.verify;
 
-    const configPath = configPathFor(project, client);
+    // Client config and the agent skill live where the AI client is opened —
+    // the workspace root, which equals the Unity root for a plain layout.
+    const configPath = configPathFor(placement.workspace, client);
     const config = await readJsonObject(configPath, true);
-    const entry = mergeClientConfig(config, client, project, pins.npm);
+    const entry = mergeClientConfig(config, client, project, pins.npm, placement);
+
+    const wrapperPath = placement.emitWrapper
+      ? join(placement.workspace, ...wrapperRelativePath(placement.layout).split("/"))
+      : null;
+    const wrapperBody = placement.emitWrapper
+      ? renderWrapperScript({
+          version: opts.version,
+          layout: placement.layout,
+          unitySubpath: placement.unitySubpath,
+        })
+      : null;
 
     let skillBytes: Buffer | null = null;
     let skillPath: string | null = null;
     if (!opts.skipSkill) {
-      skillPath = join(project, clientSkillRelativePath(client));
+      skillPath = join(placement.workspace, clientSkillRelativePath(client));
       const source = opts.skillSourcePath ?? resolveBundledSkillPath();
       if (!source) {
         throw new SetupError(
@@ -133,6 +187,14 @@ export async function runSetupCommand(
           throw ioError(`Could not write skill to ${skillPath}`, error);
         }
       }
+      if (wrapperPath && wrapperBody !== null) {
+        try {
+          await mkdir(dirname(wrapperPath), { recursive: true });
+          await writeFile(wrapperPath, wrapperBody, { mode: 0o755 });
+        } catch (error) {
+          throw ioError(`Could not write wrapper script to ${wrapperPath}`, error);
+        }
+      }
     }
 
     const report: SetupReport = {
@@ -140,6 +202,15 @@ export async function runSetupCommand(
       project,
       client,
       dryRun: opts.dryRun,
+      workspace: placement.workspace,
+      layout: placement.layout,
+      unitySubpath: placement.unitySubpath,
+      portable: placement.portable,
+      configStrategy: placement.strategy,
+      wrapper: {
+        path: wrapperPath,
+        written: !opts.dryRun && wrapperPath !== null,
+      },
       manifest: {
         path: manifestPath,
         written: !opts.dryRun,
@@ -160,7 +231,7 @@ export async function runSetupCommand(
         bytes: skillBytes?.byteLength ?? 0,
         lines: skillBytes ? countLines(skillBytes) : 0,
       },
-      warnings: [],
+      warnings,
       userAction: [
         `Open Unity with ${project} and wait for compilation to finish.`,
         "Restart the MCP / AI client so it reloads the updated configuration.",
@@ -248,6 +319,148 @@ function validateClient(input: string | undefined): SetupConfigClient {
   return input as SetupConfigClient;
 }
 
+/**
+ * Where the client config goes and how it names the Unity project.
+ *
+ * `workspace` is the folder the AI client is opened on. It equals the Unity
+ * root in the common case; for a monorepo (`<repo>/Client`) the config and the
+ * agent skill belong at the repo root while UPM pins still go to the Unity
+ * root. `portable` decides between a committable snippet and the legacy
+ * absolute path.
+ */
+interface SetupPlacement {
+  workspace: string;
+  layout: ProjectLayout;
+  /** POSIX-separated Unity root relative to the workspace; "" for unity-root. */
+  unitySubpath: string;
+  portable: boolean;
+  strategy: ConfigStrategy;
+  support: PortableClientSupport | undefined;
+  emitWrapper: boolean;
+  warnings: string[];
+}
+
+function resolvePlacement(
+  project: string,
+  client: SetupConfigClient,
+  opts: SetupCommandOptions,
+): SetupPlacement {
+  const warnings: string[] = [];
+  const requestedSubpath = normalizeSubpath(opts.unitySubpath);
+
+  let workspace: string;
+  if (opts.workspacePath) {
+    if (!isAbsolute(opts.workspacePath)) {
+      throw new SetupError(
+        "workspace_not_absolute",
+        `--workspace must be absolute (received '${opts.workspacePath}').`,
+        2,
+      );
+    }
+    workspace = resolve(opts.workspacePath);
+  } else if (requestedSubpath) {
+    // Derive the workspace by stripping the subpath off the Unity root, so
+    // `--project /abs/repo/Client --unity-subpath Client` needs no --workspace.
+    workspace = resolve(project, ...requestedSubpath.split("/").map(() => ".."));
+  } else {
+    workspace = project;
+  }
+
+  const derived = relativeSubpath(workspace, project);
+  if (derived === undefined) {
+    throw new SetupError(
+      "project_outside_workspace",
+      `--project ${project} is not inside --workspace ${workspace}.`,
+      2,
+    );
+  }
+  if (requestedSubpath && requestedSubpath !== derived) {
+    throw new SetupError(
+      "subpath_mismatch",
+      `--unity-subpath '${requestedSubpath}' does not match the Unity root under the workspace ('${derived || "."}').`,
+      2,
+    );
+  }
+  const unitySubpath = derived;
+
+  const layout: ProjectLayout =
+    opts.layout ?? (unitySubpath ? "monorepo" : "unity-root");
+  if (layout === "monorepo" && !unitySubpath) {
+    throw new SetupError(
+      "missing_unity_subpath",
+      "--layout monorepo requires --unity-subpath <relative-path> (or --workspace <repo root>).",
+      2,
+    );
+  }
+  if (layout === "unity-root" && unitySubpath) {
+    throw new SetupError(
+      "layout_conflict",
+      `--layout unity-root conflicts with a Unity project at '${unitySubpath}' below the workspace; use --layout monorepo.`,
+      2,
+    );
+  }
+
+  const support = portableSupportFor(catalogIdForSetupClient(client));
+  // Portable by default exactly where the absolute path is the real problem:
+  // a monorepo whose config file is not inside the Unity project.
+  let portable = opts.portable ?? layout === "monorepo";
+  if (portable && support?.strategy === "absolute") {
+    warnings.push(
+      `Client '${client}' has no portable configuration form; writing the absolute path.`,
+    );
+    portable = false;
+  }
+  if (portable && !support) {
+    warnings.push(
+      `Client '${client}' is not in the portable-config catalog; writing the absolute path.`,
+    );
+    portable = false;
+  }
+
+  const strategy: ConfigStrategy = portable && support ? support.strategy : "absolute";
+  const emitWrapper = (portable && strategy === "wrapper") || opts.wrapper === true;
+
+  return {
+    workspace,
+    layout,
+    unitySubpath,
+    portable,
+    strategy,
+    support,
+    emitWrapper,
+    warnings,
+  };
+}
+
+/** `Client`, `Client/`, `.\Client` → `Client`; empty/`.` → "". */
+function normalizeSubpath(input: string | undefined): string {
+  if (!input) return "";
+  const posix = input.split("\\").join("/");
+  const segments = posix
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0 && segment !== ".");
+  if (segments.some((segment) => segment === "..")) {
+    throw new SetupError(
+      "invalid_unity_subpath",
+      `--unity-subpath must stay inside the workspace (received '${input}').`,
+      2,
+    );
+  }
+  return segments.join("/");
+}
+
+/**
+ * POSIX-separated path from `workspace` down to `project`, "" when they are the
+ * same folder, `undefined` when `project` is outside `workspace`.
+ */
+function relativeSubpath(workspace: string, project: string): string | undefined {
+  const rel = relative(workspace, project);
+  if (rel === "") return "";
+  if (rel.startsWith("..") || isAbsolute(rel)) return undefined;
+  return rel.split(sep).join("/");
+}
+
 export function packagePins(version: string): {
   npm: string;
   bridge: string;
@@ -260,25 +473,36 @@ export function packagePins(version: string): {
   };
 }
 
-function configPathFor(project: string, client: SetupConfigClient): string {
+function configPathFor(workspace: string, client: SetupConfigClient): string {
   switch (client) {
     case "cursor":
-      return join(project, ".cursor", "mcp.json");
+      return join(workspace, ".cursor", "mcp.json");
     case "claude":
-      return join(project, ".mcp.json");
+      return join(workspace, ".mcp.json");
     case "opencode":
-      return join(project, "opencode.json");
+      return join(workspace, "opencode.json");
     case "agents":
-      return join(project, ".mcp.json");
+      return join(workspace, ".mcp.json");
   }
 }
 
+/**
+ * Merge the `unity-open-mcp` entry into an existing client config, preserving
+ * sibling servers and any extra keys the user added.
+ *
+ * A portable re-run REPLACES the absolute `UNITY_PROJECT_PATH` left by an
+ * earlier absolute run (and vice versa), because leaving a stale machine path
+ * behind would silently keep winning over `--project-from-cwd`.
+ */
 function mergeClientConfig(
   config: Record<string, unknown>,
   client: SetupConfigClient,
   project: string,
   npmPin: string,
+  placement: SetupPlacement,
 ): Record<string, unknown> {
+  const launch = launchFields(project, npmPin, placement);
+
   if (client === "opencode") {
     const mcp = ensureObject(config, "mcp");
     const previous = isRecord(mcp[SERVER_KEY]) ? mcp[SERVER_KEY] : {};
@@ -288,12 +512,9 @@ function mergeClientConfig(
     const entry = {
       ...previous,
       type: "local",
-      command: ["npx", "-y", npmPin],
+      command: [launch.command, ...launch.args],
       enabled: true,
-      environment: {
-        ...previousEnvironment,
-        UNITY_PROJECT_PATH: project,
-      },
+      environment: mergeProjectEnv(previousEnvironment, launch.env),
     };
     mcp[SERVER_KEY] = entry;
     return entry;
@@ -304,15 +525,63 @@ function mergeClientConfig(
   const previousEnv = isRecord(previous.env) ? previous.env : {};
   const entry = {
     ...previous,
-    command: "npx",
-    args: ["-y", npmPin],
-    env: {
-      ...previousEnv,
-      UNITY_PROJECT_PATH: project,
-    },
+    command: launch.command,
+    args: launch.args,
+    env: mergeProjectEnv(previousEnv, launch.env),
   };
   servers[SERVER_KEY] = entry;
   return entry;
+}
+
+interface LaunchFields {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+function launchFields(
+  project: string,
+  npmPin: string,
+  placement: SetupPlacement,
+): LaunchFields {
+  if (!placement.portable || !placement.support) {
+    return {
+      command: "npx",
+      args: ["-y", npmPin],
+      env: { [PROJECT_PATH_ENV_VAR]: project },
+    };
+  }
+  const target: PortableTargetOptions = {
+    layout: placement.layout,
+    unitySubpath: placement.unitySubpath,
+    npmPin,
+  };
+  if (placement.strategy === "wrapper") {
+    return {
+      command: "bash",
+      args: [wrapperRelativePath(placement.layout)],
+      env: {},
+    };
+  }
+  return {
+    command: "npx",
+    args: portableServerArgs(placement.strategy, target),
+    env: portableEnv(placement.support, target),
+  };
+}
+
+/**
+ * Keep every env key the user added, but let this run own
+ * `UNITY_PROJECT_PATH`: set it for absolute/interpolated strategies, drop it
+ * for the strategies that resolve the path at runtime.
+ */
+function mergeProjectEnv(
+  previous: Record<string, unknown>,
+  next: Record<string, string>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...previous, ...next };
+  if (next[PROJECT_PATH_ENV_VAR] === undefined) delete merged[PROJECT_PATH_ENV_VAR];
+  return merged;
 }
 
 function ensureObject(
@@ -378,7 +647,7 @@ function formatSetupReport(report: SetupReport): string {
   const skill = report.skill.skipped
     ? "skipped (--skip-skill)"
     : `${report.skill.path} (${report.skill.bytes} bytes, ${report.skill.lines} lines)`;
-  return [
+  const lines = [
     mode,
     `VERSION: ${report.version}`,
     `Project: ${report.project}`,
@@ -388,11 +657,23 @@ function formatSetupReport(report: SetupReport): string {
     `MCP config: ${report.mcpConfig.path}`,
     `Skill: ${skill}`,
     "Domain packages: not installed",
+  ];
+  if (report.layout === "monorepo" || report.portable) {
+    lines.push(
+      `Workspace: ${report.workspace}`,
+      `Layout: ${report.layout}${report.unitySubpath ? ` (Unity at ${report.unitySubpath}/)` : ""}`,
+      `Config: ${report.portable ? `portable — safe to commit (${report.configStrategy})` : "absolute path"}`,
+    );
+  }
+  if (report.wrapper.path) lines.push(`Wrapper: ${report.wrapper.path}`);
+  for (const warning of report.warnings) lines.push(`Warning: ${warning}`);
+  lines.push(
     "",
     "USER ACTION:",
     `1. ${report.userAction[0]}`,
     `2. ${report.userAction[1]}`,
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function countLines(bytes: Buffer): number {

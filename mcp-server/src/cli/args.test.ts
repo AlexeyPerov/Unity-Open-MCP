@@ -400,3 +400,67 @@ test("parseCliArgs: regression --regression-threshold rejects negative", () => {
     /--regression-threshold/,
   );
 });
+
+// ---------------------------------------------------------------------------
+// portable project-path flags
+// ---------------------------------------------------------------------------
+
+test("parseCliArgs: --project-from-cwd is a bare boolean flag", () => {
+  const p = parse(["ping", "--project-from-cwd"]);
+  assert.equal(p.error, undefined);
+  assert.equal(p.projectFromCwd, true);
+  assert.equal(p.projectPath, undefined);
+});
+
+test("parseCliArgs: --unity-subpath takes a relative path", () => {
+  const p = parse(["ping", "--project-from-cwd", "--unity-subpath", "Client"]);
+  assert.equal(p.error, undefined);
+  assert.equal(p.unitySubpath, "Client");
+});
+
+test("parseCliArgs: --unity-subpath without a value is an error", () => {
+  assert.match(parse(["ping", "--unity-subpath"]).error ?? "", /requires a relative path/);
+});
+
+test("parseCliArgs: --project still accepts a relative path", () => {
+  assert.equal(parse(["ping", "--project", "Client"]).projectPath, "Client");
+});
+
+test("parseCliArgs: setup layout flags parse", () => {
+  const p = parse([
+    "setup",
+    "--project",
+    "/abs/repo/Client",
+    "--client",
+    "cursor",
+    "--layout",
+    "monorepo",
+    "--unity-subpath",
+    "Client",
+    "--workspace",
+    "/abs/repo",
+    "--portable",
+    "--wrapper",
+  ]);
+  assert.equal(p.error, undefined);
+  assert.equal(p.setupLayout, "monorepo");
+  assert.equal(p.workspacePath, "/abs/repo");
+  assert.equal(p.portable, true);
+  assert.equal(p.wrapper, true);
+});
+
+test("parseCliArgs: --no-portable forces the absolute form", () => {
+  assert.equal(parse(["setup", "--no-portable"]).portable, false);
+});
+
+test("parseCliArgs: portable defaults are undefined/false when no flag is passed", () => {
+  const p = parse(["setup"]);
+  assert.equal(p.portable, undefined);
+  assert.equal(p.setupLayout, undefined);
+  assert.equal(p.wrapper, false);
+  assert.equal(p.projectFromCwd, false);
+});
+
+test("parseCliArgs: --layout rejects an unknown value", () => {
+  assert.match(parse(["setup", "--layout", "flat"]).error ?? "", /unity-root, monorepo/);
+});

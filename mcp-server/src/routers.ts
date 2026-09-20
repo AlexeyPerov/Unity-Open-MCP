@@ -15,13 +15,21 @@ import { BridgeEventStream } from "./event-stream.js";
 import { resolvePort, resolveAuthToken } from "./instance-discovery.js";
 import { ToolSessionState } from "./tool-session-state.js";
 import {
+  ProjectPathError,
+  resolveProjectPath,
+  type ProjectPathSource,
+} from "./project-path.js";
+import {
   PORT_ENV_VAR,
   PROJECT_PATH_ENV_VAR,
   bridgeBaseUrl,
 } from "./constants.js";
 
 export interface ResolvedEnv {
+  /** Normalized absolute Unity project root. */
   projectPath: string;
+  /** Which input produced {@link projectPath} (flag / env / cwd). */
+  projectPathSource: ProjectPathSource;
   port: number;
   authToken: string | undefined;
   /** Parsed UNITY_OPEN_MCP_BRIDGE_PORT (or CLI --port override), else undefined.
@@ -30,13 +38,24 @@ export interface ResolvedEnv {
   envPort: number | undefined;
 }
 
+export interface ResolveEnvOptions {
+  /** `--project-from-cwd`: derive the Unity project root from the cwd. */
+  projectFromCwd?: boolean;
+  /** `--unity-subpath <rel>`: Unity project subfolder under the cwd. */
+  unitySubpath?: string;
+}
+
 /**
  * Resolve the project path / port / auth token from explicit overrides (CLI
  * flags) or the process env (MCP server). Throws when no project path is set —
  * callers print a friendly message and exit non-zero.
  *
- * Mirrors the precedence in index.ts#getEnv:
- *   projectPath: override > UNITY_PROJECT_PATH
+ * The project path goes through the shared `resolveProjectPath` resolver, so
+ * the CLI accepts exactly what the stdio server accepts: an absolute path, a
+ * path relative to the cwd (`--project Client` from a monorepo root), or no
+ * path at all with `--project-from-cwd [--unity-subpath Client]`.
+ *
+ *   projectPath: --project > UNITY_PROJECT_PATH > cwd (+ subpath)
  *   port:        override > UNITY_OPEN_MCP_BRIDGE_PORT > lock file > hash
  *   authToken:   discovered from the same lock as the port (no token with an
  *                explicit port override)
@@ -44,14 +63,23 @@ export interface ResolvedEnv {
 export function resolveEnv(
   projectPathOverride?: string,
   portOverride?: number,
+  options: ResolveEnvOptions = {},
 ): ResolvedEnv {
-  const projectPath = projectPathOverride ?? process.env[PROJECT_PATH_ENV_VAR];
-  if (!projectPath) {
+  let resolvedProject;
+  try {
+    resolvedProject = resolveProjectPath({
+      flagPath: projectPathOverride,
+      envPath: process.env[PROJECT_PATH_ENV_VAR],
+      cwd: process.cwd(),
+      projectFromCwd: options.projectFromCwd,
+      unitySubpath: options.unitySubpath,
+    });
+  } catch (err) {
     throw new ResolveEnvError(
-      `${PROJECT_PATH_ENV_VAR} environment variable is required ` +
-        "(or pass --project <path>).",
+      err instanceof ProjectPathError ? err.message : String(err),
     );
   }
+  const projectPath = resolvedProject.absolute;
 
   const rawEnvPort = process.env[PORT_ENV_VAR];
   const envPort = rawEnvPort ? parseInt(rawEnvPort, 10) : undefined;
@@ -67,7 +95,13 @@ export function resolveEnv(
     portOverride ?? effectiveEnvPort,
   );
 
-  return { projectPath, port, authToken, envPort: portOverride ?? effectiveEnvPort };
+  return {
+    projectPath,
+    projectPathSource: resolvedProject.source,
+    port,
+    authToken,
+    envPort: portOverride ?? effectiveEnvPort,
+  };
 }
 
 export class ResolveEnvError extends Error {}

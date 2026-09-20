@@ -153,6 +153,34 @@
     </div>
   {/if}
 
+  {#if state.mcpPlan?.detectedWorkspaceRoot}
+    <div class="wiz-field">
+      <label class="wiz-toggle">
+        <input
+          type="checkbox"
+          checked={state.portableConfig}
+          onchange={(e) => handlers.setPortableConfig((e.currentTarget as HTMLInputElement).checked)}
+        />
+        <span>
+          <strong>Commit-safe config</strong> —
+          <small>
+            this Unity project sits at
+            <code>{state.mcpPlan.detectedUnitySubpath}/</code> inside
+            <code>{state.mcpPlan.detectedWorkspaceRoot}</code>. Write the entry
+            at the repository root with no machine path, so the whole team can
+            share one committed file.
+          </small>
+        </span>
+      </label>
+      {#if state.portableConfig && state.mcpPlan && !state.mcpPlan.portable}
+        <p class="wiz-hint wiz-hint-warn">
+          This client has no commit-safe form — a global config, or one that
+          needs the wrapper script. The absolute path is written instead.
+        </p>
+      {/if}
+    </div>
+  {/if}
+
   <details class="wiz-advanced">
     <summary>Advanced (optional)</summary>
     <div class="wiz-field">

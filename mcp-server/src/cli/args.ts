@@ -23,11 +23,15 @@
 //                                   [--platform-profile ...]
 //   unity-open-mcp update [--check] [--json]
 //   unity-open-mcp setup --project <abs> --client <id> [--skip-skill] [--dry-run] [--json]
+//                        [--layout unity-root|monorepo] [--workspace <abs>]
+//                        [--unity-subpath <rel>] [--portable|--no-portable] [--wrapper]
 //   unity-open-mcp --help | -h
 //   unity-open-mcp --version | -V
 //
 // Shared options (where relevant):
-//   --project <path> | -P <path>   override UNITY_PROJECT_PATH
+//   --project <path> | -P <path>   override UNITY_PROJECT_PATH (absolute or relative to cwd)
+//   --project-from-cwd             derive the Unity project from the current directory
+//   --unity-subpath <rel>          Unity project subfolder under the workspace (monorepo)
 //   --port <n>      | -p <n>       override UNITY_OPEN_MCP_BRIDGE_PORT
 //   --timeout-ms <n>               ping/wait timeout in milliseconds
 //   --interval-ms <n>              wait-for-ready poll interval
@@ -77,8 +81,12 @@ export interface ParsedCli {
   command: CliCommand | null;
   /** Bare `--json` flag — switches human-readable output to JSON. */
   json: boolean;
-  /** Resolved project path (flag wins, else UNITY_PROJECT_PATH env). */
+  /** Resolved project path (flag wins, else UNITY_PROJECT_PATH env). May be relative. */
   projectPath: string | undefined;
+  /** Derive the Unity project root from the current working directory. */
+  projectFromCwd: boolean;
+  /** Unity project subfolder under the workspace root (monorepo layouts). */
+  unitySubpath: string | undefined;
   /** Resolved bridge port override (flag wins, else UNITY_OPEN_MCP_BRIDGE_PORT env). */
   port: number | undefined;
   /** Ping / wait-for-ready overall timeout (ms). */
@@ -102,6 +110,14 @@ export interface ParsedCli {
   skipSkill: boolean;
   /** setup: report intended writes without changing the project. */
   dryRun: boolean;
+  /** setup: which portable template family to emit. */
+  setupLayout: "unity-root" | "monorepo" | undefined;
+  /** setup: workspace (repository) root the AI client is opened on. */
+  workspacePath: string | undefined;
+  /** setup: force (--portable) or forbid (--no-portable) machine-independent config. */
+  portable: boolean | undefined;
+  /** setup: also write the shipped wrapper script for clients that need it. */
+  wrapper: boolean;
   /** Command whose dedicated help was requested, when applicable. */
   helpCommand: CliCommand | undefined;
   // --- verify ---
@@ -136,6 +152,8 @@ export function emptyParsed(): ParsedCli {
     command: null,
     json: false,
     projectPath: undefined,
+    projectFromCwd: false,
+    unitySubpath: undefined,
     port: undefined,
     timeoutMs: undefined,
     intervalMs: undefined,
@@ -147,6 +165,10 @@ export function emptyParsed(): ParsedCli {
     setupClient: undefined,
     skipSkill: false,
     dryRun: false,
+    setupLayout: undefined,
+    workspacePath: undefined,
+    portable: undefined,
+    wrapper: false,
     helpCommand: undefined,
     verifyPaths: [],
     verifyMode: undefined,
@@ -207,6 +229,56 @@ export function parseCliArgs(argv: string[]): ParsedCli {
       }
       parsed.projectPath = v;
       i += 2;
+      continue;
+    }
+    if (tok === "--project-from-cwd") {
+      parsed.projectFromCwd = true;
+      i++;
+      continue;
+    }
+    if (tok === "--unity-subpath") {
+      const v = args[i + 1];
+      if (!v || v.startsWith("-")) {
+        parsed.error = "--unity-subpath requires a relative path (for example: Client).";
+        return parsed;
+      }
+      parsed.unitySubpath = v;
+      i += 2;
+      continue;
+    }
+    if (tok === "--workspace") {
+      const v = args[i + 1];
+      if (!v || v.startsWith("-")) {
+        parsed.error = "--workspace requires a path.";
+        return parsed;
+      }
+      parsed.workspacePath = v;
+      i += 2;
+      continue;
+    }
+    if (tok === "--layout") {
+      const v = args[i + 1];
+      if (v !== "unity-root" && v !== "monorepo") {
+        parsed.error = "--layout requires one of: unity-root, monorepo.";
+        return parsed;
+      }
+      parsed.setupLayout = v;
+      i += 2;
+      continue;
+    }
+    if (tok === "--portable") {
+      parsed.portable = true;
+      i++;
+      continue;
+    }
+    if (tok === "--no-portable") {
+      parsed.portable = false;
+      i++;
+      continue;
+    }
+    if (tok === "--wrapper") {
+      parsed.wrapper = true;
+      i++;
       continue;
     }
     if (tok === "--port" || tok === "-p") {

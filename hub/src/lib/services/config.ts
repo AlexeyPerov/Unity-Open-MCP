@@ -1795,6 +1795,20 @@ export interface McpConfigParamsWire {
   cursorProjectScope: boolean;
   /** Defaults to `"npx"`. See `McpLaunchModeWire`. */
   launchMode?: McpLaunchModeWire;
+  /**
+   * Repository root the AI client is opened on, when the Unity project is a
+   * subfolder of it (`<repo>` for a `<repo>/Client` layout). Empty / omitted
+   * means the Unity project is itself the workspace.
+   */
+  workspacePath?: string;
+  /**
+   * Write a committable entry with no machine-specific path:
+   * `${workspaceFolder}` for clients that interpolate it, `--project-from-cwd`
+   * for clients that do not. Silently falls back to the absolute path for
+   * global configs and local-checkout launch modes — check
+   * `McpConfigPlan.portable` for what was actually emitted.
+   */
+  portable?: boolean;
 }
 
 export interface McpConfigPlan {
@@ -1806,6 +1820,16 @@ export interface McpConfigPlan {
   proposedJson: string | null;
   command: string | null;
   resolvedMcpIndex: string;
+  /** `true` when the emitted entry really carries no machine path. */
+  portable: boolean;
+  /**
+   * Repository root detected above the Unity project (nearest ancestor with a
+   * `.git` entry, within four levels). `null` when the Unity project is the
+   * repository root — the portable option is offered only when this is set.
+   */
+  detectedWorkspaceRoot: string | null;
+  /** Unity root relative to `detectedWorkspaceRoot`, POSIX separators. */
+  detectedUnitySubpath: string | null;
 }
 
 export interface McpConfigWriteResult {

@@ -275,6 +275,12 @@ const TRIO_TARGETS = [
     description: "client-configuration.md npm server pins (unity-open-mcp@<ver>)",
     replace: replaceNpmPin,
   },
+  {
+    file: "docs/setup/portable-config.md",
+    kind: "md-npm",
+    description: "portable-config.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
   // Translated setup docs (ru / zh-CN) carry the same `unity-open-mcp@<ver>`
   // pins as the English docs. Keep them in lockstep with releases.
   {
@@ -302,6 +308,12 @@ const TRIO_TARGETS = [
     replace: replaceNpmPin,
   },
   {
+    file: "docs/ru/setup/portable-config.md",
+    kind: "md-npm",
+    description: "ru portable-config.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
     file: "docs/zh-CN/setup/manual-setup.md",
     kind: "md-npm",
     description: "zh-CN manual-setup.md npm server pins (unity-open-mcp@<ver>)",
@@ -323,6 +335,12 @@ const TRIO_TARGETS = [
     file: "docs/zh-CN/setup/client-configuration.md",
     kind: "md-npm",
     description: "zh-CN client-configuration.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "docs/zh-CN/setup/portable-config.md",
+    kind: "md-npm",
+    description: "zh-CN portable-config.md npm server pins (unity-open-mcp@<ver>)",
     replace: replaceNpmPin,
   },
   {

@@ -41,6 +41,48 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void IsConfiguredEntry_PortableInterpolationEntry_IsTrue()
+        {
+            // A committed, machine-independent entry: no absolute path, the
+            // Unity root named through the client's workspace variable. The
+            // panel must still report "Configured: yes".
+            var body = "{\n  \"mcpServers\": {\n    \"unity-open-mcp\": {\n" +
+                       "      \"command\": \"npx\",\n" +
+                       "      \"args\": [\"-y\", \"unity-open-mcp@1.2.3\"],\n" +
+                       "      \"env\": { \"UNITY_PROJECT_PATH\": \"${workspaceFolder}/Client\" }\n" +
+                       "    }\n  }\n}";
+            Assert.IsTrue(McpClientCatalog.IsConfiguredEntry(
+                Envelope.McpServersStdio, body, "mcpServers"));
+        }
+
+        [Test]
+        public void IsConfiguredEntry_PortableArgsEntry_IsTrue()
+        {
+            // The args-only portable form carries no UNITY_PROJECT_PATH at
+            // all — the server resolves it from its spawn directory.
+            var body = "{\n  \"mcpServers\": {\n    \"unity-open-mcp\": {\n" +
+                       "      \"command\": \"npx\",\n" +
+                       "      \"args\": [\"-y\", \"unity-open-mcp@1.2.3\", " +
+                       "\"--project-from-cwd\", \"--unity-subpath\", \"Client\"],\n" +
+                       "      \"env\": {}\n    }\n  }\n}";
+            Assert.IsTrue(McpClientCatalog.IsConfiguredEntry(
+                Envelope.McpServersStdio, body, "mcpServers"));
+        }
+
+        [Test]
+        public void IsConfiguredEntry_PortableWrapperEntry_IsTrue()
+        {
+            // The wrapper form points at a committed shell script instead of
+            // npx; the server key is still what detection keys on.
+            var body = "{\n  \"mcpServers\": {\n    \"unity-open-mcp\": {\n" +
+                       "      \"command\": \"bash\",\n" +
+                       "      \"args\": [\"scripts/mcp/unity-open-mcp.sh\"]\n" +
+                       "    }\n  }\n}";
+            Assert.IsTrue(McpClientCatalog.IsConfiguredEntry(
+                Envelope.McpServersStdio, body, "mcpServers"));
+        }
+
+        [Test]
         public void IsConfiguredEntry_Codex_TomlTableHeader_IsTrue()
         {
             // Codex writes a full TOML table block; the header is the stable

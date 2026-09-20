@@ -128,6 +128,11 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
       client: parsed.setupClient,
       skipSkill: parsed.skipSkill,
       dryRun: parsed.dryRun,
+      layout: parsed.setupLayout,
+      workspacePath: parsed.workspacePath,
+      unitySubpath: parsed.unitySubpath,
+      portable: parsed.portable,
+      wrapper: parsed.wrapper,
     });
     await emitResult(result, parsed.json);
     return { handled: true, exitCode: result.exitCode };
@@ -161,7 +166,10 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
   // bridge port.
   let stack: RouterStack;
   try {
-    const env = resolveEnv(parsed.projectPath, parsed.port);
+    const env = resolveEnv(parsed.projectPath, parsed.port, {
+      projectFromCwd: parsed.projectFromCwd,
+      unitySubpath: parsed.unitySubpath,
+    });
     logResolve(env.port, env.projectPath, env.authToken);
     stack = buildRouterStack(env);
     // run-tool / verify / baseline / regression can spawn headless Unity via

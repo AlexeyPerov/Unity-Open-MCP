@@ -9,11 +9,12 @@
   },
   "files": [
     "dist/",
+    "templates/",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc && node scripts/copy-skill.mjs",
+    "build": "tsc && node scripts/copy-assets.mjs",
     "build:test": "npm run build && tsc -p tsconfig.test.json",
     "typecheck": "tsc --noEmit",
     "test": "npm run build:test && node --test 'dist-test/**/*.test.js'",

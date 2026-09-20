@@ -28,6 +28,9 @@
 找到 Unity 项目的绝对根目录，即包含 `Assets/`、`Packages/` 和
 `ProjectSettings/` 的目录，并去掉末尾斜杠。
 
+同时确认该根目录是否就是用户 AI 客户端打开的文件夹。如果 Unity 项目是更大仓库
+的子文件夹（`<repo>/Client`），这就是单体仓库 —— 第 2 步请改用可提交配置的命令。
+
 | 客户端 | `--client` | 写入的项目配置 |
 |---|---|---|
 | Cursor | `cursor` | `.cursor/mcp.json` |
@@ -58,8 +61,27 @@ npx -y unity-open-mcp@latest setup \
 - 把内置核心技能逐字节复制到所选客户端路径；
 - 不启动 Unity、不连接 bridge，也不安装领域包。
 
+### 单体仓库：写入可提交的配置
+
+当 Unity 项目是仓库的子文件夹时，请写明布局。这样配置和技能会写到仓库根目录
+（客户端打开的位置），Unity 版本锁定仍写入 Unity 项目，而写入的条目不含任何
+机器路径 —— 团队提交一次即可：
+
+```bash
+npx -y unity-open-mcp@latest setup \
+  --project /absolute/path/to/repo/Client \
+  --client cursor \
+  --layout monorepo --unity-subpath Client
+```
+
+这是单体仓库的首选路径，优于让每位开发者各自修改绝对路径。细节与客户端矩阵见
+[可移植 MCP 配置](portable-config.md)。
+
 选项：`--dry-run` 只报告而不写文件；`--skip-skill` 不修改技能；
-`--json` 输出稳定的机器可读报告；`setup --help` 无需其他必填参数。
+`--json` 输出稳定的机器可读报告；`--layout monorepo --unity-subpath <rel>`
+写入上述可提交形式，`--portable` 让单项目仓库也得到该形式，`--no-portable`
+强制写绝对路径；`--workspace <abs>` 显式指定仓库根目录；`--wrapper` 额外写出
+包装脚本；`setup --help` 无需其他必填参数。
 退出码 `0` 表示成功，`2` 表示项目/客户端用法错误，`1` 表示文件读取、
 JSON 解析或写入失败。
 
@@ -67,7 +89,9 @@ JSON 解析或写入失败。
 
 确认报告包含 `VERSION`、同版本的两个 UPM 锁定、MCP 配置路径与
 `unity-open-mcp@VERSION`，以及一个技能路径和字节数（未指定
-`--skip-skill` 时）。
+`--skip-skill` 时）。单体仓库或使用 `--portable` 时，报告还会给出工作区根目录、
+布局，以及 `Config: portable — safe to commit` 一行。若片段中仍出现绝对路径，
+请如实报告，不要提交。
 
 ## 4）USER ACTION（用户操作）
 

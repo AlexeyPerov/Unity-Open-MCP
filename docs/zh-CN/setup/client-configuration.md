@@ -4,6 +4,9 @@
 
 将 MCP 客户端连接到一个 Unity 项目：找到客户端、复制片段、填入项目路径、保存文件、重启客户端。
 
+本页每个片段都写的是**你自己的**绝对项目路径，因此该文件只适合留在本机。若想为
+整个团队提交一份配置，见[可移植 MCP 配置](portable-config.md)。
+
 ## 按这些步骤做
 
 1. 在[表格](#放在哪里)中找到你的客户端，记下配置文件路径。
@@ -54,6 +57,9 @@ my-game/                    <- AI 客户端在此打开，配置也放在这里
 桥接窗口的 **Configure AI client** 面板会搜索 Unity 项目本身以及最多四层父
 文件夹，因此这种布局会显示 **Configured: yes**，并在 **Found in** 中给出找到
 的文件路径。
+
+放在仓库根目录的配置完全不必写绝对路径 —— 可提交的形式见
+[可移植 MCP 配置](portable-config.md)。
 
 ## 复制这些
 
@@ -146,12 +152,27 @@ claude mcp add unity-open-mcp \
 
 若服务器已注册，当命令、版本锁定或项目路径需要变更时，请先移除再重新添加。
 
+## 项目路径解析
+
+服务器取下列第一个已设置的输入，并将结果规范化为绝对路径：
+
+| 优先级 | 输入 | 结果 |
+|---|---|---|
+| 1 | `--project <path>`（仅 CLI 子命令） | 绝对路径，或相对于工作目录解析 |
+| 2 | `UNITY_PROJECT_PATH` | 绝对路径，或相对于工作目录解析 |
+| 3 | `--project-from-cwd` + 可选 `--unity-subpath <rel>` | 工作目录加上子文件夹 |
+| 4 | 都没有 | 启动报错，并列出以上选项 |
+
+`UNITY_PROJECT_PATH` 优先于 `--project-from-cwd`，因此环境变量仍可覆盖使用参数
+的配置。解析出的路径以及生效的输入会在启动时打到 stderr。第 3、4 项正是让配置
+可以提交到仓库的基础 —— 见[可移植 MCP 配置](portable-config.md)。
+
 ## 可选
 
 | 变量 | 是否必需 | 用途 |
 |---|---|---|
-| `UNITY_PROJECT_PATH` | 是 | Unity 项目根目录的绝对路径。 |
-| `UNITY_OPEN_MCP_BRIDGE_PORT` | 否 | 固定 bridge 端口，而非基于路径发现。 |
+| `UNITY_PROJECT_PATH` | 是，除非传了 `--project-from-cwd` | Unity 项目根目录：绝对路径，或相对于工作目录。 |
+| `UNITY_OPEN_MCP_BRIDGE_PORT` | 否 | 固定 bridge 端口，而非基于路径发现。因机器而异 —— 不要提交。 |
 | `UNITY_PATH` | 否 | 批量回退时显式指定 Unity 可执行文件。 |
 
 启动模态框相关环境变量：[对话框策略](../../dialog-policy.md)。
@@ -163,5 +184,8 @@ claude mcp add unity-open-mcp \
 **本地检出：** 构建 `mcp-server/` 并指向
 `node /absolute/path/to/unity-open-mcp/mcp-server/dist/index.js` — 见
 [开发安装](development-setup.md)。
+
+**团队共享配置：**[可移植 MCP 配置](portable-config.md) 用 `${workspaceFolder}`
+或 `--project-from-cwd` 取代绝对路径，让一份文件对所有人都有效。
 
 配置后的连接问题见 [故障排查](../../troubleshooting.md)。
