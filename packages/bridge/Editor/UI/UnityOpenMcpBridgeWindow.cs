@@ -43,6 +43,10 @@ namespace UnityOpenMcpBridge
         // foldout toggle across window reopens. Absent = no manual choice yet,
         // so the panel auto-expands when the selected client is unconfigured.
         private const string ConfigureClientFoldoutPref = "UOMCB_ConfigureClientFoldout";
+        private const string UpgradeUpmPref = "UOMCB_UpgradeUpm";
+        private const string UpgradeProjectConfigsPref = "UOMCB_UpgradeProjectConfigs";
+        private const string UpgradeHomeConfigsPref = "UOMCB_UpgradeHomeConfigs";
+        private const string UpgradeProsePref = "UOMCB_UpgradeProse";
 
         [MenuItem(MenuPath)]
         public static void Launch()
@@ -146,6 +150,22 @@ namespace UnityOpenMcpBridge
         // the client is not configured.
         [NonSerialized] private string _configureClientFoundPath = "";
 
+        // Explicit check → preview → apply update flow. The preview object is
+        // intentionally in-memory: changing a target/toggle invalidates it,
+        // while the post-apply outcome itself lives in SessionState so a UPM
+        // domain reload can redraw it.
+        [NonSerialized] private bool _upgradeFoldout;
+        [NonSerialized] private bool _upgradeChecking;
+        [NonSerialized] private bool _upgradeApplying;
+        [NonSerialized] private bool _upgradeUpm = true;
+        [NonSerialized] private bool _upgradeProjectConfigs = true;
+        [NonSerialized] private bool _upgradeHomeConfigs = true;
+        [NonSerialized] private bool _upgradeProse = true;
+        [NonSerialized] private string _upgradeTargetVersion = "";
+        [NonSerialized] private string _upgradeMessage = "";
+        [NonSerialized] private MessageType _upgradeMessageType = MessageType.None;
+        [NonSerialized] private UnityOpenMcpBridge.Update.ProjectUpgradeRunner.PlanResult _upgradePlan;
+
         // M29 Plan 3 — prefs migration. Before this plan the enum had 8 values
         // (Status, Tools, Gate, Activity, Batch, Settings, Extensions, Info).
         // Batch and Info were removed; the surviving indices shifted down. An
@@ -215,6 +235,11 @@ namespace UnityOpenMcpBridge
             {
                 _configureClientFoldout = EditorPrefs.GetBool(ConfigureClientFoldoutPref);
             }
+            _upgradeUpm = EditorPrefs.GetBool(UpgradeUpmPref, true);
+            _upgradeProjectConfigs = EditorPrefs.GetBool(UpgradeProjectConfigsPref, true);
+            _upgradeHomeConfigs = EditorPrefs.GetBool(UpgradeHomeConfigsPref, true);
+            _upgradeProse = EditorPrefs.GetBool(UpgradeProsePref, true);
+            _upgradeTargetVersion = UnityOpenMcpBridge.Update.LatestVersionCheck.CachedVersion;
             // EditorApplication.update drives the transient Stop-confirm
             // countdown only — it does NOT repaint every frame (see
             // EditorUpdateTick). Data-change repaints come from the *.Changed

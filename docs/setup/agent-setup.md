@@ -7,6 +7,12 @@ ACTION** handoff.
 Humans: this path is experimental. [Manual setup](manual-setup.md) and [Wizard
 setup](wizard-setup.md) remain available as fallbacks.
 
+If the project is already installed and open in Unity, do not rerun first-time
+setup just to change versions. Use **Tools → Unity Open MCP Bridge → Status →
+Updates**, or preview `unity_open_mcp_upgrade` with its default `dry_run: true`;
+both update the existing package, config, and agent-prose pins as one reviewed
+operation.
+
 ## Hard rules
 
 1. Fetch this procedure fresh, or read it from a local checkout. Do not install

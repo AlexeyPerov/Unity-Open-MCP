@@ -84,6 +84,29 @@ command shapes.
 
 ## Switch a whole project to a release
 
+### Update the open project from the bridge window
+
+For one project that is already open in Unity, choose **Tools → Unity Open MCP
+Bridge → Status → Updates**. Click **Check latest**, review **Preview**, then
+**Apply**. The preview lists every selected project config, home-scoped config,
+agent-facing document/example, and the bridge + verify package step before any
+file changes.
+
+Home-scoped files are updated only when their `UNITY_PROJECT_PATH` (or
+deterministic bridge port) identifies this project and the file does not also
+configure another project. Config and prose files receive a one-time `.bak`
+before their first write. The package step uses one Unity Package Manager
+request for verify and bridge; it is disabled for embedded or `file:`
+development installs so the updater cannot replace a checkout. After applying,
+wait for Unity to reload, restart the MCP/AI client, and run `status` or `ping`.
+
+Agents can preview the identical plan with `unity_open_mcp_upgrade` in the
+`typed-editor` group. `dry_run` defaults to `true`; set it to `false` only after
+the report has been reviewed. A hand-entered `target_version` selects an older
+published release without asking the npm registry for the latest version.
+
+### Update another or multiple projects from a checkout
+
 A project pins the version in more than one place: once per AI client config and
 once per UPM package. From a clone of this repository, one command moves all of
 them together. Preview first:
@@ -124,7 +147,8 @@ Unity so Package Manager re-resolves the two packages. `--dry-run`, `--up`,
 Rewrites are idempotent, so running it twice changes nothing the second time. The
 script only edits config files under the path you pass: a client config in your
 home directory (`~/.cursor/mcp.json`) is a machine-wide surface and stays yours
-to update.
+to update. Use the bridge window for the current open project's safely scoped
+home configs and prose; keep this script for maintainer and multi-project work.
 
 ## Suppress an intentional warning
 

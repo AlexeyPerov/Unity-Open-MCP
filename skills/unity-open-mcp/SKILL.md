@@ -46,6 +46,14 @@ project prose. Move the Bridge and Verify packages together through the bridge
 Updates UI when available, or use the setup/manual package path, then restart
 the MCP client and confirm with `ping` / `status`.
 
+For an already-installed open project, activate `typed-editor` and call
+`unity_open_mcp_upgrade` with its default `dry_run: true`. Review every file and
+skip reason, then repeat with `dry_run: false` only when requested. Home configs
+are rewritten only when their ownership markers belong exclusively to this
+project; embedded/`file:` bridge installs preserve their package pins. The tool
+returns before a possible UPM reload, so poll `bridge_status` and re-ping after
+Unity settles, then remind the operator to restart the MCP client.
+
 ## Tool groups and session visibility
 
 Sessions start with two main groups visible in `ListTools`: `core` and `gate-and-verify`. Every other group is hidden until you activate it (or auto-activates when its Unity package is installed — see below) — this keeps the **250+ tool** surface out of the prompt. Call `unity_open_mcp_manage_tools` to toggle:
@@ -361,6 +369,12 @@ Prefer these over `execute_csharp` for routine workflows — explicit schemas, s
 Workflow: `scene_list_opened` → `scene_get_data` → mutate → `scene_get_dirty_summary` → `scene_save`. Before opening a new scene in Single mode, check `scene_get_dirty_summary` and save first.
 
 **Package Manager** (`paths_hint = ["Packages/manifest.json"]`; don't list packages-lock.json separately; mutating tools are `restart_then_settle` — UPM resolution can domain-reload) — `package_add` (registry id / `name@version` / Git URL / `file:../path` / `.tgz`) / `package_remove` (by name; trailing `@version` stripped; refuses packages depended-on by others). Read-only: `package_list` (`source`/`name_filter`/`direct_dependencies_only`/`include_indirect` filters; `offline: true` default) / `package_search` (`offline: false` hits live registry for exact matches) / `package_get_info` / `package_get_dependencies` (fastest manifest snapshot, no UPM round-trip) / `package_check`.
+
+**Project version pins** — `upgrade` previews/applies coordinated bridge + verify,
+project/home client config, and agent-prose pins. Dry-run defaults true; it is
+gate-free because it changes configuration/package pins rather than project
+assets. Prefer preview → reviewed apply over a chain of individual package and
+filesystem edits.
 
 Workflow: `package_check` → `package_search` if not installed → `package_add` → after settle, `package_get_info` to confirm resolved version.
 

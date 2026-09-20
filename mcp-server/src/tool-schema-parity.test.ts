@@ -230,7 +230,10 @@ test("no tool file inlines the canonical gate enum literal (all use ...GATE_PROP
       ["enforce", "warn", "off"],
       `${tool.name} gate.enum must be the canonical tuple`,
     );
-    assert.equal(gate.default, "enforce", `${tool.name} gate.default must be enforce`);
+    assert.ok(
+      gate.default === "enforce" || gate.default === "off",
+      `${tool.name} gate.default must be enforce or an explicit gate-free off`,
+    );
   }
   // Sanity: a healthy tool tree has many gate-bearing tools.
   assert.ok(gateCount > 100, `expected >100 gate-bearing tools, got ${gateCount}`);

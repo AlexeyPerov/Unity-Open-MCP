@@ -35,7 +35,7 @@ export const batchExecute = makeTool(
     "v1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` " +
     "is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. " +
     "`batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested " +
-    "tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package, " +
+    "tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package / upgrade, " +
     "scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, " +
     "settings_set_player, execute_csharp / invoke_method / execute_menu) is refused up-front with a " +
     "`batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently " +

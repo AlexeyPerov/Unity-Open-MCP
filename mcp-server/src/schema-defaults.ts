@@ -10,7 +10,8 @@
 // run_tests (whose schema default is 60000).
 //
 // To make the schema the single source of truth, the CallTool handler fills in
-// any missing top-level argument whose property declares a scalar `default`
+// any missing top-level argument whose property declares a scalar or array
+// `default`
 // before dispatching. This keeps client-supplied values authoritative and only
 // ever adds missing fields.
 //
@@ -25,7 +26,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 /**
  * The schema of a single input property, as declared in a tool definition.
- * We only consume `default` for scalar types (number/integer/boolean/string).
+ * We consume scalar defaults and clone array defaults before dispatch.
  */
 interface PropertySchema {
   default?: unknown;
@@ -39,10 +40,21 @@ function isScalarDefault(value: unknown): boolean {
   );
 }
 
+function supportedDefault(value: unknown): unknown {
+  if (isScalarDefault(value)) return value;
+  if (Array.isArray(value)) {
+    // Tool schemas are JSON documents, so this safely clones nested array
+    // entries without sharing mutable schema state with the dispatched args.
+    return JSON.parse(JSON.stringify(value)) as unknown[];
+  }
+  return undefined;
+}
+
 /**
- * Returns a copy of `args` with missing top-level scalar defaults filled in
- * from the given tool's input schema. Object/array defaults are ignored (they
- * require deep merge and no tool currently uses them).
+ * Returns a copy of `args` with missing top-level scalar and array defaults
+ * filled in from the given tool's input schema. Arrays are cloned so callers
+ * cannot mutate the schema. Object defaults remain unsupported because their
+ * merge semantics are ambiguous.
  *
  * The original `args` object is never mutated. Existing caller-supplied values
  * are preserved verbatim, including `undefined`/`null`.
@@ -59,8 +71,8 @@ export function withSchemaDefaults(
   const out: Record<string, unknown> = { ...args };
   for (const [key, schema] of Object.entries(properties)) {
     if (key in out) continue;
-    const def = schema?.default;
-    if (isScalarDefault(def)) out[key] = def;
+    const def = supportedDefault(schema?.default);
+    if (def !== undefined) out[key] = def;
   }
   return out;
 }
@@ -89,4 +101,3 @@ export function missingRequiredArgs(
   }
   return missing;
 }
-

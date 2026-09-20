@@ -124,6 +124,12 @@ export const TOOL_LIFECYCLE: Record<string, ToolLifecycle> = {
       "Rewrites Packages/manifest.json + triggers UPM resolution which can " +
       "force a domain reload.",
   },
+  "unity_open_mcp_upgrade": {
+    class: "compile-reload",
+    note:
+      "Applying a Git-installed bridge + verify update rewrites Packages/manifest.json " +
+      "through UPM and can force a domain reload. Dry-run calls do not mutate or reload.",
+  },
   "unity_open_mcp_reimport_package": {
     class: "compile-reload",
     note:

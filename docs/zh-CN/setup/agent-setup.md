@@ -8,6 +8,11 @@
 对人类用户而言，此路径仍是实验性的；也可使用[手动安装](manual-setup.md)
 或[安装向导](wizard-setup.md)。
 
+如果项目已安装并在 Unity 中打开，不要仅为切换版本而重新运行首次安装。
+请使用 **Tools → Unity Open MCP Bridge → Status → Updates**，或先以默认的
+`dry_run: true` 预览 `unity_open_mcp_upgrade`；两者都会在审核计划后统一更新
+包、配置与智能体文档中的版本锁定。
+
 ## 硬性规则
 
 1. 每次重新获取本流程，或从本地检出读取；不要靠记忆中的片段安装。

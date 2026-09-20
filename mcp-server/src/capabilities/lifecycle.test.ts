@@ -71,6 +71,7 @@ test("lifecycleFor: compile-reload tools — script/asmdef/package/menu/compile_
     "unity_open_mcp_scene_open",
     "unity_open_mcp_package_add",
     "unity_open_mcp_package_remove",
+    "unity_open_mcp_upgrade",
     "unity_open_mcp_compile_check",
   ];
   for (const name of compileReload) {

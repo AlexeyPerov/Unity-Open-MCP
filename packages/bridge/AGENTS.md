@@ -146,6 +146,11 @@ fd-bearing resource in `AssemblyReloadEvents.beforeAssemblyReload` (the
 
 ## UI
 
+- Project update code lives under `Editor/Update/`: scanner and ownership scope
+  stay pure/testable; `ProjectUpgradeRunner` writes config/prose backups before
+  scheduling one verify-first `Client.AddAndRemove` request. Never re-pin a
+  non-Git bridge install, and never rewrite an unowned/shared home config.
+
 - Single EditorWindow with peer tabs; new surfaces are tab sections. Tab enum
   changes update `MigrateSelectedTab` + `BridgeWindowTabIaContractTests`.
 - Tooltip (`GUIContent`) for: mutability/read-only, gate mode/run fields,

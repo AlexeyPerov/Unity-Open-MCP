@@ -518,6 +518,22 @@ already in flight, fall back to `assets_refresh` / `reimport_package` when Unity
 judged sources unchanged). The recompile is project-wide; `paths_hint` exists
 only to give the gate a scoped hint (the edited scripts).
 
+### `unity_open_mcp_upgrade`
+
+Plans or applies the same single-project update shown in the bridge window's
+**Status → Updates** section. It lives in the `typed-editor` group and defaults
+to `dry_run: true`. `target_version` accepts a plain `X.Y.Z`; when omitted, the
+explicit tool call queries the latest npm release. Category flags independently
+select UPM, project configs, home configs, and agent-facing prose.
+
+The preview reports each file, pins found, intended action, and skip reason.
+Home-scoped entries that belong to another project, have no ownership marker,
+or share a file with another project are skipped. Apply writes one-time `.bak`
+files for configs/prose, then schedules one atomic verify + bridge UPM request
+and returns before a possible domain reload. Embedded and `file:` bridge installs
+never have their packages replaced; their selected config/prose updates remain
+available. Restart MCP clients after apply so they reload their configuration.
+
 ### `unity_open_mcp_execute_csharp`
 
 The snippet is compiled into its **own** assembly (`UnityOpenMcpSnippet`), so it

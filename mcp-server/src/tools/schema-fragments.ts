@@ -56,6 +56,16 @@ export const GATE_PROP = {
 };
 
 /**
+ * Gate selector for the rare mutator whose bridge contract is explicitly
+ * gate-free because it writes external configuration/package pins rather than
+ * Unity assets. Keep the enum canonical while advertising the bridge default.
+ */
+export const GATE_OFF_PROP = {
+  enum: ["enforce", "warn", "off"] as ["enforce", "warn", "off"],
+  default: "off" as const,
+};
+
+/**
  * The base `paths_hint` property: array-of-string with NO description. Almost
  * every tool that declares `paths_hint` adds a per-tool description specific
  * to its mutation scope ("Mutation scope — the .anim asset path", etc.).

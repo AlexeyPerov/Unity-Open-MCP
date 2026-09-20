@@ -187,7 +187,7 @@ function s0Status(toolName, s0) {
 // 5. Ownership map — which suite owns each tool, and the strict owner.
 //
 // This encodes the design from the plan: S0 reachability for all; S1 strict
-// for live mutating/read tools S0 only tolerates + the 7 absent tools; S2 for
+// for live mutating/read tools S0 only tolerates + the 8 absent tools; S2 for
 // batch/offline; S3 transport; S4 extensions; S5 package/hub/destructive; S6
 // for flow-level tools (batch_execute, generate_skill).
 // ---------------------------------------------------------------------------
@@ -198,6 +198,7 @@ const S1_ABSENT_TOOLS = new Set([
   "unity_open_mcp_prefab_apply", "unity_open_mcp_prefab_revert", "unity_open_mcp_prefab_unpack",
   "unity_open_mcp_settings_set_player", "unity_open_mcp_settings_set_lighting",
   "unity_open_mcp_audio_mixer_set_parameter",
+  "unity_open_mcp_upgrade",
 ]);
 
 // S0 tolerate steps that S1 re-tests strict (or documents wont-fix).

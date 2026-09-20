@@ -9,6 +9,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { withSchemaDefaults, missingRequiredArgs } from "./schema-defaults.js";
 import { runTests } from "./tools/run-tests.js";
 import { regressionCheck } from "./tools/regression-check.js";
+import { upgrade } from "./tools/upgrade.js";
 
 function toolWith(properties: Record<string, Record<string, unknown>>): Tool {
   return {
@@ -63,15 +64,17 @@ test("withSchemaDefaults: applies multiple scalar defaults", () => {
   assert.equal(out.label, "x");
 });
 
-test("withSchemaDefaults: ignores object/array defaults (no deep merge)", () => {
+test("withSchemaDefaults: clones array defaults and ignores object defaults", () => {
+  const listDefault = [1, 2];
   const tool = toolWith({
     opts: { type: "object", default: { a: 1 } },
-    list: { type: "array", default: [1, 2] },
+    list: { type: "array", default: listDefault },
     timeout_ms: { type: "integer", default: 60000 },
   });
   const out = withSchemaDefaults(tool, {});
   assert.ok(!("opts" in out), "object default must not be injected");
-  assert.ok(!("list" in out), "array default must not be injected");
+  assert.deepEqual(out.list, [1, 2]);
+  assert.notEqual(out.list, listDefault);
   assert.equal(out.timeout_ms, 60000);
 });
 
@@ -102,6 +105,12 @@ test("withSchemaDefaults: run_tests schema default is 60000", () => {
     60000,
     "run_tests must default to 60s — the documented value that previously never reached the bridge",
   );
+});
+
+test("withSchemaDefaults: upgrade materializes its gate-free audit scope", () => {
+  const out = withSchemaDefaults(upgrade, {});
+  assert.deepEqual(out.paths_hint, ["Packages/manifest.json"]);
+  assert.equal(out.gate, "off");
 });
 
 // ---------------------------------------------------------------------------
@@ -160,4 +169,3 @@ test("M15: regression_check without baseline_path is flagged (was spawned as --b
     [],
   );
 });
-

@@ -10675,65 +10675,65 @@
     }
   },
   "unity_open_mcp_batch_execute": {
-    "description": "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — cuts agent↔Unity latency and token cost for multi-object setup (e.g. spawn N cubes + create materials + assign in one call). Each entry in `commands` carries a full tool id (`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group (always visible). Live-only — NOT headless `batchCapable`; there is no batch spawn fallback when the bridge is down.\n\nNOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". The two are independent axes; nestability is decided by the pre-flight refusals below.\n\nSafety: the WHOLE batch shares ONE gate cycle (one checkpoint → all steps → one validate/delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step errors are collected. Partial failure semantics: a successful step is NOT rolled back when a later step fails (same as Coplay). A partial batch (at least one step committed) propagates `mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its validate/delta on the committed work and waits for the asset/compile settle, but marks the run `outcome: failed` so the agent reads `batch.results[]` for the per-step breakdown and undoes with a single `editor_undo` if needed. A total failure (no step committed) skips the validate/delta as before. Run `unity_open_mcp_validate_edit` on the touched paths to confirm health after a partial run.\n\nv1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. `batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package, scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, settings_set_player, execute_csharp / invoke_method / execute_menu) is refused up-front with a `batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its default Single mode replaces the active scene stack and can discard unsaved changes in open scenes). Use those tools as single top-level calls instead.\n\nA step whose terminal result is produced by the SERVER rather than by the Editor dispatch is refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns `{status:\"started\", runId}` immediately and the server polls a results file to turn that into a real result, which only happens on the top-level route. Inside a batch nothing polls, so the step would be recorded `success` carrying the non-terminal \"started\" body and the run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
+    "description": "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — cuts agent↔Unity latency and token cost for multi-object setup (e.g. spawn N cubes + create materials + assign in one call). Each entry in `commands` carries a full tool id (`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group (always visible). Live-only — NOT headless `batchCapable`; there is no batch spawn fallback when the bridge is down.\n\nNOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". The two are independent axes; nestability is decided by the pre-flight refusals below.\n\nSafety: the WHOLE batch shares ONE gate cycle (one checkpoint → all steps → one validate/delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step errors are collected. Partial failure semantics: a successful step is NOT rolled back when a later step fails (same as Coplay). A partial batch (at least one step committed) propagates `mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its validate/delta on the committed work and waits for the asset/compile settle, but marks the run `outcome: failed` so the agent reads `batch.results[]` for the per-step breakdown and undoes with a single `editor_undo` if needed. A total failure (no step committed) skips the validate/delta as before. Run `unity_open_mcp_validate_edit` on the touched paths to confirm health after a partial run.\n\nv1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. `batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package / upgrade, scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, settings_set_player, execute_csharp / invoke_method / execute_menu) is refused up-front with a `batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its default Single mode replaces the active scene stack and can discard unsaved changes in open scenes). Use those tools as single top-level calls instead.\n\nA step whose terminal result is produced by the SERVER rather than by the Editor dispatch is refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns `{status:\"started\", runId}` immediately and the server polls a results file to turn that into a real result, which only happens on the top-level route. Inside a batch nothing polls, so the step would be recorded `success` carrying the non-terminal \"started\" body and the run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
     "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "commands": {
-          "description": "Ordered list of tool calls to run sequentially. Default cap 25, hard max 100 (`batchExecuteMaxCommands`).",
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "params": {
-                "description": "The tool's input object (its normal `args`). Omit the outer `paths_hint` / `gate` — the batch supplies those for the whole sequence.",
-                "type": "object"
-              },
-              "tool": {
-                "description": "Full MCP tool id (`unity_open_mcp_gameobject_create`, etc.). Must be a live-bridge typed tool; not `batch_execute`, `compile_check`, or a meta-tool.",
-                "type": "string"
-              }
-            },
-            "required": [
-              "tool",
-              "params"
-            ],
-            "type": "object"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
-        "fail_fast": {
-          "default": true,
-          "description": "Stop on the first step failure and mark later entries `skipped` (default true). Set false to run every step and collect per-step errors.",
-          "type": "boolean"
-        },
-        "gate": {
-          "default": "enforce",
-          "description": "Gate mode applied to the WHOLE batch (one checkpoint → N steps → one validate/delta). Default `enforce`.",
-          "enum": [
-            "enforce",
-            "warn",
-            "off"
-          ]
-        },
-        "parallel": {
-          "default": false,
-          "description": "Accepted but ignored in v1 — Unity's API is main-thread, so execution is always sequential. The flag is kept for source compatibility with Coplay agents.",
-          "type": "boolean"
-        },
-        "paths_hint": {
-          "description": "Mutation scope for the whole batch — the union of all paths the nested commands may touch (scene paths, asset paths). Required when any nested command is mutating.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
+      "type": "object",
       "required": [
         "commands",
         "paths_hint"
       ],
-      "type": "object"
+      "properties": {
+        "commands": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "tool",
+              "params"
+            ],
+            "properties": {
+              "tool": {
+                "type": "string",
+                "description": "Full MCP tool id (`unity_open_mcp_gameobject_create`, etc.). Must be a live-bridge typed tool; not `batch_execute`, `compile_check`, or a meta-tool."
+              },
+              "params": {
+                "type": "object",
+                "description": "The tool's input object (its normal `args`). Omit the outer `paths_hint` / `gate` — the batch supplies those for the whole sequence."
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Ordered list of tool calls to run sequentially. Default cap 25, hard max 100 (`batchExecuteMaxCommands`)."
+        },
+        "fail_fast": {
+          "type": "boolean",
+          "default": true,
+          "description": "Stop on the first step failure and mark later entries `skipped` (default true). Set false to run every step and collect per-step errors."
+        },
+        "gate": {
+          "enum": [
+            "enforce",
+            "warn",
+            "off"
+          ],
+          "default": "enforce",
+          "description": "Gate mode applied to the WHOLE batch (one checkpoint → N steps → one validate/delta). Default `enforce`."
+        },
+        "paths_hint": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Mutation scope for the whole batch — the union of all paths the nested commands may touch (scene paths, asset paths). Required when any nested command is mutating."
+        },
+        "parallel": {
+          "type": "boolean",
+          "default": false,
+          "description": "Accepted but ignored in v1 — Unity's API is main-thread, so execution is always sequential. The flag is kept for source compatibility with Coplay agents."
+        }
+      },
+      "additionalProperties": false
     }
   },
   "unity_open_mcp_restart_editor": {
@@ -11097,6 +11097,64 @@
           "minimum": 1,
           "maximum": 100,
           "description": "Number of OnMouseDrag calls between from and to (action: drag). Capped at 100 to bound main-thread cost. Default 8."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "unity_open_mcp_upgrade": {
+    "description": "Preview or apply a coordinated update of the open Unity project to one trio version. Scans project and home-scoped MCP client configs, agent-facing prose/examples, and the bridge + verify UPM pins. Home configs are rewritten only when their UNITY_PROJECT_PATH belongs exclusively to the open project. `dry_run` defaults true and returns the exact per-file report without writing. With `dry_run:false`, config/prose files receive one-time `.bak` backups before rewriting; a Git-installed bridge and verify pair are then re-pinned atomically through Unity Package Manager, which may reload the Editor. Embedded/file bridge installs are preserved and reported while selected config/prose updates remain available. Omit `target_version` to resolve the latest published npm version explicitly for this call.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "target_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Target trio version (X.Y.Z). Omit to query the latest npm release."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "default": true,
+          "description": "Preview only by default. Set false to write selected files and schedule UPM."
+        },
+        "update_upm": {
+          "type": "boolean",
+          "default": true,
+          "description": "Update the bridge + verify Git packages atomically when the bridge source is Git."
+        },
+        "update_project_configs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Update MCP client configs found in this project or its repository ancestors."
+        },
+        "update_home_configs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Update home-scoped configs only when the entry belongs exclusively to this project."
+        },
+        "update_prose": {
+          "type": "boolean",
+          "default": true,
+          "description": "Update allowlisted agent prose, installed core skills, and MCP config examples."
+        },
+        "paths_hint": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "Packages/manifest.json"
+          ],
+          "description": "Audit scope materialized automatically. The gate is off because this workflow mutates package/configuration pins rather than Unity assets; packages-lock.json is implicit."
+        },
+        "gate": {
+          "enum": [
+            "enforce",
+            "warn",
+            "off"
+          ],
+          "default": "off",
+          "description": "Defaults off: project-asset validation does not model external configs or UPM pins."
         }
       },
       "additionalProperties": false

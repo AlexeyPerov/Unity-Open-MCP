@@ -33,7 +33,7 @@
 // project + bridge running. Pass --project as an ABSOLUTE path.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
 import {
@@ -74,6 +74,7 @@ const MAIN_SCENE_HINT = [MAIN_SCENE_PATH];
 const DEMO_PREFAB = "Assets/Prefabs/GateTestCube.prefab";
 const DEMO_MATERIAL = "Assets/Materials/TestMaterial.mat";
 const DEMO_FIXTURE_MISSING = "Assets/Fixtures/MissingScriptFixture.prefab";
+const TRIO_VERSION = JSON.parse(readFileSync(`${REPO_ROOT}/version.json`, "utf8")).version;
 
 function printHelp() {
   console.error(`Usage: node scripts/mcp-behavior.mjs [options]
@@ -109,6 +110,17 @@ function buildSuite() {
   // =====================================================================
   s("ping", "A", "unity_open_mcp_ping");
   s("editor_status", "A", "unity_open_mcp_editor_status");
+  // Project update is destructive only when dry_run:false. S1 owns the strict
+  // preview path against the embedded demo: it must report the non-Git UPM
+  // guard and perform no writes.
+  s("upgrade_dry_run", "A", "unity_open_mcp_upgrade", {
+    target_version: TRIO_VERSION,
+    dry_run: true,
+    update_upm: true,
+    update_project_configs: true,
+    update_home_configs: false,
+    update_prose: true,
+  });
 
   // checkpoint_create → mutating step → delta with returned id (strict chain).
   s("checkpoint_create", "A", "unity_open_mcp_checkpoint_create", { label: "bt-checkpoint" }, {

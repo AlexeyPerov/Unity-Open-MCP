@@ -43,6 +43,9 @@ lists them and `--up 2` includes them.
 Markdown and other prose are deliberately left alone, and the script never
 touches `$HOME`-scoped client configs. See
 [Version compatibility](../docs/versioning.md#switch-a-whole-project-to-a-release).
+This remains the maintainer/multi-project path. For the single project currently
+open in Unity, the bridge window's **Status → Updates** flow also handles safely
+owned home configs and allowlisted agent prose before an atomic UPM update.
 
 ## MCP test suites
 

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge.Config;
+using UnityOpenMcpBridge.Update;
 using UnityOpenMcpBridge.UI.Controls;
 using UnityOpenMcpVerify.Cache;
 
@@ -104,6 +105,10 @@ namespace UnityOpenMcpBridge
             BridgeGUIUtilities.HorizontalLine(8, 6);
 
             DrawConfigureClientSection();
+
+            BridgeGUIUtilities.HorizontalLine(8, 6);
+
+            DrawUpdatesSection();
 
             BridgeGUIUtilities.HorizontalLine(8, 6);
 
@@ -491,6 +496,149 @@ namespace UnityOpenMcpBridge
             }
 
             EditorGUI.indentLevel--;
+        }
+
+        // ---------- Project updates ----------
+
+        private void DrawUpdatesSection()
+        {
+            _upgradeFoldout = EditorGUILayout.Foldout(_upgradeFoldout, "Updates", true);
+            if (!_upgradeFoldout) return;
+
+            EditorGUI.indentLevel++;
+            EditorGUILayout.HelpBox(
+                "Check a published trio version, preview every pin owned by this project, then apply it. " +
+                "No network request or file write happens until you click the corresponding button.",
+                MessageType.None);
+
+            EditorGUILayout.LabelField("Running bridge", BridgeSession.BridgeVersion ?? "(unknown)");
+            EditorGUILayout.LabelField("Latest published",
+                string.IsNullOrEmpty(LatestVersionCheck.CachedVersion)
+                    ? "(not checked)" : LatestVersionCheck.CachedVersion);
+
+            EditorGUI.BeginDisabledGroup(_upgradeChecking || _upgradeApplying);
+            if (GUILayout.Button(_upgradeChecking ? "Checking…" : "Check latest", GUILayout.Width(130)))
+                _ = RunLatestVersionCheckAsync();
+            EditorGUI.EndDisabledGroup();
+
+            EditorGUI.BeginChangeCheck();
+            _upgradeTargetVersion = EditorGUILayout.TextField("Target version", _upgradeTargetVersion ?? "");
+            _upgradeUpm = EditorGUILayout.ToggleLeft("Unity packages (bridge + verify)", _upgradeUpm);
+            _upgradeProjectConfigs = EditorGUILayout.ToggleLeft("Project client configs", _upgradeProjectConfigs);
+            _upgradeHomeConfigs = EditorGUILayout.ToggleLeft("Home client configs", _upgradeHomeConfigs);
+            _upgradeProse = EditorGUILayout.ToggleLeft("Agent-facing prose and examples", _upgradeProse);
+            if (EditorGUI.EndChangeCheck())
+            {
+                _upgradePlan = null;
+                EditorPrefs.SetBool(UpgradeUpmPref, _upgradeUpm);
+                EditorPrefs.SetBool(UpgradeProjectConfigsPref, _upgradeProjectConfigs);
+                EditorPrefs.SetBool(UpgradeHomeConfigsPref, _upgradeHomeConfigs);
+                EditorPrefs.SetBool(UpgradeProsePref, _upgradeProse);
+            }
+
+            EditorGUILayout.BeginHorizontal();
+            var validTarget = VersionPinRewriter.IsVersion(
+                VersionPinRewriter.NormalizeVersion(_upgradeTargetVersion));
+            EditorGUI.BeginDisabledGroup(_upgradeChecking || _upgradeApplying || !validTarget
+                || string.IsNullOrEmpty(BridgeSession.ProjectPath));
+            if (GUILayout.Button("Preview", GUILayout.Width(110))) PreviewUpgrade();
+            EditorGUI.EndDisabledGroup();
+
+            EditorGUI.BeginDisabledGroup(_upgradeChecking || _upgradeApplying || _upgradePlan == null);
+            if (GUILayout.Button(_upgradeApplying ? "Applying…" : "Apply…", GUILayout.Width(110)))
+                _ = ConfirmAndApplyUpgradeAsync();
+            EditorGUI.EndDisabledGroup();
+            EditorGUILayout.EndHorizontal();
+
+            if (!validTarget && !string.IsNullOrEmpty(_upgradeTargetVersion))
+                EditorGUILayout.HelpBox("Target version must be a plain X.Y.Z.", MessageType.Warning);
+
+            if (_upgradePlan != null)
+            {
+                EditorGUILayout.LabelField("Preview", EditorStyles.miniBoldLabel);
+                EditorGUILayout.SelectableLabel(
+                    ProjectUpgradeRunner.FormatReport(_upgradePlan), EditorStyles.textArea,
+                    GUILayout.MinHeight(100));
+            }
+
+            var persisted = ProjectUpgradeRunner.LastReport;
+            if (!string.IsNullOrEmpty(persisted))
+                EditorGUILayout.HelpBox(persisted, MessageType.Info);
+            if (!string.IsNullOrEmpty(_upgradeMessage))
+                EditorGUILayout.HelpBox(_upgradeMessage, _upgradeMessageType);
+
+            EditorGUI.indentLevel--;
+        }
+
+        private async Task RunLatestVersionCheckAsync()
+        {
+            _upgradeChecking = true;
+            _upgradeMessage = "";
+            Repaint();
+            var result = await LatestVersionCheck.CheckAsync();
+            _upgradeChecking = false;
+            LatestVersionCheck.Remember(result);
+            if (result.Success)
+            {
+                _upgradeTargetVersion = result.Version;
+                _upgradePlan = null;
+                _upgradeMessage = "Latest published trio version: " + result.Version;
+                _upgradeMessageType = MessageType.Info;
+            }
+            else
+            {
+                _upgradeMessage = result.Error;
+                _upgradeMessageType = MessageType.Warning;
+            }
+            Repaint();
+        }
+
+        private void PreviewUpgrade()
+        {
+            var options = new ProjectUpgradeRunner.Options(
+                _upgradeUpm, _upgradeProjectConfigs, _upgradeHomeConfigs, _upgradeProse);
+            _upgradePlan = ProjectUpgradeRunner.Plan(
+                BridgeSession.ProjectPath,
+                VersionPinRewriter.NormalizeVersion(_upgradeTargetVersion),
+                options);
+            _upgradeMessage = string.IsNullOrEmpty(_upgradePlan.Error)
+                ? "Preview ready. Review every update and skip reason before applying."
+                : _upgradePlan.Error;
+            _upgradeMessageType = string.IsNullOrEmpty(_upgradePlan.Error)
+                ? MessageType.Info : MessageType.Error;
+        }
+
+        private async Task ConfirmAndApplyUpgradeAsync()
+        {
+            if (_upgradePlan == null) return;
+            var report = ProjectUpgradeRunner.FormatReport(_upgradePlan);
+            if (!EditorUtility.DisplayDialog(
+                    "Apply project update",
+                    report + "\n\nBackups are written as <file>.bak before the first write. Continue?",
+                    "Apply", "Cancel"))
+                return;
+
+            _upgradeApplying = true;
+            _upgradeMessage = "";
+            Repaint();
+            if (_upgradePlan.UpmEnabled)
+            {
+                var tag = await LatestVersionCheck.ConfirmBridgeTagAsync(_upgradePlan.TargetVersion);
+                if (!tag.Success)
+                {
+                    _upgradeApplying = false;
+                    _upgradeMessage = tag.Error;
+                    _upgradeMessageType = MessageType.Error;
+                    Repaint();
+                    return;
+                }
+            }
+            var result = ProjectUpgradeRunner.Apply(_upgradePlan);
+            _upgradeApplying = false;
+            _upgradeMessage = result.Message;
+            _upgradeMessageType = result.Success ? MessageType.Info : MessageType.Error;
+            _upgradePlan = null;
+            Repaint();
         }
 
         // ---------- Configure AI client (M27 Plan 5) ----------
