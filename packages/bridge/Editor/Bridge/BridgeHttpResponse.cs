@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace UnityOpenMcpBridge
@@ -11,6 +12,9 @@ namespace UnityOpenMcpBridge
 
     internal static class BridgeHttpResponse
     {
+        private sealed class ResponseState { internal bool Sent; }
+        private static readonly ConditionalWeakTable<HttpListenerContext, ResponseState> States = new ConditionalWeakTable<HttpListenerContext, ResponseState>();
+
         internal static void SendToolNotFound(HttpListenerContext context, string toolName)
         {
             var json = $"{{\"error\":{{\"code\":\"tool_not_found\",\"message\":\"Unknown tool: {BridgeJson.EscapeStringContent(toolName)}\"}}}}";
@@ -31,11 +35,32 @@ namespace UnityOpenMcpBridge
 
         internal static void SendJson(HttpListenerContext context, int statusCode, string json)
         {
-            var bytes = Encoding.UTF8.GetBytes(json);
-            context.Response.StatusCode = statusCode;
-            context.Response.ContentType = "application/json; charset=utf-8";
-            context.Response.ContentLength64 = bytes.Length;
-            context.Response.OutputStream.Write(bytes, 0, bytes.Length);
+            var state = States.GetValue(context, _ => new ResponseState());
+            lock (state)
+            {
+                if (state.Sent) return;
+                // Build and validate the entire body before committing any headers.
+                if (!BridgeJson.IsCompleteJson(json))
+                {
+                    statusCode = 500;
+                    json = "{\"error\":{\"code\":\"invalid_response_json\",\"message\":\"Tool produced invalid JSON.\"}}";
+                }
+                var bytes = Encoding.UTF8.GetBytes(json);
+                state.Sent = true; // a failed/partial write must never append a second envelope
+                try
+                {
+                    context.Response.StatusCode = statusCode;
+                    context.Response.ContentType = "application/json; charset=utf-8";
+                    context.Response.KeepAlive = false;
+                    var requestId = context.Request.Headers["X-Request-Id"];
+                    if (!string.IsNullOrEmpty(requestId) && requestId.Length <= 128)
+                        context.Response.Headers["X-Request-Id"] = requestId;
+                    context.Response.ContentLength64 = bytes.Length;
+                    context.Response.OutputStream.Write(bytes, 0, bytes.Length);
+                    context.Response.Close();
+                }
+                catch { try { context.Response.Abort(); } catch { } }
+            }
         }
     }
 }

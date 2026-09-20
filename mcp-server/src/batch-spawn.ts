@@ -1,3 +1,4 @@
+import { detectStaleAssembly } from "./unity-log.js";
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { stat } from "node:fs/promises";
@@ -21,6 +22,7 @@ const OUTPUT_BEGIN = VERIFY_JSON_BEGIN;
 const OUTPUT_END = VERIFY_JSON_END;
 
 const DEFAULT_BATCH_TIMEOUT_MS = 600_000;
+const activeBatchProjects = new Set<string>();
 
 const VERIFY_TOOL_TO_OPERATION: Record<string, string> = {
   unity_open_mcp_scan_all: "scan_all",
@@ -467,7 +469,7 @@ export function buildUnityBatchArgs(
   executeMethod: string,
   toolArgs: string[],
 ): string[] {
-  const unityArgs = ["-batchmode"];
+  const unityArgs = ["-batchmode", "-logFile", "-"];
   // compile_check is asynchronous: BridgeBatchEntry.Run() returns immediately
   // and CompileCheckState emits markers later from EditorApplication.update.
   // -quit would exit as soon as Run() returns (exit 0, no markers).
@@ -609,6 +611,10 @@ export class BatchSpawn implements Router {
     if (this.projectPath) {
       try {
         const lock = readInstanceLock(this.projectPath);
+        if (lock && classifyInstance(lock) === "reloading") {
+          return makeErrorResult({ code: "editor_reloading", message: "The live Editor is compiling or reloading.",
+            detail: { error: { code: "editor_reloading", message: "The live Editor owns the project; no headless spawn was attempted." }, retryAfterMs: 1000 } });
+        }
         if (lock && lock.pid && isPidAlive(lock.pid)) {
           // feedback 2026-08-17 — parameterize by the invoked tool and split
           // "live bridge should be up" from "Editor holds the lock but its
@@ -641,6 +647,15 @@ export class BatchSpawn implements Router {
         // Unreadable lock → fall through to the normal spawn path (its
         // classification already handles the project-locked case reactively).
       }
+    }
+
+    // Cold Safe Mode/boot can own the project before a bridge lock exists.
+    const running = this.projectPath ? findUnityForProject(this.projectPath) : null;
+    if (running) {
+      const diagnosis = diagnoseEditorLock(this.projectPath);
+      const message = editorLockedMessage(toolName, diagnosis);
+      return makeErrorResult({ code: "editor_instance_locked", message,
+        detail: { error: { code: "editor_instance_locked", message }, agentNextSteps: editorLockedNextSteps(toolName, diagnosis) } });
     }
 
     const pathError = await this.validateUnityPath();
@@ -787,10 +802,19 @@ export class BatchSpawn implements Router {
         toolArgs,
       );
 
-      console.error(
-        `[unity-open-mcp] Batch spawn: ${this.unityPath} ${unityArgs.join(" ")}`,
-      );
-
+      // Re-check after asynchronous executable discovery, immediately before spawn.
+      const owner = readInstanceLock(this.projectPath);
+      if ((owner && isPidAlive(owner.pid)) || findUnityForProject(this.projectPath)) {
+        reject(new BatchClassificationError("editor_instance_locked", "A live Editor owns this project; no headless spawn was attempted."));
+        return;
+      }
+      if (activeBatchProjects.has(this.projectPath)) {
+        reject(new BatchClassificationError("batch_in_progress", "A headless operation already owns this project. Wait for it to finish."));
+        return;
+      }
+      activeBatchProjects.add(this.projectPath);
+      console.error(`[unity-open-mcp] Batch spawn: ${this.unityPath} ${unityArgs.join(" ")}`);
+      const beforeAssembly = detectStaleAssembly(this.projectPath).dllMtimeMs;
       const startTime = Date.now();
       // M13 — bounded, UTF-8-correct accumulators (see BoundedTextAccumulator).
       const stdoutAcc = new BoundedTextAccumulator();
@@ -845,6 +869,8 @@ export class BatchSpawn implements Router {
       });
 
       child.on("error", (err) => {
+        // Retain the lease until close; releasing here could let this child's
+        // later close event erase a replacement child's lease.
         clearTimers();
         reject(new BatchClassificationError(
           "unity_spawn_refused",
@@ -854,6 +880,7 @@ export class BatchSpawn implements Router {
       });
 
       child.on("close", (code) => {
+        activeBatchProjects.delete(this.projectPath);
         clearTimers();
         const elapsedMs = Date.now() - startTime;
         const exitCode = code ?? 1;
@@ -876,12 +903,12 @@ export class BatchSpawn implements Router {
           // opaque "no markers" message.
           const combined = `${stdout}\n${stderr}`;
           const csErrors = extractCompilerErrors(combined);
-          const tail = stderr.trim().slice(-500) || stdout.trim().slice(-500);
+          const tail = combined.trim().slice(-4096);
           if (csErrors.length > 0) {
-            reject(new Error(
-              `Batch output did not contain JSON markers (exit ${exitCode}). ` +
-                `The bridge assembly likely failed to compile:\n` +
-                csErrors.join("\n"),
+            reject(new BatchClassificationError(
+              "compile_failed",
+              `C# compilation failed before the batch entry point (exit ${exitCode}).\n` + csErrors.join("\n") + `\nLast output: ${tail}`,
+              ["Fix the reported compiler diagnostics, then re-run compile_check."],
             ));
             return;
           }
@@ -921,7 +948,7 @@ export class BatchSpawn implements Router {
               "project_load_failed",
               `Batch Unity exited at package/project resolution (exit ${exitCode}) ` +
                 `without running the batch entry point, so no compile took place. ` +
-                `The project failed to load — this is NOT a C# compile error.${pkgPart} ` +
+                `The project failed to load — this is NOT a C# compile error.${pkgPart} Last output: ${tail} ` +
                 `Check Packages/manifest.json for unresolvable dependencies and call ` +
                 `unity_open_mcp_read_compile_errors to see the Package Manager notice.`,
               [
@@ -942,17 +969,26 @@ export class BatchSpawn implements Router {
             ));
             return;
           }
-          // Final generic fallback. Two cases reach here with no markers:
-          //   - exit 0: Unity exited cleanly (likely a healthy compile) but
-          //     emitted no markers — the async finalize path (BridgeBatchEntry
-          //     → EditorApplication.update) did not fire. feedback 2026-08-15
-          //     recurrence: this used to surface as the generic
-          //     batch_spawn_failed code, so agents (and MCP hosts keying on
-          //     isError) read a healthy compile as a spawn failure. It now
-          //     carries the distinct `markers_missing` code with the
-          //     confirm-via-read_compile_errors guidance.
-          //   - non-zero: an unclassified spawn failure (stays
-          //     batch_spawn_failed).
+          // Exit zero is only a process result. Certify a missing compile report
+          // using this child's completion log plus newly produced assemblies;
+          // otherwise preserve uncertainty rather than guessing success.
+          if (exitCode === 0 && operation === "compile_check") {
+            const after = detectStaleAssembly(this.projectPath);
+            const advanced = after.dllMtimeMs !== undefined && after.dllMtimeMs > (beforeAssembly ?? 0)
+              && after.dllMtimeMs >= startTime && !after.staleAssembly;
+            const completed = /(?:Compilation succeeded|compilation finished successfully|Scripts have been recompiled)/i.test(combined);
+            if (advanced && completed) {
+              resolve({ json: { status: "compile_passed", errorCount: 0, errors: [],
+                evidenceSource: "batch_log_and_assemblies", beforeAssemblyMtimeMs: beforeAssembly ?? null,
+                afterAssemblyMtimeMs: after.dllMtimeMs, logTail: tail }, exitCode, elapsedMs });
+              return;
+            }
+            reject(new BatchClassificationError("compile_indeterminate",
+              `Unity exited 0 without a compile report; secondary evidence cannot certify completion. ` +
+              `Assembly advanced: ${advanced}; completion log: ${completed}. Last output: ${tail}`,
+              ["Inspect this batch output and the project assembly timestamps; do not infer success from exit code 0."]));
+            return;
+          }
           if (exitCode === 0) {
             reject(new BatchClassificationError(
               "markers_missing",
@@ -968,7 +1004,8 @@ export class BatchSpawn implements Router {
             ));
             return;
           }
-          reject(new Error(
+          reject(new BatchClassificationError(
+            "batch_aborted",
             `Batch output did not contain JSON markers. Exit code: ${exitCode}.` +
               (tail ? ` Last output: ${tail}` : ""),
           ));

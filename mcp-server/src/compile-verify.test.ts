@@ -149,3 +149,15 @@ test("recommendation strings contain no internal IDs/specs paths", () => {
     );
   }
 });
+
+test("completed generation with matching inputs accepts a content-identical no-op", () => {
+  assert.equal(detectCompileVerify({ before: { compileGeneration: 1, dllMtimeMs: 100, bridgeToolCount: 20 },
+    after: { compileGeneration: 2, sourceMatches: true, dllMtimeMs: 100, bridgeToolCount: 20 }, sourceMtimeMs: 200 }).code, null);
+  assert.equal(detectCompileVerify({ before: { compileGeneration: 1, dllMtimeMs: 100 },
+    after: { compileGeneration: 2, sourceMatches: false, dllMtimeMs: 100 }, sourceMtimeMs: 200 }).code, "dll_stale");
+});
+
+test("an active compile is not diagnosed as an incremental no-op", () => {
+  assert.equal(detectCompileVerify({ before: { dllMtimeMs: 100, bridgeToolCount: 1 },
+    after: { dllMtimeMs: 100, bridgeToolCount: 1, compileStatus: "currently_compiling" } }).code, null);
+});

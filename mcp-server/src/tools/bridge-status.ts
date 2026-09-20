@@ -73,8 +73,8 @@ export const bridgeStatus = makeTool(
     "pattern and operators confirming toolbar stop/start — not a " +
     "general agent health check (use unity_open_mcp_ping for that). " +
     "Read-only, gate-free, never spawns Unity. The /ping fetch uses the " +
-    "bridge's standard 5s timeout; this tool takes no arguments.",
+    "bridge's standard 5s timeout; project_path optionally selects a different Unity project.",
   {
-    properties: {},
+    properties: { project_path: { type: "string", description: "Explicit Unity project root for this read-only probe; overrides the configured project for this call." } },
   },
 );

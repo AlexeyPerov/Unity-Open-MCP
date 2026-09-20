@@ -1,6 +1,9 @@
+import { PingCache } from "./ping-cache.js";
+import { resolveProjectPath, validateUnityProjectRoot } from "./project-path.js";
+import { resolvePort, resolveAuthToken } from "./instance-discovery.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
-import type { LiveClient } from "./live-client.js";
+import { LiveClient } from "./live-client.js";
 import type { BatchSpawn } from "./batch-spawn.js";
 import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
@@ -708,9 +711,9 @@ export class ToolRouter implements Router {
   private getRouteHandlers(): Map<string, (live: LiveClient, args: Record<string, unknown>) => Promise<CallToolResult>> {
     if (this.routeHandlers) return this.routeHandlers;
     const handlers: Map<string, (live: LiveClient, args: Record<string, unknown>) => Promise<CallToolResult>> = new Map([
-      // Offline-routed tools (resolved from disk; never hit the bridge).
+      // Disk reads and live compiler evidence with an offline log fallback.
       ["unity_open_mcp_list_assets", (_l, a) => this.routeListAssets(a)],
-      ["unity_open_mcp_read_compile_errors", (_l, a) => this.routeReadCompileErrors(a)],
+      ["unity_open_mcp_read_compile_errors", (l, a) => this.routeReadCompileErrors(a, l)],
       // Local-routed tools (server-only; no live/batch hop).
       ["unity_senses_pull_events", (l, a) => this.routePullEvents(a, l)],
       ["unity_open_mcp_capabilities", (l, a) => this.routeCapabilities(a, l)],
@@ -770,6 +773,17 @@ export class ToolRouter implements Router {
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
+    if ((toolName === "unity_open_mcp_capabilities" || toolName === "unity_open_mcp_bridge_status") && args.project_path !== undefined) {
+      if (typeof args.project_path !== "string" || !args.project_path.trim())
+        return sourceResult({ error: { code: "invalid_project_path", message: "project_path must name a Unity project root." } }, "local", true);
+      const selected = resolveProjectPath({ flagPath: args.project_path }).absolute;
+      if (!validateUnityProjectRoot(selected).valid)
+        return sourceResult({ error: { code: "invalid_project_path", message: "project_path must contain Assets, Packages, and ProjectSettings." } }, "local", true);
+      const live = new LiveClient(resolvePort(selected), new PingCache(), resolveAuthToken(selected), selected);
+      const router = new ToolRouter(live, this.batch, selected, this.eventStream, this.sessionState);
+      const { project_path: _selected, ...rest } = args;
+      return router.routeCore(live, toolName, rest);
+    }
     return this.routeCore(this.live, toolName, args);
   }
 
@@ -794,6 +808,17 @@ export class ToolRouter implements Router {
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
+    const localProbe = ["unity_open_mcp_read_compile_errors", "unity_open_mcp_bridge_status", "unity_open_mcp_capabilities",
+      "unity_open_mcp_restart_editor", "unity_open_mcp_resource_pressure", "unity_open_mcp_manage_tools",
+      "unity_open_mcp_list_assets", "unity_open_mcp_list_rules", "unity_open_mcp_generate_skill", "unity_senses_pull_events"].includes(toolName);
+    if (!localProbe && this.projectPath && classifyInstance(readInstanceLock(this.projectPath)) === "reloading") {
+      // One bounded re-probe. No headless fallback can acquire this Editor's project.
+      await new Promise(resolve => setTimeout(resolve, 250));
+      const available = await live.isLiveAvailable(750);
+      if (!available || classifyInstance(readInstanceLock(this.projectPath)) === "reloading") {
+        return sourceResult({ error: { code: "editor_reloading", message: "The live Editor is compiling or reloading. Retry after it settles." }, retryAfterMs: 1000 }, "local", true);
+      }
+    }
     // Named-tool dispatch (T3.2): the handler map covers every exact-name
     // route. The per-tool policy rationale (offline / local / hub / offline-
     // first / verify-fold / scene-paging) lives in each routeXxx method's
@@ -971,6 +996,7 @@ export class ToolRouter implements Router {
 
   private async routeReadCompileErrors(
     args: Record<string, unknown>,
+    live: LiveClient,
   ): Promise<CallToolResult> {
     const tailBytes =
       typeof args.tail_bytes === "number" && args.tail_bytes >= 4096
@@ -991,6 +1017,27 @@ export class ToolRouter implements Router {
     const resolvedLog = resolveEditorLogPath(this.projectPath, undefined, livePid, this.globalLogPathOverride);
     const logPath = resolvedLog.path;
     const tail = readLogTail(logPath, tailBytes);
+
+    const compile = await live.readCompileState?.();
+    if (compile && compile.status !== "indeterminate") {
+      const historical = summarizeProjectHealth(tail.content);
+      const errors = Array.isArray(compile.errors) ? compile.errors : [];
+      const currentErrors = compile.status === "compile_failed" ? errors : [];
+      return sourceResult({
+        ...compile, errorCount: currentErrors.length, errors: currentErrors,
+        unhealthy: compile.status === "compile_failed",
+        staleAssembly: compile.status === "assembly_stale",
+        headline: compile.status === "no_errors_found" ? "Current compile is clean; source content matches the completed generation."
+          : compile.status === "currently_compiling" ? "Compilation is active; wait for completion."
+          : compile.status === "assembly_stale" ? "Source content changed after the last compile; recompile before trusting assemblies."
+          : "Current compilation failed. Fix the compiler diagnostics and recompile.",
+        compileSource: "CompilationPipeline", logPath, logSource: resolvedLog.reason,
+        logAuthorship: parseLogAuthorship(tail.content),
+        historicalLogErrors: historical.compilerErrors,
+        historicalLogIssues: historical.issues,
+        logReadError: tail.error ?? null,
+      }, "live");
+    }
 
     if (tail.error) {
       return {

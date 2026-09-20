@@ -98,7 +98,7 @@ export const BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS = 55_000;
  * (`packages/bridge/Editor/Bridge/BridgeSession.cs`), which carries the
  * revision log.
  */
-export const EXPECTED_BRIDGE_WIRE_CONTRACT = 1;
+export const EXPECTED_BRIDGE_WIRE_CONTRACT = 2;
 
 /**
  * The npm package the MCP server is published as, pinned to the shared

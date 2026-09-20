@@ -30,6 +30,9 @@
 export interface CompileVerifySnapshot {
   /** Count of tools the bridge compiled in, or undefined when unreachable. */
   bridgeToolCount?: number;
+  compileGeneration?: number;
+  compileStatus?: string;
+  sourceMatches?: boolean;
   /**
    * Newest mtime (epoch ms) of Library/ScriptAssemblies/*.dll, or undefined.
    * Captured from the MCP server side via fs.statSync.
@@ -97,6 +100,11 @@ export const COMPILE_VERIFY_RECOMMENDATIONS: Readonly<Record<CompileVerifyCode, 
  */
 export function detectCompileVerify(input: CompileVerifyInput): CompileVerifyResult {
   const { before, after, sourceMtimeMs } = input;
+
+  // A completed generation with identical input content can legitimately retain DLL mtimes.
+  if (after.sourceMatches === true || after.compileStatus === "currently_compiling") {
+    return { code: null, recommendation: null };
+  }
 
   // 1. dll_stale — highest confidence: the DLL is provably older than the edit.
   if (

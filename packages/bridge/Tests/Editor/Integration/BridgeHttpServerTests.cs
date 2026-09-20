@@ -102,6 +102,29 @@ namespace UnityOpenMcpBridge.Tests
         // coroutines instead: SendAsync runs on a ThreadPool thread while the
         // coroutine yields, letting update pump the dispatch queue.
 
+        [UnityTest]
+        public IEnumerator TimeoutThenSuccess_HasIndependentCorrelatedEnvelopes()
+        {
+            using var first = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/tools/unity_open_mcp_execute_csharp");
+            first.Headers.Add("X-Request-Id", "timeout-request");
+            first.Content = new StringContent("{\"code\":\"System.Threading.Thread.Sleep(1500); return 41;\",\"read_only\":true,\"timeout_ms\":1000,\"gate\":\"off\"}", Encoding.UTF8, "application/json");
+            var pending = HttpClient.SendAsync(first);
+            while (!pending.IsCompleted) yield return null;
+            using var response = pending.Result;
+            var body = response.Content.ReadAsStringAsync().Result;
+            StringAssert.Contains("timeout", body);
+            Assert.AreEqual("timeout-request", System.Linq.Enumerable.First(response.Headers.GetValues("X-Request-Id")));
+            Assert.IsTrue(BridgeJson.IsValidJsonObject(body));
+            using var second = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/ping");
+            second.Headers.Add("X-Request-Id", "success-request");
+            using var success = HttpClient.SendAsync(second).Result;
+            var successBody = success.Content.ReadAsStringAsync().Result;
+            Assert.AreEqual("success-request", System.Linq.Enumerable.First(success.Headers.GetValues("X-Request-Id")));
+            Assert.IsTrue(BridgeJson.IsValidJsonObject(successBody));
+            StringAssert.Contains("\"connected\"", successBody);
+            StringAssert.DoesNotContain("timeout", successBody);
+        }
+
         private static IEnumerator PostAndWait(string path, string json, Action<string> assertBody)
         {
             var content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -221,7 +244,7 @@ namespace UnityOpenMcpBridge.Tests
             var json = BridgeJson.BuildTimeoutEnvelope(
                 "unity_open_mcp_execute_menu", "enforce", 30000);
             Assert.IsTrue(json.Contains("\"agentNextSteps\":["), $"Missing agentNextSteps: {json}");
-            StringAssert.Contains("still RUNNING", json,
+            StringAssert.Contains("still be RUNNING", json,
                 $"a menu timeout is a wait that elapsed, not a failure: {json}");
             StringAssert.Contains("editor_status", json,
                 $"the envelope must point at editor_status to confirm the outcome: {json}");

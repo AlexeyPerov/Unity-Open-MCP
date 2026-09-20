@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import type { MutationEnvelope } from "./gate-error.js";
@@ -118,6 +119,7 @@ const COMPILE_RELOAD_ANNOTATION_TOOLS: ReadonlySet<string> = new Set([
   "unity_open_mcp_package_remove",
   "unity_open_mcp_reimport_package",
   "unity_open_mcp_compile_check",
+  "unity_open_mcp_recompile_scripts",
 ]);
 
 /**
@@ -384,6 +386,18 @@ export class LiveClient implements Router {
     if (result.message) {
       console.warn(result.message);
     }
+  }
+
+  /** Bounded read-only main-thread snapshot; unavailable bridges fail open to logs. */
+  async readCompileState(): Promise<Record<string, unknown> | null> {
+    try {
+      this.refreshEndpointFromLock();
+      const res = await this.fetchWithTimeout("/compile-state", { method: "GET" }, 2000);
+      const body = await res.json() as Record<string, unknown>;
+      if (!res.ok || typeof body.generation !== "number" || typeof body.status !== "string") return null;
+      if (this.projectPath && body.projectPath !== this.projectPath) return null;
+      return body;
+    } catch { return null; }
   }
 
   async isLiveAvailable(fetchTimeoutMs?: number): Promise<boolean> {
@@ -805,6 +819,8 @@ export class LiveClient implements Router {
       }
       return res;
     } catch (err) {
+      if (err instanceof Error && err.message.startsWith("bridge_response_request_mismatch"))
+        return makeErrorResult({ code: "bridge_response_request_mismatch", message: err.message });
       return this.handlePostFailure(toolName, args, err, retryOn503, attempt);
     }
   }
@@ -977,7 +993,12 @@ export class LiveClient implements Router {
       parsed.error == null &&
       parsed._staleDomain === undefined
     ) {
-      const staleAsm = this.resolveStaleAssembly();
+      const liveCompile = await this.readCompileState();
+      const staleAsm = liveCompile?.status === "no_errors_found" && liveCompile.sourceMatches === true
+        ? null : liveCompile?.status === "assembly_stale"
+          ? { staleAssembly: true, newerSources: [], hint: "Source content changed after the completed compile generation. Recompile before trusting this result." }
+          : this.resolveStaleAssembly();
+      if (liveCompile) parsed._compileState = liveCompile;
       if (staleAsm != null && staleAsm.staleAssembly) {
         // specs/feedback.md 2026-08-14 — a stale assembly plus a wedged build
         // driver is not a footnote, it is an execution-integrity failure. In
@@ -1835,6 +1856,12 @@ export class LiveClient implements Router {
     }
     const dllMtime = this.newestScriptAssembliesMtime();
     if (dllMtime !== undefined) snap.dllMtimeMs = dllMtime;
+    const compile = await this.readCompileState();
+    if (compile) {
+      snap.compileGeneration = compile.generation as number;
+      snap.compileStatus = compile.status as string;
+      snap.sourceMatches = compile.sourceMatches === true && compile.status === "no_errors_found";
+    }
     return snap;
   }
 
@@ -1939,7 +1966,6 @@ export class LiveClient implements Router {
 
     const detection = detectCompileVerify({ before, after, sourceMtimeMs });
     const annotation = buildCompileVerifyAnnotation(detection);
-    if (annotation === null) return result;
 
     // Inject into the first text content block's JSON body. Mirrors the
     // injectRouteMeta shape in tool-router.ts.
@@ -1949,7 +1975,7 @@ export class LiveClient implements Router {
     if (block.type !== "text") return result;
     try {
       const body = JSON.parse(block.text) as Record<string, unknown>;
-      body._compileVerify = annotation;
+      body._compileVerify = { ...annotation, before, after };
       const newContent = result.content.slice();
       newContent[textIndex] = { type: "text", text: JSON.stringify(body) };
       return { ...result, content: newContent };
@@ -2021,6 +2047,8 @@ export class LiveClient implements Router {
     // from the instance lock. Merge with any caller-supplied headers so we
     // never clobber a per-request value.
     const headers = new Headers(init.headers);
+    const requestId = randomUUID();
+    headers.set("X-Request-Id", requestId);
     if (this.authToken && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${this.authToken}`);
     }
@@ -2037,6 +2065,12 @@ export class LiveClient implements Router {
       signal: controller.signal,
     }).then(
       (res) => {
+        const echoedId = res.headers.get("X-Request-Id");
+        if (echoedId !== null && echoedId !== requestId) {
+          controller.abort();
+          dispose();
+          throw new Error("bridge_response_request_mismatch: response belongs to another request");
+        }
         // Wrap the body-reading accessors so the abort timer is cleared when
         // the body is consumed (the common path) or errors. The wrappers
         // delegate to the original methods; they only add the dispose() side
@@ -2058,7 +2092,7 @@ export class LiveClient implements Router {
           // body WAS claimed, the fallback is a no-op — the abort timer
           // remains armed to protect the in-progress read.
           claimTimer = setTimeout(() => {
-            if (!bodyClaimed) dispose();
+            if (!bodyClaimed) { controller.abort(); dispose(); }
           }, 100);
           claimTimer.unref();
         }

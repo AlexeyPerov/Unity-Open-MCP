@@ -9,101 +9,22 @@ import { toolHintReference } from "../tool-hint.js";
 const RECOMPILE_SCRIPTS_HINT = toolHintReference("unity_open_mcp_recompile_scripts");
 const COMPILE_CHECK_HINT = toolHintReference("unity_open_mcp_compile_check");
 
-// Offline, filesystem-only tool: reads the tail of Unity's Editor.log and
-// extracts BOTH C# compiler errors AND package / assembly-level red flags AND
-// a hard Editor hang signal. The one recovery channel that works when the
-// bridge assembly itself has failed to compile — in that state every in-bridge
-// channel (read_console, editor_status) is dead with it, and compile_check
-// can't run either (the batch entry point shares the broken assembly, and
-// Unity's per-project lock blocks a second instance). The live Editor still
-// writes CSxxxx diagnostics AND assembly-resolution failures AND Package
-// Manager notices AND the Bee build-driver hang stack to Editor.log regardless
-// of bridge health, so this tool retrieves them without touching Unity or the
-// bridge.
-//
-// Log resolution: Unity 6000.5+ moved the Editor.log to a project-relative
-// path (<project>/Logs/Editor.log) and stops writing to the global per-user
-// log. The tool prefers the project-relative log when it exists (using the
-// --project path) and falls back to the global per-user log for older Unity
-// versions. This matters most when the Editor is in Safe Mode with a broken
-// bridge: the global log is stale there, and only the project-relative log
-// carries the current compile errors.
-//
-// Response fields:
-//   - status: "compile_failed" | "project_unhealthy" | "no_errors_found"
-//             | "stale_log" (errors may not apply — stale log / version
-//             mismatch) | "indeterminate" (no errors, but read from the
-//             ROTATED prev_log_* — not a verified clean bill of health)
-//   - unhealthy: true when compiler errors OR issues are present
-//   - headline: one-line triage summary (empty when healthy)
-//   - errors[]: structured CSxxxx diagnostics (file/line/code/message)
-//   - issues[]: package / assembly / Editor red flags with kind + hint:
-//       * assembly_resolution — Mono.Cecil unresolved-assembly failures
-//         (classic package-version / Unity-version mismatch, e.g. ProBuilder
-//         5.x compiled against an assembly ProBuilder 6 removed)
-//       * package_deprecated   — [Package Manager] <id> is deprecated
-//       * package_manager_error — other Package Manager conflict / resolution
-//         errors
-//       * editor_fd_exhaustion — the Editor hung mid-build after hitting an
-//         internal Mono/Unity file-descriptor limit (the Bee build driver's
-//         "Could not register to wait for file descriptor N" exception). This
-//         is NOT a code error and has no CSxxxx fix; the Editor must be
-//         restarted to recover. The hint carries restart instructions.
+// A bounded live compile snapshot is preferred; the filesystem fallback stays
+// available when the bridge itself cannot compile, without launching Unity.
 export const readCompileErrors = makeTool(
   "unity_open_mcp_read_compile_errors",
-  "Read C# compiler errors AND package/assembly red flags AND an Editor " +
-    "hang signal directly from Unity's Editor.log (offline, no bridge, no " +
-    "Unity spawn). Returns structured CSxxxx compiler errors " +
-    "(file/line/code/message) PLUS an `issues` list of red flags with " +
-    "per-issue `kind` + `hint`: assembly_resolution (Mono.Cecil " +
-    "unresolved-assembly failures — the classic package-version / " +
-    "Unity-version mismatch, e.g. ProBuilder 5.x on Unity 6), " +
-    "package_deprecated ([Package Manager] <id> is deprecated), " +
-    "package_manager_error (conflict / resolution errors), and " +
-    "editor_fd_exhaustion (the Editor hung mid-build after hitting an " +
-    "internal Mono/Unity file-descriptor limit — NOT a code error; the hint " +
-    "carries restart instructions). Use this when: (a) the bridge is " +
-    "unreachable after a recompile — a 'bridge_compile_failed' response " +
-    "points here, or ping returns connected:false unexpectedly; (b) Unity " +
-    "showed a 'package update' / incompatibility popup; (c) you suspect a " +
-    "package is too old for the current Editor; (d) the Editor appears hung " +
-    "after heavy automation (many recompiles) with no compile errors to " +
-    "explain it — editor_fd_exhaustion is the likely cause and only a " +
-    "restart recovers it. Works even when the bridge assembly itself is " +
-    "broken, because it reads the log file the Editor writes independently " +
-    "of the bridge. Check `unhealthy` first; when true, scan `headline` for " +
-    "a one-line triage then drill into `errors` and `issues`. When the " +
-    "response carries `staleLogSuspected: true`, the cited source files " +
-    "were edited more recently than Editor.log — the error block may " +
-    "reference on-disk code you have already fixed (Unity's incremental " +
-    "compiler no-op'd the recompile). When the response carries " +
-    "`errorsMayPredateEdits: true`, at least one file the errors CITE is newer " +
-    "than the newest built assembly, so no compile has completed since you " +
-    "edited it and the error block is from an earlier compile — do not re-read " +
-    "or re-fix that code on the strength of it. When the response carries " +
-    "`staleAssembly: true`, at least one Assets/**/*.cs " +
-    "source is newer than the newest Library/ScriptAssemblies/*.dll — the " +
-    "running assembly predates the latest source, so a no_errors_found signal " +
-    "CANNOT be trusted until the assembly is rebuilt. When that flag is set " +
-    "WITH errors, the `headline` itself says the error block may predate the " +
-    "current sources (not just the separate staleAssemblyHint field). When " +
-    "`logSource` is a `prev_log_*` value (the read came from the ROTATED " +
-    "Editor-prev.log while a live Editor may be writing a different log) and " +
-    "no errors were found, `status` is `indeterminate`, NOT " +
-    "`no_errors_found` — a clean read from the rotated log is not a verified " +
-    "clean bill of health; confirm via the live bridge or re-read after the " +
-    "Editor settles. All staleness signals call for the " +
-    "same next step (one recommended path per situation, matching the runtime " +
-    `hints): call ${RECOMPILE_SCRIPTS_HINT} for a deterministic ` +
-    "force-recompile, then re-read compile errors; with the Editor closed or " +
-    `unreachable, ${COMPILE_CHECK_HINT} spawns a fresh headless recompile ` +
-    "instead. IMPORTANT — staged compilation: Unity compiles " +
-    "assemblies in dependency order, so when `errorCount` is small but the project " +
-    "has multiple assemblies (the response carries `partialCompileLikely: true` " +
-    "with `asmdefCount`/`assembliesWithErrors`), the reported errors may be a " +
-    "SUBSET — the failing assembly aborted the pipeline before dependent ones were " +
-    "reached. Do NOT treat `errorCount` as the complete picture; fix the reported " +
-    "errors and re-check until `errorCount` is 0.",
+  "Read current compiler state from the live CompilationPipeline when available, with a bounded " +
+    "read-only probe and offline Editor.log fallback (never spawns Unity). Live status distinguishes " +
+    "currently_compiling, assembly_stale, compile_failed, and no_errors_found. A completed compile " +
+    "generation with matching source content outranks historical log errors; generation and before/after " +
+    "assembly mtimes identify the evidence. historicalLogErrors and historicalLogIssues preserve older " +
+    "log evidence separately. Without confirmed live state, returns log diagnostics with source/authorship " +
+    "and staleAssembly/staleLogSuspected caveats; a clean rotated log is indeterminate. Log issues include " +
+    "assembly_resolution, package_deprecated, package_manager_error, and editor_fd_exhaustion. " +
+    `For stale sources call ${RECOMPILE_SCRIPTS_HINT}, then re-read. ` +
+    `With the Editor closed, ${COMPILE_CHECK_HINT} can verify headlessly; never launch a second Unity ` +
+    "while a live Editor owns the project. Check unhealthy, status, headline, errors, and issues; " +
+    "offline partialCompileLikely means a failing assembly may hide downstream errors.",
   {
     properties: {
           tail_bytes: {

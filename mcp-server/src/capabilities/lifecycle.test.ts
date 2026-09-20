@@ -252,3 +252,7 @@ test("buildLifecycle: returns the 5-class taxonomy + non-empty guidance", () => 
   assert.ok(block.guidance.trim().length > 0);
   assert.match(block.guidance, /lifecycle/i);
 });
+
+test("recompile_scripts is a compile-reload lifecycle", () => {
+  assert.equal(lifecycleFor("unity_open_mcp_recompile_scripts").class, "compile-reload");
+});

@@ -41,6 +41,96 @@ namespace UnityOpenMcpBridge
         // deliberately minimal (no schema, no value-type strictness): its only
         // job is to refuse to trust a string as JSON when its containers don't
         // balance or its string escapes don't terminate.
+        // Strict transport validation: one complete JSON value, no trailing envelope,
+        // malformed number, mismatched container, or unescaped control character.
+        internal static bool IsCompleteJson(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return false;
+            var reader = new JsonValidator(json);
+            return reader.Value(0) && reader.End();
+        }
+
+        private sealed class JsonValidator
+        {
+            private readonly string text;
+            private int at;
+            internal JsonValidator(string text) { this.text = text; }
+            private void Space() { while (at < text.Length && (text[at] == ' ' || text[at] == '\r' || text[at] == '\n' || text[at] == '\t')) at++; }
+            internal bool End() { Space(); return at == text.Length; }
+            private bool Take(char c) { Space(); if (at >= text.Length || text[at] != c) return false; at++; return true; }
+            private bool String()
+            {
+                if (!Take('"')) return false;
+                while (at < text.Length)
+                {
+                    var c = text[at++];
+                    if (c == '"') return true;
+                    if (c < 32) return false;
+                    if (c != '\\') continue;
+                    if (at >= text.Length) return false;
+                    c = text[at++];
+                    if (c == 'u')
+                    {
+                        for (var n = 0; n < 4; n++)
+                        {
+                            if (at >= text.Length || !System.Uri.IsHexDigit(text[at++])) return false;
+                        }
+                    }
+                    else if ("\"\\/bfnrt".IndexOf(c) < 0) return false;
+                }
+                return false;
+            }
+            internal bool Value(int depth)
+            {
+                Space();
+                if (depth > 128 || at >= text.Length) return false;
+                var c = text[at];
+                if (c == '"') return String();
+                if (c == '{' || c == '[')
+                {
+                    at++;
+                    var close = c == '{' ? '}' : ']';
+                    if (Take(close)) return true;
+                    do
+                    {
+                        if (c == '{' && (!String() || !Take(':'))) return false;
+                        if (!Value(depth + 1)) return false;
+                        if (Take(close)) return true;
+                    } while (Take(','));
+                    return false;
+                }
+                foreach (var literal in new[] { "true", "false", "null" })
+                {
+                    if (string.CompareOrdinal(text, at, literal, 0, literal.Length) == 0)
+                    { at += literal.Length; return true; }
+                }
+                if (c == '-') at++;
+                if (at >= text.Length) return false;
+                if (text[at] == '0') at++;
+                else
+                {
+                    if (text[at] < '1' || text[at] > '9') return false;
+                    while (at < text.Length && text[at] >= '0' && text[at] <= '9') at++;
+                }
+                if (at < text.Length && text[at] == '.')
+                {
+                    at++;
+                    var start = at;
+                    while (at < text.Length && text[at] >= '0' && text[at] <= '9') at++;
+                    if (at == start) return false;
+                }
+                if (at < text.Length && (text[at] == 'e' || text[at] == 'E'))
+                {
+                    at++;
+                    if (at < text.Length && (text[at] == '+' || text[at] == '-')) at++;
+                    var start = at;
+                    while (at < text.Length && text[at] >= '0' && text[at] <= '9') at++;
+                    if (at == start) return false;
+                }
+                return true;
+            }
+        }
+
         internal static bool IsValidJsonObject(string json)
         {
             if (string.IsNullOrEmpty(json)) return false;

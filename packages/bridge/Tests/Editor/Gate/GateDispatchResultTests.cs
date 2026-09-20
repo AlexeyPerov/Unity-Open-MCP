@@ -62,7 +62,7 @@ namespace UnityOpenMcpBridge.Tests
             {
                 Logs = new System.Collections.Generic.List<LogEntryInfo>
                 {
-                    new LogEntryInfo { Mode = 4, Message = "warn" } // bit 4 = warning
+                    new LogEntryInfo { Mode = 512, Message = "warn" } // ScriptingWarning
                 }
             };
             Assert.IsNotNull(result.Logs);

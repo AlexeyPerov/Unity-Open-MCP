@@ -14,6 +14,7 @@ export const agentCapabilities = makeTool(
     "actually need. The response echoes `profile` and a `profileHint` naming what was folded away.",
   {
     properties: {
+          project_path: { type: "string", description: "Explicit Unity project root for this read-only probe; overrides the configured project for this call." },
           kind: {
             enum: ["tools", "rules", "fixes"],
             description:

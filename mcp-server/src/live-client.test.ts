@@ -2797,3 +2797,44 @@ test("2026-08-14: a merely stale assembly (no wedge) promotes staleAssembly + wa
   }
 });
 
+
+test("HTTP body timeout cannot contaminate the next correlated response", async () => {
+  const ids: string[] = [];
+  const bridge = await startBridgeStub((req, res) => {
+    const id = String(req.headers["x-request-id"]);
+    ids.push(id);
+    res.setHeader("X-Request-Id", id);
+    if (req.url === "/slow") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.write('{"late":');
+      setTimeout(() => res.end('true}'), 150);
+    } else res.end('{"ok":true}');
+  });
+  try {
+    const live = new LiveClient(bridge.port, new PingCache());
+    const fetchBounded = (live as unknown as { fetchWithTimeout(path: string, init: RequestInit, ms: number): Promise<Response> }).fetchWithTimeout.bind(live);
+    const first = await fetchBounded("/slow", {}, 70);
+    await assert.rejects(first.text());
+    const second = await fetchBounded("/success", {}, 1000);
+    assert.deepEqual(await second.json(), { ok: true });
+    assert.notEqual(ids[0], ids[1]);
+    assert.equal(second.headers.get("X-Request-Id"), ids[1]);
+  } finally { bridge.server.closeAllConnections(); await bridge.close(); }
+});
+
+test("correlation mismatch is discarded without re-posting a tool", async () => {
+  let posts = 0;
+  const bridge = await startBridgeStub((req, res) => {
+    if (req.url === "/ping") { idleOkHandler(req, res); return; }
+    posts++;
+    res.setHeader("X-Request-Id", "abandoned-request");
+    res.end('{"ok":true}');
+  });
+  try {
+    const live = new LiveClient(bridge.port, new PingCache());
+    const result = await live.route("unity_open_mcp_editor_status", {});
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "bridge_response_request_mismatch");
+    assert.equal(posts, 1);
+  } finally { bridge.server.closeAllConnections(); await bridge.close(); }
+});

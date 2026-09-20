@@ -17,6 +17,7 @@ Subscriber lifecycle on both event endpoints: a client-supplied `subscriber`
 id persists across polls/reconnects and keeps its cursor; an id the bridge
 mints (no `subscriber` param) is retired with the request/stream so anonymous
 clients don't accumulate subscriber state.
+| `/compile-state` | `GET` | Read-only main-thread CompilationPipeline generation, source-content match, current errors, and before/after assembly mtimes. Unconfirmed generations return `indeterminate`. |
 | `/tools` | `GET` | Compiled-state tool inventory + group→tools map (used by capabilities / manage_tools for per-group availability). |
 | `/tools/{toolName}` | `POST` | Execute one bridge tool. |
 | `/resources` | `GET` | List bridge resources. |
@@ -132,3 +133,16 @@ the field is, by definition, older than revision 1.
 - [Routing and lifecycle](routing-lifecycle.md)
 - [MCP client configuration](../setup/client-configuration.md)
 - [Architecture](../architecture.md)
+
+### Request-scoped JSON responses
+
+Wire contract revision 2 adds `GET /compile-state` and `X-Request-Id` echoing.
+JSON responses are fully validated before headers are committed. Each request
+can send at most one envelope, with explicit UTF-8 content length and connection
+closure; a failed write aborts the response rather than appending another error.
+A late timed-out dispatch cannot send into the next request. Invalid JSON is
+replaced by HTTP 500 `invalid_response_json`.
+
+Per-call console logs use Unity Console mode flags: scripting/import/compiler
+warnings retain `warning` severity, compiler errors and exceptions retain `error`,
+and ordinary managed logs remain `log`.

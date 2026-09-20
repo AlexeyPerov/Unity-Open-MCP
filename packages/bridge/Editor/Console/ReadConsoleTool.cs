@@ -14,17 +14,9 @@ namespace UnityOpenMcpBridge.Console
     // across versions. We use reflection to access them and fall back
     // gracefully if the API surface changes.
     //
-    // The `mode` bitmask on each LogEntry determines the log type:
-    //   bit 0 (1)   → Error
-    //   bit 1 (2)   → Assert
-    //   bit 2 (4)   → Warning
-    //   bit 3 (8)   → Log
-    //   bit 4 (16)  → Fatal/Error (used by exceptions in some versions)
-    //   bit 5 (32)  → Exception (some versions)
-    //
-    // We classify conservatively: Exception/Fatal/Assert bits → "error",
-    // Warning bit → "warning", everything else → "log". This avoids
-    // mis-classifying exceptions as logs.
+    // Unity Console mode is a bitmask, not UnityEngine.LogType. Managed
+    // warnings use ScriptingWarning (512); compiler warnings use 4096.
+    // Error severity takes precedence when flags are combined.
     //
     // M13 T4.6 — standardized token-bounded output: `detail` controls stack
     // inclusion (summary = message only; normal = capped stack with Unity
@@ -396,14 +388,10 @@ namespace UnityOpenMcpBridge.Console
         // vocabulary.
         public static string Classify(int mode)
         {
-            // Exception/Fatal/Error/Assert bits
-            if ((mode & 1) != 0) return "error";       // Error
-            if ((mode & 2) != 0) return "error";       // Assert (treat as error)
-            if ((mode & 4) != 0) return "warning";      // Warning
-            if ((mode & 8) != 0) return "log";          // Log
-            if ((mode & 16) != 0) return "error";       // Fatal
-            if ((mode & 32) != 0) return "error";       // Exception
-            if ((mode & 64) != 0) return "error";       // scripting error variant
+            const int errors = 1 | 2 | 16 | 64 | 256 | 2048 | 131072 | 2097152;
+            const int warnings = 128 | 512 | 4096;
+            if ((mode & errors) != 0) return "error";
+            if ((mode & warnings) != 0) return "warning";
             return "log";
         }
 

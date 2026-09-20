@@ -469,6 +469,13 @@ namespace UnityOpenMcpBridge
                         activity.Kind = BridgeActivityKind.Ping;
                         HandlePing(context);
                         break;
+                    case "/compile-state":
+                        if (context.Request.HttpMethod != "GET")
+                            BridgeHttpResponse.SendJsonError(context, 405, "method_not_allowed", "GET required for /compile-state");
+                        else
+                            BridgeHttpResponse.SendJson(context, 200,
+                                MainThreadDispatcher.EnqueueAsync(BridgeCompileState.BuildJson, 1500).Result);
+                        break;
                     case "/instance":
                         activity.Kind = BridgeActivityKind.Ping;
                         HandleInstance(context);

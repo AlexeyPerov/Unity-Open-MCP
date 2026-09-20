@@ -750,7 +750,7 @@ test("execute_menu batch-fallback lock error names execute_menu, not a canned co
 // The distinct markers_missing code keeps agents (and MCP hosts keying on
 // isError / error.code) from reading a healthy compile as batch_spawn_failed.
 // ---------------------------------------------------------------------------
-test("compile_check exit 0 without markers surfaces markers_missing, not batch_spawn_failed", async () => {
+test("compile_check exit 0 without markers and without assembly evidence is compile_indeterminate", async () => {
   const savedPath = process.env.UNITY_PATH;
   delete process.env.UNITY_PATH;
   const restore = setUnityProcessScannerForTest({ scan: () => [] });
@@ -777,21 +777,9 @@ test("compile_check exit 0 without markers surfaces markers_missing, not batch_s
       if (process.platform === "win32") return; // same win32 caveat as above
       const body = parseBody(result);
       const error = body.error as Record<string, string>;
-      assert.equal(error.code, "markers_missing");
-      assert.ok(
-        error.message.includes("exited cleanly"),
-        "message should say Unity exited cleanly",
-      );
-      assert.ok(
-        error.message.includes("read_compile_errors"),
-        "message should point at read_compile_errors to confirm",
-      );
-      assert.ok(
-        (body.agentNextSteps as string[]).some((s) =>
-          s.includes("read_compile_errors"),
-        ),
-        "agentNextSteps should mention read_compile_errors",
-      );
+      assert.equal(error.code, "compile_indeterminate");
+      assert.match(error.message, /secondary evidence cannot certify/);
+      assert.match(error.message, /Compilation succeeded/);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -1009,7 +997,7 @@ test("buildUnityBatchArgs omits -quit for compile_check", () => {
     ["compile_check"],
   );
   assert.ok(!args.includes("-quit"), "compile_check must not pass -quit");
-  assert.deepEqual(args.slice(0, 2), ["-batchmode", "-projectPath"]);
+  assert.deepEqual(args.slice(0, 3), ["-batchmode", "-logFile", "-"]);
 });
 
 test("buildUnityBatchArgs includes -quit for synchronous batch ops", () => {
@@ -1019,7 +1007,7 @@ test("buildUnityBatchArgs includes -quit for synchronous batch ops", () => {
     "UnityOpenMcpBridge.Batch.BridgeBatchEntry.Run",
     ["find_members", "--query", "Transform"],
   );
-  assert.deepEqual(args.slice(0, 3), ["-batchmode", "-quit", "-projectPath"]);
+  assert.deepEqual(args.slice(0, 5), ["-batchmode", "-logFile", "-", "-quit", "-projectPath"]);
 });
 
 test("compile_check with exit 127 surfaces unity_spawn_refused, not batch_spawn_failed", async () => {
@@ -1121,3 +1109,43 @@ test("M13: BoundedTextAccumulator caps retained bytes (drops the head, keeps the
   assert.ok(out.length < headSize, "retained buffer must be smaller than the head fed in (cap applied)");
 });
 
+
+test("pre-marker replay classifies compiler failure, unknown abort, and secondary clean evidence", { skip: process.platform === "win32" }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "compile-replay-"));
+  const savedPath = process.env.UNITY_PATH;
+  const restore = setUnityProcessScannerForTest({ scan: () => [] });
+  try {
+    const exe = join(root, "Unity");
+    process.env.UNITY_PATH = exe;
+    const cases = [
+      { script: "echo 'Assets/Broken.cs(1,1): error CS1002: ; expected'; exit 1", code: "compile_failed" },
+      { script: "echo 'license handshake failed'; exit 3", code: "batch_aborted" },
+      { script: "mkdir -p '" + root + "/Library/ScriptAssemblies'; touch '" + root + "/Library/ScriptAssemblies/Game.dll'; echo 'Compilation succeeded'; exit 0", code: null },
+    ];
+    for (const item of cases) {
+      writeFileSync(exe, "#!/bin/sh\n" + item.script + "\n");
+      chmodSync(exe, 0o755);
+      const body = parseBody(await new BatchSpawn({ projectPath: root }).route("unity_open_mcp_compile_check", {}));
+      if (item.code) assert.equal((body.error as { code: string }).code, item.code);
+      else { assert.equal(body.status, "compile_passed"); assert.equal(body.evidenceSource, "batch_log_and_assemblies"); }
+    }
+  } finally { restore(); if (savedPath === undefined) delete process.env.UNITY_PATH; else process.env.UNITY_PATH = savedPath; rmSync(root, { recursive: true, force: true }); }
+});
+
+test("concurrent headless requests share one project lease and release it on exit", { skip: process.platform === "win32" }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "batch-concurrency-"));
+  const savedPath = process.env.UNITY_PATH;
+  const restore = setUnityProcessScannerForTest({ scan: () => [] });
+  try {
+    const exe = join(root, "Unity");
+    process.env.UNITY_PATH = exe;
+    writeFileSync(exe, "#!/bin/sh\nsleep 0.2\nexit 0\n");
+    chmodSync(exe, 0o755);
+    const results = await Promise.all([new BatchSpawn({ projectPath: root }), new BatchSpawn({ projectPath: root })]
+      .map(batch => batch.route("unity_open_mcp_compile_check", {})));
+    const codes = results.map(result => (parseBody(result).error as { code: string }).code).sort();
+    assert.deepEqual(codes, ["batch_in_progress", "compile_indeterminate"]);
+    const later = parseBody(await new BatchSpawn({ projectPath: root }).route("unity_open_mcp_compile_check", {}));
+    assert.equal((later.error as { code: string }).code, "compile_indeterminate");
+  } finally { restore(); if (savedPath === undefined) delete process.env.UNITY_PATH; else process.env.UNITY_PATH = savedPath; rmSync(root, { recursive: true, force: true }); }
+});

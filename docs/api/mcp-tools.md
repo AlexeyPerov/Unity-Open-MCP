@@ -111,6 +111,10 @@ The response is the authoritative current catalog. Public documentation uses
 
 ### Keeping the discovery call cheap
 
+`capabilities` and `bridge_status` accept an optional `project_path` naming a Unity
+project root. It overrides the configured project for that read-only call, including
+port/auth discovery, without changing subsequent calls.
+
 `capabilities` honors the same `profile` / `page_size` / `cursor` contract as the
 heavy read tools, because the unfolded catalog is ~500 KB on one line (per-tool
 `inputSchema` is ~85% of that) and overflows a typical client's per-result
@@ -417,6 +421,18 @@ manually re-request the tool list, or route the tool by id through
 `batch_execute` (which works regardless of `listChanged` support).
 
 ### `unity_open_mcp_read_compile_errors`
+
+The server first makes a bounded read-only `GET /compile-state` probe. A completed
+CompilationPipeline generation whose source content still matches is authoritative:
+`status` is `no_errors_found`, `compile_failed`, `currently_compiling`, or
+`assembly_stale`. The response records `generation`, `sourceMatches`,
+`beforeAssemblyMtimeMs`, and `afterAssemblyMtimeMs` (Unix milliseconds). Touching
+unchanged content does not invalidate a confirmed compile. Editing source does.
+Old log errors and issues remain separately in `historicalLogErrors` and
+`historicalLogIssues`; they do not override a confirmed current compile.
+
+If the bridge cannot provide a confirmed generation, the tool falls back to
+log evidence with the following freshness and authorship caveats. It never spawns Unity.
 
 Resolves the authoritative `Editor.log` per platform. Unity 6000.5+ writes a
 project-relative log (`<project>/Logs/Editor.log`); pre-6000.5 writes the global

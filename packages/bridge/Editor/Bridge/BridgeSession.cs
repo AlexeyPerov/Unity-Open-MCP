@@ -38,7 +38,8 @@ namespace UnityOpenMcpBridge
         //       batch_execute pre-flight refusal of server-polled steps
         //       (batch_step_requires_server_poll), run_tests in-flight run_id
         //       refusal (run_id_in_flight).
-        public const int WireContract = 1;
+        //   2 — source-aware /compile-state and request-correlated atomic JSON replies.
+        public const int WireContract = 2;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
         public static string Mode => "live";

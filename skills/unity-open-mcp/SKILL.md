@@ -69,6 +69,23 @@ Common groups: `asset-intelligence`, `typed-editor`, `diagnostics`, `gate-intell
 
 Each embedded domain also has a deeper playbook under `skills/extensions/<domain>/SKILL.md` — consult the matching one for domain-specific tool contracts, gate/lifecycle hints, and round-trip workflows.
 
+## Compile and reload evidence
+
+`read_compile_errors` prefers a bounded live CompilationPipeline snapshot, falling
+back to logs if unavailable. `currently_compiling` means wait; `assembly_stale`
+means source changed after the last completed compile; `compile_failed` reports
+current diagnostics. A confirmed `no_errors_found` with `sourceMatches:true`
+outranks `historicalLogErrors`. Inspect generation and before/after assembly mtimes.
+For stale sources, activate `typed-editor`, call `recompile_scripts`, then re-read.
+`capabilities` and `bridge_status` accept `project_path` for a different project.
+
+On `editor_reloading`, retry after `retryAfterMs`; do not start another Unity.
+`compile_check` is headless-only. It captures its own log and classifies compiler,
+project-load, and spawn failures. `compile_indeterminate` means exit 0 lacked
+sufficient completion evidence; never infer success from exit 0 alone. A
+`batch_in_progress` response means wait for the current child. On response
+correlation/JSON errors, inspect post-state before repeating a mutation.
+
 ## Unity state triage (before edits/tests, and on `bridge_offline`)
 
 The single most common agent mistake is misclassifying Unity's state. Follow this **in order** before running tests, before launching Unity, and whenever a tool returns `bridge_offline` or `bridge_compile_failed`.
@@ -133,7 +150,6 @@ Compile failures surface as **machine-readable error codes** — branch on the c
 - **A tool failing in a way this file says is fixed** — check `bridge_status` → `wireContract` before concluding it regressed. `stale: true` means the installed Unity bridge package predates this MCP server's contract (reinstall/update it and retry); `stale: false` means it really is a regression worth reporting. `bridgeVersion` alone cannot tell you: the package semver does not move for a wire-contract fix, so a stale install and a current one report the same string.
 - **`status: "wedged"`** (`bridge_status`) — the Editor process, heartbeat and `/ping` all look fine but the Editor cannot do the work. `wedged.reason = "editor_fd_exhaustion"`: the build driver is dead, `Library/ScriptAssemblies` has stopped updating, C# edits never take effect — only a restart recovers (`execute_csharp` fails with `editor_build_wedged` in this state rather than returning stale output). `wedged.reason = "main_thread_wedged"`: a modal dialog is blocking Unity's message pump — the heartbeat is stale but `/ping` still answers, which a failed bridge assembly could never do, so this is **not** Safe Mode and there is no compile error to chase. No tool can dismiss a modal; an operator must close it in the Unity UI. Prefer non-interactive APIs over `execute_menu`/`ExecuteMenuItem` for converter-style menus.
 - **`editor_instance_locked`** — a batch/`compile_check` spawn cannot run while an Editor holds the project lock. The error names the tool you actually called and its message + `agentNextSteps[]` split the diagnosis three ways: a **fresh instance lock** (the live bridge should be reachable — retry the live route / check `bridge_status`), a **live process with the listener not up yet** (a booting Editor or Safe Mode — wait and retry; the call takes the live route once the listener binds), or **no matching process** (a stale `Temp/UnityLockfile` from a crashed session). Do not read this code as "close the Editor" until you have read which variant it reports.
-- **`markers_missing`** — the batch Unity exited **cleanly (exit 0)** but emitted no JSON report (the async finalize path did not run). The compile **likely succeeded**; this is not a spawn failure. Confirm with `read_compile_errors` (expect `errorCount: 0`) instead of retrying or "fixing" anything.
 - **`unity_spawn_refused`** — the Unity binary could not be executed (spawn `ENOENT`/`EACCES`, or exit code `127`). Do **not** retry `compile_check` blindly. Verify `UNITY_PATH`, then fall back to `read_compile_errors` / `bridge_status` to check compile state without headless spawn.
 - **`_compileVerify: { code: "compile_noop" | "dll_stale" }`** — a recompile *reported success* but the compiled state did not advance. Surfaced as an additive annotation on a **successful** result (not an error), so check for it after any `compile-reload` tool. `compile_noop` = tool registry count + DLL mtime unchanged (incremental no-op); `dll_stale` = `Library/ScriptAssemblies/*.dll` older than your source edit. Both mean: do **not** trust the success — force a rebuild (no-op `package_add`/`package_remove`, or operator refocus of the Editor), then verify DLL mtime > edit mtime before tests.
 - **`compilePending: true`** (additive, on the gate envelope next to `settleMs`) — the editor was **still compiling** when the gate validated after the post-mutation settle wait. The gate's `passed` / `delta.newErrors:0` reflects the **PRE-compile** state, not the new code, so a clean-looking gate does **not** mean the new code is verified healthy. `agentNextSteps[]` carries the same advisory. Poll `editor_status.isCompiling` until `false`, then `read_compile_errors` to confirm the new code. (Root cause: `RequestScriptCompilation` can no-op silently — the compile may be queued but not yet started, or the settle cap elapsed mid-compile.)

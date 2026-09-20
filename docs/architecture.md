@@ -65,3 +65,13 @@ sync, tags, and release workflows.
 - [Bridge HTTP API](api/bridge-http.md)
 - [Extensions](extensions.md)
 - [Contributing — extensions](contributing/extensions.md)
+
+### Compiler evidence boundary
+
+The bridge owns the live CompilationPipeline snapshot at `GET /compile-state`:
+Editor-session generation, source-content fingerprint, compiler diagnostics, and
+before/after assembly mtimes survive domain reload via Unity SessionState. The
+MCP server owns offline log fallback, provenance labeling, bounded reload re-probes,
+and headless output classification. It never starts headless Unity when a live
+Editor owns the project. Read-only project selectors on `capabilities` and
+`bridge_status` resolve their own project lock, port, and authentication per call.

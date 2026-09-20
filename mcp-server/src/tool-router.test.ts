@@ -4518,3 +4518,84 @@ test("B-N21: scene_get_data paging does not duplicate a pre-unwrapped body's ful
   });
 });
 
+
+// Compile provenance replay: a stale global log cannot override a completed live generation.
+test("live compile truth supersedes historical log errors and preserves later source staleness", async () => {
+  const root = await mkdtemp(join(tmpdir(), "compile-truth-"));
+  try {
+    await mkdir(join(root, "Logs"));
+    await writeFile(join(root, "Logs/Editor.log"), "Assets/Old.cs(1,1): error CS1002: ; expected\n");
+    const live = makeFakeLive();
+    let status = "no_errors_found";
+    live.readCompileState = async () => ({ status, generation: 3, sourceMatches: status === "no_errors_found",
+      errors: [], beforeAssemblyMtimeMs: 100, afterAssemblyMtimeMs: 200 });
+    const router = new ToolRouter(live, makeFakeBatch(), root, makeFakeEventStream(), new ToolSessionState(), undefined, undefined, join(root, "missing.log"));
+    for (const expected of ["no_errors_found", "assembly_stale", "currently_compiling"]) {
+      status = expected;
+      const result = await router.route("unity_open_mcp_read_compile_errors", {});
+      const body = JSON.parse((result.content[0] as { text: string }).text);
+      assert.equal(body.status, expected);
+      assert.equal(body.errorCount, 0);
+      assert.equal(body.historicalLogErrors.length, 1);
+      assert.equal(body._source, "live");
+      assert.equal(body.staleAssembly, expected === "assembly_stale");
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("fresh reloading lock causes one bounded live re-probe and never calls batch", async () => {
+  const root = await mkdtemp(join(tmpdir(), "reload-route-"));
+  const path = lockPath(root);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({ pid: process.pid, projectPath: root, port: 27999,
+    state: "reloading", heartbeatAt: new Date().toISOString() }));
+  try {
+    const live = makeFakeLive({ available: false });
+    let probes = 0;
+    live.isLiveAvailable = async (budget) => { probes++; assert.equal(budget, 750); return false; };
+    const batch = makeFakeBatch({ batchTools: new Set(["unity_open_mcp_compile_check"]) });
+    const router = new ToolRouter(live, batch, root, makeFakeEventStream(), new ToolSessionState());
+    const result = await router.route("unity_open_mcp_compile_check", {});
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "editor_reloading");
+    assert.equal(body.retryAfterMs, 1000);
+    assert.equal(probes, 1);
+    assert.equal(batch.calls.length, 0);
+  } finally { rmSync(path, { force: true }); await rm(root, { recursive: true, force: true }); }
+});
+
+test("core project selectors use the selected project's endpoint instead of the configured project", async () => {
+  const { createServer } = await import("node:http");
+  const root = await mkdtemp(join(tmpdir(), "selected-project-"));
+  const seen: string[] = [];
+  const server = createServer((req, res) => {
+    seen.push(req.url ?? "");
+    assert.equal(req.headers.authorization, "Bearer selected-token");
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify(req.url === "/ping" ? { connected: true, compiling: false, projectPath: root }
+      : { tools: [], groups: [] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as { port: number };
+  const path = lockPath(root);
+  try {
+    for (const dir of ["Assets", "Packages", "ProjectSettings"]) await mkdir(join(root, dir));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: process.pid, port: address.port, projectPath: root,
+      state: "idle", heartbeatAt: new Date().toISOString(), authToken: "selected-token" }));
+    const configured = makeFakeLive();
+    const router = new ToolRouter(configured, makeFakeBatch(), "/unrelated/project", makeFakeEventStream(), new ToolSessionState());
+    for (const tool of ["unity_open_mcp_bridge_status", "unity_open_mcp_capabilities"]) {
+      const result = await router.route(tool, { project_path: root });
+      assert.equal(result.isError, false);
+    }
+    assert.ok(seen.includes("/ping"));
+    assert.ok(seen.includes("/tools"));
+    assert.equal(configured.calls.length, 0);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    rmSync(path, { force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
