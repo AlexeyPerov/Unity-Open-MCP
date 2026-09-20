@@ -19,8 +19,6 @@ namespace UnityOpenMcpBridge.MetaTools
             "Edit/Selection",
             "Edit/Project Settings",
             "File/Open Scene",
-            "GameObject/Align with View",
-            "GameObject/Move to View",
             "Window/General/Hierarchy",
             "Window/General/Inspector",
             "Window/General/Project",
@@ -55,9 +53,27 @@ namespace UnityOpenMcpBridge.MetaTools
             "File/Save Scenes",
         };
 
+        private static readonly HashSet<string> VerifierMenus = DiscoverVerifierMenus();
+
+        private static HashSet<string> DiscoverVerifierMenus()
+        {
+            var menus = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var method in TypeCache.GetMethodsWithAttribute<BridgeReadOnlyMenuAttribute>())
+                foreach (MenuItem menu in method.GetCustomAttributes(typeof(MenuItem), false))
+                    if (!menu.validate) menus.Add(menu.menuItem);
+            return menus;
+        }
+
+        public static bool IsNonDisruptiveReadOnlyMenu(string menuPath) =>
+            menuPath != null && (VerifierMenus.Contains(menuPath)
+                || menuPath == "Window/General/Hierarchy" || menuPath == "Window/General/Inspector"
+                || menuPath == "Window/General/Project" || menuPath == "Window/General/Console"
+                || menuPath == "Window/General/Scene" || menuPath == "Window/General/Game");
+
         public static bool IsReadOnlyMenu(string menuPath)
         {
             if (string.IsNullOrEmpty(menuPath)) return false;
+            if (VerifierMenus.Contains(menuPath)) return true;
             // Exact, case-insensitive match against the allow-list — OR a
             // parent-segment match where the allow-listed entry is a real menu
             // ancestor (e.g. allow-listing "Edit/Selection" covers the submenu
@@ -127,7 +143,8 @@ namespace UnityOpenMcpBridge.MetaTools
 
             try
             {
-                EditorApplication.ExecuteMenuItem(menuPath);
+                if (!EditorApplication.ExecuteMenuItem(menuPath))
+                    return ToolDispatchResult.Fail("menu_not_found", "Menu item not found: " + menuPath);
                 return ToolDispatchResult.Ok("\"ok\"");
             }
             catch (ArgumentNullException)

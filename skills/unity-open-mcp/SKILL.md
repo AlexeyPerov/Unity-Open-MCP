@@ -528,7 +528,7 @@ Results are walked by a depth-limited reflective serializer before becoming `mut
 
 ### `execute_csharp` read-only probe flag (`read_only`)
 
-`execute_csharp` is a mutating tool (it runs arbitrary code), so by default it requires a non-empty `paths_hint` to scope the gate. For **pure-read probes** — type lookups, `SessionState` reads, console reads via reflection — pass `read_only: true` to waive the `paths_hint` requirement and skip the gate (no checkpoint/validate). This is a **scope hint, not a safety boundary**: the deny heuristic still applies (a `read_only` snippet matching `EditorApplication.Exit` / `AssetDatabase.DeleteAsset` / `BuildPipeline.BuildPlayer` is still denied), and the bridge cannot statically prove the snippet writes nothing — it only takes your assertion that no scope is needed. Do **not** use `read_only` for a snippet that mutates assets; the gate would then run with no scope and miss any verify-rule regression the writes introduced.
+`execute_csharp` defaults to mutating and requires a non-empty `paths_hint`. For pure inspection, pass `read_only: true`: no scope, checkpoint, or validation is needed, even when the scene is dirty or a hint was supplied. This is a caller assertion, not a sandbox: never use it for writes or disruptive lifecycle transitions. Known compile/refresh, scene-switch, and play-transition calls retain protection, and the deny heuristic still applies. See the request and batch guidance below.
 
 ## Read-only tools (no gate)
 
@@ -557,3 +557,19 @@ For routing details, see the `routing` object on the capabilities response — n
 - [ ] Fixes applied / retried as needed
 - [ ] Compile verified (`read_console` `type: "error"`, or `read_compile_errors` if bridge down)
 - [ ] Tests run on affected assembly (one run at a time)
+
+### Read-only requests and batch preflight
+
+Use `execute_csharp(read_only: true)` only for inspection without writes,
+compile/refresh, scene switching, or play transitions. Pure reads run against
+dirty scenes without saving them, skip gates even with `paths_hint`, and return
+lifecycle `none`. This assertion does not sandbox indirect C# calls. Known
+explicit disruptive calls retain scope and dirty-scene protection.
+
+All-read `batch_execute` calls, including screenshots, need no `paths_hint` and
+create no checkpoint or undo group. Mixed/mutating batches require the explicit
+union scope. Every step is schema/lifecycle checked before dispatch; fix all
+reported errors before retrying. A failed mutation before validation reports
+`gate.outcome: "skipped"` and `skippedReason: "mutation_failed"`. Read
+`mutation.success` separately: committed work in a partial batch still receives
+validation, so a passed gate does not mean every step succeeded.

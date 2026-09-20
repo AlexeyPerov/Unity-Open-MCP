@@ -260,7 +260,8 @@ export const TOOL_LIFECYCLE: Record<string, ToolLifecycle> = {
   "unity_open_mcp_batch_execute": {
     class: "scene-dirty",
     note:
-      "Runs many nested typed tools sequentially; the batch shares one gate " +
+      "Runs nested tools sequentially. All-read batches require no scope, gate, or undo group. " +
+      "Mixed/mutating batches require a union paths_hint and share one gate " +
       "cycle (one checkpoint → N steps → one validate/delta) and one undo " +
       "group. The recovery concern is the union of the nested tools' " +
       "scene-dirty / paths_hint contracts. v1 does not roll back successful " +

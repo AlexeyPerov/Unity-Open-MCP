@@ -22,7 +22,8 @@ registration, transport, gate execution, and the port formula —
    domain/tool array, and ensure that array is in `ALL_TOOLS`.
 2. Names: `unity_open_mcp_*` or `unity_senses_*`.
 3. Each tool: `name`, `description`, `inputSchema`, handler.
-4. Schema changes → same-task bridge C# handler update (args by key name).
+4. Schema changes → same-task bridge C# handler update (args by key name),
+   then `node scripts/generate-batch-schemas.mjs` for nested preflight constraints.
 5. Legacy typed tools → bridge `KnownTools` (+ read/mutate set) +
    `DispatchTool` case
    ([registration](../packages/bridge/AGENTS.md#tool-registration)).

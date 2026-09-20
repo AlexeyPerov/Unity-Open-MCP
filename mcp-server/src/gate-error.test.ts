@@ -192,3 +192,19 @@ test("gate.outcome=passed is NOT an error", () => {
   env.gate.delta = { newErrors: 0 };
   assert.equal(deriveIsError(env), false);
 });
+
+
+test("skipped validation never hides mutation failure", () => {
+  const envelope = okEnvelope();
+  envelope.mutation = { success: false, output: null, error: { code: "compile_error", message: "bad snippet" } };
+  envelope.gate = { mode: "enforce", skipped: true, outcome: "skipped", skippedReason: "mutation_failed", validation: null, delta: null };
+  assert.equal(deriveIsError(envelope), true);
+});
+
+test("passing validation never hides a partial batch failure", () => {
+  const envelope = okEnvelope();
+  envelope.mutation.success = false;
+  envelope.mutation.error = { code: "batch_partial_failure", message: "one step failed" };
+  envelope.gate = { mode: "enforce", skipped: false, outcome: "passed", validation: { passed: true }, delta: { newErrors: 0 } };
+  assert.equal(deriveIsError(envelope), true);
+});

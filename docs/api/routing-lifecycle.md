@@ -345,3 +345,13 @@ the connection. `X-Request-Id` correlates requests and responses. A mismatched
 response is discarded with `bridge_response_request_mismatch`, without repeating
 the operation. Invalid bridge JSON returns `invalid_response_json` rather than a
 partial success envelope. Client deadlines cover body reads and abandon unread bodies.
+
+### Request-specific lifecycle
+
+Catalog lifecycle values are conservative defaults. A pure inspection snippet
+with `read_only: true`, an explicitly declared `[BridgeReadOnlyMenu]` verifier,
+or an all-read `batch_execute` resolves to `none` in its response. Dirty scenes
+are left untouched. Known disruptive snippet calls retain the default protection;
+`read_only` is an assertion, not proof that arbitrary C# is safe. Mixed batches
+retain `editor_settle`, union scope, and one gate/undo group. Nested reload and
+server-polled operations are rejected during preflight before step zero.

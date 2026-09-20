@@ -146,6 +146,8 @@ namespace UnityOpenMcpBridge
         public string[] PathsHint;
         public string Outcome;          // passed | warned | failed | skipped
         public bool GateRan;
+        public string SkippedReason;
+        public bool EffectiveReadOnly;
         public int NewErrors;
         public int NewWarnings;
         public int ResolvedErrors;
@@ -172,6 +174,8 @@ namespace UnityOpenMcpBridge
             sb.Append("\"pathsHint\":").Append(JsonStringArray(PathsHint)).Append(',');
             sb.Append("\"outcome\":").Append(JsonString(Outcome)).Append(',');
             sb.Append("\"gateRan\":").Append(GateRan ? "true" : "false").Append(',');
+            sb.Append("\"skippedReason\":").Append(JsonString(SkippedReason)).Append(',');
+            sb.Append("\"effectiveReadOnly\":").Append(EffectiveReadOnly ? "true" : "false").Append(',');
             sb.Append("\"newErrors\":").Append(NewErrors).Append(',');
             sb.Append("\"newWarnings\":").Append(NewWarnings).Append(',');
             sb.Append("\"resolvedErrors\":").Append(ResolvedErrors).Append(',');

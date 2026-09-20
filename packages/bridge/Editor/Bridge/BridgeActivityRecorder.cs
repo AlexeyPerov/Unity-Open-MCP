@@ -74,7 +74,8 @@ namespace UnityOpenMcpBridge
         {
             if (activity == null) return;
             activity.DurationMs = durationMs;
-            activity.Outcome = result.Outcome switch
+            activity.Outcome = result.Mutation != null && !result.Mutation.Success
+                ? BridgeActivityOutcome.Failed : result.Outcome switch
             {
                 GateOutcome.Passed => BridgeActivityOutcome.Success,
                 GateOutcome.Warned => BridgeActivityOutcome.Success,

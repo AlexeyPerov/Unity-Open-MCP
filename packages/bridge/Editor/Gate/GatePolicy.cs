@@ -118,12 +118,14 @@ namespace UnityOpenMcpBridge
         // relevant to this mutation.
         public bool CompilePending;
         // feedback.md issue 5 — machine-readable reason the gate was skipped.
-        // Currently only "play_mode" (the gate short-circuits checkpoint/validate
+        // For "play_mode", the gate short-circuits checkpoint/validate
         // during play mode because the scene graph is animating and the verify
         // scan never settles, which previously hung the request queue and trained
-        // agents to set gate:"off" globally). Null on every other skip path.
+        // agents to set gate:"off" globally. Other skips identify read-only,
+        // disabled/no-scope gates, request rejection, or mutation failure.
         // Emitted in the envelope as skippedReason next to skipped:true.
         public string SkippedReason;
+        public bool EffectiveReadOnly;
         // Verify rule ids that threw during this gate's checkpoint or validate
         // scan. When non-empty the gate distrusts its own delta (a failed rule
         // contributes no issues, so pre-existing problems read as resolved and
@@ -148,6 +150,16 @@ namespace UnityOpenMcpBridge
         // the test assembly is declared in OutputSerializer.cs.
         internal static Func<string[], string[], string, VerifyResult> ValidatePathsOverride;
 
+        internal static GateDispatchResult Skipped(ToolDispatchResult mutation, string reason) =>
+            new GateDispatchResult { Mutation = mutation, GateRan = false, Outcome = GateOutcome.Skipped,
+                GateFailed = false, SkippedReason = reason };
+
+        private static ToolDispatchResult InvokeMutation(Func<ToolDispatchResult> mutation)
+        {
+            try { return mutation(); }
+            catch (Exception e) { return ToolDispatchResult.Fail("execution_error", e.Message); }
+        }
+
         public static GateDispatchResult Execute(
             GateMode mode,
             string[] pathsHint,
@@ -155,25 +167,27 @@ namespace UnityOpenMcpBridge
         {
             if (mode == GateMode.Off)
             {
-                var offResult = mutation();
+                var offResult = InvokeMutation(mutation);
                 return new GateDispatchResult
                 {
                     Mutation = offResult,
                     GateRan = false,
-                    Outcome = offResult.Success ? GateOutcome.Skipped : GateOutcome.Failed,
-                    GateFailed = !offResult.Success
+                    Outcome = GateOutcome.Skipped,
+                    SkippedReason = offResult.Success ? "gate_off" : "mutation_failed",
+                    GateFailed = false
                 };
             }
 
             if (pathsHint == null || pathsHint.Length == 0)
             {
-                var noPathResult = mutation();
+                var noPathResult = InvokeMutation(mutation);
                 return new GateDispatchResult
                 {
                     Mutation = noPathResult,
                     GateRan = false,
-                    Outcome = noPathResult.Success ? GateOutcome.Skipped : GateOutcome.Failed,
-                    GateFailed = !noPathResult.Success
+                    Outcome = GateOutcome.Skipped,
+                    SkippedReason = noPathResult.Success ? "no_scope" : "mutation_failed",
+                    GateFailed = false
                 };
             }
 
@@ -188,7 +202,7 @@ namespace UnityOpenMcpBridge
             // refreshed every EditorApplication.update tick (thread-safe to read).
             if (BridgeSession.IsPlaying)
             {
-                var playResult = mutation();
+                var playResult = InvokeMutation(mutation);
                 var steps = playResult.Success
                     ? new[] { "Validation skipped: editor is in play mode (the scene graph is animating; the verify scan does not settle). Re-run in edit mode for a verified result." }
                     : null;
@@ -196,9 +210,9 @@ namespace UnityOpenMcpBridge
                 {
                     Mutation = playResult,
                     GateRan = false,
-                    Outcome = playResult.Success ? GateOutcome.Skipped : GateOutcome.Failed,
-                    GateFailed = !playResult.Success,
-                    SkippedReason = "play_mode",
+                    Outcome = GateOutcome.Skipped,
+                    SkippedReason = playResult.Success ? "play_mode" : "mutation_failed",
+                    GateFailed = false,
                     AgentNextSteps = steps
                 };
             }
@@ -252,7 +266,7 @@ namespace UnityOpenMcpBridge
                 };
             }
 
-            var mutationResult = mutation();
+            var mutationResult = InvokeMutation(mutation);
 
             if (!mutationResult.Success && !mutationResult.PartialCommit)
             {
@@ -260,12 +274,13 @@ namespace UnityOpenMcpBridge
                 return new GateDispatchResult
                 {
                     Mutation = mutationResult,
-                    GateRan = true,
-                    Outcome = GateOutcome.Failed,
+                    GateRan = false,
+                    Outcome = GateOutcome.Skipped,
+                    SkippedReason = "mutation_failed",
                     CheckpointId = checkpoint.CheckpointId,
                     CheckpointDurationMs = checkpointMs,
                     TotalGateDurationMs = gateSw.ElapsedMilliseconds,
-                    GateFailed = true,
+                    GateFailed = false,
                     AgentNextSteps = BuildNextSteps()
                 };
             }
@@ -390,19 +405,6 @@ namespace UnityOpenMcpBridge
             }
 
             var (outcome, gateFailed) = ResolveOutcome(mode, delta);
-
-            // B-N10 — a partial-commit run (e.g. batch_partial_failure with some
-            // steps committed) reached here so the validate/delta health-checks
-            // the committed work. The mutation itself still failed, so override
-            // a delta-driven Passed/Warned to Failed: the agent must see the run
-            // as failed (mutation.success is false) and read batch.results[] for
-            // the per-step breakdown. The delta is still attached so the caller
-            // can see whether the committed steps introduced new issues.
-            if (mutationResult.PartialCommit && !mutationResult.Success)
-            {
-                outcome = GateOutcome.Failed;
-                gateFailed = true;
-            }
 
             var nextSteps = GenerateAgentNextSteps(delta, outcome);
 

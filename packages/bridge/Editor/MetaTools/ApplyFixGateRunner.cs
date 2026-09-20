@@ -82,7 +82,7 @@ namespace UnityOpenMcpBridge.MetaTools
             // Decide whether to roll back. Two triggers:
             //   1. The mutation itself failed (provider returned !Success or
             //      threw before the validate step — GatePolicy marks these
-            //      Outcome=Failed with GateFailed=true but no delta).
+            //      Outcome=Skipped / mutation_failed with no delta).
             //   2. Under ENFORCE, the gate detected new errors after the fix.
             //      (Warn mode never rolls back — the operator asked for
             //      report-only; Off mode has no delta to check.)

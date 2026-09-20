@@ -84,3 +84,10 @@ node scripts/<suite>.mjs --json-out report.json
 3. **S3** — protocol layer (`--skip-live` if Unity is down).
 4. **S2** — quit the Editor first.
 5. **S5** — last; clones the project and runs destructive steps.
+
+### Nested batch schema generation
+
+After changing MCP tool schemas, run `node scripts/generate-batch-schemas.mjs`
+as well as `node scripts/generate-token-estimates.mjs`. The former derives
+bridge-side preflight constraints from `ALL_TOOLS`; it does not execute tools.
+`node scripts/generate-batch-schemas.mjs --check` detects generated drift.

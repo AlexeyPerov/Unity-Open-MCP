@@ -3,42 +3,34 @@ using UnityEditor;
 
 namespace UnityOpenMcpBridge.MetaTools
 {
-    // M27 Plan 4 — gate runner for `batch_execute`. Mirrors `ApplyFixGateRunner`:
-    // it wraps the whole batch in ONE GatePolicy.Execute cycle so the sequence
-    // gets a single checkpoint → N nested dispatches → one validate/delta,
-    // instead of N independent gate cycles (which would be both slower and
-    // semantically wrong — the batch is one logical mutation from the agent's
-    // perspective).
-    //
-    // On top of the gate, it adds a single UNDO GROUP for the whole batch:
-    //   Undo.GetCurrentGroup() before the loop captures the group index;
-    //   Undo.SetCurrentGroupName("Open MCP Batch") labels it;
-    //   Undo.CollapseUndoOperations(group) at the end folds every per-step
-    //   Undo.RegisterCreatedObjectUndo / RecordObject into ONE undo step so
-    //   a single Ctrl+Z reverts the entire batch (UCP competitive note §E;
-    //   strictly better than Coplay's per-step undo).
-    //
-    // v1 does NOT roll back successful steps when a later step fails (same
-    // partial-failure semantics as Coplay, documented in the tool contract).
-    // A partial batch propagates `Mutation.Success = false` (code-review fix B1)
-    // AND stamps `PartialCommit = true` when at least one step committed (B-N10),
-    // so GatePolicy.Execute STILL runs the post-mutation validate/delta on the
-    // committed work (the committed steps must be health-checked) while marking
-    // the run Failed so the agent reads batch.results[]. The partial-failure
-    // branch below adds the recovery guidance (inspect batch.results[], undo
-    // with editor_undo). A total failure (no step committed) short-circuits the
-    // validate/delta step as before. Rollback-on-failure is v2.
+    // Preflight precedes checkpoint and undo setup. Read batches dispatch without
+    // either; mutating batches share one scoped gate and an isolated undo group.
+    // Partial mutations are retained and validated. Operation success and gate
+    // outcome are independent; a failed step does not imply failed validation.
     public static class BatchExecuteGateRunner
     {
         public static GateDispatchResult Execute(
             string body, string gateMode, string[] pathsHint)
         {
+            var refusal = BatchExecuteTool.Preflight(body, out var isMutating);
+            if (refusal != null) return GatePolicy.Skipped(refusal, "request_rejected");
+            if (!isMutating)
+            {
+                var read = BatchExecuteTool.Execute(body);
+                var skipped = GatePolicy.Skipped(read, read.Success ? "read_only" : "mutation_failed");
+                skipped.EffectiveReadOnly = true;
+                return skipped;
+            }
+            if (pathsHint == null || pathsHint.Length == 0)
+                return GatePolicy.Skipped(ToolDispatchResult.Fail("paths_hint_required",
+                    "A mixed/mutating batch requires the explicit union paths_hint before any step runs."), "request_rejected");
             var mode = GatePolicy.ParseMode(gateMode);
 
             // Mark the undo group boundary BEFORE the batch runs. Every nested
             // typed tool calls Undo.RegisterCreatedObjectUndo / RecordObject /
             // AddComponent inside this window; CollapseUndoOperations at the end
             // folds them into a single undo step labelled "Open MCP Batch".
+            Undo.IncrementCurrentGroup();
             int groupBefore = Undo.GetCurrentGroup();
             Undo.SetCurrentGroupName("Open MCP Batch");
 
@@ -101,12 +93,14 @@ namespace UnityOpenMcpBridge.MetaTools
             }
             else if (!result.Mutation.Success)
             {
+                steps.Add(result.Mutation.PartialCommit
+                    ? "Successful mutations remain committed; undo with a single editor_undo if needed."
+                    : "No successful mutating step was committed; read-only successes do not require undo.");
                 steps.Add(
                     "One or more batch steps failed. Inspect batch.results[] for the per-step " +
                     "status (success / failed / skipped) and error detail. Under fail_fast:true " +
                     "the batch stopped at the first failure; later entries are 'skipped' and " +
-                    "were NOT executed. Successful steps before the failure are committed (v1 " +
-                    "does not roll them back) — undo with a single editor_undo if needed.");
+                    "were NOT executed.");
             }
             else if (result.GateRan && result.Delta != null && result.Delta.NewErrors > 0)
             {

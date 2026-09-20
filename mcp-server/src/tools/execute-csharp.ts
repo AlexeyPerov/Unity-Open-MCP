@@ -59,10 +59,12 @@ export const executeCsharp = makeTool(
             type: "boolean",
             default: false,
             description:
-              "Hint that the snippet performs no asset writes (a pure-read probe: " +
+              "Assertion that the snippet performs no writes or disruptive lifecycle transitions (a pure-read probe: " +
               "type lookup, SessionState read, console read). When true the " +
               "paths_hint requirement is waived and the gate is skipped (no " +
-              "checkpoint/validate), so a read probe no longer needs a fake " +
+              "checkpoint/validate), including when paths_hint is supplied. Pure reads bypass the dirty-scene guard " +
+              "and settle wait. Known compile, refresh, scene-switch, or play-transition calls retain mutation " +
+              "scope and lifecycle protection even with this flag. A read probe needs no fake " +
               "scope. This is a SCOPE HINT, not a safety boundary: the deny " +
               "heuristic still applies (a snippet matching " +
               "AssetDatabase.DeleteAsset / EditorApplication.Exit / etc. is " +

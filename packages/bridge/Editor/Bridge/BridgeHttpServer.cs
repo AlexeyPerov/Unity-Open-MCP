@@ -874,8 +874,21 @@ namespace UnityOpenMcpBridge
             var gateMode = BridgeRequestBody.ExtractGateMode(body);
             var sw = Stopwatch.StartNew();
 
-            bool isRegistryTool = BridgeToolRegistry.TryGet(toolName, out var registryEntry);
-            bool isMutating = MutatingTools.Contains(toolName) || (isRegistryTool && registryEntry.IsMutating);
+            bool batchMutating = true;
+            if (toolName == "unity_open_mcp_batch_execute")
+            {
+                var refusal = BatchExecuteTool.Preflight(body, out batchMutating);
+                if (refusal != null)
+                {
+                    var rejected = GatePolicy.Skipped(refusal, "request_rejected");
+                    BridgeAuditRecorder.RecordGateRun(toolName, gateMode, rejected, null);
+                    BridgeActivityRecorder.ApplyToolResultToActivity(activity, rejected, sw.ElapsedMilliseconds);
+                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildGateEnvelope(rejected, gateMode, LifecyclePolicy.None));
+                    return;
+                }
+            }
+            bool isMutating = toolName == "unity_open_mcp_batch_execute"
+                ? batchMutating : EffectiveToolContract.IsMutating(toolName, body);
             // Effective gate precedence (docs/api/bridge-http.md#gate-policy):
             //   valid request `gate`  →  project default (BridgeGateDefaultPolicy).
             // ExtractGateMode already resolves (1) → (2); the [BridgeTool].Gate
@@ -909,7 +922,7 @@ namespace UnityOpenMcpBridge
             bool reserializeAllPathsInvalid = false;
             if (isMutating)
             {
-                pathsHint = JsonBody.GetStringArray(body, "paths_hint");
+                pathsHint = JsonBody.GetStringArray(JsonBody.TopLevelField(body, "paths_hint"), "paths_hint");
                 if (pathsHint == null || pathsHint.Length == 0)
                 {
                     if (toolName == "unity_open_mcp_apply_fix")
@@ -977,11 +990,7 @@ namespace UnityOpenMcpBridge
                         // the tool's `invalid_paths` diagnostic (which names each
                         // rejected path) reaches the caller instead of a generic
                         // paths_hint_required.
-                        bool skipPathsHint = reserializeAllPathsInvalid
-                            || (toolName == "unity_open_mcp_execute_menu"
-                                && ExecuteMenuTool.IsReadOnlyMenu(JsonBody.GetString(body, "menu_path")))
-                            || (BridgeToolClassification.ExposesReadOnlyParam(toolName)
-                                && JsonBody.GetBool(body, "read_only"));
+                        bool skipPathsHint = reserializeAllPathsInvalid;
 
                         if (!skipPathsHint)
                         {
@@ -991,6 +1000,8 @@ namespace UnityOpenMcpBridge
                                 activity.ErrorCode = "paths_hint_required";
                                 activity.DurationMs = sw.ElapsedMilliseconds;
                             }
+                            BridgeAuditRecorder.RecordGateRun(toolName, effectiveGateMode,
+                                GatePolicy.Skipped(ToolDispatchResult.Fail("paths_hint_required", "Explicit mutation scope is required."), "request_rejected"), pathsHint);
                             BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildPathsHintErrorEnvelope(toolName, effectiveGateMode, BridgeToolClassification.ExposesReadOnlyParam(toolName)));
                             return;
                         }
@@ -1082,7 +1093,9 @@ namespace UnityOpenMcpBridge
                 // response returns while the Editor is still importing what the
                 // successful steps wrote. A total failure (Success == false,
                 // PartialCommit == false) committed nothing and skips the wait.
-                var lifecycle = ToolLifecycle.Resolve(toolName);
+                var lifecycle = toolName == "unity_open_mcp_batch_execute"
+                    ? (result.EffectiveReadOnly ? LifecyclePolicy.None : LifecyclePolicy.EditorSettle)
+                    : EffectiveToolContract.Lifecycle(toolName, body);
                 if (result.Mutation != null
                     && (result.Mutation.Success || result.Mutation.PartialCommit)
                     && ToolLifecycle.RequiresSettleWait(lifecycle))
@@ -1224,8 +1237,9 @@ namespace UnityOpenMcpBridge
 
         private static GateDispatchResult DispatchWithGateCore(string toolName, string body, string gateMode, string[] pathsHint)
         {
-            bool isMutating = MutatingTools.Contains(toolName)
-                || (BridgeToolRegistry.TryGet(toolName, out var regEntry) && regEntry.IsMutating);
+            if (toolName == "unity_open_mcp_batch_execute")
+                return BatchExecuteGateRunner.Execute(body, gateMode, pathsHint);
+            bool isMutating = EffectiveToolContract.IsMutating(toolName, body);
 
             var mode = GatePolicy.ParseMode(gateMode);
 
@@ -1249,8 +1263,9 @@ namespace UnityOpenMcpBridge
                     {
                         Mutation = ToolDispatchResult.Fail("scene_dirty", guard.RefusalMessage),
                         GateRan = false,
-                        Outcome = GateOutcome.Failed,
-                        GateFailed = true,
+                        Outcome = GateOutcome.Skipped,
+                        SkippedReason = "request_rejected",
+                        GateFailed = false,
                         DirtyScenePaths = guard.DirtyScenePaths,
                         AgentNextSteps = BridgeJson.BuildSceneDirtyNextSteps(guard.DirtyScenePaths)
                     };
@@ -1264,8 +1279,10 @@ namespace UnityOpenMcpBridge
                 {
                     Mutation = nonMutatingResult,
                     GateRan = false,
-                    Outcome = nonMutatingResult.Success ? GateOutcome.Skipped : GateOutcome.Failed,
-                    GateFailed = !nonMutatingResult.Success
+                    Outcome = GateOutcome.Skipped,
+                    SkippedReason = nonMutatingResult.Success ? "read_only" : "mutation_failed",
+                    EffectiveReadOnly = true,
+                    GateFailed = false
                 };
             }
 
@@ -1275,16 +1292,6 @@ namespace UnityOpenMcpBridge
             // dry-run apply_fix is short-circuited earlier (HandleDryRunApplyFix).
             if (toolName == "unity_open_mcp_apply_fix")
                 return ApplyFixGateRunner.Execute(body, gateMode, pathsHint);
-
-            // M27 Plan 4 — batch_execute runs through its own gate runner so
-            // the WHOLE sequence shares ONE gate cycle (one checkpoint → N
-            // nested dispatches → one validate/delta) plus a single undo group.
-            // Reuses GatePolicy internally; the nested steps dispatch via
-            // DispatchTool WITHOUT re-entering HandleToolDispatch (no per-step
-            // queue / auth / paths_hint re-enforcement — the batch owns one
-            // gate scope for the sequence).
-            if (toolName == "unity_open_mcp_batch_execute")
-                return BatchExecuteGateRunner.Execute(body, gateMode, pathsHint);
 
             return GatePolicy.Execute(mode, pathsHint, () => DispatchTool(toolName, body));
         }
@@ -1526,8 +1533,10 @@ namespace UnityOpenMcpBridge
                 {
                     Mutation = mutation,
                     GateRan = false,
-                    Outcome = mutation.Success ? GateOutcome.Skipped : GateOutcome.Failed,
-                    GateFailed = !mutation.Success,
+                    Outcome = GateOutcome.Skipped,
+                    SkippedReason = mutation.Success ? "read_only" : "mutation_failed",
+                    EffectiveReadOnly = true,
+                    GateFailed = false,
                 };
 
                 sw.Stop();

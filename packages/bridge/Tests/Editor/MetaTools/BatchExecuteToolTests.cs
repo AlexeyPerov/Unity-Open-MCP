@@ -285,11 +285,11 @@ namespace UnityOpenMcpBridge.Tests
             // asset-path reasons, but it must NOT fail with the scene-stack
             // batch_nested_reload_unsafe error.
             var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_scene_create\",\"params\":{\"path\":\"Assets/__MCPTest_Scene_Additive.unity\",\"mode\":\"additive\"}}]}";
-            var result = BatchExecuteTool.Execute(body);
+            var result = BatchExecuteTool.Preflight(body, out _);
             // The scene-stack guard specifically must not have fired.
-            Assert.AreNotEqual("batch_nested_reload_unsafe", result.ErrorCode,
+            Assert.IsNull(result,
                 "Additive scene_create must not be refused by the scene-stack guard. " +
-                "Got: " + result.ErrorCode + " — " + result.ErrorMessage);
+                "Got: " + result?.ErrorCode + " — " + result?.ErrorMessage);
         }
 
         // -------------------------------------------------------------------
@@ -495,7 +495,7 @@ namespace UnityOpenMcpBridge.Tests
         public void Execute_SuccessStep_IncludesOutput()
         {
             var body = "{\"commands\":[" +
-                       "{\"tool\":\"unity_open_mcp_gameobject_create\",\"params\":{\"name\":\"" + CleanupPrefix + "Out\"}}}" +
+                       "{\"tool\":\"unity_open_mcp_gameobject_create\",\"params\":{\"name\":\"" + CleanupPrefix + "Out\"}}" +
                        "]}";
 
             var result = BatchExecuteTool.Execute(body);

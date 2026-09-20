@@ -66,6 +66,7 @@ namespace UnityOpenMcpBridge
 
         internal static int ExtractTimeoutMs(string body)
         {
+            body = JsonBody.TopLevelField(body, "timeout_ms");
             if (string.IsNullOrEmpty(body)) return DefaultTimeoutMs;
 
             const string key = "\"timeout_ms\"";
@@ -96,6 +97,7 @@ namespace UnityOpenMcpBridge
 
         internal static string ExtractGateMode(string body)
         {
+            body = JsonBody.TopLevelField(body, "gate");
             // Precedence per docs/api/bridge-http.md#gate-policy:
             //   1. Request body `gate` value
             //   2. Project default from `.unity-open-mcp/settings.json`

@@ -4,11 +4,14 @@ export interface MutationEnvelope {
     output: unknown;
     error: { code: string; message: string } | null;
   };
+  /** Effective request classification; catalog annotations remain conservative. */
+  effectiveReadOnly?: boolean;
   gate: {
     mode: string;
     skipped: boolean;
     /** Structured outcome token: passed | warned | failed | skipped | validate_scan_failed. */
     outcome?: string;
+    skippedReason?: string | null;
     validation: unknown;
     delta: Record<string, unknown> | null;
   };

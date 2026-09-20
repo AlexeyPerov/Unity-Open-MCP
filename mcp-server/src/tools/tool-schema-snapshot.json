@@ -10,81 +10,81 @@
   "unity_open_mcp_execute_csharp": {
     "description": "Compile and run a C# snippet in the Editor (Roslyn). Primary escape hatch — covers most Editor APIs without typed tools. The snippet compiles into its OWN assembly, so it sees only the PUBLIC members of your project's assemblies: an `internal` member (the natural visibility for a testable seam) reports as CS0117/CS0122/CS1061 'not found', which is the assembly boundary and not a typo. Reach it with reflection — typeof(T).GetMethod(\"Name\", BindingFlags.NonPublic | BindingFlags.Static).Invoke(...) — or, for anything you will call more than once, make the seam public or exercise it from a test assembly via unity_senses_run_tests. (Same class of surprise as the no-`using`-directives rule: fully-qualify every type or pass `usings`.)",
     "inputSchema": {
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
         "code": {
-          "description": "C# source. Use return x; to produce output. Required unless setup_roslyn is true.",
-          "type": "string"
+          "type": "string",
+          "description": "C# source. Use return x; to produce output. Required unless setup_roslyn is true."
+        },
+        "setup_roslyn": {
+          "type": "boolean",
+          "description": "Install the IL-only Roslyn compiler fallback and/or report its install status. Use when this tool fails with roslyn_unavailable (Unity 6000.x ships only ReadyToRun Roslyn images the editor's Mono runtime cannot load). Downloads ~15 MB of SHA-256-pinned packages from nuget.org into ~/.unity-open-mcp/roslyn — ask the user before triggering. Re-call with setup_roslyn: true to poll until status is 'installed'; combine with `code` to compile immediately once ready."
+        },
+        "usings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra using directives beyond defaults (UnityEngine, UnityEditor, etc.)"
+        },
+        "object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Instance IDs (or full handle JSON) of live UnityEngine.Objects to inject into the snippet. Access them via Refs[index] or Ref<T>(index) in the code body. Instance IDs come from the 'objectId' field of object handles returned by other tools. Instance IDs change on domain reload."
+        },
+        "paths_hint": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Asset paths likely touched; drives scoped gate validation"
+        },
+        "read_only": {
+          "type": "boolean",
+          "default": false,
+          "description": "Assertion that the snippet performs no writes or disruptive lifecycle transitions (a pure-read probe: type lookup, SessionState read, console read). When true the paths_hint requirement is waived and the gate is skipped (no checkpoint/validate), including when paths_hint is supplied. Pure reads bypass the dirty-scene guard and settle wait. Known compile, refresh, scene-switch, or play-transition calls retain mutation scope and lifecycle protection even with this flag. A read probe needs no fake scope. This is a SCOPE HINT, not a safety boundary: the deny heuristic still applies (a snippet matching AssetDatabase.DeleteAsset / EditorApplication.Exit / etc. is still denied), and the bridge cannot statically prove the snippet writes nothing — only assert it does not need a scope."
+        },
+        "ignore_scene_dirty": {
+          "type": "boolean",
+          "default": false,
+          "description": "Bypass the active-scene dirty guard. By default a disruptive op (recompile / scene switch) is refused with scene_dirty when any loaded scene has unsaved changes, so Unity's native save modal never interrupts the flow. Set true to proceed and accept the risk of a native save prompt."
         },
         "confirm_bypass": {
+          "type": "boolean",
           "default": false,
-          "description": "Bypass the deny heuristic for destructive patterns (EditorApplication.Exit, AssetDatabase.DeleteAsset, BuildPipeline.BuildPlayer, etc.). Requires gate: \"off\" as well — both flags must be set. The bypass is audited.",
-          "type": "boolean"
+          "description": "Bypass the deny heuristic for destructive patterns (EditorApplication.Exit, AssetDatabase.DeleteAsset, BuildPipeline.BuildPlayer, etc.). Requires gate: \"off\" as well — both flags must be set. The bypass is audited."
         },
         "gate": {
-          "default": "enforce",
           "enum": [
             "enforce",
             "warn",
             "off"
-          ]
-        },
-        "ignore_scene_dirty": {
-          "default": false,
-          "description": "Bypass the active-scene dirty guard. By default a disruptive op (recompile / scene switch) is refused with scene_dirty when any loaded scene has unsaved changes, so Unity's native save modal never interrupts the flow. Set true to proceed and accept the risk of a native save prompt.",
-          "type": "boolean"
-        },
-        "max_depth": {
-          "default": 4,
-          "description": "Max recursion depth when serializing the returned object graph (default 4). Composite nodes deeper than this are stringified to bound payload size.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "max_items": {
-          "default": 100,
-          "description": "Max items emitted per list/enumerable in the returned object graph (default 100). Truncated lists report a `truncated` count of the elided items.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "object_ids": {
-          "description": "Instance IDs (or full handle JSON) of live UnityEngine.Objects to inject into the snippet. Access them via Refs[index] or Ref<T>(index) in the code body. Instance IDs come from the 'objectId' field of object handles returned by other tools. Instance IDs change on domain reload.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "paths_hint": {
-          "description": "Asset paths likely touched; drives scoped gate validation",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "read_only": {
-          "default": false,
-          "description": "Hint that the snippet performs no asset writes (a pure-read probe: type lookup, SessionState read, console read). When true the paths_hint requirement is waived and the gate is skipped (no checkpoint/validate), so a read probe no longer needs a fake scope. This is a SCOPE HINT, not a safety boundary: the deny heuristic still applies (a snippet matching AssetDatabase.DeleteAsset / EditorApplication.Exit / etc. is still denied), and the bridge cannot statically prove the snippet writes nothing — only assert it does not need a scope.",
-          "type": "boolean"
-        },
-        "setup_roslyn": {
-          "description": "Install the IL-only Roslyn compiler fallback and/or report its install status. Use when this tool fails with roslyn_unavailable (Unity 6000.x ships only ReadyToRun Roslyn images the editor's Mono runtime cannot load). Downloads ~15 MB of SHA-256-pinned packages from nuget.org into ~/.unity-open-mcp/roslyn — ask the user before triggering. Re-call with setup_roslyn: true to poll until status is 'installed'; combine with `code` to compile immediately once ready.",
-          "type": "boolean"
+          ],
+          "default": "enforce"
         },
         "timeout_ms": {
+          "type": "integer",
           "default": 30000,
-          "description": "Hard cap 55000 ms — values above a typical MCP host request timeout (~60s) are unreachable: the host aborts the tools/call first (opaque -32001 transport error, no structured envelope), while the snippet keeps running on Unity's main thread. The route clamps to this cap server-side regardless (and reports the clamp) so a client that does not validate still gets a clean `timeout` envelope with agentNextSteps. For long work (full recompiles, heavy imports), split into smaller steps or use run_tests (which has an async job-poll shape) instead of one big blocking call. Default 30000.",
-          "maximum": 55000,
           "minimum": 1000,
-          "type": "integer"
+          "maximum": 55000,
+          "description": "Hard cap 55000 ms — values above a typical MCP host request timeout (~60s) are unreachable: the host aborts the tools/call first (opaque -32001 transport error, no structured envelope), while the snippet keeps running on Unity's main thread. The route clamps to this cap server-side regardless (and reports the clamp) so a client that does not validate still gets a clean `timeout` envelope with agentNextSteps. For long work (full recompiles, heavy imports), split into smaller steps or use run_tests (which has an async job-poll shape) instead of one big blocking call. Default 30000."
         },
-        "usings": {
-          "description": "Extra using directives beyond defaults (UnityEngine, UnityEditor, etc.)",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "max_depth": {
+          "type": "integer",
+          "default": 4,
+          "minimum": 0,
+          "description": "Max recursion depth when serializing the returned object graph (default 4). Composite nodes deeper than this are stringified to bound payload size."
+        },
+        "max_items": {
+          "type": "integer",
+          "default": 100,
+          "minimum": 0,
+          "description": "Max items emitted per list/enumerable in the returned object graph (default 100). Truncated lists report a `truncated` count of the elided items."
         }
       },
-      "type": "object"
+      "additionalProperties": false
     }
   },
   "unity_open_mcp_invoke_method": {
@@ -10684,12 +10684,11 @@
     }
   },
   "unity_open_mcp_batch_execute": {
-    "description": "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — cuts agent↔Unity latency and token cost for multi-object setup (e.g. spawn N cubes + create materials + assign in one call). Each entry in `commands` carries a full tool id (`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group (always visible). Live-only — NOT headless `batchCapable`; there is no batch spawn fallback when the bridge is down.\n\nNOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". The two are independent axes; nestability is decided by the pre-flight refusals below.\n\nSafety: the WHOLE batch shares ONE gate cycle (one checkpoint → all steps → one validate/delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step errors are collected. Partial failure semantics: a successful step is NOT rolled back when a later step fails (same as Coplay). A partial batch (at least one step committed) propagates `mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its validate/delta on the committed work and waits for the asset/compile settle, but marks the run `outcome: failed` so the agent reads `batch.results[]` for the per-step breakdown and undoes with a single `editor_undo` if needed. A total failure (no step committed) skips the validate/delta as before. Run `unity_open_mcp_validate_edit` on the touched paths to confirm health after a partial run.\n\nv1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. `batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package / upgrade, scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, settings_set_player, execute_csharp / invoke_method / execute_menu) is refused up-front with a `batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its default Single mode replaces the active scene stack and can discard unsaved changes in open scenes). Use those tools as single top-level calls instead.\n\nA step whose terminal result is produced by the SERVER rather than by the Editor dispatch is refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns `{status:\"started\", runId}` immediately and the server polls a results file to turn that into a real result, which only happens on the top-level route. Inside a batch nothing polls, so the step would be recorded `success` carrying the non-terminal \"started\" body and the run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
+    "description": "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — cuts agent↔Unity latency and token cost for multi-object setup (e.g. spawn N cubes + create materials + assign in one call). Each entry in `commands` carries a full tool id (`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group (always visible). Live-only — NOT headless `batchCapable`; there is no batch spawn fallback when the bridge is down.\n\nNOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". The two are independent axes; nestability is decided by the pre-flight refusals below.\n\nEvery step is schema/lifecycle preflighted before dispatch. All-read batches need no paths_hint, checkpoint, gate, or undo group. Mixed/mutating batches require the explicit union paths_hint. Safety: a mutating batch shares ONE gate cycle (one checkpoint → all steps → one validate/delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step errors are collected. Partial failure semantics: a successful step is NOT rolled back when a later step fails (same as Coplay). A partial batch (at least one step committed) propagates `mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its validate/delta on the committed work and waits for the asset/compile settle. Gate outcome describes validation independently of mutation.success; read `batch.results[]` for the breakdown and undo with a single `editor_undo` if needed. A total failure (no step committed) skips the validate/delta with gate.outcome: skipped and skippedReason: mutation_failed. Run `unity_open_mcp_validate_edit` on the touched paths to confirm health after a partial run.\n\nv1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. `batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package / upgrade, scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, settings_set_player, mutating execute_csharp / invoke_method / disruptive execute_menu) is refused up-front with a `batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its default Single mode replaces the active scene stack and can discard unsaved changes in open scenes). Script writes/deletes, undo/redo, play transitions, and non-preview fixes also require their top-level routes. Use those tools as single top-level calls instead.\n\nA step whose terminal result is produced by the SERVER rather than by the Editor dispatch is refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns `{status:\"started\", runId}` immediately and the server polls a results file to turn that into a real result, which only happens on the top-level route. Inside a batch nothing polls, so the step would be recorded `success` carrying the non-terminal \"started\" body and the run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
     "inputSchema": {
       "type": "object",
       "required": [
-        "commands",
-        "paths_hint"
+        "commands"
       ],
       "properties": {
         "commands": {
@@ -10698,8 +10697,7 @@
           "items": {
             "type": "object",
             "required": [
-              "tool",
-              "params"
+              "tool"
             ],
             "properties": {
               "tool": {
@@ -10708,7 +10706,7 @@
               },
               "params": {
                 "type": "object",
-                "description": "The tool's input object (its normal `args`). Omit the outer `paths_hint` / `gate` — the batch supplies those for the whole sequence."
+                "description": "The tool's input object (its normal `args`); omitted means an empty object. Omit the outer `paths_hint` / `gate` — the batch supplies those for the whole sequence."
               }
             },
             "additionalProperties": false

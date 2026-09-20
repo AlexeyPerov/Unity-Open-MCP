@@ -182,8 +182,28 @@ code. Poll `editor_status.isCompiling` until false, then `read_compile_errors`.
 
 `execute_csharp` accepts `read_only: true` for pure-read probes (type lookups,
 `SessionState` reads, console reads): it waives the `paths_hint` requirement and
-skips the gate. It is a scope hint, not a safety boundary — the deny heuristic
-still applies, and it must not be used for a snippet that mutates assets.
+skips the gate even if a scope is supplied. Such reads run against dirty scenes
+without saving them and return lifecycle `none`. Known compile/refresh,
+scene-switch, and play-transition calls retain lifecycle and mutation-scope
+protection. This is a caller assertion, not a sandbox or proof of purity:
+indirect calls cannot be proven safe. The deny heuristic still applies; use
+`read_only` only for inspection without writes or disruptive transitions.
+
+Verifier menu handlers can explicitly declare `[BridgeReadOnlyMenu]` alongside
+`[MenuItem("exact/menu/path")]`. The exact registered path then needs no fake
+scope, checkpoint, or dirty-scene guard; descendants do not inherit permission.
+The declaration promises inspection only, with no writes, scene switch, reload,
+or play transition. Existing no-asset-write exemptions such as Refresh and Play
+retain their disruption guard and remain unavailable inside batches.
+
+Gate outcome describes validation independently of operation success. A mutation
+failure before validation returns `mutation.success: false`, `gate.outcome:
+"skipped"`, `gate.skipped: true`, `gate.skippedReason: "mutation_failed"`, and
+null `validation`/`delta`. A completed checkpoint ID is retained. Preflight
+refusals use `request_rejected`. Partial mutations still validate committed work;
+the gate may pass while the batch operation fails. Check both fields. Existing
+`gate.delta`, `gate.validation`, and `agentNextSteps` remain readable, and
+`effectiveReadOnly` reports the request classification.
 
 `unity_open_mcp_apply_fix` defaults to `dry_run: true`. Review the preview before
 applying. Unsafe fixes require an explicit replacement target. A top-level
@@ -228,8 +248,13 @@ traces are needed.
 ### `unity_open_mcp_batch_execute`
 
 Runs multiple typed tools sequentially in one request to an already-open
-Editor. It uses one checkpoint/validation/delta cycle and one undo group.
-`commands` and the union `paths_hint` are required; `fail_fast` defaults to
+Editor. All-read batches (including screenshots) need only `commands`, with no
+`paths_hint`, checkpoint, gate, or undo group. Mixed/mutating batches require an
+explicit union `paths_hint` and use one checkpoint/validation/delta cycle and
+one undo group. Every nested schema and lifecycle is checked before step zero,
+before scope enforcement or checkpoints. Refusals collect errors across all
+steps, including unknown tools, unknown keys, missing fields, invalid values,
+reload hazards, and server-polled operations. `fail_fast` defaults to
 `true`; `gate` defaults to `enforce`. Successful earlier steps are not
 automatically rolled back when a later step fails. Nested steps that resolve
 to the `restart_then_settle` lifecycle (`scene_open` Single mode, `package_add`
@@ -239,14 +264,10 @@ with `batch_nested_reload_unsafe` — a domain reload or scene switch mid-batch
 would silently abort every later step. `batch_execute` itself and `compile_check`
 are also refused as nested steps.
 
-A `script_write` step (any `.cs` write) followed later in the same batch by an
-import/refresh step (`assets_refresh`, `reimport_package`, `reimport_asset`) is
-also refused with `batch_nested_reload_unsafe`: the settle wait runs only once
-at the batch level after all steps complete, so a compile kicked off by the
-refresh can kill the HTTP response mid-write via a domain reload before the
-batch envelope is serialized (surfaced by the client as
-`bridge_response_unparsable`). Write the script as a single top-level call, let
-it settle, then run the remaining steps in a separate batch.
+`script_write` and `script_delete` are also refused because importing/deleting
+scripts may reload the domain even without a later refresh. The preflight also
+reports cross-step script-write/import hazards. Write scripts as top-level
+calls, let compilation settle, then continue with a separate batch.
 
 A step whose **terminal result is produced by the MCP server** rather than by the
 Editor dispatch is refused with `batch_step_requires_server_poll`.
@@ -259,8 +280,8 @@ run's outcome would never reach the caller. Call it top-level.
 Pre-flight refusals (`batch_tool_not_invokable`, `batch_nested_reload_unsafe`,
 `batch_step_requires_server_poll`, `batch_too_many_commands`,
 `batch_invalid_step`, `missing_parameter`) all happen **before** the dispatch
-loop: `batch.results[]` is empty, nothing was committed, and `agentNextSteps`
-says so instead of offering the partial-failure/`editor_undo` guidance. Where a
+loop: no per-step result exists and nothing was committed. Read the aggregated
+`mutation.error.message`; there is nothing to undo. Where a
 concrete meta-tool equivalent exists, the refusal message also names it — a
 client that ignores `tools/list_changed` cannot see a tool `manage_tools` just
 activated, so "use it as a single top-level call" alone would be a dead end for

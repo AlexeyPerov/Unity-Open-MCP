@@ -171,7 +171,9 @@ fd-bearing resource in `AssemblyReloadEvents.beforeAssemblyReload` (the
 2. Tool contracts → MCP schema/handler + domain/tool array + `ALL_TOOLS`;
    owning page under `docs/api/mcp-tools.md`; root/domain skills when workflow
    changes.
-3. Schema/catalog/group changes → regenerate token estimates.
+3. Schema/catalog/group changes → regenerate token estimates. Schema changes
+   also require `node scripts/generate-batch-schemas.mjs`; never hand-edit
+   `BridgeBatchSchemas.cs`. Verify with the generator's `--check` flag.
 4. Routed tools → S0 + narrowest S1–S5
    (`docs/troubleshooting-contributors.md#mcp-test-suite-catalog`).
 5. Instance IDs →

@@ -42,7 +42,7 @@ namespace UnityOpenMcpBridge
         // ToolLifecycle.RequiresDirtyGuard so callers don't double-decide.
         public static bool AppliesTo(string toolName, string body)
         {
-            if (!ToolLifecycle.RequiresDirtyGuard(toolName)) return false;
+            if (EffectiveToolContract.Lifecycle(toolName, body) != LifecyclePolicy.RestartThenSettle) return false;
             // Additive scene_create / scene_open do not close any open scene,
             // so a dirty scene cannot be lost and the native save modal cannot
             // fire — the guard would only add friction. The shipped schema tells

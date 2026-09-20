@@ -382,6 +382,7 @@ namespace UnityOpenMcpBridge
             }
             sb.Append('}');
 
+            sb.Append(",\"effectiveReadOnly\":").Append(result.EffectiveReadOnly ? "true" : "false");
             sb.Append(",\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
             sb.Append("\"");
 
@@ -784,7 +785,7 @@ namespace UnityOpenMcpBridge
             sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"execution_error\",\"message\":\"");
             sb.Append(EscapeStringContent(e.Message));
             sb.Append("\"}},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
-            sb.Append("\",\"skipped\":true,\"validation\":null,\"delta\":null}");
+            sb.Append("\",\"skipped\":true,\"outcome\":\"skipped\",\"skippedReason\":\"mutation_failed\",\"validation\":null,\"delta\":null}");
             sb.Append(",\"logs\":[]");
             sb.Append(",\"agentNextSteps\":[\"Tool execution failed with an unexpected error.\"]}");
             return sb.ToString();

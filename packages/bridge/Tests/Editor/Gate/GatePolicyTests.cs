@@ -379,7 +379,7 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
-        public void Execute_EditMode_RunsGateNormally_NoSkipReason()
+        public void Execute_EditMode_NoPaths_ReportsNoScope()
         {
             // The default (edit mode) path must NOT set SkippedReason when the
             // gate is skipped only because paths_hint is empty — that's a
@@ -392,7 +392,7 @@ namespace UnityOpenMcpBridge.Tests
                     GateMode.Enforce,
                     null, // empty paths_hint → skipped, but NOT play_mode
                     () => ToolDispatchResult.Ok("{}"));
-                Assert.IsNull(result.SkippedReason,
+                Assert.AreEqual("no_scope", result.SkippedReason,
                     "Edit-mode empty-paths skip must not carry a play_mode reason.");
             }
             finally

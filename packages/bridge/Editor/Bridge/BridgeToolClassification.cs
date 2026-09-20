@@ -396,9 +396,8 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_execute_csharp",
             "unity_open_mcp_invoke_method",
             "unity_open_mcp_execute_menu",
-            // M27 Plan 4 — batch_execute is mutating (its nested commands can
-            // include scene/asset mutators). paths_hint is required at the
-            // batch level and scopes the single batch-level gate cycle.
+            // Conservative catalog default. EffectiveToolContract derives each
+            // request from its preflighted steps; all-read batches waive scope.
             "unity_open_mcp_batch_execute",
             "unity_open_mcp_apply_fix",
             "unity_open_mcp_reserialize",

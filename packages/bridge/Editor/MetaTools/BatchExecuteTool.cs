@@ -51,6 +51,9 @@ namespace UnityOpenMcpBridge.MetaTools
         {
             "unity_open_mcp_batch_execute",
             "unity_open_mcp_compile_check",
+            "unity_open_mcp_editor_undo",
+            "unity_open_mcp_editor_redo",
+            "unity_open_mcp_editor_clear_history",
         };
 
         // specs/feedback.md 2026-08-24 — tools whose TERMINAL result is produced
@@ -136,9 +139,9 @@ namespace UnityOpenMcpBridge.MetaTools
         // here and handled by the param-aware IsNestedSceneStackUnsafe check,
         // which runs FIRST (see the call site). scene_open has no additive-safe
         // case in the batch context and stays caught here. (B-N9.)
-        private static bool IsNestedReloadUnsafe(string toolName, out LifecyclePolicy policy)
+        private static bool IsNestedReloadUnsafe(string toolName, string body, out LifecyclePolicy policy)
         {
-            policy = ToolLifecycle.Resolve(toolName);
+            policy = EffectiveToolContract.Lifecycle(toolName, body);
             if (policy != LifecyclePolicy.RestartThenSettle) return false;
             // scene_create's safety depends on its `mode` param; the param-aware
             // IsNestedSceneStackUnsafe check (run before this one at the call
@@ -200,7 +203,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return step.Tool == "unity_open_mcp_assets_refresh";
         }
 
-        public static ToolDispatchResult Execute(string body)
+        private static ToolDispatchResult ValidateStructure(string body)
         {
             var sw = Stopwatch.StartNew();
 
@@ -235,7 +238,7 @@ namespace UnityOpenMcpBridge.MetaTools
             for (int i = 0; i < commandsRaw.Length; i++)
             {
                 var raw = commandsRaw[i];
-                var tool = JsonBody.GetString(raw, "tool");
+                var tool = JsonBody.GetString(JsonBody.TopLevelField(raw, "tool"), "tool");
                 if (string.IsNullOrWhiteSpace(tool))
                 {
                     return ToolDispatchResult.Fail(
@@ -243,7 +246,7 @@ namespace UnityOpenMcpBridge.MetaTools
                         $"commands[{i}] is missing a 'tool' name.");
                 }
 
-                var paramsRaw = JsonBody.GetRawValue(raw, "params");
+                var paramsRaw = JsonBody.GetTopLevelRawValue(raw, "params");
                 // params may be absent for no-arg tools — pass "{}" so the
                 // nested handler sees a valid (empty) object body.
                 var paramsBody = string.IsNullOrWhiteSpace(paramsRaw) || paramsRaw.Trim() == "null"
@@ -270,6 +273,12 @@ namespace UnityOpenMcpBridge.MetaTools
                 // `success` with a non-terminal {"status":"started"} body and the
                 // run's outcome is unreachable. Refuse up-front rather than
                 // silently accepting a call that cannot answer.
+                if ((tool == "unity_open_mcp_editor_set_state"
+                    && JsonBody.GetString(paramsBody, "state") != "pause")
+                    || (tool == "unity_open_mcp_apply_fix" && !JsonBody.GetBool(paramsBody, "dry_run", true)))
+                    return ToolDispatchResult.Fail("batch_tool_not_invokable",
+                        $"commands[{i}] tool '{tool}' requires its top-level lifecycle/rollback runner.");
+
                 if (ServerPolledTools.Contains(tool))
                 {
                     return ToolDispatchResult.Fail(
@@ -307,7 +316,7 @@ namespace UnityOpenMcpBridge.MetaTools
                 // a clear error naming the offending step and why. scene_create
                 // is handled by the param-aware check above and carved out of
                 // IsNestedReloadUnsafe so an additive scene_create is accepted.
-                if (IsNestedReloadUnsafe(tool, out var unsafePolicy))
+                if (IsNestedReloadUnsafe(tool, paramsBody, out var unsafePolicy))
                 {
                     return ToolDispatchResult.Fail(
                         "batch_nested_reload_unsafe",
@@ -360,6 +369,96 @@ namespace UnityOpenMcpBridge.MetaTools
                 }
             }
 
+            return null;
+        }
+
+        internal static ToolDispatchResult Preflight(string body, out bool isMutating)
+        {
+            isMutating = false;
+            if (!BridgeJson.IsCompleteJson(body))
+                return ToolDispatchResult.Fail("batch_invalid_step", "Batch request must be one complete JSON object.");
+            var rawCommands = JsonBody.GetTopLevelRawValue(body, "commands");
+            if (rawCommands == null || !rawCommands.TrimStart().StartsWith("["))
+                return ToolDispatchResult.Fail("missing_parameter", "'commands' must be a non-empty array.");
+            var commands = JsonBody.GetArrayRawValues(rawCommands);
+            if (commands.Count == 0)
+                return ToolDispatchResult.Fail("missing_parameter", "'commands' must be a non-empty array.");
+            int limit = System.Math.Max(1, System.Math.Min(HardMaxCommands, BridgeProjectSettings.BatchExecuteMaxCommands));
+            if (commands.Count > limit)
+                return ToolDispatchResult.Fail("batch_too_many_commands", $"Batch has {commands.Count} commands; the limit is {limit}.");
+            var errors = new List<string>();
+            BatchSchemaValidator.Validate(body, BridgeBatchSchemas.ByTool["unity_open_mcp_batch_execute"], "batch", errors);
+            string errorCode = errors.Count == 0 ? null : "batch_invalid_step";
+            for (int i = 0; i < commands.Count; i++)
+            {
+                var raw = commands[i];
+                var tool = JsonBody.GetString(JsonBody.TopLevelField(raw, "tool"), "tool");
+                var args = JsonBody.GetTopLevelRawValue(raw, "params") ?? "{}";
+                var structure = ValidateStructure("{\"commands\":[" + raw + "]}");
+                if (structure != null)
+                {
+                    errorCode = errorCode ?? structure.ErrorCode;
+                    errors.Add(structure.ErrorMessage.Replace("commands[0]", "commands[" + i + "]"));
+                }
+                foreach (var key in JsonBody.GetObjectKeys(raw) ?? new List<string>())
+                    if (key != "tool" && key != "params")
+                    {
+                        errorCode = errorCode ?? "batch_invalid_step";
+                        errors.Add("commands[" + i + "]." + key + " is unknown");
+                    }
+                if (string.IsNullOrWhiteSpace(tool)) continue;
+                bool known = BridgeToolClassification.KnownTools.Contains(tool) || BridgeToolRegistry.TryGet(tool, out _);
+                if (!known)
+                {
+                    errorCode = errorCode ?? "batch_tool_not_invokable";
+                    errors.Add("commands[" + i + "] tool '" + tool + "' is not available in the live bridge. Use its top-level route.");
+                    continue;
+                }
+                if (BridgeToolTogglePolicy.IsDisabled(tool))
+                {
+                    errorCode = errorCode ?? "batch_tool_not_invokable";
+                    errors.Add("commands[" + i + "] tool '" + tool + "' is disabled in the bridge.");
+                }
+                if (BridgeBatchSchemas.ByTool.TryGetValue(tool, out var schema))
+                {
+                    int before = errors.Count;
+                    BatchSchemaValidator.Validate(args, schema, "commands[" + i + "].params", errors, true);
+                    if (errors.Count != before) errorCode = errorCode ?? "batch_invalid_step";
+                }
+                else
+                {
+                    errorCode = errorCode ?? "batch_tool_not_invokable";
+                    errors.Add("commands[" + i + "] has no published batch schema; call the tool top-level instead.");
+                }
+                if (tool == "unity_open_mcp_script_write" || tool == "unity_open_mcp_script_delete")
+                {
+                    errorCode = errorCode ?? "batch_nested_reload_unsafe";
+                    errors.Add("commands[" + i + "] tool '" + tool + "' imports/deletes scripts and may reload the domain. Call it top-level and wait for compilation.");
+                }
+                if (tool != "unity_open_mcp_batch_execute") isMutating |= EffectiveToolContract.IsMutating(tool, args);
+            }
+            var combination = ValidateStructure(body);
+            if (combination != null && combination.ErrorMessage.Contains("writes a script"))
+            {
+                errorCode = errorCode ?? combination.ErrorCode;
+                errors.Add(combination.ErrorMessage);
+            }
+            if (errors.Count == 0) return combination;
+            return ToolDispatchResult.Fail(errorCode ?? "batch_invalid_step", string.Join("\n", errors));
+        }
+
+        public static ToolDispatchResult Execute(string body)
+        {
+            var refusal = Preflight(body, out _);
+            if (refusal != null) return refusal;
+            var sw = Stopwatch.StartNew();
+            bool failFast = JsonBody.GetBool(JsonBody.TopLevelField(body, "fail_fast"), "fail_fast", true);
+            var steps = new List<BatchStep>();
+            foreach (var raw in JsonBody.GetArrayRawValues(JsonBody.GetTopLevelRawValue(body, "commands")))
+                steps.Add(new BatchStep {
+                    Tool = JsonBody.GetString(JsonBody.TopLevelField(raw, "tool"), "tool"),
+                    ParamsBody = JsonBody.GetTopLevelRawValue(raw, "params") ?? "{}"
+                });
             // --- BridgeBatchRunHistory live progress -------------------------
             // One BeginRun / CompleteRun pair around the whole loop so the
             // operator's Activity Batch section shows in-flight progress without
@@ -374,6 +473,7 @@ namespace UnityOpenMcpBridge.MetaTools
                 // --- Sequential dispatch loop --------------------------------
                 var results = new List<BatchStepResult>(steps.Count);
                 int successCount = 0;
+                int committedCount = 0;
                 int failureCount = 0;
                 bool aborted = false;
 
@@ -423,6 +523,7 @@ namespace UnityOpenMcpBridge.MetaTools
                     if (stepResult.Success)
                     {
                         successCount++;
+                        if (EffectiveToolContract.IsMutating(step.Tool, step.ParamsBody)) committedCount++;
                         BridgeBatchRunHistory.SetEntryStatus(i, BridgeBatchEntryStatus.Done, stepSw.ElapsedMilliseconds);
                         results.Add(new BatchStepResult
                         {
@@ -479,7 +580,7 @@ namespace UnityOpenMcpBridge.MetaTools
                 {
                     return ToolDispatchResult.Ok(batchOutput);
                 }
-                if (successCount > 0)
+                if (committedCount > 0)
                 {
                     return ToolDispatchResult.PartialFailure(
                         "batch_partial_failure",

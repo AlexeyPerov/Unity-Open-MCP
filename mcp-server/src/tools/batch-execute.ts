@@ -21,27 +21,30 @@ export const batchExecute = makeTool(
     "NOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS " +
     "batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". " +
     "The two are independent axes; nestability is decided by the pre-flight refusals below.\n\n" +
-    "Safety: the WHOLE batch shares ONE gate cycle (one checkpoint → all steps → one validate/" +
+    "Every step is schema/lifecycle preflighted before dispatch. All-read batches need no paths_hint, " +
+    "checkpoint, gate, or undo group. Mixed/mutating batches require the explicit union paths_hint. " +
+    "Safety: a mutating batch shares ONE gate cycle (one checkpoint → all steps → one validate/" +
     "delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure " +
     "and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step " +
     "errors are collected. Partial failure semantics: a successful step is NOT rolled back when a " +
     "later step fails (same as Coplay). A partial batch (at least one step committed) propagates " +
     "`mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its " +
-    "validate/delta on the committed work and waits for the asset/compile settle, but marks the run " +
-    "`outcome: failed` so the agent reads `batch.results[]` for the per-step breakdown and undoes " +
+    "validate/delta on the committed work and waits for the asset/compile settle. Gate outcome describes " +
+    "validation independently of mutation.success; read `batch.results[]` for the breakdown and undo " +
     "with a single `editor_undo` if needed. A total failure (no step committed) skips the " +
-    "validate/delta as before. Run `unity_open_mcp_validate_edit` on the touched paths to confirm " +
+    "validate/delta with gate.outcome: skipped and skippedReason: mutation_failed. Run `unity_open_mcp_validate_edit` on the touched paths to confirm " +
     "health after a partial run.\n\n" +
     "v1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` " +
     "is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. " +
     "`batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested " +
     "tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package / upgrade, " +
     "scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, " +
-    "settings_set_player, execute_csharp / invoke_method / execute_menu) is refused up-front with a " +
+    "settings_set_player, mutating execute_csharp / invoke_method / disruptive execute_menu) is refused up-front with a " +
     "`batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently " +
     "abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its " +
     "default Single mode replaces the active scene stack and can discard unsaved changes in open " +
-    "scenes). Use those tools as single top-level calls instead.\n\n" +
+    "scenes). Script writes/deletes, undo/redo, play transitions, and non-preview fixes also require " +
+    "their top-level routes. Use those tools as single top-level calls instead.\n\n" +
     "A step whose terminal result is produced by the SERVER rather than by the Editor dispatch is " +
     "refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns " +
     "`{status:\"started\", runId}` immediately and the server polls a results file to turn that " +
@@ -51,14 +54,14 @@ export const batchExecute = makeTool(
     "names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for " +
     "clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
   {
-    required: ["commands", "paths_hint"],
+    required: ["commands"],
         properties: {
           commands: {
             type: "array",
             minItems: 1,
             items: {
               type: "object",
-              required: ["tool", "params"],
+              required: ["tool"],
               properties: {
                 tool: {
                   type: "string",
@@ -69,7 +72,7 @@ export const batchExecute = makeTool(
                 params: {
                   type: "object",
                   description:
-                    "The tool's input object (its normal `args`). Omit the outer `paths_hint` / " +
+                    "The tool's input object (its normal `args`); omitted means an empty object. Omit the outer `paths_hint` / " +
                     "`gate` — the batch supplies those for the whole sequence.",
                 },
               },

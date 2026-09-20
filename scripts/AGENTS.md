@@ -25,6 +25,9 @@ suites. Root `AGENTS.md` also applies. Human overview:
 - Token estimates: `node scripts/generate-token-estimates.mjs` writes
   `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs`. Regenerate after
   MCP tool schema, catalog, or group changes; `--check` is advisory in CI.
+- Batch preflight schemas: `node scripts/generate-batch-schemas.mjs` derives
+  `BridgeBatchSchemas.cs` from MCP `ALL_TOOLS`; regenerate after schema changes
+  and verify with `--check`.
 - Coverage matrix (`gen-mcp-coverage-matrix.mjs`) is internal/gitignored.
 
 ## MCP suite selection

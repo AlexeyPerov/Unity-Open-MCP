@@ -280,6 +280,48 @@ namespace UnityOpenMcpBridge
             return items.ToArray();
         }
 
+        // Unlike GetRawValue, nested command/patch fields cannot shadow this key.
+        public static string GetTopLevelRawValue(string json, string key)
+        {
+            if (string.IsNullOrWhiteSpace(json) || !json.TrimStart().StartsWith("{")) return null;
+            int i = json.IndexOf('{') + 1;
+            while (i < json.Length)
+            {
+                while (i < json.Length && (char.IsWhiteSpace(json[i]) || json[i] == ',')) i++;
+                if (i >= json.Length || json[i] != '"') break;
+                i++;
+                var name = ReadQuotedString(json, ref i);
+                while (i < json.Length && (char.IsWhiteSpace(json[i]) || json[i] == ':')) i++;
+                int start = i;
+                var value = ReadJsonValue(json, i);
+                i = value.Item2;
+                if (name == key) return json.Substring(start, i - start);
+            }
+            return null;
+        }
+
+        internal static List<string> GetArrayRawValues(string json)
+        {
+            var values = new List<string>();
+            if (string.IsNullOrWhiteSpace(json) || !json.TrimStart().StartsWith("[")) return values;
+            int i = json.IndexOf('[') + 1;
+            while (i < json.Length)
+            {
+                while (i < json.Length && (char.IsWhiteSpace(json[i]) || json[i] == ',')) i++;
+                if (i >= json.Length || json[i] == ']') break;
+                int start = i;
+                i = ReadJsonValue(json, i).Item2;
+                values.Add(json.Substring(start, i - start));
+            }
+            return values;
+        }
+
+        public static string TopLevelField(string json, string key)
+        {
+            var raw = GetTopLevelRawValue(json, key);
+            return raw == null ? "{}" : "{\"" + key + "\":" + raw + "}";
+        }
+
         public static string GetRawValue(string json, string key)
         {
             if (string.IsNullOrEmpty(json)) return null;

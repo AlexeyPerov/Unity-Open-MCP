@@ -69,7 +69,7 @@ namespace UnityOpenMcpBridge
             var denied = mutationError == "denied_by_policy" || mutationError == "menu_blocked";
             var outcome = denied
                 ? "denied"
-                : result.Outcome.ToString().ToLowerInvariant();
+                : result.Outcome.ToWireString();
 
             var record = new BridgeAuditRecord
             {
@@ -80,6 +80,8 @@ namespace UnityOpenMcpBridge
                 PathsHint = pathsHint,
                 Outcome = outcome,
                 GateRan = result.GateRan,
+                SkippedReason = result.SkippedReason,
+                EffectiveReadOnly = result.EffectiveReadOnly,
                 NewErrors = result.Delta?.NewErrors ?? 0,
                 NewWarnings = result.Delta?.NewWarnings ?? 0,
                 ResolvedErrors = result.Delta?.ResolvedErrors ?? 0,

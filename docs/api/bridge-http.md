@@ -96,8 +96,9 @@ not only the gate's validation scope, and there is no whole-project fallback.
 The check runs before dispatch, so a missing `paths_hint` returns
 `error.code: "paths_hint_required"` with `gate.skippedReason:
 "request_rejected"` — nothing ran and no gate was evaluated. Tools that expose
-`read_only` (today: `execute_csharp`) waive the requirement when it is `true`,
-and a read-only `execute_menu` path waives it too.
+`read_only` (today: `execute_csharp`) waive the requirement for inspection-only
+requests; known disruptive calls keep it. A read-only `execute_menu` path and
+an all-read batch waive it too.
 
 Rule auto-selection maps the `paths_hint` extensions to rule families. Only
 **registered** rule families are ever auto-selected: image (`.png`, `.jpg`,
@@ -146,3 +147,28 @@ replaced by HTTP 500 `invalid_response_json`.
 Per-call console logs use Unity Console mode flags: scripting/import/compiler
 warnings retain `warning` severity, compiler errors and exceptions retain `error`,
 and ordinary managed logs remain `log`.
+
+### Effective read-only requests and gate outcomes
+
+The bridge derives request mutability before scope enforcement, queueing, and
+checkpoint/undo setup. Inspection-only `execute_csharp(read_only:true)`, explicitly
+marked `[BridgeReadOnlyMenu]` verifier menu handlers, and all-read batches skip
+the gate even when the caller supplies `paths_hint`. Read-only snippets and
+non-disruptive menus also skip dirty-scene checks and settle waits. The annotation
+is a caller/author assertion, not a sandbox: known disruptive snippet calls keep
+the conservative lifecycle; indirect calls cannot be proven safe.
+
+`batch_execute` preflights every nested command using generated MCP schema
+constraints and live tool/lifecycle availability before any dispatch. All-read
+batches require no scope; mixed/mutating batches require the explicit union
+`paths_hint`, even with `gate: "off"`. Invalid steps are reported together.
+
+A failed mutation before validation has `gate.outcome: "skipped"`,
+`skippedReason: "mutation_failed"`, `skipped: true`, and null `validation` and
+`delta`. A completed checkpoint ID remains available. Gate failure counters do
+not count such failures; activity still records the failed operation. A partial
+batch validates committed mutations and reports the actual validation outcome
+independently of `mutation.success`. Existing delta and next-step fields remain.
+`effectiveReadOnly` is additive response metadata; audit records also include it
+and `skippedReason`. `request_rejected`, `gate_off`, `no_scope`, `read_only`, and
+`play_mode` identify other skip causes.
