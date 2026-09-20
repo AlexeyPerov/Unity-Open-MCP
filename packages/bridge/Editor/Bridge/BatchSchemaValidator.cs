@@ -51,6 +51,15 @@ namespace UnityOpenMcpBridge
             if (!valid) { errors.Add(path + " must be " + type); return; }
             var choices = Raw(schema, "enum");
             if (choices != null && !JsonBody.GetArrayRawValues(choices).Contains(trimmed)) errors.Add(path + " is not an allowed value");
+            // Combinator branches commonly express only `required` (without
+            // repeating type/properties). Required keys still constrain those
+            // branches; otherwise every branch appears to match and valid
+            // oneOf requests are rejected.
+            foreach (var key in JsonBody.GetStringArray(JsonBody.TopLevelField(schema, "required"), "required") ?? Array.Empty<string>())
+            {
+                if (root && (key == "paths_hint" || key == "gate")) continue;
+                if (Raw(value, key) == null) errors.Add(path + "." + key + " is required");
+            }
             if (type == "object" || Raw(schema, "properties") != null)
             {
                 var properties = Raw(schema, "properties") ?? "{}";
@@ -62,11 +71,6 @@ namespace UnityOpenMcpBridge
                     if (selectors.Count > 1) errors.Add(path + ": supply only one GameObject selector (prefer game_object_path); ignored keys: " + string.Join(", ", selectors));
                     if (Supplied(value, "component_instance_id") && (Supplied(value, "component_type") || Supplied(value, "type_name")))
                         errors.Add(path + ": component_instance_id and component_type are alternatives");
-                }
-                foreach (var key in JsonBody.GetStringArray(JsonBody.TopLevelField(schema, "required"), "required") ?? Array.Empty<string>())
-                {
-                    if (root && (key == "paths_hint" || key == "gate")) continue;
-                    if (Raw(value, key) == null) errors.Add(path + "." + key + " is required");
                 }
                 foreach (var key in JsonBody.GetObjectKeys(value) ?? new List<string>())
                 {

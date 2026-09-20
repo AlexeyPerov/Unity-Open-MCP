@@ -44,5 +44,5 @@
   "reset": {
     "note": "The replay restores its temporary player loop/input settings/devices and destroys fixture objects in finally blocks. It exits play mode only if it entered it. No disk fixture or scene save is required."
   },
-  "order": 10
+  "order": 40
 }

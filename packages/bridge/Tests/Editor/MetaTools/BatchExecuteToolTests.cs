@@ -73,6 +73,23 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void OneOfRequiredOnlyBranches_SelectExactlyOneLocator()
+        {
+            var schema = BridgeBatchSchemas.ByTool["unity_open_mcp_find_references"];
+            var errors = new List<string>();
+            BatchSchemaValidator.ValidateRequest("{\"asset_path\":\"Assets/A.prefab\",\"profile\":\"compact\"}", schema, errors);
+            Assert.IsEmpty(errors, string.Join("; ", errors));
+
+            errors.Clear();
+            BatchSchemaValidator.ValidateRequest("{\"guid\":\"0123456789abcdef0123456789abcdef\"}", schema, errors);
+            Assert.IsEmpty(errors, string.Join("; ", errors));
+
+            errors.Clear();
+            BatchSchemaValidator.ValidateRequest("{\"asset_path\":\"Assets/A.prefab\",\"guid\":\"0123456789abcdef0123456789abcdef\"}", schema, errors);
+            StringAssert.Contains("oneOf", string.Join("; ", errors));
+        }
+
+        [Test]
         public void Execute_MissingCommands_ReturnsMissingParameter()
         {
             var result = BatchExecuteTool.Execute("{}");

@@ -1,0 +1,56 @@
+{
+  "id": "m33-discovery-locators",
+  "title": "Exact discovery, activation fallback, and canonical locators",
+  "milestone": "m33",
+  "engineId": "unity",
+  "requirementLevel": "required-core",
+  "tags": [
+    "discovery",
+    "schemas",
+    "live-editor"
+  ],
+  "steps": [
+    {
+      "id": "setup",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Open the demo in Unity with the local bridge running and build mcp-server. Start one fresh stdio MCP session and do not refresh tools/list after activation."
+    },
+    {
+      "id": "discovery",
+      "type": "agent_prompt",
+      "title": "Replay exact and filtered discovery",
+      "payload": "Call capabilities with tool_name=unity_open_mcp_component_modify and inspect the single complete contract. Page a query for component tools in the typed-editor group. Activate the scene tag, deliberately do not refresh tools/list, then use manage_tools action=invoke for gameobject_find and read_compile_errors. Also verify unknown, inactive, recursive, and conflicting-selector refusals."
+    },
+    {
+      "id": "locators",
+      "type": "agent_prompt",
+      "title": "Replay canonical and legacy locator shapes",
+      "payload": "Inspect Main Camera Transform data with game_object_path, component_type, and property_path. Repeat with each declared unambiguous legacy alias and record deprecation notes. Send unknown or conflicting keys and a nested invalid component patch in a two-step batch; confirm rejection occurs before the first step creates its sentinel object."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "Exact lookup returns one bounded full contract; filtered pages are deterministic and availability remains null when it cannot be known.",
+        "An activated non-default tool is immediately callable through manage_tools invoke without a tools/list refresh, using normal routing and protections.",
+        "Canonical locators resolve, supported aliases are explicit and deprecated, and unknown, conflicting, or nested-invalid keys fail before dispatch."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Record the MCP transcript, deprecations, and sentinel check"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Record the result"
+    }
+  ],
+  "reset": {
+    "note": "Deactivate only groups activated for this replay if desired. Confirm the sentinel object was never created and do not save scene changes."
+  },
+  "order": 30
+}

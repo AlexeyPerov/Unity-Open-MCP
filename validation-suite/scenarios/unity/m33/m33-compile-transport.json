@@ -1,0 +1,56 @@
+{
+  "id": "m33-compile-transport",
+  "title": "Compile truth, reload ownership, and response integrity",
+  "milestone": "m33",
+  "engineId": "unity",
+  "requirementLevel": "required-core",
+  "tags": [
+    "compilation",
+    "transport",
+    "live-editor"
+  ],
+  "steps": [
+    {
+      "id": "setup",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Open the demo in Unity with the local bridge running and build mcp-server. Preserve existing project edits. Use a disposable script for the compiler-error probe and remove it during cleanup."
+    },
+    {
+      "id": "compile",
+      "type": "agent_prompt",
+      "title": "Replay compile and reload states",
+      "payload": "Using the MCP client, create a disposable scoped script with one compiler error, read compile errors, fix it, request recompilation, and read again without deleting the old Editor log. Then touch the source after the clean compile and inspect the stale-source result. While a requested compile or reload is active, call compile_check and poll once after its retry hint. Record source, log, generation, staleAssembly, and route fields. Remove the disposable script and finish with a clean compile report."
+    },
+    {
+      "id": "transport",
+      "type": "agent_prompt",
+      "title": "Replay timeout followed by success",
+      "payload": "Run the bridge timeout-then-success Editor regression: a read-only request whose work exceeds its deadline followed by a ping or short read-only request. Also run the malformed-body and wrong-request-correlation fixtures. Record both request IDs and confirm every response body parses independently."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "Current compiler errors retain their diagnostic fields; a clean live generation outranks historical log errors; changed source is reported stale until rebuilt.",
+        "A fresh compiling or reloading Editor returns editor_reloading with a retry hint and does not launch a headless Unity process against the owned project.",
+        "The timed-out request cannot corrupt, interleave with, or be mistaken for the next successful response; mismatched correlation is rejected."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Record Editor version, evidence paths, and final clean compile state"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Record the result"
+    }
+  ],
+  "reset": {
+    "note": "Delete the disposable compiler-probe script, refresh, and confirm a clean compilation. Do not restart or close the user's Editor."
+  },
+  "order": 10
+}

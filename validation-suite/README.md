@@ -114,3 +114,5 @@ Phase 3: operator-only bridge admin (`bridge_status` MCP tool) wired into the To
 Phase 4: the M9 `required-core` + `required-extended` scenario set, runnable end-to-end.
 
 Phase 5 (this directory): optional automated-covered scenarios (extension matrix, error paths, compact-read quantitative checks, serializer behavior), the Export run summary, and milestone process wiring — the manual checklist convention now supports a Validation Suite index model and the demo `.gitignore` documents suite data paths.
+
+The Unity scenario catalog also includes required live regression replays for compile/transport integrity, effective read-only and gate behavior, schema discovery and activation, and input simulation. These scenarios preserve existing dirty project state and use disposable fixtures where mutation is required.

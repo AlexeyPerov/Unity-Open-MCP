@@ -239,8 +239,8 @@ function buildSuite() {
   // reserialize is mutating but safe on a known asset; test it in band C under a temp copy.
 
   // --- gate-intelligence (read-only compositions) — these require paths_hint ---
-  s("impact_preview", "B", "unity_open_mcp_impact_preview", { asset_path: "Assets/Materials/TestMaterial.mat", paths_hint: ["Assets/Materials/TestMaterial.mat"] });
-  s("gate_budget_estimate", "B", "unity_open_mcp_gate_budget_estimate", { paths: ["Assets/Materials/TestMaterial.mat"], paths_hint: ["Assets/Materials/TestMaterial.mat"] });
+  s("impact_preview", "B", "unity_open_mcp_impact_preview", { paths_hint: ["Assets/Materials/TestMaterial.mat"] });
+  s("gate_budget_estimate", "B", "unity_open_mcp_gate_budget_estimate", { paths_hint: ["Assets/Materials/TestMaterial.mat"] });
   // mutation_explain needs a prior mutation context OR a checkpoint_id; pass a
   // sentinel checkpoint_id and tolerate no_mutation_context (the explain path is
   // still exercised + the contract gap is surfaced).

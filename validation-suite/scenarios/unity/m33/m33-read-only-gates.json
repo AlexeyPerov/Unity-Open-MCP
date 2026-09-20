@@ -1,0 +1,56 @@
+{
+  "id": "m33-read-only-gates",
+  "title": "Effective read-only batches and gate outcomes",
+  "milestone": "m33",
+  "engineId": "unity",
+  "requirementLevel": "required-core",
+  "tags": [
+    "batch",
+    "gate",
+    "live-editor"
+  ],
+  "steps": [
+    {
+      "id": "setup",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Open the demo in Unity with the local bridge running and build mcp-server. Leave a disposable scratch scene dirty so the replay exercises dirty-scene handling without saving or replacing the user's scene."
+    },
+    {
+      "id": "read-only",
+      "type": "agent_prompt",
+      "title": "Replay dirty read-only work",
+      "payload": "Run execute_csharp with read_only=true and code that returns 42 while the scratch scene is dirty. Compare scene roots, dirty state, undo group, lifecycle, checkpoint, and gate fields before and after. Repeat three all-read batch_execute calls containing editor_status and gameobject_find, then run a screenshot-only batch. Do not provide paths_hint for these reads."
+    },
+    {
+      "id": "preflight",
+      "type": "agent_prompt",
+      "title": "Replay mutation and preflight refusals",
+      "payload": "Send a mixed read/write batch without paths_hint and confirm rejection. Send one batch containing an invalid schema, a server-polled tool, a reload-unsafe tool, and an unknown tool; confirm every offending index is reported before step zero. Finally run an intentionally uncompilable mutating snippet with a disposable paths_hint and inspect its mutation and gate outcomes."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "Dirty read-only work succeeds without scope, checkpoint, save, undo change, or settle; the scratch scene remains unchanged and dirty.",
+        "All-read and screenshot-only batches report effectiveReadOnly=true and need no fake scope; mixed mutation still requires paths_hint.",
+        "Nested violations are collected before execution, and mutation failure reports gate outcome skipped with skippedReason mutation_failed and no validation delta."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Record response envelopes and scratch-scene restoration"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Record the result"
+    }
+  ],
+  "reset": {
+    "note": "Discard only the disposable scratch scene and confirm no sentinel object or checkpoint remains. Preserve all pre-existing dirty scenes and project files."
+  },
+  "order": 20
+}
