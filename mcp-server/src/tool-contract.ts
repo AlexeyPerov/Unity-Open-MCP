@@ -131,14 +131,14 @@ export function validateSchema(value: any, schema: Schema, path = "args"): strin
   if (schema.enum && !schema.enum.includes(value)) errors.push(`${path} must be one of ${schema.enum.join(", ")}`);
   if (value && typeof value === "object" && !Array.isArray(value)) {
     for (const key of schema.required ?? []) if (value[key] === undefined) errors.push(`${path}.${key} is required`);
-    if (schema.properties?.game_object_path) {
+    if (!schema["x-project-command"] && schema.properties?.game_object_path) {
       const supplied = (k: string) => value[k] !== undefined && value[k] !== null && value[k] !== "" && value[k] !== 0 && value[k] !== "0";
       const selectors = ["instance_id", "game_object_path", "path", "target_path", "name"].filter(k => schema.properties[k] && supplied(k));
       if (selectors.length > 1) errors.push(`${path}: supply only one GameObject selector (prefer game_object_path); ignored keys: ${selectors.join(", ")}`);
       if (supplied("component_instance_id") && ["component_type", "type_name"].some(supplied)) errors.push(`${path}: component_instance_id and component_type are alternatives`);
     }
     if (schema.properties) for (const [key, child] of Object.entries(value)) {
-      const prop = schema.properties[key];
+      const prop = Object.prototype.hasOwnProperty.call(schema.properties, key) ? schema.properties[key] : undefined;
       if (!prop && schema.additionalProperties === false) errors.push(`${path}.${key} is unknown; canonical keys: ${Object.keys(schema.properties).filter(k => !schema.properties[k].deprecated).join(", ")}`);
       if (prop) {
         if (prop["x-alias-for"] && Object.keys(value).some(other => other !== key && (other === prop["x-alias-for"] || schema.properties[other]?.["x-alias-for"] === prop["x-alias-for"]))) errors.push(`${path}.${key} conflicts with another selector; use only ${prop["x-alias-for"]}`);

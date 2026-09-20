@@ -1762,6 +1762,36 @@ export class ToolRouter implements Router {
   }
 
   private async routeProjectCommands(args: Record<string, unknown>, live: LiveClient): Promise<CallToolResult> {
+    if (args.action === "invoke") {
+      const allowed = ["action", "command_id", "args", "schema_version", "paths_hint", "gate", "ignore_scene_dirty", "confirm_bypass", "timeout_ms"];
+      let identity: Record<string, unknown> = { id: args.command_id };
+      const fail = (code: string, message: string) => injectRouteMeta(sourceResult({ projectCommand: identity, error: { code, message } }, "local", true), { route: "local" });
+      if (!args.command_id || Object.keys(args).some(k => !allowed.includes(k)))
+        return fail("invalid_arguments", "invoke requires command_id and accepts command args plus transport safety options only.");
+      const catalog = await live.projectCommands({ action: "describe", id: args.command_id });
+      if (catalog.error) return injectRouteMeta(sourceResult(catalog, "live", true), { route: "live" });
+      const command = catalog.command as Record<string, any> | undefined;
+      if (!command?.available || !command.invocationSupported || !command.inputSchema || !command.schemaVersion)
+        return fail("command_unavailable", "Command is unavailable or this bridge does not support invocation.");
+      identity = { id: command.id, schemaVersion: command.schemaVersion, declaringAssembly: command.declaringAssembly,
+        declaringType: command.declaringType, lifecycle: command.lifecycle };
+      if (args.schema_version !== undefined && args.schema_version !== command.schemaVersion)
+        return fail("command_schema_changed", "Describe the command again before invoking its changed contract.");
+      const errors = validateSchema(args.args ?? {}, command.inputSchema);
+      if (errors.length) return fail("invalid_arguments", errors.join("; "));
+      const result = await live.route("unity_open_mcp_project_commands", { ...args, args: args.args ?? {}, schema_version: command.schemaVersion }, command.lifecycle);
+      // Reload/transport failures have no bridge envelope; retain the exact catalog identity.
+      result.content = result.content.map(item => {
+        if (item.type !== "text") return item;
+        try {
+          const body = JSON.parse(item.text);
+          if (body && typeof body === "object" && !Array.isArray(body) && !body.projectCommand)
+            return { ...item, text: JSON.stringify({ ...body, projectCommand: identity }) };
+        } catch { /* Preserve non-JSON transport diagnostics. */ }
+        return item;
+      });
+      return injectRouteMeta(result, { route: "live" });
+    }
     const allowed = args.action === "describe" ? ["action", "id"] : ["action", "query", "tags", "group", "package", "offset", "limit"];
     if (Object.keys(args).some(k => !allowed.includes(k)) || (args.action === "describe" && !args.id))
       return sourceResult({ error: { code: "invalid_arguments", message: "describe requires an exact id only; list accepts filters and paging only." } }, "local", true);

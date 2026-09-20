@@ -342,7 +342,9 @@ namespace UnityOpenMcpBridge
         {
             var sb = new StringBuilder(1024);
 
-            sb.Append("{\"mutation\":{\"success\":");
+            sb.Append('{');
+            if (result.ProjectCommandJson != null) sb.Append("\"projectCommand\":").Append(result.ProjectCommandJson).Append(',');
+            sb.Append("\"mutation\":{\"success\":");
             sb.Append(result.Mutation.Success ? "true" : "false");
             sb.Append(",\"output\":");
             // feedback-01-08-glm §4 — the mutation output is spliced raw into

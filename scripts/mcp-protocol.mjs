@@ -255,9 +255,22 @@ async function runStep(step, client, opts, results) {
       if (pass && body.commands.length) {
         const described = await client.request("tools/call", { name: "unity_open_mcp_project_commands", arguments: { action: "describe", id: body.commands[0].id } });
         const command = JSON.parse(described.content[0].text).command;
-        pass = !described.isError && command.id === body.commands[0].id && !!command.inputSchema && command.invocationSupported === false;
+        pass = !described.isError && command.id === body.commands[0].id && !!command.inputSchema && command.invocationSupported === true && typeof command.schemaVersion === "string";
       }
-      detail = pass ? "bounded catalog and exact describe returned" : JSON.stringify(body);
+      if (pass && body.commands[0]?.id === "project.demo.catalog_fixture") {
+        // This known read-only fixture is safe to invoke; never execute an arbitrary catalog entry.
+        const invoked = await client.request("tools/call", { name: "unity_open_mcp_project_commands", arguments: {
+          action: "invoke", command_id: "project.demo.catalog_fixture", args: { labels: ["protocol"] },
+        } });
+        const result = JSON.parse(invoked.content[0].text);
+        const invalid = await client.request("tools/call", { name: "unity_open_mcp_project_commands", arguments: {
+          action: "invoke", command_id: "project.demo.catalog_fixture", args: {},
+        } });
+        pass = !invoked.isError && result.mutation?.output?.result?.fixture === true
+          && result.effectiveReadOnly === true && result.projectCommand?.schemaVersion
+          && invalid.isError === true;
+      }
+      detail = pass ? "bounded catalog, exact describe and available demo invocation passed without reconnect/list refresh" : JSON.stringify(body);
     } else if (step.id === "call_live_ping") {
       const res = await client.request("tools/call", {
         name: "unity_open_mcp_ping", arguments: {},

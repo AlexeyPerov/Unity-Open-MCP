@@ -17,6 +17,8 @@ namespace UnityOpenMcpBridge
 
         internal static bool IsMutating(string tool, string body)
         {
+            if (tool == ProjectCommandInvocation.ToolName)
+                return !ProjectCommandInvocation.Resolve(body, out var command) || command.Attribute.IsMutating;
             if (tool == "unity_open_mcp_execute_csharp" && IsReadOnlySnippet(body)) return false;
             if (tool == "unity_open_mcp_execute_menu" && ExecuteMenuTool.IsReadOnlyMenu(
                 JsonBody.GetString(JsonBody.TopLevelField(body, "menu_path"), "menu_path"))) return false;
@@ -29,6 +31,8 @@ namespace UnityOpenMcpBridge
 
         internal static LifecyclePolicy Lifecycle(string tool, string body)
         {
+            if (tool == ProjectCommandInvocation.ToolName)
+                return ProjectCommandInvocation.Resolve(body, out var command) ? command.Attribute.Lifecycle : LifecyclePolicy.None;
             if (tool == "unity_open_mcp_execute_csharp" && IsReadOnlySnippet(body)) return LifecyclePolicy.None;
             if (tool == "unity_open_mcp_execute_menu" && ExecuteMenuTool.IsNonDisruptiveReadOnlyMenu(
                 JsonBody.GetString(JsonBody.TopLevelField(body, "menu_path"), "menu_path"))) return LifecyclePolicy.None;

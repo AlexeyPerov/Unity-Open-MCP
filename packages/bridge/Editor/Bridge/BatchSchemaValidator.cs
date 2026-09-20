@@ -63,7 +63,7 @@ namespace UnityOpenMcpBridge
             if (type == "object" || Raw(schema, "properties") != null)
             {
                 var properties = Raw(schema, "properties") ?? "{}";
-                if (Raw(properties, "game_object_path") != null)
+                if (Raw(schema, "x-project-command") != "true" && Raw(properties, "game_object_path") != null)
                 {
                     var selectors = new List<string>();
                     foreach (var selector in new[] { "instance_id", "game_object_path", "path", "target_path", "name" })

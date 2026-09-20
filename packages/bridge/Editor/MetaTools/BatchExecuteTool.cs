@@ -50,6 +50,7 @@ namespace UnityOpenMcpBridge.MetaTools
         private static readonly HashSet<string> DeniedNestedTools = new HashSet<string>
         {
             "unity_open_mcp_batch_execute",
+            ProjectCommandInvocation.ToolName,
             "unity_open_mcp_compile_check",
             "unity_open_mcp_editor_undo",
             "unity_open_mcp_editor_redo",

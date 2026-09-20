@@ -26,6 +26,7 @@ namespace UnityOpenMcpBridge
         // snippet / menu_path. Invalid regexes are dropped at compile time.
         public string[] csharpDenyPatterns;
         public string[] menuDenyPatterns;
+        public string[] projectCommandDenyPatterns;
 
         // M14 T5.4 — listener bind address. "127.0.0.1" (loopback only) is the
         // safe default; "0.0.0.0" enables remote access and is refused at start
@@ -405,6 +406,19 @@ namespace UnityOpenMcpBridge
         {
             if (!_loaded) Load();
             _data.csharpDenyPatterns = NormalizePatternArray(patterns);
+            Save();
+            try { Changed?.Invoke(); } catch { }
+        }
+
+        public static string[] ProjectCommandDenyPatterns
+        {
+            get { if (!_loaded) Load(); return _data.projectCommandDenyPatterns; }
+        }
+
+        public static void SetProjectCommandDenyPatterns(IEnumerable<string> patterns)
+        {
+            if (!_loaded) Load();
+            _data.projectCommandDenyPatterns = NormalizePatternArray(patterns);
             Save();
             try { Changed?.Invoke(); } catch { }
         }

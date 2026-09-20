@@ -182,7 +182,7 @@ pointed at a top-level call it cannot make.
 | `markers_missing` | A non-compile batch operation exited 0 without its report. | Inspect its post-state before repeating a mutation. |
 | `batch_spawn_failed` | Headless Unity produced no classifiable result (non-zero exit, no markers). | Inspect compile errors, package state, project lock, and path. |
 | `batch_step_requires_server_poll` | A `batch_execute` step's terminal result is produced by the server polling a results file, which the batch route does not do (today: `unity_senses_run_tests`). | Call the tool as a single top-level call. The message also names a reachable `execute_csharp` / `invoke_method` equivalent for clients that cannot see the tool. |
-| `scene_dirty` | A disruptive mutation was refused because a scene has unsaved work. | Save/discard first or deliberately opt into the documented risk. |
+| `scene_dirty` | A disruptive mutation was refused because a loaded scene has unsaved work, including unsaved additive scenes. | Save/discard first or deliberately opt into the documented risk. |
 | `bridge_response_unparsable` | A substantial bridge response could not be parsed. | Do not trust partial output; check bridge health before retrying. |
 
 Retry tunables include `UNITY_OPEN_MCP_COMPILE_WAIT_MS`,

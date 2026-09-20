@@ -427,6 +427,7 @@ export class LiveClient implements Router {
   async route(
     toolName: string,
     args: Record<string, unknown>,
+    commandLifecycle?: string,
   ): Promise<CallToolResult> {
     if (toolName === "unity_open_mcp_ping") {
       return this.handlePing();
@@ -434,7 +435,7 @@ export class LiveClient implements Router {
     if (toolName === "unity_senses_run_tests") {
       return this.handleRunTests(args);
     }
-    return this.handleToolCall(toolName, args);
+    return this.handleToolCall(toolName, args, commandLifecycle);
   }
 
   private async handlePing(): Promise<CallToolResult> {
@@ -550,6 +551,7 @@ export class LiveClient implements Router {
   private async handleToolCall(
     toolName: string,
     args: Record<string, unknown>,
+    commandLifecycle?: string,
   ): Promise<CallToolResult> {
     const readyError = await this.ensureReady();
     if (readyError) return readyError;
@@ -573,7 +575,7 @@ export class LiveClient implements Router {
     const annotate = isCompileReload && shouldAnnotateCompileVerify(toolName);
     const before = annotate ? await this.captureCompileSnapshot() : null;
 
-    const result = await this.postTool(toolName, args, true);
+    const result = await this.postTool(toolName, args, true, 1, commandLifecycle);
 
     if (annotate && !result.isError && before !== null) {
       return this.annotateCompileVerify(toolName, result, before, args);
@@ -807,21 +809,22 @@ export class LiveClient implements Router {
     args: Record<string, unknown>,
     retryOn503: boolean,
     attempt = 1,
+    commandLifecycle?: string,
   ): Promise<CallToolResult> {
     try {
-      const res = await this.postToolFetch(toolName, args, retryOn503);
+      const res = await this.postToolFetch(toolName, args, retryOn503, commandLifecycle);
       // 503 + compile settled cleanly → re-POST once without 503 retry. This is
       // a deliberate single re-dispatch (retryOn503 flips to false, so a second
       // 503 surfaces the error), but it still counts as a POST attempt for the
       // recursion bound.
       if (isCompileRepostSentinel(res)) {
-        return this.postTool(toolName, args, false, attempt + 1);
+        return this.postTool(toolName, args, false, attempt + 1, commandLifecycle);
       }
       return res;
     } catch (err) {
       if (err instanceof Error && err.message.startsWith("bridge_response_request_mismatch"))
         return makeErrorResult({ code: "bridge_response_request_mismatch", message: err.message });
-      return this.handlePostFailure(toolName, args, err, retryOn503, attempt);
+      return this.handlePostFailure(toolName, args, err, retryOn503, attempt, commandLifecycle);
     }
   }
 
@@ -837,6 +840,7 @@ export class LiveClient implements Router {
     toolName: string,
     args: Record<string, unknown>,
     retryOn503: boolean,
+    commandLifecycle?: string,
   ): Promise<CallToolResult | CompileRepostSentinel> {
     const rawTimeout = args.timeout_ms;
     const explicitTimeout = typeof rawTimeout === "number";
@@ -899,7 +903,7 @@ export class LiveClient implements Router {
       });
     }
 
-    const result = await this.shapeToolResult(toolName, res);
+    const result = await this.shapeToolResult(toolName, res, commandLifecycle);
     // Surface the clamp ONLY when the caller explicitly requested a timeout
     // above the cap (feedback N1). When timeout_ms is absent the server default
     // (60s) is silently clamped to the cap — there is no caller expectation to
@@ -937,6 +941,7 @@ export class LiveClient implements Router {
   private async shapeToolResult(
     toolName: string,
     res: Response,
+    commandLifecycle?: string,
   ): Promise<CallToolResult> {
     // The bridge returns TWO response shapes from /tools/*:
     //   1. A MUTATION envelope: { mutation: { success, ... }, gate: {...} }
@@ -1126,7 +1131,7 @@ export class LiveClient implements Router {
     // 2026-07-03-c contract) — that path keeps bridge_response_unparsable.
     if (parsed == null) {
       const isEmptyLikeReload = rawText.trim().length === 0;
-      if (isEmptyLikeReload && lifecycleFor(toolName).class === "compile-reload") {
+      if (isEmptyLikeReload && (commandLifecycle === "restart_then_settle" || lifecycleFor(toolName).class === "compile-reload")) {
         return {
           content: [
             {
@@ -1222,6 +1227,7 @@ export class LiveClient implements Router {
     err: unknown,
     retryOn503: boolean,
     attempt: number,
+    commandLifecycle?: string,
   ): Promise<CallToolResult> {
     const endpointBefore = this.baseUrl;
     const recovered = await this.handleTransientOffline("post");
@@ -1232,10 +1238,11 @@ export class LiveClient implements Router {
     const maxAttempts = 1 + this.retry.transientRetryAttempts;
     const attemptsExhausted = attempt >= maxAttempts;
     if (
+      toolName !== "unity_open_mcp_project_commands" &&
       !attemptsExhausted &&
       shouldRetryPostAfterFailure(err, endpointChanged)
     ) {
-      return this.postTool(toolName, args, retryOn503, attempt + 1);
+      return this.postTool(toolName, args, retryOn503, attempt + 1, commandLifecycle);
     }
     const exhaustedNote = attemptsExhausted
       ? ` The POST retry budget (${maxAttempts} attempt${

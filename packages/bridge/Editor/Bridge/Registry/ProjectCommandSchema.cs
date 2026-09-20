@@ -18,7 +18,7 @@ namespace UnityOpenMcpBridge
                 throw new ArgumentException("Commands must be public static non-generic methods returning JSON as string.");
             var parameters = method.GetParameters();
             var names = new System.Collections.Generic.HashSet<string>(parameters.Select(p => p.Name), StringComparer.Ordinal);
-            var sb = new StringBuilder("{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\",\"additionalProperties\":false,\"properties\":{");
+            var sb = new StringBuilder("{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\",\"x-project-command\":true,\"additionalProperties\":false,\"properties\":{");
             foreach (var p in parameters)
             {
                 if (p != parameters[0]) sb.Append(',');
@@ -79,7 +79,7 @@ namespace UnityOpenMcpBridge
             if (type.IsEnum && !type.IsDefined(typeof(FlagsAttribute), false))
                 return "{\"type\":\"string\",\"enum\":" + Strings(Enum.GetNames(type).OrderBy(x => x, StringComparer.Ordinal)) + "}";
             if (type.IsArray && type.GetArrayRank() == 1 && !type.GetElementType().IsArray)
-                return "{\"type\":[\"array\",\"null\"],\"items\":" + TypeSchema(type.GetElementType()) + "}";
+                return "{\"anyOf\":[{\"type\":\"array\",\"items\":" + TypeSchema(type.GetElementType()) + "},{\"type\":\"null\"}]}";
             throw new ArgumentException("Unsupported CLR parameter type: " + type);
         }
 

@@ -107,3 +107,7 @@ saves scenes, and restores its initial play/edit state and disposable fixtures.
 Project command catalog coverage: S0 `--band A --only project_commands` runs a
 read-only catalog probe without scene cleanup; S3 band T checks bounded listing
 and exact description over stdio. Use the demo fixture for a non-empty catalog.
+
+The S3 project-command check lists and describes the live catalog. When the known
+read-only demo fixture is present, it also invokes that fixture and checks missing
+argument rejection in the same stdio session without refreshing the tool list.

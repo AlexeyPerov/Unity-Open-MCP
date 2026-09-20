@@ -76,6 +76,8 @@ namespace UnityOpenMcpBridge
                 Timestamp = DateTime.UtcNow,
                 ProjectHash = ResolveAuditProjectHash(),
                 Tool = toolName,
+                ProjectCommandJson = result.ProjectCommandJson,
+                DurationMs = result.CommandDurationMs,
                 GateMode = effectiveMode,
                 PathsHint = pathsHint,
                 Outcome = outcome,
@@ -89,7 +91,7 @@ namespace UnityOpenMcpBridge
                 CheckpointId = result.CheckpointId,
                 TotalGateDurationMs = result.TotalGateDurationMs,
                 MutationErrorCode = mutationError,
-                BypassedDenyList = effectiveMode == BridgeGateDefaultPolicy.Off && !denied,
+                BypassedDenyList = toolName == ProjectCommandInvocation.ToolName ? result.CommandBypassedDenyList : effectiveMode == BridgeGateDefaultPolicy.Off && !denied,
                 DeniedPattern = ExtractDeniedPattern(result.Mutation?.ErrorMessage)
             };
             BridgeAuditLog.Record(record);

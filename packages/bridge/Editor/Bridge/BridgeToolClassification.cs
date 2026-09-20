@@ -29,6 +29,7 @@ namespace UnityOpenMcpBridge
     {
         internal static readonly HashSet<string> KnownTools = new()
         {
+            ProjectCommandInvocation.ToolName,
             "unity_open_mcp_execute_csharp",
             "unity_open_mcp_invoke_method",
             "unity_open_mcp_execute_menu",
@@ -393,6 +394,8 @@ namespace UnityOpenMcpBridge
 
         internal static readonly HashSet<string> MutatingTools = new()
         {
+            // Conservative catalog hint; invocation resolves the declaration per request.
+            ProjectCommandInvocation.ToolName,
             "unity_open_mcp_execute_csharp",
             "unity_open_mcp_invoke_method",
             "unity_open_mcp_execute_menu",

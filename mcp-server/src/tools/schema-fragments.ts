@@ -55,6 +55,9 @@ export const GATE_PROP = {
   default: "enforce" as const,
 };
 
+/** Request-selected gate; omission delegates to the project's bridge setting. */
+export const GATE_REQUEST_PROP = { enum: GATE_PROP.enum };
+
 /**
  * Gate selector for the rare mutator whose bridge contract is explicitly
  * gate-free because it writes external configuration/package pins rather than

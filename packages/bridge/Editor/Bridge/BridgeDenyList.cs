@@ -158,6 +158,13 @@ namespace UnityOpenMcpBridge
                 "to proceed and accept the risk.");
         }
 
+        public static DenyResult EvaluateProjectCommand(string id, string[] patterns, bool bypass)
+        {
+            if (bypass) return DenyResult.Allow();
+            return Match(id, Compile(patterns), "project_commands",
+                "Use another command or retry with gate: \"off\" and confirm_bypass: true.");
+        }
+
         private static DenyResult Match(string input, PatternCache cache, string toolName, string suggestion)
         {
             var compiled = cache.Compiled;

@@ -16,5 +16,26 @@ namespace ProjectCommandFixture
             ReportDetail detail = ReportDetail.Compact,
             [ProjectCommandParameter(Description = "Maximum entries", Minimum = 1, Maximum = 10, Examples = new[] { "3" })] int limit = 3,
             int? seed = null) => "{\"fixture\":true}";
+
+        [ProjectCommand("project.demo.reload_fixture", Title = "Reload fixture", Description = "Request compilation for lifecycle validation.",
+            Package = "demo.project-commands", IsMutating = true, Lifecycle = LifecyclePolicy.RestartThenSettle,
+            PathsHint = new[] { "Packages/com.unity-open-mcp.project-command-fixture" })]
+        public static string Reload()
+        {
+            UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation();
+            return "{\"requested\":true}";
+        }
+
+        [ProjectCommand("project.demo.write_fixture", Title = "Write fixture", Description = "Write a disposable validation asset.",
+            Package = "demo.project-commands", IsMutating = true, Lifecycle = LifecyclePolicy.EditorSettle,
+            PathsHint = new[] { "Assets/_ValidationSuite/ProjectCommands" })]
+        public static string Write(string text)
+        {
+            const string folder = "Assets/_ValidationSuite/ProjectCommands";
+            System.IO.Directory.CreateDirectory(folder);
+            System.IO.File.WriteAllText(folder + "/invocation.txt", text);
+            UnityEditor.AssetDatabase.ImportAsset(folder + "/invocation.txt");
+            return "{\"written\":true}";
+        }
     }
 }

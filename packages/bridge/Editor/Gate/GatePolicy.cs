@@ -65,6 +65,9 @@ namespace UnityOpenMcpBridge
 
     public class GateDispatchResult
     {
+        internal string ProjectCommandJson;
+        internal long CommandDurationMs;
+        internal bool CommandBypassedDenyList;
         public ToolDispatchResult Mutation;
         public bool GateRan;
         public GateOutcome Outcome;

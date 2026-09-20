@@ -52,7 +52,7 @@ namespace UnityOpenMcpBridge
             if (IsAdditiveSceneOp(toolName, body)) return false;
             // Explicit opt-out: the agent takes responsibility for the dirty
             // state (the lightweight --force equivalent — no auto-save).
-            return !JsonBody.GetBool(body, "ignore_scene_dirty");
+            return !JsonBody.GetBool(JsonBody.TopLevelField(body, "ignore_scene_dirty"), "ignore_scene_dirty");
         }
 
         // scene_create and scene_open accept a `mode` parameter whose "additive"
@@ -75,7 +75,19 @@ namespace UnityOpenMcpBridge
         // loaded scene is dirty; otherwise Refuse with the dirty paths.
         public static GuardResult Check()
         {
-            return Check(() => EditorSceneManager.GetSceneManagerSetup());
+            return Check(() =>
+            {
+                // GetSceneManagerSetup omits unsaved additive scenes in supported
+                // Editor versions. Enumerate the actual scenes so none can escape
+                // the disruptive-operation guard merely because it has no path yet.
+                var scenes = new SceneSetup[SceneManager.sceneCount];
+                for (var i = 0; i < scenes.Length; i++)
+                {
+                    var scene = SceneManager.GetSceneAt(i);
+                    scenes[i] = new SceneSetup { path = scene.path, isLoaded = scene.isLoaded };
+                }
+                return scenes;
+            });
         }
 
         // Overload that accepts the scene-setup provider so the fail-open path

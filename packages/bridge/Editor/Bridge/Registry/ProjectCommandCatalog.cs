@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 namespace UnityOpenMcpBridge
 {
     // Built by the existing registry scan, then published as an immutable snapshot.
-    // Catalog entries never enter direct tool dispatch before the invocation safety pipeline exists.
+    // Catalog entries remain separate from direct tool dispatch.
     internal static class ProjectCommandCatalog
     {
         internal sealed class Entry
@@ -15,6 +15,7 @@ namespace UnityOpenMcpBridge
             internal ProjectCommandAttribute Attribute;
             internal MethodInfo Method;
             internal string Schema;
+            internal string SchemaVersion;
             internal string Code;
             internal string Message;
             internal string Id => Attribute.Name;
@@ -59,7 +60,16 @@ namespace UnityOpenMcpBridge
                     throw new ArgumentException("Unknown gate or lifecycle declaration.");
                 if (attr.Cancellable && !attr.Async) throw new ArgumentException("Cancellable requires Async.");
                 if (attr.IsMutating && attr.ReadOnlyHint) throw new ArgumentException("Mutating commands cannot declare ReadOnlyHint.");
+                if (attr.PathsHint == null || attr.PathsHint.Any(p => !ProjectCommandInvocation.ValidScope(p)))
+                    throw new ArgumentException("PathsHint must contain project-relative Assets/ or Packages/ paths without traversal.");
+                if (attr.IsMutating && attr.Lifecycle == LifecyclePolicy.None)
+                    throw new ArgumentException("Mutating commands must declare a lifecycle policy.");
+                if (!attr.IsMutating && attr.Lifecycle != LifecyclePolicy.None)
+                    throw new ArgumentException("Read-only commands must declare Lifecycle.None.");
                 entry.Schema = ProjectCommandSchema.Build(method);
+                using (var hash = System.Security.Cryptography.SHA256.Create())
+                    entry.SchemaVersion = BitConverter.ToString(hash.ComputeHash(System.Text.Encoding.UTF8.GetBytes(
+                        entry.Schema + "|" + method.Module.ModuleVersionId + "|" + entry.Source + "|" + attr.IsMutating + "|" + attr.Lifecycle + "|" + attr.Gate + "|" + attr.Async + "|" + attr.Cancellable + "|" + string.Join(";", attr.PathsHint)))).Replace("-", "").ToLowerInvariant();
                 if (!attr.Enabled) { entry.Code = "command_disabled"; entry.Message = "Command is disabled by its declaration."; }
             }
             catch (Exception ex) { entry.Code = "invalid_command_declaration"; entry.Message = ex.Message; }
@@ -105,7 +115,9 @@ namespace UnityOpenMcpBridge
                 + ",\"isMutating\":" + Bool(a.IsMutating) + ",\"readOnlyHint\":" + Bool(a.ReadOnlyHint) + ",\"idempotentHint\":" + Bool(a.IdempotentHint)
                 + ",\"destructiveHint\":" + Bool(a.DestructiveHint) + ",\"gate\":" + BridgeJson.EscapeString(a.Gate.ToString().ToLowerInvariant())
                 + ",\"lifecycle\":" + BridgeJson.EscapeString(a.Lifecycle.ToWireString())
-                + ",\"async\":" + Bool(a.Async) + ",\"cancellable\":" + Bool(a.Cancellable) + ",\"invocationSupported\":false";
+                + ",\"schemaVersion\":" + BridgeJson.EscapeString(e.SchemaVersion) + ",\"declaringAssembly\":" + BridgeJson.EscapeString(e.Method.DeclaringType.Assembly.GetName().Name)
+                + ",\"declaringType\":" + BridgeJson.EscapeString(e.Method.DeclaringType.FullName) + ",\"pathsHint\":" + ProjectCommandSchema.Strings(a.PathsHint ?? Array.Empty<string>())
+                + ",\"async\":" + Bool(a.Async) + ",\"cancellable\":" + Bool(a.Cancellable) + ",\"invocationSupported\":true";
             return s + "}";
         }
         private static string Bool(bool value) => value ? "true" : "false";

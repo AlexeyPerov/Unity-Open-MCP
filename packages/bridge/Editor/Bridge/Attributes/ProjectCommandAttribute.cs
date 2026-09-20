@@ -11,6 +11,7 @@ namespace UnityOpenMcpBridge
         public string Package { get; set; }
         public string[] Tags { get; set; } = Array.Empty<string>();
         public string[] DeprecatedAliases { get; set; } = Array.Empty<string>();
+        public string[] PathsHint { get; set; } = Array.Empty<string>();
         public bool Async { get; set; }
         public bool Cancellable { get; set; }
         public ProjectCommandAttribute(string id) : base(id) { }

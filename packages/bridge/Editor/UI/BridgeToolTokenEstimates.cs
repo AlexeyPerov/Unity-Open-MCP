@@ -191,7 +191,7 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_profiler_set_config", 688 },
             { "unity_open_mcp_profiler_start", 227 },
             { "unity_open_mcp_profiler_stop", 152 },
-            { "unity_open_mcp_project_commands", 278 },
+            { "unity_open_mcp_project_commands", 450 },
             { "unity_open_mcp_read_asset", 826 },
             { "unity_open_mcp_read_compile_errors", 436 },
             { "unity_open_mcp_recompile_scripts", 390 },

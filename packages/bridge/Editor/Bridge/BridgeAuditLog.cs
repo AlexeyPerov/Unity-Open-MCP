@@ -142,6 +142,8 @@ namespace UnityOpenMcpBridge
         public DateTime Timestamp;
         public string ProjectHash;
         public string Tool;
+        public string ProjectCommandJson;
+        public long DurationMs;
         public string GateMode;
         public string[] PathsHint;
         public string Outcome;          // passed | warned | failed | skipped
@@ -170,6 +172,7 @@ namespace UnityOpenMcpBridge
             sb.Append("\"ts\":\"").Append(Escape(Timestamp.ToString("o", CultureInfo.InvariantCulture))).Append("\",");
             sb.Append("\"projectHash\":\"").Append(Escape(ProjectHash ?? "")).Append("\",");
             sb.Append("\"tool\":").Append(JsonString(Tool)).Append(',');
+            if (ProjectCommandJson != null) sb.Append("\"projectCommand\":").Append(ProjectCommandJson).Append(",\"durationMs\":").Append(DurationMs).Append(',');
             sb.Append("\"gate\":").Append(JsonString(GateMode)).Append(',');
             sb.Append("\"pathsHint\":").Append(JsonStringArray(PathsHint)).Append(',');
             sb.Append("\"outcome\":").Append(JsonString(Outcome)).Append(',');

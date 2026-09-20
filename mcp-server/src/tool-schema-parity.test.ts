@@ -231,8 +231,9 @@ test("no tool file inlines the canonical gate enum literal (all use ...GATE_PROP
       `${tool.name} gate.enum must be the canonical tuple`,
     );
     assert.ok(
-      gate.default === "enforce" || gate.default === "off",
-      `${tool.name} gate.default must be enforce or an explicit gate-free off`,
+      gate.default === "enforce" || gate.default === "off" ||
+        (tool.name === "unity_open_mcp_project_commands" && gate.default === undefined),
+      `${tool.name} gate.default must be enforce/off, or omitted for the action-dependent project command contract`,
     );
   }
   // Sanity: a healthy tool tree has many gate-bearing tools.

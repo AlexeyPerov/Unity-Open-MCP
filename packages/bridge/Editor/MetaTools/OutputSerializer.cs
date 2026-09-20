@@ -46,6 +46,48 @@ namespace UnityOpenMcpBridge.MetaTools
             return SerializeInternal(value, 0, options, new HashSet<object>(ReferenceComparer.Instance));
         }
 
+        // Project commands return JSON, but retain the same depth/list bounds as
+        // reflective results. Build a bounded value graph before serializing atomically.
+        internal static string SerializeJson(string json)
+        {
+            if (json == null || json.Length > 1024 * 1024 || !BridgeJson.IsCompleteJson(json))
+                throw new ArgumentException("Command result must be complete JSON within 1 MiB.");
+            var options = new SerializeOptions();
+            return Serialize(ReadJson(json.Trim(), 0, options), options);
+        }
+
+        private static object ReadJson(string raw, int depth, SerializeOptions options)
+        {
+            if (raw == "null") return null;
+            if (raw == "true" || raw == "false") return raw == "true";
+            if (raw.StartsWith("\"")) return JsonBody.GetString("{\"v\":" + raw + "}", "v");
+            if (depth >= options.MaxDepth && (raw.StartsWith("{") || raw.StartsWith("["))) return "<max depth>";
+            if (raw.StartsWith("{"))
+            {
+                var result = new Dictionary<string, object>();
+                foreach (var key in JsonBody.GetObjectKeys(raw))
+                {
+                    if (result.Count >= options.MaxListItems) { result["$truncated"] = true; break; }
+                    result[key] = ReadJson(JsonBody.GetTopLevelRawValue(raw, key), depth + 1, options);
+                }
+                return result;
+            }
+            if (raw.StartsWith("["))
+            {
+                var result = new List<object>();
+                foreach (var item in JsonBody.GetArrayRawValues(raw))
+                {
+                    if (result.Count >= options.MaxListItems) { result.Add("<truncated>"); break; }
+                    result.Add(ReadJson(item, depth + 1, options));
+                }
+                return result;
+            }
+            if (decimal.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var exact)) return exact;
+            var number = double.Parse(raw, NumberStyles.Float, CultureInfo.InvariantCulture);
+            if (double.IsInfinity(number) || double.IsNaN(number)) throw new ArgumentException("Non-finite result number.");
+            return number;
+        }
+
         // B7 — object_get_data resolves a UnityEngine.Object and asks for a
         // depth-limited reflective walk over its public fields/properties
         // (the documented contract for ScriptableObjects, Materials, etc.).

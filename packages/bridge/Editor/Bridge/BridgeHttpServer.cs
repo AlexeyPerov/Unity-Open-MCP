@@ -886,7 +886,28 @@ namespace UnityOpenMcpBridge
 
             var gateMode = BridgeRequestBody.ExtractGateMode(body);
             var sw = Stopwatch.StartNew();
+            string FailureEnvelope(string json, string code, string message)
+            {
+                if (toolName != ProjectCommandInvocation.ToolName) return json;
+                var failed = GatePolicy.Skipped(ToolDispatchResult.Fail(code, message), "request_rejected");
+                ProjectCommandInvocation.Decorate(failed, body, sw.ElapsedMilliseconds);
+                BridgeAuditRecorder.RecordGateRun(toolName, gateMode, failed, ProjectCommandInvocation.ScopedPaths(body));
+                return "{\"projectCommand\":" + failed.ProjectCommandJson + "," + json.Substring(1);
+            }
 
+            if (toolName == ProjectCommandInvocation.ToolName)
+            {
+                var refusal = ProjectCommandInvocation.Preflight(body, out _, out _);
+                if (refusal != null)
+                {
+                    var rejected = GatePolicy.Skipped(refusal, "request_rejected");
+                    ProjectCommandInvocation.Decorate(rejected, body, sw.ElapsedMilliseconds);
+                    BridgeAuditRecorder.RecordGateRun(toolName, gateMode, rejected, ProjectCommandInvocation.ScopedPaths(body));
+                    BridgeActivityRecorder.ApplyToolResultToActivity(activity, rejected, sw.ElapsedMilliseconds);
+                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildGateEnvelope(rejected, gateMode, EffectiveToolContract.Lifecycle(toolName, body)));
+                    return;
+                }
+            }
             bool batchMutating = true;
             if (toolName == "unity_open_mcp_batch_execute")
             {
@@ -935,7 +956,9 @@ namespace UnityOpenMcpBridge
             bool reserializeAllPathsInvalid = false;
             if (isMutating)
             {
-                pathsHint = JsonBody.GetStringArray(JsonBody.TopLevelField(body, "paths_hint"), "paths_hint");
+                pathsHint = toolName == ProjectCommandInvocation.ToolName
+                    ? ProjectCommandInvocation.ScopedPaths(body)
+                    : JsonBody.GetStringArray(JsonBody.TopLevelField(body, "paths_hint"), "paths_hint");
                 if (pathsHint == null || pathsHint.Length == 0)
                 {
                     if (toolName == "unity_open_mcp_apply_fix")
@@ -1083,7 +1106,7 @@ namespace UnityOpenMcpBridge
                     System.Threading.Volatile.Write(ref timedOut.Value, true);
                     sw.Stop();
                     BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "timeout", $"Tool {toolName} timed out after {timeoutMs}ms", sw.ElapsedMilliseconds);
-                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildTimeoutEnvelope(toolName, effectiveGateMode, timeoutMs));
+                    BridgeHttpResponse.SendJson(context, 200, FailureEnvelope(BridgeJson.BuildTimeoutEnvelope(toolName, effectiveGateMode, timeoutMs), "timeout", "Execution outcome may be unknown; verify before retrying."));
                     return;
                 }
 
@@ -1163,6 +1186,7 @@ namespace UnityOpenMcpBridge
                         result.AgentNextSteps = AppendStep(result.AgentNextSteps, fdAdvisory);
                 }
 
+                if (toolName == ProjectCommandInvocation.ToolName) ProjectCommandInvocation.Decorate(result, body, sw.ElapsedMilliseconds);
                 BridgeAuditRecorder.RecordGateRun(toolName, effectiveGateMode, result, pathsHint);
                 BridgeActivityRecorder.ApplyToolResultToActivity(activity, result, sw.ElapsedMilliseconds);
                 BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildGateEnvelope(result, effectiveGateMode, lifecycle));
@@ -1178,24 +1202,24 @@ namespace UnityOpenMcpBridge
                     // structured main_thread_blocked error instead of the
                     // generic timeout so the agent can react.
                     BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "main_thread_blocked", inner.Message, sw.ElapsedMilliseconds);
-                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildMainThreadBlockedEnvelope(toolName, effectiveGateMode, timeoutMs));
+                    BridgeHttpResponse.SendJson(context, 200, FailureEnvelope(BridgeJson.BuildMainThreadBlockedEnvelope(toolName, effectiveGateMode, timeoutMs), "main_thread_blocked", inner.Message));
                 }
                 else if (inner is TimeoutException)
                 {
                     BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "timeout", inner.Message, sw.ElapsedMilliseconds);
-                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildTimeoutEnvelope(toolName, effectiveGateMode, timeoutMs));
+                    BridgeHttpResponse.SendJson(context, 200, FailureEnvelope(BridgeJson.BuildTimeoutEnvelope(toolName, effectiveGateMode, timeoutMs), "timeout", "Execution outcome may be unknown; verify before retrying."));
                 }
                 else
                 {
                     BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "execution_error", inner?.Message, sw.ElapsedMilliseconds);
-                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildFaultEnvelope(inner, effectiveGateMode));
+                    BridgeHttpResponse.SendJson(context, 200, FailureEnvelope(BridgeJson.BuildFaultEnvelope(inner, effectiveGateMode), "execution_error", inner?.Message));
                 }
             }
             catch (System.Exception e)
             {
                 sw.Stop();
                 BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "execution_error", e.Message, sw.ElapsedMilliseconds);
-                BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildFaultEnvelope(e, effectiveGateMode));
+                BridgeHttpResponse.SendJson(context, 200, FailureEnvelope(BridgeJson.BuildFaultEnvelope(e, effectiveGateMode), "execution_error", e.Message));
             }
         }
 
@@ -1252,6 +1276,11 @@ namespace UnityOpenMcpBridge
         {
             if (toolName == "unity_open_mcp_batch_execute")
                 return BatchExecuteGateRunner.Execute(body, gateMode, pathsHint);
+            if (toolName == ProjectCommandInvocation.ToolName)
+            {
+                var refusal = ProjectCommandInvocation.Preflight(body, out _, out _);
+                if (refusal != null) return GatePolicy.Skipped(refusal, "request_rejected");
+            }
             bool isMutating = EffectiveToolContract.IsMutating(toolName, body);
 
             var mode = GatePolicy.ParseMode(gateMode);
@@ -1321,6 +1350,7 @@ namespace UnityOpenMcpBridge
                 body = BatchSchemaValidator.WireArguments(body, wireSchema);
             return toolName switch
             {
+                ProjectCommandInvocation.ToolName => ProjectCommandInvocation.Execute(body),
                 "unity_open_mcp_execute_csharp" => ExecuteCSharpTool.Execute(body),
                 "unity_open_mcp_invoke_method" => InvokeMethodTool.Execute(body),
                 "unity_open_mcp_execute_menu" => ExecuteMenuTool.Execute(body),
