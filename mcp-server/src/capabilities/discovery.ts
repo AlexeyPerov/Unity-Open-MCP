@@ -5,7 +5,8 @@ import { INTENT_TAGS } from "./intent-groups.js";
 import { filterVisibleTools, type ToolSessionState } from "../tool-session-state.js";
 import { applyPaging } from "../output-profile.js";
 
-const LOCAL = new Set(["capabilities", "manage_tools", "generate_skill", "list_rules", "bridge_status", "restart_editor", "resource_pressure", "read_compile_errors"] .map(n => `unity_open_mcp_${n}`));
+const LOCAL = new Set(["capabilities", "manage_tools", "generate_skill", "list_rules", "bridge_status", "restart_editor", "resource_pressure", "read_compile_errors", "jobs"] .map(n => `unity_open_mcp_${n}`));
+const POTENTIALLY_MUTATING_LOCAL = new Set(["unity_open_mcp_jobs", "unity_open_mcp_restart_editor", "unity_open_mcp_hub_install_editor", "unity_open_mcp_hub_install_modules", "unity_open_mcp_hub_set_install_path"]);
 
 function exampleValue(s: any, key: string): any {
   if (s.default !== undefined) return s.default;
@@ -35,7 +36,7 @@ export function discoverTools(tools: Tool[], batch: ReadonlySet<string>, session
     const local = LOCAL.has(t.name) || t.name.startsWith("unity_open_mcp_hub_") || t.name === "unity_senses_pull_events";
     const tags = INTENT_TAGS.filter(tag => t.group && tag.groups.includes(t.group)).map(tag => tag.tag);
     return { ...t, routePolicy: local ? "local" : ALWAYS_BATCH_TOOLS.has(t.name) ? "batch" : t.routePolicy,
-      mutating: !!t.inputSchema.properties?.gate || ["unity_open_mcp_restart_editor", "unity_open_mcp_hub_install_editor", "unity_open_mcp_hub_install_modules", "unity_open_mcp_hub_set_install_path"].includes(t.name),
+      mutating: !!t.inputSchema.properties?.gate || POTENTIALLY_MUTATING_LOCAL.has(t.name),
       active: visible.has(t.name), available: local || t.routePolicy === "offline" || t.routePolicy === "offline-first" ? true : inventory ? inventory.has(t.name) : null,
       tags, example: exampleFor(t.inputSchema) };
   }).filter(t => (!args.tool_name || t.name === args.tool_name)

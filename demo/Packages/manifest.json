@@ -8,10 +8,10 @@
     "com.unity.ide.vscode": "1.2.5",
     "com.unity.inputsystem": "1.19.0",
     "com.unity.probuilder": "6.1.2",
-    "com.unity.render-pipelines.universal": "17.5.0",
+    "com.unity.render-pipelines.universal": "17.3.0",
     "com.unity.splines": "2.9.0",
     "com.unity.timeline": "1.8.12",
-    "com.unity.ugui": "2.5.0",
+    "com.unity.ugui": "2.0.0",
     "com.unity-open-mcp.project-command-fixture": "file:com.unity-open-mcp.project-command-fixture"
   },
   "scopedRegistries": [],

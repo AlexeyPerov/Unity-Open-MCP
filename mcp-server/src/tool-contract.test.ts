@@ -86,6 +86,17 @@ test("availability, activation, route and tag filters remain independent", () =>
   assert.deepEqual(after.tools.map(t => t.name), [name]);
 });
 
+test("jobs discovery remains available locally and reports potential mutation", () => {
+  const result = discoverTools(ALL_TOOLS, new Set(), new ToolSessionState(), undefined, {
+    tool_name: "unity_open_mcp_jobs",
+  });
+
+  assert.equal(result.tools.length, 1);
+  assert.equal(result.tools[0].routePolicy, "local");
+  assert.equal(result.tools[0].available, true);
+  assert.equal(result.tools[0].mutating, true);
+});
+
 test("verify filters enumerate implemented rules, excluding planned entries", () => {
   for (const t of ALL_TOOLS) for (const key of ["include_rules", "exclude_rules"]) {
     const p = t.inputSchema.properties?.[key] as any;

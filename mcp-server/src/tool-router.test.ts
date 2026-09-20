@@ -599,6 +599,32 @@ test("route: non-batch tool routes to live and tags _route=live", async () => {
   assert.equal(routeOf(result), "live");
 });
 
+test("route: batch_execute rewrites canonical nested parameters for the bridge", async () => {
+  const live = makeFakeLive({ available: true });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  await router.route("unity_open_mcp_batch_execute", {
+    commands: [{
+      tool: "unity_open_mcp_component_get",
+      params: {
+        game_object_path: "Main Camera",
+        component_type: "UnityEngine.Transform",
+      },
+    }],
+  });
+
+  assert.equal(live.calls.length, 1);
+  assert.deepEqual(live.calls[0].args, {
+    commands: [{
+      tool: "unity_open_mcp_component_get",
+      params: {
+        path: "Main Camera",
+        type_name: "UnityEngine.Transform",
+      },
+    }],
+  });
+});
+
 // ---------------------------------------------------------------------------
 // batch tools — prefer live, fall back to batch
 // ---------------------------------------------------------------------------

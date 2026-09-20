@@ -856,11 +856,13 @@ export class ToolRouter implements Router {
       if (errors.length) return sourceResult({ error: { code: "invalid_arguments", message: errors.join("; ") }, errors, _route: { route: "local" } }, "local", true);
       const notes: string[] = [];
       const wire = wireArguments(args, definition.inputSchema, notes);
-      if (toolName === "unity_open_mcp_batch_execute" && Array.isArray(args.commands)) {
-        for (const command of args.commands as Array<{ tool?: string; params?: unknown }>) {
+      if (toolName === "unity_open_mcp_batch_execute" && Array.isArray(wire.commands)) {
+        wire.commands = (wire.commands as Array<{ tool?: string; params?: unknown }>).map(command => {
           const nested = ALL_TOOLS.find(t => t.name === command.tool);
-          if (nested) wireArguments(command.params ?? {}, nested.inputSchema, notes);
-        }
+          return nested
+            ? { ...command, params: wireArguments(command.params ?? {}, nested.inputSchema, notes) }
+            : command;
+        });
       }
       // Recursive dispatch only after validation; alias notes are attached to the normal result.
       return this.routeValidated(live, toolName, wire, notes);
