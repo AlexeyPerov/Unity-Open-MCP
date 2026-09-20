@@ -12,6 +12,7 @@ namespace UnityOpenMcpBridge.Tests
         public enum Choice { First, Second }
         public static string Typed(string required, int[] counts, long id, Choice choice, double precision = 1, int? optional = null)
         { calls++; return "{\"calls\":" + calls + ",\"id\":\"" + id + "\",\"count\":" + counts.Length + "}"; }
+        public static System.Threading.Tasks.Task<string> AsyncEmpty(ProjectCommandContext context) => System.Threading.Tasks.Task.FromResult("{}");
         public static string Empty() { calls++; return "{}"; }
         public static string BadOutput() { calls++; return "{broken"; }
         public static string Throws() { calls++; throw new InvalidOperationException("after write"); }
@@ -27,6 +28,18 @@ namespace UnityOpenMcpBridge.Tests
         }
         private static string Body(string args = "{}", string extra = "") => "{\"action\":\"invoke\",\"command_id\":\"project.tests.invoke\",\"args\":" + args + extra + "}";
         private const string Valid = "{\"required\":null,\"counts\":[1,2],\"id\":\"9223372036854775807\",\"choice\":\"Second\"}";
+        [Test] public void AsyncDeclarationRequiresTaskAndOneInjectedContext()
+        {
+            var invalid = Register("Empty", async: true);
+            Assert.AreEqual("invalid_command_declaration", invalid.Code);
+            var valid = Register("AsyncEmpty", async: true);
+            Assert.IsNull(valid.Code);
+            StringAssert.DoesNotContain("context", valid.Schema);
+            var context = new ProjectCommandContext("test", System.Threading.CancellationToken.None, _ => {});
+            Assert.IsNull(ProjectCommandInvocation.Preflight(Body(), out _, out var values, context));
+            Assert.AreSame(context, values[0]);
+            Assert.AreEqual("async_not_supported", ProjectCommandInvocation.Execute(Body()).ErrorCode);
+        }
         [SetUp] public void Reset() { calls = 0; }
         [TearDown] public void Restore() => BridgeToolRegistry.Scan();
 
@@ -96,7 +109,11 @@ namespace UnityOpenMcpBridge.Tests
         }
         [Test] public void SharedDirtyGuardIncludesUnsavedAdditiveScenes()
         {
-            var scene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(
+            // The native runner starts with an untitled scene; Unity refuses an
+            // additive scene beside it. Reuse that disposable scene in this case.
+            var active = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            bool reuse = string.IsNullOrEmpty(active.path);
+            var scene = reuse ? active : UnityEditor.SceneManagement.EditorSceneManager.NewScene(
                 UnityEditor.SceneManagement.NewSceneSetup.EmptyScene, UnityEditor.SceneManagement.NewSceneMode.Additive);
             try
             {
@@ -105,12 +122,12 @@ namespace UnityOpenMcpBridge.Tests
                 Assert.IsFalse(guard.Allowed);
                 CollectionAssert.Contains(guard.DirtyScenePaths, "(unsaved scene)");
             }
-            finally { UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true); }
+            finally { if (!reuse) UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true); }
         }
         [Test] public void MissingLifecycleAndAsyncExecutionFailClosed()
         {
             Assert.AreEqual("invalid_command_declaration", Register("Empty", true).Code);
-            Register("Empty", async: true);
+            Register("AsyncEmpty", async: true);
             Assert.AreEqual("async_not_supported", ProjectCommandInvocation.Execute(Body()).ErrorCode);
             Assert.AreEqual(0, calls);
         }

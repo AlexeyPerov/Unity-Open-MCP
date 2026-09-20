@@ -470,6 +470,17 @@ namespace UnityOpenMcpBridge
                         activity.Kind = BridgeActivityKind.Ping;
                         HandlePing(context);
                         break;
+                    case "/project-command-jobs":
+                        if (context.Request.HttpMethod != "POST")
+                            BridgeHttpResponse.SendJsonError(context, 405, "method_not_allowed", "POST required");
+                        else
+                        {
+                            var jobBody = BridgeRequestBody.ReadRequestBody(context.Request);
+                            var jobOwner = ExtractAgentId(context.Request);
+                            BridgeHttpResponse.SendJson(context, 200, MainThreadDispatcher.EnqueueAsync(
+                                () => ProjectCommandJobs.Handle(jobBody, jobOwner), 5000).Result);
+                        }
+                        break;
                     case "/compile-state":
                         if (context.Request.HttpMethod != "GET")
                             BridgeHttpResponse.SendJsonError(context, 405, "method_not_allowed", "GET required for /compile-state");
@@ -1274,6 +1285,8 @@ namespace UnityOpenMcpBridge
 
         private static GateDispatchResult DispatchWithGateCore(string toolName, string body, string gateMode, string[] pathsHint)
         {
+            if (ProjectCommandJobs.Active && (EffectiveToolContract.IsMutating(toolName, body) || toolName == "unity_open_mcp_batch_execute"))
+                return GatePolicy.Skipped(ToolDispatchResult.Fail("job_busy", "An asynchronous project command owns the Editor mutation scope."), "request_rejected");
             if (toolName == "unity_open_mcp_batch_execute")
                 return BatchExecuteGateRunner.Execute(body, gateMode, pathsHint);
             if (toolName == ProjectCommandInvocation.ToolName)

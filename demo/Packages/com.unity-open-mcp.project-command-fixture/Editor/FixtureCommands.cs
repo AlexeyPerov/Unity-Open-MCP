@@ -17,6 +17,22 @@ namespace ProjectCommandFixture
             [ProjectCommandParameter(Description = "Maximum entries", Minimum = 1, Maximum = 10, Examples = new[] { "3" })] int limit = 3,
             int? seed = null) => "{\"fixture\":true}";
 
+        [ProjectCommand("project.demo.long_write", Title = "Long write fixture", Description = "Prepare over time, then write one disposable asset; cooperatively cancellable between steps.",
+            Package = "demo.project-commands", IsMutating = true, Async = true, Cancellable = true,
+            Lifecycle = LifecyclePolicy.EditorSettle, PathsHint = new[] { "Assets/_ValidationSuite/ProjectCommands" })]
+        public static async System.Threading.Tasks.Task<string> LongWrite(ProjectCommandContext context,
+            [ProjectCommandParameter(Minimum = 1, Maximum = 120)] int seconds = 60)
+        {
+            for (int i = 0; i < seconds; i++)
+            {
+                context.ReportPhase("preparing step " + (i + 1) + " of " + seconds);
+                await System.Threading.Tasks.Task.Delay(1000, context.CancellationToken);
+            }
+            context.CancellationToken.ThrowIfCancellationRequested();
+            context.ReportPhase("writing asset");
+            return Write("Async project command completed.");
+        }
+
         [ProjectCommand("project.demo.reload_fixture", Title = "Reload fixture", Description = "Request compilation for lifecycle validation.",
             Package = "demo.project-commands", IsMutating = true, Lifecycle = LifecyclePolicy.RestartThenSettle,
             PathsHint = new[] { "Packages/com.unity-open-mcp.project-command-fixture" })]

@@ -66,6 +66,12 @@ namespace UnityOpenMcpBridge
                     throw new ArgumentException("Mutating commands must declare a lifecycle policy.");
                 if (!attr.IsMutating && attr.Lifecycle != LifecyclePolicy.None)
                     throw new ArgumentException("Read-only commands must declare Lifecycle.None.");
+                if (attr.Async && (method.ReturnType != typeof(System.Threading.Tasks.Task<string>) || method.GetParameters().Count(p => p.ParameterType == typeof(ProjectCommandContext)) != 1))
+                    throw new ArgumentException("Async commands require Task<string> and exactly one ProjectCommandContext parameter.");
+                if (!attr.Async && (method.ReturnType != typeof(string) || method.GetParameters().Any(p => p.ParameterType == typeof(ProjectCommandContext))))
+                    throw new ArgumentException("Synchronous commands require string and no ProjectCommandContext parameter.");
+                if (attr.Async && attr.Lifecycle != LifecyclePolicy.None && attr.Lifecycle != LifecyclePolicy.EditorSettle)
+                    throw new ArgumentException("Async commands support None or EditorSettle lifecycle only; reload cannot resume user code.");
                 entry.Schema = ProjectCommandSchema.Build(method);
                 using (var hash = System.Security.Cryptography.SHA256.Create())
                     entry.SchemaVersion = BitConverter.ToString(hash.ComputeHash(System.Text.Encoding.UTF8.GetBytes(

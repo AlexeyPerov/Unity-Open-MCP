@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import type { MutationEnvelope } from "./gate-error.js";
-import type { PingCache, PingSnapshot } from "./ping-cache.js";
+import { PingCache, type PingSnapshot } from "./ping-cache.js";
 import type { BridgeToolsInventory } from "./bridge-tools-cache.js";
 import { BridgeToolsCache } from "./bridge-tools-cache.js";
 import { StaleAssemblyCache } from "./stale-assembly-cache.js";
@@ -581,6 +581,29 @@ export class LiveClient implements Router {
       return this.annotateCompileVerify(toolName, result, before, args);
     }
     return result;
+  }
+
+  /** Preserve configured endpoint/auth when attaching an independent job owner. */
+  forAgent(agent: string): LiveClient {
+    return new LiveClient(Number(new URL(this.baseUrl).port), new PingCache(), this.authToken, this.projectPath, agent, this.envPort);
+  }
+
+  /** Job-owned test start has no transport replay; poll the existing file handoff. */
+  async runTestsJob(args: Record<string, unknown>, onStarted: () => void): Promise<CallToolResult> {
+    const readyError = await this.ensureReady();
+    if (readyError) return readyError;
+    const { timeout_ms: _budget, ...startArgs } = args;
+    const response = await this.fetchWithTimeout("/tools/unity_senses_run_tests", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(startArgs),
+    }, 10_000);
+    if (!response.ok) throw new Error(`Test start HTTP ${response.status}; execution outcome unknown.`);
+    const body = await response.json() as Record<string, unknown>;
+    if (body.status !== "started" || body.runId !== args.run_id) {
+      if (body.error || body.mutation) return { content: [{ type: "text", text: JSON.stringify(body) }], isError: true };
+      throw new Error("Test start did not confirm the owned run id.");
+    }
+    onStarted();
+    return this.pollTestResults(String(args.run_id), args);
   }
 
   private async handleRunTests(
@@ -1779,6 +1802,15 @@ export class LiveClient implements Router {
           "Run unity_open_mcp_scan_paths or a gated mutation to populate the cache.",
       };
     }
+  }
+
+  /** Private job transport: one bounded request, never an automatic mutation retry. */
+  async projectCommandJob(args: Record<string, unknown>): Promise<Record<string, any>> {
+    const response = await this.fetchWithTimeout("/project-command-jobs", {
+      method: "POST", body: JSON.stringify(args), headers: { "Content-Type": "application/json" },
+    }, 10_000);
+    if (!response.ok) throw new Error(`Project job transport HTTP ${response.status}`);
+    return await response.json() as Record<string, any>;
   }
 
   /** Fresh authenticated bounded catalog read; no disk/session cache can hide a reload. */

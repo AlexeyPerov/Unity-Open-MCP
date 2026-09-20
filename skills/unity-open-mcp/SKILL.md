@@ -42,16 +42,19 @@ The server revalidates a fresh schema; optionally pin `schema_version` from desc
 Supply `paths_hint` for mutations without declared paths; gate and dirty-scene
 options stay outside `args`. Check `mutation.output.result` and the normal gate /
 lifecycle envelope. After timeout or reload, inspect post-state before retrying.
-Async/cancellable declarations do not yet start jobs; do not bypass unavailable
-commands with reflection or nest project commands in `batch_execute`.
+For an `async` command, use jobs with its exact id and the invocation envelope
+in job `args`. Do not bypass unavailable commands with reflection or nest project
+commands in `batch_execute`.
 
 ## Asynchronous job observation
 
 Use the always-visible `unity_open_mcp_jobs` for explicitly supported asynchronous
 operations. `start` requires `tool_or_command`, adapter `args`, and an
-`idempotency_key` for mutations. The initial surface has no production adapters;
-async catalog declarations alone do not enable jobs. An unsupported target must
-not be retried as an arbitrary background tool.
+`idempotency_key`. Supported targets are `unity_senses_run_tests` (ordinary test
+filters, no caller `run_id`, cancellation unsupported) and available async project
+commands (`args: {args: {...}, gate, paths_hint}`). Read terminal project-job gate
+results even on failure/cancellation. An unsupported target must not be retried as
+an arbitrary background tool.
 
 Keep the job id and the same project/port/agent identity for `status`, `wait`,
 `cancel` and `list`. A wait timeout leaves execution running. Reuse the same key

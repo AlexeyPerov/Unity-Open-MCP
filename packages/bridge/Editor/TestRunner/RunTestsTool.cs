@@ -11,6 +11,7 @@ namespace UnityOpenMcpBridge.TestRunner
     [BridgeToolType]
     public class Tool_TestRunner
     {
+        internal static bool RunScheduled;
         [BridgeTool("unity_senses_run_tests", Title = "Run Tests",
             IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.CustomConfirmation)]
         [System.ComponentModel.Description(
@@ -26,6 +27,7 @@ namespace UnityOpenMcpBridge.TestRunner
             string run_id = null,
             bool include_passes = true)
         {
+            if (ProjectCommandJobs.Active) throw new InvalidOperationException("job_busy: an asynchronous project command owns the Editor.");
             bool callerSuppliedRunId = !string.IsNullOrEmpty(run_id);
             if (!callerSuppliedRunId)
                 run_id = System.Diagnostics.Process.GetCurrentProcess().Id + "-"
@@ -104,6 +106,7 @@ namespace UnityOpenMcpBridge.TestRunner
             // earliest point TestRunnerApi will accept the run anyway. The
             // callbacks (registered below) own the api lifetime and the results
             // file write, so no further coordination is needed here.
+            RunScheduled = true;
             StartRunDeferred(filter, run_id, mode, play_mode, include_passes);
 
             return TestRunnerService.BuildStartedJson(run_id, mode);
@@ -147,6 +150,7 @@ namespace UnityOpenMcpBridge.TestRunner
 
             EditorApplication.delayCall += () =>
             {
+                RunScheduled = false;
                 // A6 — sweep any leaked (api, callbacks) pair from a previous
                 // run whose onFinished never fired (Stop during PlayMode, a
                 // reload that aborted an EditMode run) before subscribing a

@@ -14,9 +14,9 @@ namespace UnityOpenMcpBridge
 
         internal static string Build(MethodInfo method)
         {
-            if (!method.IsPublic || !method.IsStatic || method.ContainsGenericParameters || method.ReturnType != typeof(string))
+            if (!method.IsPublic || !method.IsStatic || method.ContainsGenericParameters || (method.ReturnType != typeof(string) && method.ReturnType != typeof(System.Threading.Tasks.Task<string>)))
                 throw new ArgumentException("Commands must be public static non-generic methods returning JSON as string.");
-            var parameters = method.GetParameters();
+            var parameters = method.GetParameters().Where(p => p.ParameterType != typeof(ProjectCommandContext)).ToArray();
             var names = new System.Collections.Generic.HashSet<string>(parameters.Select(p => p.Name), StringComparer.Ordinal);
             var sb = new StringBuilder("{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\",\"x-project-command\":true,\"additionalProperties\":false,\"properties\":{");
             foreach (var p in parameters)

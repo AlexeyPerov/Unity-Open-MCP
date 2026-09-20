@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -163,14 +164,15 @@ namespace UnityOpenMcpBridge
             catch (Exception e) { return ToolDispatchResult.Fail("execution_error", e.Message); }
         }
 
-        public static GateDispatchResult Execute(
-            GateMode mode,
-            string[] pathsHint,
-            Func<ToolDispatchResult> mutation)
+        public static GateDispatchResult Execute(GateMode mode, string[] pathsHint, Func<ToolDispatchResult> mutation)
+            => ExecuteAsync(mode, pathsHint, () => Task.FromResult(InvokeMutation(mutation))).GetAwaiter().GetResult();
+
+        internal static async Task<GateDispatchResult> ExecuteAsync(
+            GateMode mode, string[] pathsHint, Func<Task<ToolDispatchResult>> mutation)
         {
             if (mode == GateMode.Off)
             {
-                var offResult = InvokeMutation(mutation);
+                var offResult = await mutation();
                 return new GateDispatchResult
                 {
                     Mutation = offResult,
@@ -183,7 +185,7 @@ namespace UnityOpenMcpBridge
 
             if (pathsHint == null || pathsHint.Length == 0)
             {
-                var noPathResult = InvokeMutation(mutation);
+                var noPathResult = await mutation();
                 return new GateDispatchResult
                 {
                     Mutation = noPathResult,
@@ -205,7 +207,7 @@ namespace UnityOpenMcpBridge
             // refreshed every EditorApplication.update tick (thread-safe to read).
             if (BridgeSession.IsPlaying)
             {
-                var playResult = InvokeMutation(mutation);
+                var playResult = await mutation();
                 var steps = playResult.Success
                     ? new[] { "Validation skipped: editor is in play mode (the scene graph is animating; the verify scan does not settle). Re-run in edit mode for a verified result." }
                     : null;
@@ -269,7 +271,7 @@ namespace UnityOpenMcpBridge
                 };
             }
 
-            var mutationResult = InvokeMutation(mutation);
+            var mutationResult = await mutation();
 
             if (!mutationResult.Success && !mutationResult.PartialCommit)
             {

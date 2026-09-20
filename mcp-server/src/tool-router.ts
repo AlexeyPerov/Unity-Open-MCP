@@ -1,3 +1,4 @@
+import { testRunOperation, projectCommandOperation } from "./jobs/adapters.js";
 import { JobManager, JobManagerError, type JobOwner } from "./jobs/job-manager.js";
 import { handleJobs } from "./jobs/handler.js";
 import { PROCESS_AGENT_ID } from "./agent-identity.js";
@@ -711,7 +712,23 @@ export class ToolRouter implements Router {
     if (errors.length) return localError("invalid_arguments", errors.join("; "));
     const owner: JobOwner = { project: this.projectPath || "default", agent: identity?.agent ?? PROCESS_AGENT_ID,
       ...(identity?.port === undefined ? {} : { port: identity.port }) };
-    try { return sourceResult(await handleJobs(this.jobs, owner, args) as Record<string, unknown>, "local"); }
+    try {
+      const clientFor = (jobOwner: JobOwner) => jobOwner.port === undefined
+        ? jobOwner.agent === PROCESS_AGENT_ID ? this.live : this.live.forAgent(jobOwner.agent)
+        : new LiveClient(jobOwner.port, new PingCache(), resolveAuthToken(this.projectPath, jobOwner.port), this.projectPath, jobOwner.agent, jobOwner.port);
+      if (args.action === "start" && typeof args.tool_or_command === "string" && !this.jobs.hasOperation(args.tool_or_command)) {
+        const name = args.tool_or_command;
+        if (name === "unity_senses_run_tests") this.jobs.register(name, testRunOperation(clientFor));
+        else if (name.startsWith("project.")) {
+          const catalog = await clientFor(owner).projectCommands({ action: "describe", id: name });
+          const command = catalog.command as Record<string, unknown> | undefined;
+          if (!command?.available || !command.async) throw new JobManagerError("job_operation_unsupported", "Target must be an available async project command.");
+          // Concurrent catalog reads may race; register the adapter only once.
+          if (!this.jobs.hasOperation(name)) this.jobs.register(name, projectCommandOperation(name, command.cancellable === true, clientFor));
+        }
+      }
+      return sourceResult(await handleJobs(this.jobs, owner, args) as Record<string, unknown>, "local");
+    }
     catch (error) {
       return localError(error instanceof JobManagerError ? error.code : "invalid_arguments", error instanceof Error ? error.message : String(error));
     }

@@ -352,6 +352,11 @@ candidates (prefixed `static ` for static members).
 
 ### `unity_senses_run_tests`
 
+For suites that may exceed the host request timeout, opt into
+[jobs](jobs.md#adopted-operations) with `tool_or_command: "unity_senses_run_tests"`
+and an idempotency key. Job observation returns promptly and test execution keeps
+its existing file handoff. The direct call described below is unchanged.
+
 Results are retrieved by the server polling a results file under
 `~/.unity-open-mcp/`, **not** via `unity_senses_pull_events` (which streams only
 console/editor-state). `timeout_ms` is a client-side polling budget, not a

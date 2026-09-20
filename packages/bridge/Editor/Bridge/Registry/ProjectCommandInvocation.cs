@@ -31,7 +31,7 @@ namespace UnityOpenMcpBridge
                 ? entry.Attribute.PathsHint.Concat(supplied).Distinct(StringComparer.Ordinal).ToArray() : supplied;
         }
 
-        internal static ToolDispatchResult Preflight(string body, out ProjectCommandCatalog.Entry entry, out object[] values)
+        internal static ToolDispatchResult Preflight(string body, out ProjectCommandCatalog.Entry entry, out object[] values, ProjectCommandContext context = null)
         {
             entry = null;
             values = null;
@@ -65,12 +65,13 @@ namespace UnityOpenMcpBridge
             {
                 values = entry.Method.GetParameters().Select(p =>
                 {
+                    if (p.ParameterType == typeof(ProjectCommandContext)) return context;
                     var raw = JsonBody.GetTopLevelRawValue(args, p.Name);
                     return raw == null ? p.DefaultValue : Bind(raw, p.ParameterType);
                 }).ToArray();
             }
             catch (Exception ex) { return ToolDispatchResult.Fail("invalid_arguments", "Argument cannot be represented by its CLR type: " + ex.Message); }
-            if (entry.Attribute.Async)
+            if (entry.Attribute.Async && context == null)
                 return ToolDispatchResult.Fail("async_not_supported", "This command requires job orchestration; it was not started.");
             if (entry.Attribute.Lifecycle == LifecyclePolicy.CustomConfirmation)
                 return ToolDispatchResult.Fail("lifecycle_not_supported", "Custom confirmation requires job orchestration; the command was not started.");
@@ -136,7 +137,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        private static void RecordStarted(string body, ProjectCommandCatalog.Entry entry)
+        internal static void RecordStarted(string body, ProjectCommandCatalog.Entry entry, string jobId = null)
         {
             try
             {
@@ -146,6 +147,7 @@ namespace UnityOpenMcpBridge
                 {
                     var started = GatePolicy.Skipped(ToolDispatchResult.Ok(), "in_progress");
                     Decorate(started, body, 0);
+                    if (jobId != null) started.ProjectCommandJson = started.ProjectCommandJson.Replace("\"jobId\":null", "\"jobId\":" + BridgeJson.EscapeString(jobId));
                     BridgeAuditLog.Record(new BridgeAuditRecord {
                         Timestamp = DateTime.UtcNow, ProjectHash = BridgeAuditRecorder.ResolveAuditProjectHash(),
                         Tool = ToolName, ProjectCommandJson = started.ProjectCommandJson,

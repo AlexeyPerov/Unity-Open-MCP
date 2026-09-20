@@ -8,6 +8,33 @@ namespace UnityOpenMcpBridge.Tests
     [TestFixture]
     public class GatePolicyTests
     {
+        [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator AsyncGate_ValidatesOnlyAfterTerminalMutation_Once()
+        {
+            var completion = new System.Threading.Tasks.TaskCompletionSource<ToolDispatchResult>();
+            int validations = 0;
+            GatePolicy.ValidatePathsOverride = (_, __, ___) => {
+                validations++;
+                return new VerifyResult(new System.Collections.Generic.List<VerifyIssue>(), new string[0], 0, null, null);
+            };
+            try
+            {
+                var pending = GatePolicy.ExecuteAsync(GateMode.Enforce, new[] { "Assets/__MCPTest_AsyncGate.txt" }, () => completion.Task);
+                Assert.IsFalse(pending.IsCompleted);
+                Assert.AreEqual(0, validations);
+                yield return null;
+                Assert.AreEqual(0, validations);
+                completion.SetResult(ToolDispatchResult.PartialFailure("cancelled", "Acknowledged at safe boundary", null));
+                while (!pending.IsCompleted) yield return null;
+                var result = pending.GetAwaiter().GetResult();
+                Assert.AreEqual(1, validations);
+                Assert.IsNotNull(result.CheckpointId);
+                Assert.IsTrue(result.GateRan);
+                Assert.IsTrue(result.Mutation.PartialCommit);
+            }
+            finally { GatePolicy.ValidatePathsOverride = null; }
+        }
+
         // -------------------------------------------------------------------
         // ResolveOutcome — the mutate→gate decision matrix
         // -------------------------------------------------------------------

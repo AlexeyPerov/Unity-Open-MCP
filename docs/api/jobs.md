@@ -4,10 +4,59 @@
 available when Unity is offline or reloading. It owns jobs in one MCP server
 session; it does not turn synchronous tool calls into background work.
 
-Only operations with a registered `JobOperation` adapter can start. The initial
-orchestration surface ships without production operation adapters. A project's
-`async` or `cancellable` catalog declaration alone does not enable execution.
-Unsupported targets return `job_operation_unsupported` before dispatch.
+Supported targets are `unity_senses_run_tests` and available project commands
+that declare `Async = true` with the async authoring signature. Other targets
+return `job_operation_unsupported`; builds, imports, package resolution, and
+baking retain their existing contracts.
+
+## Adopted operations
+
+For tests, use `start` with `tool_or_command: "unity_senses_run_tests"`, the usual
+test filters in `args`, and an `idempotency_key`. The job owns `run_id`; supplying
+one is rejected. The existing test runner and result-file handoff run unchanged,
+including PlayMode reload support. The default observation budget is 600000 ms;
+`args.timeout_ms` can set 1000–600000 ms. Exhausting that budget means `orphaned`,
+not proof the tests stopped. Cancellation is unsupported (`not_cancellable`).
+Progress reports coarse observation phases, without invented percentages.
+Terminal results retain the test summary; failing tests or an aborted run make
+the job fail. Tests have no mutation gate in their existing runner contract.
+Direct calls to `unity_senses_run_tests` still start and wait synchronously.
+
+For a project command, pass its exact catalog id as `tool_or_command` and an
+invocation envelope as `args`, for example:
+
+```json
+{
+  "action": "start",
+  "tool_or_command": "project.demo.long_write",
+  "idempotency_key": "authoring-pass-1",
+  "args": {"args": {"seconds": 60}, "gate": "enforce"}
+}
+```
+
+The nested `args` holds typed command parameters. `schema_version`, `paths_hint`,
+`gate`, `ignore_scene_dirty`, and `confirm_bypass` belong alongside it. Starts
+require an idempotency key, including read-only async commands. Describe first;
+the bridge rechecks declaration, schema, enabled state, deny rules and scope.
+Mutations capture one checkpoint before invoking user code and validate once
+when it finishes, including partial failure or acknowledged cancellation. The
+terminal `result` retains the gate envelope and project identity with `jobId`.
+Status, wait, and duplicate starts never repeat validation.
+
+Project commands run on the Editor synchronization context and must yield between
+bounded steps. `ProjectCommandContext.ReportPhase` supplies phase-only progress;
+`CancellationToken` lets commands acknowledge cancellation at a safe boundary.
+The job remains `cancel_requested` until acknowledged; completion may win the
+race. Commands without `Cancellable = true` reject cancellation. Other bridge
+mutations and test starts are refused with `job_busy` during a project job, so
+they cannot contaminate its checkpoint/validation interval. Operator edits and
+other Editor plugins remain outside this scheduling guarantee.
+
+Only settled EditMode starts and `None` (read-only) / `EditorSettle` (mutating)
+lifecycles are supported. Project-command execution is domain-local: a reload or
+transport loss becomes `orphaned`, never an automatic restart. The bridge retains
+at most 256 records for 30 minutes after completion; the MCP session owns
+observation and idempotency. See [authoring](project-commands.md#asynchronous-authoring).
 
 ## Calls
 
@@ -39,7 +88,7 @@ caller does not cancel execution. Retrieve the same job id on a later call.
 ## Identity, limits, and retention
 
 Ownership uses the configured project plus per-call bridge port override and the
-request's `_meta.agentId` (default: MCP process identity). Every action checks
+tool arguments' `_meta.agentId` (default: MCP process identity). Every action checks
 ownership. These are trusted local routing identities, not authentication
 credentials; clients sharing a process must use distinct agent ids consistently.
 Port overrides have separate namespaces; use the same routing metadata on every

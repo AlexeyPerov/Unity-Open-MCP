@@ -4,7 +4,7 @@ export const JOB_STATES = ["queued", "running", "succeeded", "failed", "cancel_r
 export type JobState = typeof JOB_STATES[number];
 export interface JobOwner { project: string; agent: string; port?: number }
 export interface JobError { code: string; message: string }
-export type JobOutcome = { state: "succeeded"; result: unknown } | { state: "failed"; error: JobError } | { state: "cancelled" };
+export type JobOutcome = { state: "succeeded"; result: unknown } | { state: "failed"; error: JobError; result?: unknown } | { state: "cancelled"; result?: unknown };
 export interface JobContext {
   jobId: string;
   owner: JobOwner;
@@ -87,6 +87,7 @@ export class JobManager {
     this.cleanupTimer = setInterval(() => this.cleanup(), Math.min(this.options.retentionMs, 60_000));
     this.cleanupTimer.unref();
   }
+  hasOperation(name: string): boolean { return this.operations.has(name); }
   register(name: string, operation: JobOperation): void {
     if (this.operations.has(name)) throw new Error(`Duplicate job operation: ${name}`);
     this.operations.set(name, operation);
@@ -252,9 +253,9 @@ export class JobManager {
     try {
       const outcome = await entry.operation.run(entry.args, context);
       if (terminal(entry.view.state)) return;
-      if (outcome.state === "succeeded") entry.view.result = this.copy(outcome.result);
-      else if (outcome.state === "failed") entry.view.error = this.copy(outcome.error);
-      else if (outcome.state !== "cancelled" || !entry.operation.cancellable || !entry.controller.signal.aborted)
+      if ("result" in outcome) entry.view.result = this.copy(outcome.result);
+      if (outcome.state === "failed") entry.view.error = this.copy(outcome.error);
+      else if (outcome.state !== "succeeded" && (outcome.state !== "cancelled" || !entry.operation.cancellable || !entry.controller.signal.aborted))
         throw new Error("Invalid terminal outcome or cancellation without acknowledgement");
       this.transition(entry, outcome.state);
     } catch (error) {

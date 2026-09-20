@@ -3,7 +3,7 @@
 `unity_open_mcp_project_commands` is always visible, independent of active tool
 groups. It reads the live Editor catalog without an MCP server release, reconnect,
 or dynamic tool registration. Synchronous invocation uses the built-in safety pipeline.
-Asynchronous jobs are not yet supported.
+Explicitly async commands execute through [jobs](jobs.md).
 
 ## Discovery
 
@@ -16,13 +16,13 @@ Asynchronous jobs are not yet supported.
   A reload can change the catalog between pages; restart paging after recompiling.
 - `action: "describe", id: "project.demo.catalog_fixture"`: one exact lookup
   returns full `inputSchema`, safety/lifecycle metadata, deprecated aliases,
-  reserved async/cancellation declarations, `schemaVersion`, declaring assembly/type,
+  async/cancellation declarations, `schemaVersion`, declaring assembly/type,
   declared `pathsHint`, and `invocationSupported: true`.
   Filters and paging are list-only; `id` is describe-only; invocation uses `command_id`. Aliases are informational
   and are not resolved as exact ids.
 
 Each entry reports `available` for declaration validity/enabled state. This does
-not imply async/job support. Invalid and disabled entries remain discoverable,
+not imply cancellability; inspect `async` and `cancellable`. Invalid and disabled entries remain discoverable,
 with method-qualified diagnostics. Duplicate ids or aliases make all affected
 commands unavailable, regardless of assembly load order. Exact lookup of a
 colliding id returns `duplicate_command_id`; an unknown id returns
@@ -95,8 +95,8 @@ serialized deterministically using invariant culture.
 
 `ProjectCommand` inherits IsMutating, Gate, Lifecycle, ReadOnlyHint,
 IdempotentHint, DestructiveHint and Enabled from `BridgeTool`. Mutating commands
-cannot declare ReadOnlyHint. Async and Cancellable are reserved declarations;
-Cancellable requires Async. They do not start jobs or promise cancellation.
+cannot declare ReadOnlyHint. `Async` opts into jobs and requires the signature
+below; `Cancellable` requires Async and cooperative token handling.
 Mutating declarations must choose a non-None Lifecycle; read-only declarations
 must use None. `PathsHint` optionally declares fixed project-relative mutation
 paths. Commands remain outside direct per-command bridge dispatch; invocation
@@ -177,12 +177,56 @@ before user code, so a reload cannot erase evidence of dispatch; without a termi
 record the outcome is unknown, and duration 0 on the start record is not execution time.
 No command argument values are added to audit records.
 
-Async declarations return `async_not_supported` without starting work;
-CustomConfirmation lifecycle returns `lifecycle_not_supported`. These are reserved
-for job orchestration through the same preflight/binding seam. Project commands
+Synchronous invocation of an async declaration returns `async_not_supported`
+without starting work; use jobs instead. CustomConfirmation lifecycle returns
+`lifecycle_not_supported`. Project commands
 cannot be nested in `batch_execute`; use a top-level invocation.
 
 Authenticated `POST /tools/unity_open_mcp_project_commands` accepts the invocation
 shape above and the transport options. Direct HTTP callers receive the same
 bridge validation and safety pipeline. Discovery remains on the read-only GET
 catalog endpoint; no client tool-list refresh or reconnect is required.
+
+
+## Asynchronous authoring
+
+An async command returns `Task<string>` containing JSON and accepts exactly one
+injected `ProjectCommandContext`. The context is omitted from the JSON Schema;
+all other parameters use the same supported types and validation as synchronous
+commands. Async commands must declare `Lifecycle.None` for reads or
+`Lifecycle.EditorSettle` for mutations. Reloading user code cannot be resumed.
+
+```csharp
+using System.Threading.Tasks;
+using UnityOpenMcpBridge;
+
+[BridgeToolType]
+public static class AsyncCommands
+{
+    [ProjectCommand("project.example.prepare", Title = "Prepare report",
+        Description = "Prepare a report cooperatively.", Package = "example.tools",
+        Async = true, Cancellable = true, ReadOnlyHint = true, Gate = GateMode.Off)]
+    public static async Task<string> Prepare(ProjectCommandContext context)
+    {
+        context.ReportPhase("preparing report");
+        await Task.Delay(1000, context.CancellationToken);
+        context.CancellationToken.ThrowIfCancellationRequested();
+        return "{\"prepared\":true}";
+    }
+}
+```
+
+Keep Unity API calls on the captured Editor context. Do not use `Task.Run`,
+`ConfigureAwait(false)`, blocking sleeps, or long work before the first yield for
+Unity operations. Cancellation is acknowledged by throwing
+`OperationCanceledException` after the context token is cancelled. Honor the
+token only at boundaries where it is safe to stop; partial mutations still get
+terminal validation and are not automatically rolled back. Report actual phases,
+not estimated percentages. The demo fixture `project.demo.long_write` demonstrates
+a 60-second preparation followed by a scoped asset write.
+
+Authenticated `POST /project-command-jobs` is the private bridge adapter transport.
+It accepts `action: start | status | cancel`, a UUID `job_id`, and `invocation`
+(the ordinary invoke envelope) on start. Records are scoped to `X-Agent-Id`;
+unknown owners and lost records return `job_not_found`. Normal MCP callers use
+`unity_open_mcp_jobs`, which owns scheduling, idempotency and retained results.

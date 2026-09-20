@@ -193,3 +193,16 @@ patch values are not rewritten. Direct HTTP alias use is reported in the
 [project command catalog](project-commands.md#bridge-transport). Plain `GET /tools`
 keeps the existing compiled inventory response. Duplicate built-in registry ids
 are rejected for every candidate and reported in registration diagnostics.
+
+
+### Project-command jobs
+
+Authenticated `POST /project-command-jobs` is the domain-local execution endpoint
+behind the MCP [jobs API](jobs.md). Start carries a UUID `job_id` and the ordinary
+project-command `invocation` envelope; status/cancel carry that id. The bridge
+checks the same declaration, parameter schema, scope, deny rules, and gate default
+as synchronous invocation. It returns immediately, then runs the command on the
+Editor context. Checkpoint and terminal validation share the normal gate policy.
+Only one project job executes at a time; other bridge mutations and test starts
+are refused while it owns the Editor scope. Job records are owned by `X-Agent-Id`
+and lost on domain reload, which the MCP adapter reports as an unknown outcome.

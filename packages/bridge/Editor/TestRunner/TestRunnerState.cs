@@ -56,6 +56,10 @@ namespace UnityOpenMcpBridge.TestRunner
 
         static TestRunnerState()
         {
+            // A destroyed runner can leave a callback registration after terminal output.
+            // The pending marker, cleared before result publication, owns execution.
+            ProjectCommandJobs.TestRunActive = () => Tool_TestRunner.RunScheduled
+                || ActiveRegistry.Exists(a => File.Exists(PendingFilePath(a.RunId)));
             // specs/feedback.md 2026-08-24 — finalize markers from a DEAD Editor
             // process before anything else. On a fresh Editor launch
             // AssemblyReloadEvents.afterAssemblyReload does not fire, so the
