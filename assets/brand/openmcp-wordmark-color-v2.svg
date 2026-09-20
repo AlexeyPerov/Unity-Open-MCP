@@ -3,14 +3,14 @@
   <desc id="desc">Modular Open MCP wordmark with a light green open and a light blue mcp on a transparent background.</desc>
 
   <!-- Fixed module: 39 × 58 px, 10 px tracking, y = 28 px. -->
-  <g fill="#a7f3b8">
+  <g fill="#15803d">
     <path fill-rule="evenodd" d="M88 28h39v58H88zm9 9v40h21V37z"/>
     <path fill-rule="evenodd" d="M137 28h39v33h-30v25h-9zm9 9v15h21V37z"/>
     <path d="M186 28h39v9h-30v15h27v9h-27v16h30v9h-39z"/>
     <path d="M235 28h39v58h-9V37h-21v49h-9z"/>
   </g>
 
-  <g fill="#a9deff">
+  <g fill="#0b6fa4">
     <path d="M284 28h9l10.5 20L314 28h9v58h-9V48l-10.5 20L293 48v38h-9z"/>
     <path d="M333 28h39v9h-30v40h30v9h-39z"/>
     <path fill-rule="evenodd" d="M382 28h39v33h-30v25h-9zm9 9v15h21V37z"/>
