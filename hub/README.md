@@ -25,7 +25,11 @@ Versions match the pinned stack:
 
 ## Current scope
 
-- Empty main window with branded app metadata (`Unity Hub Pro`).
+- Project inventory, Unity discovery and launch with per-project options.
+- AI Setup wizard for Unity packages, MCP client configuration, portable team
+  configuration, agent skill installation, and connection verification.
+- Project settings, diagnostics, log shortcuts, extension status, and maintainer
+  actions for Open MCP repositories.
 - Baseline Tauri capabilities:
   - `core:default`
   - `fs:default`

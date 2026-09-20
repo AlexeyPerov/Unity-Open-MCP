@@ -12,6 +12,9 @@ This file is the index for external interfaces and protocol contracts exposed by
 | `api/tool-groups.md` | Session defaults, group activation, compiled availability, and auto-activation. |
 | `api/routing-lifecycle.md` | Live/batch/offline/local routing, lifecycle recovery, offline coverage, and errors. |
 | `api/cli-automation.md` | CLI command and automation reference; links to canonical CI behavior. |
+| `api/input-simulation.md` | Pointer delivery, keyboard and touch frames, frame stepping, and supported input boundaries. |
+| `api/project-commands.md` | Project-owned command declaration, discovery, invocation, schemas, and safety boundaries. |
+| `api/jobs.md` | Asynchronous job lifecycle, observation, idempotency, cancellation, retention, and adapters. |
 | `api/resources.md` | MCP resource URIs, payload shapes, and resource router behavior. |
 
 ## Contract boundaries
@@ -19,6 +22,8 @@ This file is the index for external interfaces and protocol contracts exposed by
 - Bridge HTTP contract source: `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`
 - MCP server routing/registry source: `mcp-server/src/index.ts`, `mcp-server/src/tool-router.ts`
 - MCP tool definitions source: `mcp-server/src/tools/`
+- Project-command catalog and invocation source: `packages/bridge/Editor/Bridge/Registry/ProjectCommandCatalog.cs`, `packages/bridge/Editor/Bridge/Registry/ProjectCommandInvocation.cs`
+- Asynchronous job orchestration source: `mcp-server/src/jobs/`
 - MCP resources source: `mcp-server/src/resources/index.ts`, `mcp-server/src/resource-router.ts`
 
 ## Contract documentation guidance

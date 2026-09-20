@@ -116,8 +116,12 @@ client and Unity package pins together — see
 - [Agent setup](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/agent-setup.md)
 - [Full manual setup](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/manual-setup.md)
 - [MCP client configuration](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/client-configuration.md)
+- [Portable, committable MCP configuration](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/portable-config.md)
 - [Unity Hub Pro wizard walkthrough](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/wizard-setup.md)
+- [Updating and air-gapped installs](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/updating.md)
 - [MCP tool catalog and routing](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/api/mcp-tools.md)
+- [Project-defined commands](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/api/project-commands.md)
+- [Asynchronous jobs](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/api/jobs.md)
 - [Bridge HTTP API](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/api/bridge-http.md)
 - [Architecture](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/architecture.md)
 

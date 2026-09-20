@@ -60,6 +60,18 @@ for closed-loop agent workflows.
 > **Example:** "Run Play Mode tests for the Combat assembly and capture a
 > Game-view screenshot on failure."
 
+### Project-defined commands and asynchronous jobs
+
+Unity projects can expose typed, discoverable commands without an MCP server
+release. Explicitly async operations run as observable jobs with progress,
+idempotency, retained results, and truthful cancellation.
+
+> **Example:** "Describe the project's level-generation command, start it as a
+> job, and wait for the validated result."
+
+See [Project commands](docs/api/project-commands.md) and
+[Asynchronous jobs](docs/api/jobs.md).
+
 ### Session tool groups and skills
 
 Default groups stay small; activate domains on demand. Project skills teach
@@ -128,6 +140,9 @@ open locally, read docs/setup/agent-setup.md from disk instead of fetching it.
 ```
 
 Full procedure: [Agent setup](docs/setup/agent-setup.md).
+For teams and monorepos, use a
+[portable MCP configuration](docs/setup/portable-config.md) that can be committed
+without per-developer absolute paths.
 
 ## Documentation
 

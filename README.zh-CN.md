@@ -51,6 +51,15 @@ GameObject、场景、预制体、材质、包管理，以及依赖包门控的�
 
 > **示例：**「运行 Combat 程序集的 Play Mode 测试，失败时截取 Game 视图。」
 
+### 项目自定义命令与异步作业
+
+Unity 项目无需发布新的 MCP 服务器版本，即可公开类型化、可发现的命令。
+显式异步操作会作为可观察作业运行，并提供进度、幂等性、保留结果与真实的取消状态。
+
+> **示例：**「描述项目的关卡生成命令，把它作为作业启动，并等待经过验证的结果。」
+
+详见[项目命令](docs/api/project-commands.md)与[异步作业](docs/api/jobs.md)（英文）。
+
 ### 会话工具组与技能
 
 默认工具面保持精简；按需激活领域。项目技能指导智能体执行 mutate → gate → fix 循环。
@@ -105,6 +114,8 @@ npx -y unity-open-mcp@latest setup --project <绝对项目路径> --client <id>�
 ```
 
 完整流程见 [Agent 安装](docs/zh-CN/setup/agent-setup.md)。
+团队与 monorepo 可使用[可移植 MCP 配置](docs/zh-CN/setup/portable-config.md)，
+无需写入每位开发者的绝对路径即可提交到仓库。
 
 ## 文档
 
@@ -115,7 +126,8 @@ npx -y unity-open-mcp@latest setup --project <绝对项目路径> --client <id>�
 - [故障排查](docs/troubleshooting.md)（英文）— 连接与恢复指南。
 - [对话框策略](docs/dialog-policy.md)（英文）— 启动模态框处理与自动化。
 - [技能](docs/skills.md)（英文）— 安装到 Unity 项目中的智能体操作手册。
-- [版本兼容](docs/versioning.md)（英文）— 版本匹配与不一致时的恢复。
+- [版本兼容](docs/zh-CN/versioning.md) — 版本匹配与不一致时的恢复。
+- [更新](docs/updating.md)（英文）— Hub、MCP 与 Unity 包的更新流程，包括离线环境。
 
 面向贡献者：
 
@@ -124,7 +136,7 @@ npx -y unity-open-mcp@latest setup --project <绝对项目路径> --client <id>�
 
 > 想看看其他 MCP 方案？参见 [Unity MCP 工具对比](docs/mcp-tools-comparison.md)（英文）— Unity Open MCP 与业内其他 MCP 工具 / AI 助手的功能矩阵并排对比。
 
-> 注：除本 README 与 `docs/zh-CN/setup/` 下的安装文档外，其余文档目前仅有英文版。
+> 注：除本 README、`docs/zh-CN/setup/` 下的安装文档与版本兼容页面外，其余文档目前仅有英文版。
 
 ## Unity Hub Pro
 
