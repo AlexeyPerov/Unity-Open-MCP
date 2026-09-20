@@ -1,13 +1,9 @@
 // Input simulation — frame advance tool (M1 in feedback-input.md).
 //
-// The missing middle of the play-mode testing loop. EditorApplication.Step() is
-// synchronous: it runs one full player-loop frame inline (Update / FixedUpdate /
-// coroutines / render) before returning. A tight loop therefore pumps N frames
-// within one tool dispatch and returns immediately after — it does NOT suffer
-// the QueuePlayerLoopUpdate + Thread.Sleep deadlock documented in
-// ProfilerCaptureFrameTool (the sleeping thread is the one that would service
-// the queued update). Play-mode only: Step is a no-op in edit mode, so the guard
-// refuses with play_mode_required before looping.
+// Live regression fixtures verify that Step advances gameplay Update inline.
+// FixedUpdate count depends on the simulation clock. Step does not guarantee
+// native Input System processing; device tools pump it within the stepped loop.
+// Always preserve the caller's pause state, including after failure.
 using System.Text;
 using UnityEditor;
 using UnityEngine;

@@ -6,7 +6,7 @@
 // K2 fix: `swipe` accepts `advance_frames` to advance a frame AFTER each Moved
 // phase, so the swipe genuinely unfolds across frames for polling code (per-frame
 // primaryTouch.delta, distance/velocity gesture recognizers). Without
-// `advance_frames`, all Moved phases collapse into a single InputSystem.Update —
+// `advance_frames`, all Moved phases collapse into a single dispatch —
 // documented honestly now (previously mis-advertised as "across real frames").
 //
 // Play-mode only. Gate-free. Requires com.unity.inputsystem.
@@ -18,17 +18,16 @@ export const inputsimTouch = makeTool(
     "(Touchscreen.current) during play mode. `tap` = press+release at a point; " +
     "`swipe` = press at from_, move across `steps` interpolated points, release " +
     "at to_; `press`/`release` = single-phase control. POLLING vs CALLBACK: " +
-    "without `advance_frames`, all touch phases process in a single " +
-    "InputSystem.Update — so polling code (per-frame primaryTouch.delta, gesture " +
+    "without `advance_frames`, all touch phases process within one " +
+    "dispatch — so polling code (per-frame primaryTouch.delta, gesture " +
     "recognizers) sees a collapsed jump, not a real swipe. Pass `advance_frames` " +
     "≥ 1 to advance a frame after each Moved phase so the swipe unfolds across " +
     "real frames for polling code. Callback-driven InputAction.performed fires " +
-    "either way. Endpoints resolve target-first (object_id/name/path → screen " +
-    "point) or accept screen_x/screen_y directly. NOTE: target resolution here " +
-    "uses a plain GameObject.Find name/path match (no ambiguity detection or " +
-    "partial-path matching — that lives in the uGUI-gated inputsim_pointer, and " +
-    "this tool compiles against the Input System package only); prefer an " +
-    "object_id or a full unique path for the target. Play-mode only — refuses " +
+    "either way. The Began phase also advances before the first move. Endpoints " +
+    "resolve target-first (name/path to visual center) or accept screen coordinates. " +
+    "Root-anchored paths win over suffix matches; ambiguous names/paths return " +
+    "ambiguous_target with candidate paths. This tool has no object_id parameter; " +
+    "use a unique path or screen coordinates. Play-mode only — refuses " +
     "with `play_mode_required` otherwise. Gate-free. Requires com.unity.inputsystem.",
   {
     required: ["action"],
@@ -84,7 +83,7 @@ export const inputsimTouch = makeTool(
           "Pump this many player-loop frames (EditorApplication.Step) AFTER each " +
           "Moved phase so the swipe unfolds across real frames for polling code " +
           "(per-frame delta, gesture recognizers). 0 (default) collapses all phases " +
-          "into one update — only callback-driven input sees it then. Cap 60.",
+          "into one dispatch — only callback-driven input sees it then. Also advances after Began. Cap 60.",
       },
     },
   },

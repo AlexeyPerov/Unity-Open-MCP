@@ -3,7 +3,7 @@
   "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.InputSimulation",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
-    "com.alexeyperov.unity-open-mcp-bridge.InputSimulation.InputSystem.Editor",
+    "com.alexeyperov.unity-open-mcp-bridge.InputSystem.Editor",
     "com.alexeyperov.unity-open-mcp-bridge.TestRunner.Editor",
     "Unity.InputSystem"
   ],
@@ -19,6 +19,17 @@
     "UNITY_OPEN_MCP_EXT_INPUTSIM_IS",
     "UNITY_TEST_FRAMEWORK"
   ],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.inputsystem",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_INPUTSIM_IS"
+    },
+    {
+      "name": "com.unity.test-framework",
+      "expression": "1.0.0",
+      "define": "UNITY_TEST_FRAMEWORK"
+    }
+  ],
   "noEngineReferences": false
 }

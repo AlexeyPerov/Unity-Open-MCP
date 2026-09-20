@@ -91,3 +91,15 @@ After changing MCP tool schemas, run `node scripts/generate-batch-schemas.mjs`
 as well as `node scripts/generate-token-estimates.mjs`. The former derives
 bridge-side preflight constraints from `ALL_TOOLS`; it does not execute tools.
 `node scripts/generate-batch-schemas.mjs --check` detects generated drift.
+
+### Live input simulation regression replay
+
+With the demo Editor open and `mcp-server` built, run
+`node scripts/mcp-input-simulation.mjs --fixture frames` and
+`node scripts/mcp-input-simulation.mjs --fixture pointer`.
+Use `--project <absolute-path>` for another project and `--json-out <path>` to
+save the MCP envelopes. The first fixture samples the actual gameplay player
+loop; the second checks uGUI event delivery and interaction reporting. Both
+require uGUI and Input System. Run serially, without another live test session.
+The replay temporarily enters play mode (including from an unsaved scene), never
+saves scenes, and restores its initial play/edit state and disposable fixtures.

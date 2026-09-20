@@ -54,7 +54,9 @@ actually reads — **callback vs polling matters** for `key`/`touch`:
 in a single `InputSystem.Update()` — no `MonoBehaviour.Update` ticks in between,
 so `wasPressedThisFrame` is already false by the time game code next runs. Pass
 `advance_frames: 1` (or more) to pump that many player-loop frames between down
-and up. Alternatively split into `down` → `inputsim_step` → `up`.
+and up. An input update inside each stepped frame consumes the press so gameplay
+can observe `wasPressedThisFrame`. Splitting `down` → `inputsim_step` → `up`
+works for held-state polling; the immediate `down` update may consume the edge.
 
 ## The self-sufficient testing loop
 
@@ -112,7 +114,7 @@ probe (edit mode OK) → click by object_id → step → screenshot
 // or split it:
 { "action": "down", "key": "Space" }                        // inputsim_key
 { "frames": 5 }                                             // inputsim_step
-{ "action": "up", "key": "Space" }                          // inputsim_key (releases ALL held keys)
+{ "action": "up", "key": "Space" }                          // inputsim_key (releases Space only)
 ```
 
 ### Recipe: click a 3D world object (legacy Input Manager)
@@ -150,7 +152,7 @@ probe (edit mode OK) → click by object_id → step → screenshot
   `dropLanded: false` means nothing received `IDropHandler` (dragged to empty
   space, or the slot has no `IDropHandler`).
 
-`inputsim_step` returns `{ framesAdvanced, initialPaused, finalPaused }`.
+`inputsim_step` returns `{ framesAdvanced, initialPaused, steppedPaused, pausedRestored }`.
 
 ## Error codes
 
@@ -158,7 +160,7 @@ probe (edit mode OK) → click by object_id → step → screenshot
 |---|---|---|
 | `play_mode_required` | Called outside play mode | `editor_set_state(state: "play")` first |
 | `no_event_system` | No `EventSystem` in the scene (pointer) | Add one (create via `ui_canvas_add`, or add an EventSystem GameObject) |
-| `target_not_found` | `target` matches no active GameObject | Check the name/path; `GameObject.Find` only matches active objects |
+| `target_not_found` | `target` matches no active GameObject | Check the name/path; only active objects are searched |
 | `ambiguous_target` | `target` matches >1 active GameObject (`inputsim_pointer`, `inputsim_pointer3d`, `inputsim_touch`) | Use the full path, a longer trailing segment, or `object_id` (candidates listed). `inputsim_key` takes no target |
 | `no_hit` | Screen point raycast hit nothing | Check the point is over a raycast-target element |
 | `both_endpoint_forms` | Both target and screen coords supplied for one drag endpoint | Pass one form per endpoint (target wins; this error makes it explicit) |
@@ -176,14 +178,15 @@ probe (edit mode OK) → click by object_id → step → screenshot
   shares the uGUI half's `PointerTargets`; `inputsim_touch` carries its own
   self-contained resolver so its sub-asmdef stays independent.) `inputsim_key`
   takes no target. When a name is shared, prefer a unique path or an `object_id`
-  from `inputsim_probe`.
+  from `inputsim_probe` for pointer tools. Touch accepts unique paths or screen
+  coordinates, not `object_id`.
 - **uGUI drag is single-frame.** `begin/drag×N/pointerUp/drop/endDrag` dispatch
   in one frame. Use `inputsim_step` afterward to let drag-driven tweens settle.
 - **`hold` duration is the number of advanced frames, not wall-clock.** Pair
-  `hold` with `advance_frames` for Input System Hold *interactions*.
-- **`up` releases ALL held keys** (the named key + mods + anything held by a
-  prior `down`) — per-key release needs cross-call state. To release one key
-  among several: prefer `tap` per key, or track held keys in game code.
+  `hold` with `advance_frames` for held-state polling. Hold interactions still
+  require actual elapsed input time; `duration_ms` does not wait.
+- **`up` releases the named key and explicitly requested modifiers.** Other
+  held keys survive. Use matching modifier flags to release modifiers.
 - **Touch multi-touch beyond finger 0 is best-effort.** Single-finger
   tap/swipe is the verified path.
 - **Probe occlusion is reported only in play mode** (needs a live EventSystem

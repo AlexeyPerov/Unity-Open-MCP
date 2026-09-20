@@ -32,9 +32,12 @@ half its packages allow.
   events). Games reading legacy `UnityEngine.Input.GetKey*` directly (not via
   `OnMouseDown`) are **not covered** — use `invoke_method`/`execute_csharp`.
 - **Callback vs polling matters for `key`/`touch`.** A `tap`/`hold`/`swipe`
-  without `advance_frames` processes down+up in a single `InputSystem.Update` —
+  without `advance_frames` processes down+up within one dispatch —
   invisible to polling code (`wasPressedThisFrame`, per-frame touch delta). Pass
-  `advance_frames ≥ 1`, or split into `down` → `inputsim_step` → `up`.
+  `advance_frames ≥ 1`, or split into `down` → `inputsim_step` → `up` for held-state polling.
+  Framed tap/swipe processes input immediately before gameplay Update,
+  preserving press edges and touch deltas for gameplay. Named-key `up` preserves
+  other held keys and releases only explicit modifiers.
 - **Resolution precedence (`pointer`):** `object_id` (InstanceId, EntityId-safe)
   > `target` (name or slash-path, with duplicate detection + partial-path match)
   > `screen_x`/`screen_y` (raycasts through `EventSystem`).

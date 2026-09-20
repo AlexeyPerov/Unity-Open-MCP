@@ -12,13 +12,8 @@
 //      center (the P4 pivot fix). These are the load-bearing P2/P4/P5 fixes and
 //      are fully reachable in EditMode.
 //
-// What is NOT covered here (needs PlayMode — flagged):
-//   - Actual ExecuteEvents dispatch, drop delivery, occlusion raycast (P1/P2/P3).
-//   - inputsim_step frame advance (EditorApplication.Step is a play-mode no-op).
-//   - inputsim_pointer3d Physics.Raycast + SendMessage delivery.
-// TODO(PlayMode fixture): build a PlayMode test assembly + fixture scene for the
-// dispatch-side regressions; a domain whose job is "did the click land" cannot be
-// fully regression-proofed by EditMode metadata + helper assertions.
+// Dispatch delivery is covered by PointerDispatchTests in EditMode. Actual
+// player-loop and device polling checks are runnable Validation Suite scenarios.
 #if UNITY_OPEN_MCP_EXT_INPUTSIM_UGUI
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -116,7 +111,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
         // --- PointerTargets helpers (no play-mode guard — directly testable) ---
 
         [Test]
-        public void FindByPath_DetectsAmbiguousNames(P5)
+        public void FindByPath_DetectsAmbiguousNames()
         {
             // Two active roots with the same name → ambiguous_target territory.
             // FindByPath returns null and fills candidates (used for the error).

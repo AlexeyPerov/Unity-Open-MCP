@@ -209,7 +209,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         // ExecuteHierarchy reaches, and respect CanvasGroup.ignoreParentGroups.)
         public static bool ComputeInteractable(GameObject go)
         {
-            if (go == null) return false;
+            if (go == null || !go.activeInHierarchy) return false;
 
             // blocksRaycasts walk: a CanvasGroup with blocksRaycasts==false makes
             // the raycast miss the target entirely. ignoreParentGroups stops the
@@ -221,7 +221,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 var grp = t.GetComponent<CanvasGroup>();
                 if (grp != null)
                 {
-                    if (!grp.blocksRaycasts) return false;
+                    if (!grp.blocksRaycasts || !grp.interactable) return false;
                     if (grp.ignoreParentGroups) break;
                 }
                 t = t.parent;
@@ -237,7 +237,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             {
                 var sel = selT.GetComponent<Selectable>();
                 if (sel != null)
-                    return sel.IsInteractable();
+                    return sel.IsActive() && sel.IsInteractable();
                 selT = selT.parent;
             }
 

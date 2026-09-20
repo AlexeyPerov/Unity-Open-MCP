@@ -20,12 +20,11 @@ export const inputsimStep = makeTool(
   "unity_open_mcp_inputsim_step",
   "Advance the Unity play-mode player loop by N frames, then return. Pump the " +
     "frames synchronously via EditorApplication.Step (each Step runs one full " +
-    "Update/FixedUpdate/coroutines/render cycle inline). Use between an input " +
+    "player-loop frame inline; fixed updates depend on the simulation clock). Use between an input " +
     "injection (inputsim_pointer / _key / _touch) and a screenshot so gameplay " +
-    "code, tweens, and animations actually run before you look — and so polling " +
-    "game code (`wasPressedThisFrame`, per-frame touch delta) can observe a " +
-    "press/swipe injected with inputsim_key/_touch (which otherwise process in a " +
-    "single InputSystem.Update and are invisible to polling). Play-mode only — " +
+    "code, tweens, and animations run before inspection. Framed key/touch " +
+    "injection owns its input updates; standalone step can observe held state " +
+    "but does not guarantee an unconsumed press edge. Play-mode only — " +
     "refuses with `play_mode_required` otherwise (Step is a no-op in edit mode). " +
     "Gate-free (writes no assets). Cap 60 frames per call to bound dispatch cost; " +
     "for longer advances, call repeatedly.",
@@ -40,16 +39,16 @@ export const inputsimStep = makeTool(
         description:
           "Number of player-loop frames to advance. Default 1. Hard cap 60 to " +
           "bound dispatch cost (each frame is a full Update cycle). 0 is allowed " +
-          "and useful as a pure settle tick (one QueuePlayerLoopUpdate).",
+          "and performs no Step; set settle_ms > 0 to request an extra update.",
       },
       settle_ms: {
         type: "integer",
         default: 0,
         minimum: 0,
         description:
-          "Optional extra wall-clock settle in milliseconds AFTER stepping, as a " +
+          "Compatibility settle hint: any positive value requests a " +
           "single QueuePlayerLoopUpdate (lets one more render tick land before a " +
-          "screenshot). Default 0 (no extra tick).",
+          "screenshot). It does not wait that many milliseconds. Default 0 (no extra tick).",
       },
     },
   },

@@ -12079,7 +12079,7 @@
             "submit",
             "drag"
           ],
-          "description": "Pointer action. click = down+up+click (IPointerClickHandler); double_click = two triples with clickCount incrementing (so handlers reading eventData.clickCount==2 fire); press = pointer down only; release = pointer up only; hover = pointer Enter ONLY (so tooltip/highlight state can be screenshotted); hover_exit = pointer Exit (the pair); submit = ISubmitHandler (keyboard-style activate); drag = pointerDown → beginDrag → drag×N → pointerUp → drop (on the to-point target) → endDrag, matching uGUI's release order, with IDropHandler fired on the drop target."
+          "description": "Pointer action. click = down+up+click (IPointerClickHandler); double_click = two triples with clickCount incrementing (so handlers reading eventData.clickCount==2 fire); press = pointer down only; release = pointer up only; hover = pointer Enter ONLY (so tooltip/highlight state can be screenshotted); hover_exit = pointer Exit (the pair); submit = ISubmitHandler (keyboard-style activate); drag = pointerDown → initializePotentialDrag → beginDrag → drag×N → pointerUp → drop (on the to-point target) → endDrag, matching uGUI's release order. Drop is delivered to an active IDropHandler; dropLanded is false without one."
         },
         "object_id": {
           "type": "string",
@@ -12152,12 +12152,12 @@
     }
   },
   "unity_open_mcp_inputsim_key": {
-    "description": "Queue a keyboard event through the Input System (Keyboard.current) during play mode. Covers gameplay reading Keyboard.current / Key enum / InputAction.performed. `key` accepts a Unity Key enum name ('Space', 'W', 'LeftArrow', 'Digit1') or a single character ('a', '1'). POLLING vs CALLBACK: without `advance_frames`, down+up process in a single InputSystem.Update and no MonoBehaviour.Update runs between them — so polling code (wasPressedThisFrame) CANNOT see a `tap`/`hold`; only callback-driven InputAction.performed fires. Pass `advance_frames` ≥ 1 to pump that many player-loop frames between down and up so polling code observes the press (or split into `down` → inputsim_step → `up`). `up` releases ALL held keys (the named key + mods + anything held by a prior `down`), since per-key release would require cross-call state. Play-mode only — refuses with `play_mode_required` otherwise. Gate-free. Requires com.unity.inputsystem. Does NOT cover legacy UnityEngine.Input.",
+    "description": "Queue a keyboard event through the Input System (Keyboard.current) during play mode. Covers gameplay reading Keyboard.current / Key enum / InputAction.performed. `key` accepts a Unity Key enum name ('Space', 'W', 'LeftArrow', 'Digit1') or a single character ('a', '1'). POLLING vs CALLBACK: without `advance_frames`, down+up process within one dispatch and no MonoBehaviour.Update runs between them — so polling code (wasPressedThisFrame) CANNOT see a `tap`/`hold`; only callback-driven InputAction.performed fires. Pass `advance_frames` ≥ 1 to pump that many player-loop frames between down and up so polling code observes the press (split down/step/up can inspect held state). `up` releases the named key and explicitly requested modifiers, preserving other held keys. Play-mode only — refuses with `play_mode_required` otherwise. Gate-free. Requires com.unity.inputsystem. Does NOT cover legacy UnityEngine.Input.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "action": {
-          "description": "down = key pressed (queued, processed next InputSystem.Update); up = release ALL held keys (see tool description); tap = down+up (only visible to callback-driven input unless advance_frames ≥ 1); hold = down+up after advancing frames (so Hold interactions with a duration threshold can fire).",
+          "description": "down = key pressed (queued, processed next InputSystem.Update); up = release the named key and requested modifiers; tap = down+up (only visible to callback-driven input unless advance_frames ≥ 1); hold = down+up after advancing frames. Hold interactions still require actual elapsed input time.",
           "enum": [
             "down",
             "up",
@@ -12168,7 +12168,7 @@
         },
         "advance_frames": {
           "default": 0,
-          "description": "Pump this many player-loop frames (EditorApplication.Step) BETWEEN down and up so polling game code observes the press. 0 (default) keeps the old single-update behavior (only callback-driven input sees it). Cap 60. For polling input (wasPressedThisFrame) pass ≥ 1.",
+          "description": "Pump this many player-loop frames (EditorApplication.Step) BETWEEN down and up so polling game code observes the press. 0 (default) keeps the old single-dispatch behavior (only callback-driven input sees it). Cap 60. For polling input (wasPressedThisFrame) pass ≥ 1.",
           "maximum": 60,
           "minimum": 0,
           "type": "integer"
@@ -12185,11 +12185,11 @@
         },
         "duration_ms": {
           "default": 100,
-          "description": "Recorded hold duration in milliseconds (for action='hold'). The real held-time gate is the number of advanced frames, not wall-clock — pair with advance_frames for Input System Hold interactions. Default 100.",
+          "description": "Recorded hold duration in milliseconds (for action='hold'). The real held-time gate is the number of advanced frames, not wall-clock — pair with advance_frames for held-state polling. Does not wait this duration or guarantee a Hold interaction. Default 100.",
           "type": "integer"
         },
         "key": {
-          "description": "Unity Key enum name ('Space', 'W', 'LeftArrow', 'Digit1', 'F1') OR a single character ('a', '1', '!'). Resolved case-insensitively against UnityEngine.InputSystem.LowLevel.Key first, then as a character key.",
+          "description": "Unity Key enum name ('Space', 'W', 'LeftArrow', 'Digit1', 'F1') OR a single character ('a', '1'). Resolved case-insensitively against UnityEngine.InputSystem.Key first, then as a character key.",
           "type": "string"
         },
         "shift": {
@@ -12206,7 +12206,7 @@
     }
   },
   "unity_open_mcp_inputsim_touch": {
-    "description": "Queue a touch / swipe event sequence through the Input System (Touchscreen.current) during play mode. `tap` = press+release at a point; `swipe` = press at from_, move across `steps` interpolated points, release at to_; `press`/`release` = single-phase control. POLLING vs CALLBACK: without `advance_frames`, all touch phases process in a single InputSystem.Update — so polling code (per-frame primaryTouch.delta, gesture recognizers) sees a collapsed jump, not a real swipe. Pass `advance_frames` ≥ 1 to advance a frame after each Moved phase so the swipe unfolds across real frames for polling code. Callback-driven InputAction.performed fires either way. Endpoints resolve target-first (object_id/name/path → screen point) or accept screen_x/screen_y directly. NOTE: target resolution here uses a plain GameObject.Find name/path match (no ambiguity detection or partial-path matching — that lives in the uGUI-gated inputsim_pointer, and this tool compiles against the Input System package only); prefer an object_id or a full unique path for the target. Play-mode only — refuses with `play_mode_required` otherwise. Gate-free. Requires com.unity.inputsystem.",
+    "description": "Queue a touch / swipe event sequence through the Input System (Touchscreen.current) during play mode. `tap` = press+release at a point; `swipe` = press at from_, move across `steps` interpolated points, release at to_; `press`/`release` = single-phase control. POLLING vs CALLBACK: without `advance_frames`, all touch phases process within one dispatch — so polling code (per-frame primaryTouch.delta, gesture recognizers) sees a collapsed jump, not a real swipe. Pass `advance_frames` ≥ 1 to advance a frame after each Moved phase so the swipe unfolds across real frames for polling code. Callback-driven InputAction.performed fires either way. The Began phase also advances before the first move. Endpoints resolve target-first (name/path to visual center) or accept screen coordinates. Root-anchored paths win over suffix matches; ambiguous names/paths return ambiguous_target with candidate paths. This tool has no object_id parameter; use a unique path or screen coordinates. Play-mode only — refuses with `play_mode_required` otherwise. Gate-free. Requires com.unity.inputsystem.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -12222,7 +12222,7 @@
         },
         "advance_frames": {
           "default": 0,
-          "description": "Pump this many player-loop frames (EditorApplication.Step) AFTER each Moved phase so the swipe unfolds across real frames for polling code (per-frame delta, gesture recognizers). 0 (default) collapses all phases into one update — only callback-driven input sees it then. Cap 60.",
+          "description": "Pump this many player-loop frames (EditorApplication.Step) AFTER each Moved phase so the swipe unfolds across real frames for polling code (per-frame delta, gesture recognizers). 0 (default) collapses all phases into one dispatch — only callback-driven input sees it then. Also advances after Began. Cap 60.",
           "maximum": 60,
           "minimum": 0,
           "type": "integer"
@@ -12290,20 +12290,20 @@
     }
   },
   "unity_open_mcp_inputsim_step": {
-    "description": "Advance the Unity play-mode player loop by N frames, then return. Pump the frames synchronously via EditorApplication.Step (each Step runs one full Update/FixedUpdate/coroutines/render cycle inline). Use between an input injection (inputsim_pointer / _key / _touch) and a screenshot so gameplay code, tweens, and animations actually run before you look — and so polling game code (`wasPressedThisFrame`, per-frame touch delta) can observe a press/swipe injected with inputsim_key/_touch (which otherwise process in a single InputSystem.Update and are invisible to polling). Play-mode only — refuses with `play_mode_required` otherwise (Step is a no-op in edit mode). Gate-free (writes no assets). Cap 60 frames per call to bound dispatch cost; for longer advances, call repeatedly.",
+    "description": "Advance the Unity play-mode player loop by N frames, then return. Pump the frames synchronously via EditorApplication.Step (each Step runs one full player-loop frame inline; fixed updates depend on the simulation clock). Use between an input injection (inputsim_pointer / _key / _touch) and a screenshot so gameplay code, tweens, and animations run before inspection. Framed key/touch injection owns its input updates; standalone step can observe held state but does not guarantee an unconsumed press edge. Play-mode only — refuses with `play_mode_required` otherwise (Step is a no-op in edit mode). Gate-free (writes no assets). Cap 60 frames per call to bound dispatch cost; for longer advances, call repeatedly.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "frames": {
           "default": 1,
-          "description": "Number of player-loop frames to advance. Default 1. Hard cap 60 to bound dispatch cost (each frame is a full Update cycle). 0 is allowed and useful as a pure settle tick (one QueuePlayerLoopUpdate).",
+          "description": "Number of player-loop frames to advance. Default 1. Hard cap 60 to bound dispatch cost (each frame is a full Update cycle). 0 is allowed and performs no Step; set settle_ms > 0 to request an extra update.",
           "maximum": 60,
           "minimum": 0,
           "type": "integer"
         },
         "settle_ms": {
           "default": 0,
-          "description": "Optional extra wall-clock settle in milliseconds AFTER stepping, as a single QueuePlayerLoopUpdate (lets one more render tick land before a screenshot). Default 0 (no extra tick).",
+          "description": "Compatibility settle hint: any positive value requests a single QueuePlayerLoopUpdate (lets one more render tick land before a screenshot). It does not wait that many milliseconds. Default 0 (no extra tick).",
           "minimum": 0,
           "type": "integer"
         }

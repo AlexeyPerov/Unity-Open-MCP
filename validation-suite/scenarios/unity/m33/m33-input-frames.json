@@ -1,0 +1,48 @@
+{
+  "id": "m33-input-frames",
+  "title": "Input System: real frame polling and state restoration",
+  "milestone": "m33",
+  "engineId": "unity",
+  "requirementLevel": "required-core",
+  "tags": [
+    "input-simulation",
+    "live-editor"
+  ],
+  "steps": [
+    {
+      "id": "setup",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Open the demo in a Unity Editor with the local bridge, uGUI and Input System installed. Build mcp-server first. This replay temporarily enters play mode, preserves existing unsaved scene content, and never saves scenes. Close unrelated test runs before starting."
+    },
+    {
+      "id": "replay",
+      "type": "agent_prompt",
+      "title": "Run the live regression replay",
+      "payload": "From the repository root run: node scripts/mcp-input-simulation.mjs --fixture frames --project <absolute-demo-path> --json-out <local-report-path>. Inspect the assertions and attach the JSON report. The script owns fixture cleanup and restores the initial play/edit state."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "Every assertion passes, including the press edge during gameplay Update, distinct swipe positions/deltas, named-key release, and pause restoration.",
+        "The original player loop, input mode, devices, and initial play/edit state are restored."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Record Editor version, assertion count and report path"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Record the result"
+    }
+  ],
+  "reset": {
+    "note": "The replay restores its temporary player loop/input settings/devices and destroys fixture objects in finally blocks. It exits play mode only if it entered it. No disk fixture or scene save is required."
+  },
+  "order": 10
+}

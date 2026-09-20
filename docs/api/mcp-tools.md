@@ -22,6 +22,7 @@ definitions live in `mcp-server/src/tools/`.
 | [Routing, offline, and lifecycle contracts](routing-lifecycle.md) | Live/batch/offline/local selection, offline coverage, lifecycle recovery, batch behavior, errors, and multi-agent scheduling. |
 | [CLI and automation](cli-automation.md) | CLI commands, options, JSON output, and links to canonical CI behavior. |
 | [CI templates](../ci/README.md) | Pipeline shape, CLI exit codes, baselines, and provider templates. |
+| [Input simulation](input-simulation.md) | Pointer delivery, device events, frame stepping, and supported input boundaries. |
 | [MCP resources](resources.md) | Resource URIs, payloads, and resource routing. |
 
 ## Tool families

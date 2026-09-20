@@ -16,6 +16,67 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
 {
     public class InputSystemDeviceToolsTests
     {
+        [Test]
+        public void NamedReleasePreservesOtherHeldKeysAndModifiers()
+        {
+            var keyboard = UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Keyboard>();
+            try
+            {
+                var method = typeof(InputSystemDeviceTools).GetMethod("QueueKeyboardState",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                var mods = new System.Collections.Generic.List<UnityEngine.InputSystem.Key>();
+                System.Action<UnityEngine.InputSystem.Key, bool> queue = (key, pressed) =>
+                {
+                    method.Invoke(null, new object[] { keyboard, key, mods, pressed });
+                    UnityEngine.InputSystem.InputSystem.Update();
+                };
+                queue(UnityEngine.InputSystem.Key.W, true);
+                queue(UnityEngine.InputSystem.Key.LeftShift, true);
+                queue(UnityEngine.InputSystem.Key.Space, true);
+                Assert.IsTrue(keyboard.wKey.isPressed);
+                queue(UnityEngine.InputSystem.Key.Space, false);
+                Assert.IsFalse(keyboard.spaceKey.isPressed);
+                Assert.IsTrue(keyboard.wKey.isPressed);
+                Assert.IsTrue(keyboard.leftShiftKey.isPressed);
+                mods.Add(UnityEngine.InputSystem.Key.LeftShift);
+                queue(UnityEngine.InputSystem.Key.W, false);
+                Assert.IsFalse(keyboard.wKey.isPressed);
+                Assert.IsFalse(keyboard.leftShiftKey.isPressed);
+            }
+            finally { UnityEngine.InputSystem.InputSystem.RemoveDevice(keyboard); }
+        }
+
+        [Test]
+        public void TouchResolverRejectsAmbiguityAndPrefersRootAnchoredPath()
+        {
+            var root = new UnityEngine.GameObject("DeviceResolverRoot");
+            var child = new UnityEngine.GameObject("DeviceResolverChild");
+            child.transform.SetParent(root.transform);
+            var other = new UnityEngine.GameObject("DeviceResolverOuter");
+            var nestedRoot = new UnityEngine.GameObject("DeviceResolverRoot");
+            nestedRoot.transform.SetParent(other.transform);
+            var nestedChild = new UnityEngine.GameObject("DeviceResolverChild");
+            nestedChild.transform.SetParent(nestedRoot.transform);
+            try
+            {
+                var method = typeof(InputSystemDeviceTools).GetMethod("TryResolveTarget",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                object[] args = { "DeviceResolverChild", null, null };
+                Assert.IsFalse((bool)method.Invoke(null, args));
+                StringAssert.Contains("ambiguous_target", args[2].ToString());
+                args[0] = "DeviceResolverRoot/DeviceResolverChild";
+                Assert.IsTrue((bool)method.Invoke(null, args));
+                var center = typeof(InputSystemDeviceTools).GetMethod("ScreenPointOf",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                Assert.AreEqual(center.Invoke(null, new object[] { child }), args[1]);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+                UnityEngine.Object.DestroyImmediate(other);
+            }
+        }
+
         private static readonly string[] DeviceTools =
         {
             "unity_open_mcp_inputsim_key",

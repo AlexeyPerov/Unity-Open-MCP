@@ -48,9 +48,9 @@ export const inputsimPointer = makeTool(
           "release = pointer up only; hover = pointer Enter ONLY (so tooltip/" +
           "highlight state can be screenshotted); hover_exit = pointer Exit (the " +
           "pair); submit = ISubmitHandler (keyboard-style activate); drag = " +
-          "pointerDown → beginDrag → drag×N → pointerUp → drop (on the to-point " +
-          "target) → endDrag, matching uGUI's release order, with IDropHandler " +
-          "fired on the drop target.",
+          "pointerDown → initializePotentialDrag → beginDrag → drag×N → pointerUp → drop (on the to-point " +
+          "target) → endDrag, matching uGUI's release order. Drop is delivered " +
+          "to an active IDropHandler; dropLanded is false without one.",
       },
       object_id: {
         type: "string",

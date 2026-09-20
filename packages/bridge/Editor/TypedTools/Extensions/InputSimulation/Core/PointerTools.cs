@@ -205,11 +205,15 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
 
             var ped = NewEventData(fromPoint, inputButton, pressRaycast, pressTarget);
             ped.pressPosition = fromPoint;
-            ped.pointerPress = pressTarget;
-            ped.pointerDrag = pressTarget;
+            ped.pointerPress = ExecuteEvents.GetEventHandler<IPointerDownHandler>(pressTarget)
+                ?? ExecuteEvents.GetEventHandler<IPointerClickHandler>(pressTarget);
+            ped.rawPointerPress = pressTarget;
+            ped.pointerDrag = ExecuteEvents.GetEventHandler<IDragHandler>(pressTarget);
+
 
             // press + beginDrag
             Dispatch(pressTarget, ped, ExecuteEvents.pointerDownHandler, "pointerDown", outcome);
+            Dispatch(pressTarget, ped, ExecuteEvents.initializePotentialDrag, "initializePotentialDrag", outcome);
             ped.dragging = true;
             Dispatch(pressTarget, ped, ExecuteEvents.beginDragHandler, "beginDrag", outcome);
 
@@ -229,7 +233,6 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             ped.delta = toPoint - prev;
 
             // P1: uGUI release order — pointerUp → drop (on drop target) → endDrag.
-            ped.dragging = false;
             Dispatch(pressTarget, ped, ExecuteEvents.pointerUpHandler, "pointerUp", outcome);
 
             // Resolve the drop target at toPoint and dispatch IDropHandler (P1).
@@ -243,10 +246,12 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 var dropHit = PointerTargets.RaycastTop(toPoint, out _);
                 if (dropHit != null) dropTarget = dropHit;
             }
-            if (dropTarget != null)
+            var dropHandler = dropTarget == null ? null
+                : ExecuteEvents.GetEventHandler<IDropHandler>(dropTarget);
+            if (dropHandler != null)
             {
-                Dispatch(dropTarget, ped, ExecuteEvents.dropHandler, "drop", outcome);
-                outcome.DropTarget = PointerTargets.BuildPath(dropTarget);
+                Dispatch(dropHandler, ped, ExecuteEvents.dropHandler, "drop", outcome);
+                outcome.DropTarget = PointerTargets.BuildPath(dropHandler);
                 outcome.DropLanded = true;
             }
             else
@@ -258,6 +263,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             }
 
             Dispatch(pressTarget, ped, ExecuteEvents.endDragHandler, "endDrag", outcome);
+            ped.dragging = false;
 
             ComputeHonestyFields(outcome, pressTarget, fromPoint);
             outcome.ScreenPoint = toPoint;
@@ -437,6 +443,13 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 position = point,
                 pressPosition = point,
                 button = btn,
+                pointerId = btn == PointerEventData.InputButton.Left ? -1
+                    : btn == PointerEventData.InputButton.Right ? -2 : -3,
+                clickCount = 1,
+                eligibleForClick = true,
+                rawPointerPress = resolved,
+                pointerPress = ExecuteEvents.GetEventHandler<IPointerDownHandler>(resolved)
+                    ?? ExecuteEvents.GetEventHandler<IPointerClickHandler>(resolved),
             };
             // P3: populate the raycast-derived fields. pressEventCamera is the
             // load-bearing one — Slider/ScrollRect/InputField OnDrag use it to
@@ -523,8 +536,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             ExecuteEvents.EventFunction<T> functor, string name, PointerOutcome outcome)
             where T : IEventSystemHandler
         {
-            ExecuteEvents.ExecuteHierarchy(target, ped, functor);
-            outcome.Dispatched.Add(name);
+            if (ExecuteEvents.ExecuteHierarchy(target, ped, functor) != null)
+                outcome.Dispatched.Add(name);
         }
 
         private static PointerEventData.InputButton? TryParseButton(string button)

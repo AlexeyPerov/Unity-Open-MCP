@@ -11,9 +11,7 @@
 // InputAction.performed still fires). For polling input, pass advance_frames ≥ 1
 // (or use `down`, inputsim_step, `up`).
 //
-// K3 doc: `up` queues an EMPTY KeyboardState, releasing EVERY held key (the
-// named key, mods, and any key held by a prior `down`) — per-key release would
-// require cross-call state. This is documented, not silent.
+// Named-key release preserves unrelated device state.
 //
 // Play-mode only. Gate-free. Does NOT cover legacy UnityEngine.Input.
 import { makeTool } from "./schema-fragments.js";
@@ -24,14 +22,14 @@ export const inputsimKey = makeTool(
     "play mode. Covers gameplay reading Keyboard.current / Key enum / " +
     "InputAction.performed. `key` accepts a Unity Key enum name ('Space', 'W', " +
     "'LeftArrow', 'Digit1') or a single character ('a', '1'). " +
-    "POLLING vs CALLBACK: without `advance_frames`, down+up process in a single " +
-    "InputSystem.Update and no MonoBehaviour.Update runs between them — so polling " +
+    "POLLING vs CALLBACK: without `advance_frames`, down+up process within one " +
+    "dispatch and no MonoBehaviour.Update runs between them — so polling " +
     "code (wasPressedThisFrame) CANNOT see a `tap`/`hold`; only callback-driven " +
     "InputAction.performed fires. Pass `advance_frames` ≥ 1 to pump that many " +
     "player-loop frames between down and up so polling code observes the press " +
-    "(or split into `down` → inputsim_step → `up`). `up` releases ALL held keys " +
-    "(the named key + mods + anything held by a prior `down`), since per-key " +
-    "release would require cross-call state. Play-mode only — refuses with " +
+    "(split down/step/up can inspect held state). `up` releases the named key " +
+    "and explicitly requested modifiers, preserving other held keys. " +
+    "Play-mode only — refuses with " +
     "`play_mode_required` otherwise. Gate-free. Requires com.unity.inputsystem. " +
     "Does NOT cover legacy UnityEngine.Input.",
   {
@@ -42,16 +40,16 @@ export const inputsimKey = makeTool(
         enum: ["down", "up", "tap", "hold"],
         description:
           "down = key pressed (queued, processed next InputSystem.Update); up = " +
-          "release ALL held keys (see tool description); tap = down+up (only visible " +
+          "release the named key and requested modifiers; tap = down+up (only visible " +
           "to callback-driven input unless advance_frames ≥ 1); hold = down+up after " +
-          "advancing frames (so Hold interactions with a duration threshold can fire).",
+          "advancing frames. Hold interactions still require actual elapsed input time.",
       },
       key: {
         type: "string",
         description:
           "Unity Key enum name ('Space', 'W', 'LeftArrow', 'Digit1', 'F1') OR a " +
-          "single character ('a', '1', '!'). Resolved case-insensitively against " +
-          "UnityEngine.InputSystem.LowLevel.Key first, then as a character key.",
+          "single character ('a', '1'). Resolved case-insensitively against " +
+          "UnityEngine.InputSystem.Key first, then as a character key.",
       },
       duration_ms: {
         type: "integer",
@@ -59,7 +57,7 @@ export const inputsimKey = makeTool(
         description:
           "Recorded hold duration in milliseconds (for action='hold'). The real " +
           "held-time gate is the number of advanced frames, not wall-clock — pair " +
-          "with advance_frames for Input System Hold interactions. Default 100.",
+          "with advance_frames for held-state polling. Does not wait this duration or guarantee a Hold interaction. Default 100.",
       },
       advance_frames: {
         type: "integer",
@@ -69,7 +67,7 @@ export const inputsimKey = makeTool(
         description:
           "Pump this many player-loop frames (EditorApplication.Step) BETWEEN down " +
           "and up so polling game code observes the press. 0 (default) keeps the " +
-          "old single-update behavior (only callback-driven input sees it). Cap 60. " +
+          "old single-dispatch behavior (only callback-driven input sees it). Cap 60. " +
           "For polling input (wasPressedThisFrame) pass ≥ 1.",
       },
       shift: { type: "boolean", default: false, description: "Also hold Left Shift. Default false." },

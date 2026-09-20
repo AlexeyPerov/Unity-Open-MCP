@@ -8,21 +8,16 @@
 //
 // State is queued via the public InputSystem.QueueStateEvent API:
 //   InputSystem.QueueStateEvent(Keyboard.current, new KeyboardState(Key.Space));
-//   InputSystem.Update();   // process queued events this frame
+//   UpdateInput();   // process queued events this frame
 // No unsafe pointers required.
 //
 // Play-mode only (refuses with play_mode_required otherwise). Gate-free
 // (IsMutating=false — input writes no assets).
 //
-// Honest limits (documented in the domain skill):
-//   - `hold` duration is best-effort: a synchronous tool call cannot yield
-//     frames, so press+release dispatch in one InputSystem.Update cycle. Hold
-//     INTERACTIONS (Input System interactions with a duration threshold) will
-//     not fire from `hold`; use `down`, advance frames, then `up` for those.
-//   - Touch is the version-sensitive half: Touchscreen.current may be null in
-//     a desktop Editor without a touch device added. For uGUI swipe/drag prefer
-//     inputsim_pointer (action: drag); reserve inputsim_touch for games reading
-//     the Input System Touchscreen directly.
+// Framed input runs a temporary manual input update before gameplay Update.
+// Immediate input processes callbacks without advancing gameplay. duration_ms
+// is metadata, not a real-time wait or a Hold-interaction guarantee.
+// Touchscreen.current may be absent on desktop; prefer uGUI for UI gestures.
 //
 // Parameter names are snake_case to match the JSON-schema keys (see
 // PointerTools.cs / InputSystemTools.cs for the same convention).
@@ -92,7 +87,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             if (!keyEnum.HasValue)
                 return DeviceJson.Error("invalid_key",
                     $"Could not resolve key '{key}'. Pass a UnityEngine.InputSystem " +
-                    ".LowLevel.Key enum name ('Space', 'W', 'LeftArrow', 'Digit1', 'F1') " +
+                    ".Key enum name ('Space', 'W', 'LeftArrow', 'Digit1', 'F1') " +
                     "or a single character ('a', '1').");
 
             var mods = new List<InputKey>(3);
@@ -103,24 +98,18 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             if (advance_frames < 0) advance_frames = 0;
             if (advance_frames > 60) advance_frames = 60;
 
+            UpdateInput();
             var dispatched = new List<string>();
-            var now = Time.realtimeSinceStartup;
 
             switch (action)
             {
                 case "down":
-                    QueueKeyboardState(keyboard, keyEnum.Value, mods, true, now);
+                    QueueKeyboardState(keyboard, keyEnum.Value, mods, true);
                     dispatched.Add("keyDown");
                     break;
                 case "up":
-                    // K3: `up` queues an EMPTY KeyboardState, releasing EVERY held key
-                    // (the named key AND any mods AND any other key held by a prior
-                    // `down`), because per-key release would require cross-call state.
-                    // This is documented in the schema description — silently dropping
-                    // other held keys is not acceptable, so the behavior is explicit.
-                    // To release one key among several: prefer `tap` with the key, or
-                    // track held keys in game code via `down`/`up` pairs per key.
-                    QueueKeyboardState(keyboard, keyEnum.Value, mods, false, now);
+                    // Release only the named key and explicitly requested modifiers.
+                    QueueKeyboardState(keyboard, keyEnum.Value, mods, false);
                     dispatched.Add("keyUp");
                     break;
                 case "tap":
@@ -130,25 +119,19 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                     // MonoBehaviour.Update ticks while the key is down — the press is
                     // invisible to polling code (callback-driven InputAction.performed
                     // still fires). Pass advance_frames >= 1 for polling input.
-                    QueueKeyboardState(keyboard, keyEnum.Value, mods, true, now);
+                    QueueKeyboardState(keyboard, keyEnum.Value, mods, true);
                     dispatched.Add("keyDown");
-                    InputSystem.Update();
-                    StepFrames(advance_frames);
-                    QueueKeyboardState(keyboard, keyEnum.Value, mods, false, now + 0.001);
+                    ProcessInputFrames(advance_frames);
+                    QueueKeyboardState(keyboard, keyEnum.Value, mods, false);
                     dispatched.Add("keyUp");
                     break;
                 case "hold":
-                    // K1 fix: with advance_frames, the press lands, frames advance
-                    // (so Hold interactions with a duration threshold can fire and
-                    // polling code observes the held state), then release. duration_ms
-                    // is recorded for the response; the real held-time gate is the
-                    // number of advanced frames, not wall-clock.
-                    QueueKeyboardState(keyboard, keyEnum.Value, mods, true, now);
+                    // Hold uses the same framed sequence as tap. Real elapsed
+                    // input time, not duration_ms, controls timed interactions.
+                    QueueKeyboardState(keyboard, keyEnum.Value, mods, true);
                     dispatched.Add("keyDown");
-                    InputSystem.Update();
-                    StepFrames(advance_frames);
-                    QueueKeyboardState(keyboard, keyEnum.Value, mods, false,
-                        now + System.Math.Max(0.001, duration_ms / 1000.0));
+                    ProcessInputFrames(advance_frames);
+                    QueueKeyboardState(keyboard, keyEnum.Value, mods, false);
                     dispatched.Add("keyUp");
                     break;
                 default:
@@ -156,43 +139,90 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                         $"Unknown key action '{action}'. Valid: down, up, tap, hold.");
             }
 
-            InputSystem.Update();
+            UpdateInput();
 
             return DeviceJson.Ok(BuildKeyOk(keyEnum.Value, action, shift, ctrl, alt, duration_ms, advance_frames, dispatched));
         }
 
-        // Pump N play-mode frames via EditorApplication.Step so polling game code
-        // runs between input events. Synchronous (Step runs a full frame inline),
-        // so this does not deadlock the dispatch queue. No-op (0 frames) is valid.
-        // feedback S4 — Step() pauses the editor; capture and restore the as-found
-        // pause state so a key/touch call with advance_frames does not leave the
-        // game frozen for the next dispatch.
-        private static void StepFrames(int frames)
+        private static void UpdateInput()
         {
-            if (frames <= 0) return;
+            bool paused = EditorApplication.isPaused;
+            var mode = InputSystem.settings.updateMode;
+            try
+            {
+                // InputSystem otherwise selects Editor state while Step is paused.
+                EditorApplication.isPaused = false;
+                InputSystem.settings.updateMode = InputSettings.UpdateMode.ProcessEventsManually;
+                InputSystem.Update();
+            }
+            finally
+            {
+                InputSystem.settings.updateMode = mode;
+                EditorApplication.isPaused = paused;
+            }
+        }
+
+        // EditorApplication.Step advances gameplay but does not run the native
+        // Input System update on every supported Editor. Pump input immediately
+        // before gameplay Update, inside each stepped frame, so edge flags and
+        // touch delta belong to that frame. Manual mode prevents double updates.
+        private static void ProcessInputFrames(int frames)
+        {
+            if (frames <= 0) { UpdateInput(); return; }
+            var original = UnityEngine.LowLevel.PlayerLoop.GetCurrentPlayerLoop();
+            var loop = original;
+            var systems = (UnityEngine.LowLevel.PlayerLoopSystem[])loop.subSystemList.Clone();
+            bool installed = false;
+            for (int i = 0; i < systems.Length; i++)
+            {
+                if (systems[i].type != typeof(UnityEngine.PlayerLoop.Update)) continue;
+                var update = systems[i];
+                var children = new List<UnityEngine.LowLevel.PlayerLoopSystem>(update.subSystemList);
+                int index = children.FindIndex(s => s.type == typeof(UnityEngine.PlayerLoop.Update.ScriptRunBehaviourUpdate));
+                children.Insert(index < 0 ? 0 : index, new UnityEngine.LowLevel.PlayerLoopSystem
+                {
+                    type = typeof(InputSystemDeviceTools),
+                    updateDelegate = UpdateInput,
+                });
+                update.subSystemList = children.ToArray();
+                systems[i] = update;
+                installed = true;
+                break;
+            }
+            if (!installed) throw new System.InvalidOperationException("Player loop has no Update phase.");
+            loop.subSystemList = systems;
+            var mode = InputSystem.settings.updateMode;
             bool wasPaused = EditorApplication.isPaused;
             try
             {
+                InputSystem.settings.updateMode = InputSettings.UpdateMode.ProcessEventsManually;
+                UnityEngine.LowLevel.PlayerLoop.SetPlayerLoop(loop);
                 for (int i = 0; i < frames; i++) EditorApplication.Step();
             }
             finally
             {
+                UnityEngine.LowLevel.PlayerLoop.SetPlayerLoop(original);
+                InputSystem.settings.updateMode = mode;
                 EditorApplication.isPaused = wasPaused;
             }
         }
 
         private static void QueueKeyboardState(
-            Keyboard keyboard, InputKey key, List<InputKey> mods, bool pressed, double time)
+            Keyboard keyboard, InputKey key, List<InputKey> mods, bool pressed)
         {
-            // KeyboardState has no Add() — use Press(Key), which sets the bit for
-            // the key in the state's bitfield. (Input System API.)
+            // Derive the complete state from the device, preserving unrelated
+            // held keys without storing a second cross-call keyboard state.
             var state = new KeyboardState();
-            if (pressed)
+            foreach (var control in keyboard.allKeys)
+                if (control.isPressed) state.Press(control.keyCode);
+            if (pressed) state.Press(key);
+            else state.Release(key);
+            foreach (var mod in mods)
             {
-                state.Press(key);
-                for (int i = 0; i < mods.Count; i++) state.Press(mods[i]);
+                if (pressed) state.Press(mod);
+                else state.Release(mod);
             }
-            InputSystem.QueueStateEvent(keyboard, state, time);
+            InputSystem.QueueStateEvent(keyboard, state);
         }
 
         private static InputKey? ParseKey(string key)
@@ -290,7 +320,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                     "Touchscreen.current is null. The Editor has no touch device; " +
                     "for uGUI drag/swipe use unity_open_mcp_inputsim_pointer " +
                     "(action: drag) instead, or add a simulated Touchscreen via " +
-                    "UnityEngine.InputSystem.LowLevel.TouchscreenSimulation.");
+                    "UnityEngine.InputSystem.InputSystem.AddDevice<Touchscreen>().");
 
             if (finger < 0) finger = 0;
             if (finger > 9) finger = 9;
@@ -318,6 +348,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                         $"Unknown touch action '{action}'. Valid: tap, swipe, press, release.");
             }
 
+            UpdateInput();
             var dispatched = new List<string>();
             var now = Time.realtimeSinceStartup;
 
@@ -328,9 +359,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                     // ended so polling touch code observes the press.
                     QueueTouch(touchscreen, finger, TouchPhase.Began, point, now);
                     dispatched.Add("began");
-                    InputSystem.Update();
-                    StepFrames(advance_frames);
-                    QueueTouch(touchscreen, finger, TouchPhase.Ended, point, now + 0.001);
+                    ProcessInputFrames(advance_frames);
+                    QueueTouch(touchscreen, finger, TouchPhase.Ended, point, Time.realtimeSinceStartupAsDouble);
                     dispatched.Add("ended");
                     break;
                 case "press":
@@ -343,7 +373,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                     break;
             }
 
-            InputSystem.Update();
+            UpdateInput();
 
             return DeviceJson.Ok(BuildTouchOk(action, finger, point, dispatched));
         }
@@ -372,26 +402,27 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
 
             // Resolve TO.
             Vector2 toPoint;
-            if (toX.HasValue && toY.HasValue) toPoint = new Vector2(toX.Value, toY.Value);
-            else if (!string.IsNullOrEmpty(toTarget))
+            if (!string.IsNullOrEmpty(toTarget))
             {
                 if (!TryResolveTarget(toTarget, out toPoint, out var toErr))
                     return DeviceJson.Error(toErr.Code, $"Swipe to_target — {toErr.Message}");
             }
+            else if (toX.HasValue && toY.HasValue) toPoint = new Vector2(toX.Value, toY.Value);
             else toPoint = fromPoint;
 
             // feedback S6 — bound swipe steps (each can run advance_frames × Step).
             if (steps < 1) steps = 1;
             if (steps > 100) steps = 100;
 
+            UpdateInput();
             var dispatched = new List<string>();
             var now = Time.realtimeSinceStartup;
-            var stepDt = System.Math.Max(0.001, durationMs / 1000.0 / steps);
+            // durationMs is metadata, never a future event timestamp.
 
             // Begin.
             QueueTouch(touchscreen, finger, TouchPhase.Began, fromPoint, now);
             dispatched.Add("began");
-            InputSystem.Update();
+            ProcessInputFrames(advanceFrames);
 
             // K2 fix: when advance_frames > 0, advance a frame AFTER each Moved
             // phase so the swipe genuinely unfolds across frames for polling code
@@ -402,16 +433,15 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             {
                 float t = (float)i / steps;
                 var p = Vector2.Lerp(fromPoint, toPoint, t);
-                QueueTouch(touchscreen, finger, TouchPhase.Moved, p, now + i * stepDt);
+                QueueTouch(touchscreen, finger, TouchPhase.Moved, p, Time.realtimeSinceStartupAsDouble);
                 dispatched.Add("moved");
-                InputSystem.Update();
-                StepFrames(advanceFrames);
+                ProcessInputFrames(advanceFrames);
             }
 
             // End.
-            QueueTouch(touchscreen, finger, TouchPhase.Ended, toPoint, now + (steps + 1) * stepDt);
+            QueueTouch(touchscreen, finger, TouchPhase.Ended, toPoint, Time.realtimeSinceStartupAsDouble);
             dispatched.Add("ended");
-            InputSystem.Update();
+            UpdateInput();
 
             return DeviceJson.Ok(BuildTouchOk("swipe", finger, toPoint, dispatched));
         }
@@ -436,7 +466,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 isPrimaryTouch = finger == 0,
                 // isInProgress is read-only (derived from phase) — not settable.
             };
-            InputSystem.QueueStateEvent(touchscreen, state, time);
+            InputSystem.QueueStateEvent(touchscreen, state);
         }
 
         // Resolve a screen point from target OR screen_x/screen_y. Target-first:

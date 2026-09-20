@@ -195,3 +195,11 @@ the orchestrator (`scripts/mcp-test-all.mjs`).
 - [Development setup](setup/development-setup.md) — local checkout and build
 - [Dialog policy](dialog-policy.md) — dismiss env vars and macOS Accessibility
 - [Bridge HTTP API](api/bridge-http.md)
+
+### Input simulation replay
+
+Run the [live input simulation fixtures](../scripts/README.md#live-input-simulation-regression-replay)
+after changing pointer dispatch or framed device input. EditMode tests cover
+handler delivery and resolution; the live replay additionally samples gameplay
+Update, which detects input edges consumed too early by manual input updates.
+The Validation Suite exposes the frame and pointer replays as separate scenarios.
