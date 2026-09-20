@@ -2,19 +2,18 @@
 //
 // Single source of truth for the schema boilerplate that was duplicated
 // across ~265 tool files in this directory. The fragments are SPREAD into a
-// per-tool property block; the JSON Schema each tool emits is byte-identical
-// to the pre-change inline form (verified by the golden-snapshot test in
-// `tool-schema-parity.test.ts`). Per-tool descriptions stay inline where
+// per-tool property block, then canonical locator aliases and verify-rule
+// constraints are applied by canonicalSchema. The golden snapshot pins the
+// published result. Per-tool descriptions stay inline where
 // they vary — only the truly shared boilerplate (enum/default/type) is
 // centralized here.
 //
 // Design constraints:
 //
-//   1. **Byte-identical output.** The MCP client sees `inputSchema`
-//      post-`JSON.stringify`. Spreading `{ ...GATE_PROP }` yields the same
-//      property set + value types as the inline literal (verified by parity
-//      test). The `as const` assertions lock the literal types so TypeScript
-//      does not widen `enum` to `string[]`.
+//   1. **Canonical output.** Shared fragments preserve their types;
+//      canonicalSchema adds locator wire mappings, deprecated aliases,
+//      and selectable verify-rule enums consistently across the registry.
+//      The golden snapshot makes every published change explicit.
 //
 //   2. **Description text stays per-tool where it varies.** Most tools have
 //      a unique `paths_hint` description ("Mutation scope — the .anim asset
@@ -40,6 +39,7 @@
 //   });
 //   ```
 
+import { canonicalSchema } from "../tool-contract.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 /**
@@ -135,9 +135,8 @@ export interface ToolSchemaBody {
  * + `properties` + `additionalProperties: false`. The `additionalProperties`
  * literal lives here once instead of being copy-pasted into every tool file.
  *
- * The body's `properties` record is kept as-is (callers spread shared
- * fragments like `GATE_PROP` into it). The resulting `inputSchema` is
- * byte-identical to the pre-change inline form.
+ * The body is cloned and canonicalized without mutating shared fragments.
+ * Wire-key annotations keep handler arguments aligned with public locators.
  */
 export function makeTool(
   name: string,
@@ -147,12 +146,12 @@ export function makeTool(
   return {
     name,
     description,
-    inputSchema: {
+    inputSchema: canonicalSchema(name, {
       type: "object",
       ...(body.required !== undefined ? { required: body.required } : {}),
       properties: body.properties,
       ...(body.oneOf !== undefined ? { oneOf: body.oneOf } : {}),
       additionalProperties: false,
-    },
+    }),
   };
 }

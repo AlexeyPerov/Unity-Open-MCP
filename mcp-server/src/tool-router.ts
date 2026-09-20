@@ -1,3 +1,7 @@
+import { buildEditorSearch } from "./editor-search.js";
+import { withSchemaDefaults } from "./schema-defaults.js";
+import { validateSchema, wireArguments } from "./tool-contract.js";
+import { discoverTools, compactDiscoverySchema } from "./capabilities/discovery.js";
 import { PingCache } from "./ping-cache.js";
 import { resolveProjectPath, validateUnityProjectRoot } from "./project-path.js";
 import { resolvePort, resolveAuthToken } from "./instance-discovery.js";
@@ -112,7 +116,7 @@ const defaultHubBackend: HubControlBackend = {
   setInstallPath: (path) => setInstallPath(path),
 };
 import { BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS } from "./batch-spawn.js";
-import type { ToolSessionState } from "./tool-session-state.js";
+import { filterVisibleTools, type ToolSessionState } from "./tool-session-state.js";
 import {
   readProfileAndDetail,
   applyPaging,
@@ -808,6 +812,31 @@ export class ToolRouter implements Router {
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
+    const definition = ALL_TOOLS.find(t => t.name === toolName);
+    if (definition) {
+      const errors = validateSchema(args, definition.inputSchema);
+      if (errors.length) return sourceResult({ error: { code: "invalid_arguments", message: errors.join("; ") }, errors, _route: { route: "local" } }, "local", true);
+      const notes: string[] = [];
+      const wire = wireArguments(args, definition.inputSchema, notes);
+      if (toolName === "unity_open_mcp_batch_execute" && Array.isArray(args.commands)) {
+        for (const command of args.commands as Array<{ tool?: string; params?: unknown }>) {
+          const nested = ALL_TOOLS.find(t => t.name === command.tool);
+          if (nested) wireArguments(command.params ?? {}, nested.inputSchema, notes);
+        }
+      }
+      // Recursive dispatch only after validation; alias notes are attached to the normal result.
+      return this.routeValidated(live, toolName, wire, notes);
+    }
+    return this.routeValidated(live, toolName, args, []);
+  }
+
+  private async routeValidated(live: LiveClient, toolName: string, args: Record<string, unknown>, notes: string[]): Promise<CallToolResult> {
+    const result = await this.routeUnchecked(live, toolName, args);
+    if (notes.length) result.content.push({ type: "text", text: JSON.stringify({ deprecations: [...new Set(notes)] }) });
+    return result;
+  }
+
+  private async routeUnchecked(live: LiveClient, toolName: string, args: Record<string, unknown>): Promise<CallToolResult> {
     const localProbe = ["unity_open_mcp_read_compile_errors", "unity_open_mcp_bridge_status", "unity_open_mcp_capabilities",
       "unity_open_mcp_restart_editor", "unity_open_mcp_resource_pressure", "unity_open_mcp_manage_tools",
       "unity_open_mcp_list_assets", "unity_open_mcp_list_rules", "unity_open_mcp_generate_skill", "unity_senses_pull_events"].includes(toolName);
@@ -1467,6 +1496,12 @@ export class ToolRouter implements Router {
     args: Record<string, unknown>,
     live: LiveClient,
   ): Promise<CallToolResult> {
+    if (["tool_name", "query", "group", "tag", "available", "active", "route", "mutating"].some(k => args[k] !== undefined)) {
+      if (args.kind !== undefined && args.kind !== "tools") return localError("invalid_arguments", "Tool discovery filters require kind: tools (or omit kind).");
+      const inventory = await this.fetchInventoryAndReconcile(live);
+      const found = discoverTools(ALL_TOOLS, BATCH_TOOL_NAMES, this.sessionState, inventory?.tools, args);
+      return sourceResult(found, "local", !!found.error);
+    }
     const kind =
       args.kind === "tools" || args.kind === "rules" || args.kind === "fixes"
         ? args.kind
@@ -1614,6 +1649,29 @@ export class ToolRouter implements Router {
     const action = typeof args.action === "string" ? args.action : "";
     const group = typeof args.group === "string" ? args.group.trim() : "";
 
+    const actionKeys: Record<string, string[]> = {
+      list_groups: [], reset: [], activate: ["group"], deactivate: ["group"],
+      suggest: ["intent", "tags"], activate_for: ["intent", "tags"],
+      invoke: ["tool_name", "arguments"], editor_search: ["search_text", "asset_type", "open_ui"],
+    };
+    const ignored = Object.keys(args).filter(k => k !== "action" && actionKeys[action] && !actionKeys[action].includes(k));
+    if (ignored.length) return this.manageToolsError("invalid_arguments", `Keys not used by ${action}: ${ignored.join(", ")}`);
+    if (action === "editor_search") {
+      const query = buildEditorSearch(String(args.search_text ?? ""), args.asset_type as string | undefined);
+      if (args.open_ui !== true) return sourceResult({ query, opened: false, purpose: "Human collaboration; use search_assets/find_references for structured results." }, "local");
+      const result = await this.routeCore(live, "unity_open_mcp_execute_csharp", {
+        code: `UnityEditor.Search.SearchService.ShowWindow(UnityEditor.Search.SearchService.CreateContext(${JSON.stringify(query)})); return ${JSON.stringify(query)};`,
+        read_only: true,
+      });
+      result.content.push({ type: "text", text: JSON.stringify({ query, opened: !result.isError }) });
+      return result;
+    }
+    if (action === "invoke") {
+      const name = typeof args.tool_name === "string" ? args.tool_name : "";
+      if (name === "unity_open_mcp_manage_tools" || !filterVisibleTools(ALL_TOOLS, this.sessionState).some(t => t.name === name))
+        return this.manageToolsError("tool_not_active", "Activate the target group first; recursive manage_tools invocation is forbidden.");
+      return this.routeCore(live, name, withSchemaDefaults(ALL_TOOLS.find(t => t.name === name)!, (args.arguments ?? {}) as Record<string, unknown>));
+    }
     if (action === "list_groups") {
       return this.manageToolsListGroups(live);
     }
@@ -1698,7 +1756,7 @@ export class ToolRouter implements Router {
     return this.manageToolsError(
       "unknown_action",
       `Unknown action '${action}'. Valid actions: list_groups, activate, ` +
-        `deactivate, reset, suggest, activate_for.`,
+        `deactivate, reset, suggest, activate_for, invoke, editor_search.`,
     );
   }
 
@@ -1819,6 +1877,7 @@ export class ToolRouter implements Router {
     rec: Recommendation,
     live: LiveClient,
   ): Promise<CallToolResult> {
+    const groupsBeforeInventory = new Set(this.sessionState.activeGroups());
     const inventory = await this.fetchInventoryAndReconcile(live);
     const compiledAvailability = this.computeCompiledAvailability(
       inventory,
@@ -1862,6 +1921,7 @@ export class ToolRouter implements Router {
         intent: rec,
         groups,
         activated,
+        tools: compactDiscoverySchema(discoverTools(ALL_TOOLS, BATCH_TOOL_NAMES, this.sessionState, inventory?.tools, { groups: this.sessionState.activeGroups().filter(g => !groupsBeforeInventory.has(g)), profile: "full", page_size: 1000 }).tools),
         skipped,
         unavailable,
         activeGroups: this.sessionState.activeGroups(),

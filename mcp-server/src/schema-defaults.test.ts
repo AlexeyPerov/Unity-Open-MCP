@@ -169,3 +169,8 @@ test("M15: regression_check without baseline_path is flagged (was spawned as --b
     [],
   );
 });
+
+test("withSchemaDefaults does not shadow a supplied locator alias", () => {
+  const tool = toolWith({ asset_path: { type: "string", default: "" }, path: { type: "string", "x-alias-for": "asset_path" } });
+  assert.deepEqual(withSchemaDefaults(tool, { path: "Assets/A.unity" }), { path: "Assets/A.unity" });
+});

@@ -29,16 +29,21 @@ Skills are markdown playbooks (`SKILL.md`) that give an AI agent **project-speci
 
 ### Core playbook
 
-`skills/unity-open-mcp/SKILL.md` is the playbook every agent reads first. It covers:
+`skills/unity-open-mcp/SKILL.md` retains the core workflow and non-negotiable
+safety rules. It links six focused references for discovery, compile/Safe Mode,
+routing/lifecycle, batches/gates, YAML/offline work, and senses/tests. Load a
+reference only when its trigger applies; exact runtime schemas replace a large
+static tool catalog.
 
-- **Preconditions** — what must be true before live tools work.
-- **Non-negotiable rules** — discover first, scope every mutation, one test run at a time, read the gate.
-- **Fast-start sequence** — the canonical `capabilities → manage_tools → ping → mutate` order.
-- **Core loop** — mutate → gate → fix, with gate modes and the canonical failure shape.
-- **Tool groups & session visibility** — activating only the group you need keeps the prompt small.
-- **Typed tool catalog** — the preferred tools for assets, materials, GameObjects, components, prefabs, scenes, packages, profiler, build, settings.
-- **Routing rules** — live vs. batch vs. offline reads.
-- **Agent checklist** — the before/after list.
+The CLI setup, project skill generator, and Hub template installer copy the
+reference tree alongside the entrypoint for every destination selected through
+`skills/client-paths.json`. Keep the folder together when distributing a skill.
+
+While the Editor is reachable, prefer typed live tools. Never directly edit an
+open/dirty scene or asset YAML. File-level repair remains supported when the
+Editor is unavailable or explicitly chosen: identify the offline-file route,
+preserve GUID/fileID links and the intended scene, then reimport/reserialize and
+run scoped validation before trusting the result.
 
 ### Extension skills
 

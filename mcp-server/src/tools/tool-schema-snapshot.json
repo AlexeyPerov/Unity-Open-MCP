@@ -8,7 +8,7 @@
     }
   },
   "unity_open_mcp_execute_csharp": {
-    "description": "Compile and run a C# snippet in the Editor (Roslyn). Primary escape hatch — covers most Editor APIs without typed tools. The snippet compiles into its OWN assembly, so it sees only the PUBLIC members of your project's assemblies: an `internal` member (the natural visibility for a testable seam) reports as CS0117/CS0122/CS1061 'not found', which is the assembly boundary and not a typo. Reach it with reflection — typeof(T).GetMethod(\"Name\", BindingFlags.NonPublic | BindingFlags.Static).Invoke(...) — or, for anything you will call more than once, make the seam public or exercise it from a test assembly via unity_senses_run_tests. (Same class of surprise as the no-`using`-directives rule: fully-qualify every type or pass `usings`.)",
+    "description": "Compile and run a C# snippet in the Editor (Roslyn). Object defaults to UnityEngine.Object via an injected alias; explicit caller Object aliases win. Primary escape hatch — covers most Editor APIs without typed tools. The snippet compiles into its OWN assembly, so it sees only the PUBLIC members of your project's assemblies: an `internal` member (the natural visibility for a testable seam) reports as CS0117/CS0122/CS1061 'not found', which is the assembly boundary and not a typo. Reach it with reflection — typeof(T).GetMethod(\"Name\", BindingFlags.NonPublic | BindingFlags.Static).Invoke(...) — or, for anything you will call more than once, make the seam public or exercise it from a test assembly via unity_senses_run_tests. (Same class of surprise as the no-`using`-directives rule: fully-qualify every type or pass `usings`.)",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -328,14 +328,34 @@
         "exclude_rules": {
           "description": "Deny-list. Always wins over categories and include_rules.",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "missing_references",
+              "scene_prefab_health",
+              "dependencies",
+              "asmdef_audit",
+              "project_health",
+              "materials",
+              "animation_analysis",
+              "shader_analysis"
+            ]
           },
           "type": "array"
         },
         "include_rules": {
           "description": "Allow-list applied to the resolved rule set. When `categories` is set, include_rules narrows to their intersection; without `categories` it is additive on top of the auto-selected set.",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "missing_references",
+              "scene_prefab_health",
+              "dependencies",
+              "asmdef_audit",
+              "project_health",
+              "materials",
+              "animation_analysis",
+              "shader_analysis"
+            ]
           },
           "type": "array"
         },
@@ -422,8 +442,18 @@
       "additionalProperties": false,
       "oneOf": [
         {
-          "required": [
-            "asset_path"
+          "required": [],
+          "anyOf": [
+            {
+              "required": [
+                "asset_path"
+              ]
+            },
+            {
+              "required": [
+                "path"
+              ]
+            }
           ]
         },
         {
@@ -483,6 +513,12 @@
             "balanced",
             "full"
           ]
+        },
+        "path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path",
+          "description": "Deprecated alias; use asset_path."
         }
       },
       "type": "object"
@@ -494,8 +530,18 @@
       "additionalProperties": false,
       "oneOf": [
         {
-          "required": [
-            "asset_path"
+          "required": [],
+          "anyOf": [
+            {
+              "required": [
+                "asset_path"
+              ]
+            },
+            {
+              "required": [
+                "path"
+              ]
+            }
           ]
         },
         {
@@ -538,20 +584,36 @@
           "default": 100,
           "description": "Maximum number of reverse-dependency entries to return. Forward edges are not capped (a single asset's forward set is bounded). Callers should pass >= 1; the value 0 is a server-internal sentinel meaning 'unlimited' and is never a value a caller needs to pass.",
           "type": "integer"
+        },
+        "path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path",
+          "description": "Deprecated alias; use asset_path."
         }
       },
       "type": "object"
     }
   },
   "unity_open_mcp_scan_paths": {
-    "description": "Run one or more ported verify rules scoped to paths. For a single rule, pass categories: [\"missing_references\"]. Unknown rule IDs error with availableRules. Use include_rules / exclude_rules to filter the auto-selected set (exclude always wins; include narrows an explicit categories list, otherwise it is additive). fail_on_severity defaults to the project setting verify.severityThreshold in .unity-open-mcp/settings.json. Default (`profile: 'compact'`) returns passed + issue counts grouped by severity (no per-issue list); raise to balanced/full for the full issues list, and page large result sets with page_size/cursor. Each issue carries ruleId + categoryId (alias), severity, code + issueCode (alias), assetPath, description, and fixId + fixSafe when a fix is available. rulesApplied lists the post-filter rule set.",
+    "description": "Run one or more ported verify rules scoped to paths. For a single rule, pass categories: [\"missing_references\"]. Valid rule IDs are enumerated in the schema; unknown IDs fail before dispatch. Use include_rules / exclude_rules to filter the auto-selected set (exclude always wins; include narrows an explicit categories list, otherwise it is additive). fail_on_severity defaults to the project setting verify.severityThreshold in .unity-open-mcp/settings.json. Default (`profile: 'compact'`) returns passed + issue counts grouped by severity (no per-issue list); raise to balanced/full for the full issues list, and page large result sets with page_size/cursor. Each issue carries ruleId + categoryId (alias), severity, code + issueCode (alias), assetPath, description, and fixId + fixSafe when a fix is available. rulesApplied lists the post-filter rule set.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "categories": {
-          "description": "Verify rule IDs; auto-selected from paths if omitted. Unknown IDs error with availableRules.",
+          "description": "Verify rule IDs; auto-selected from paths if omitted. Valid IDs are enumerated below.",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "missing_references",
+              "scene_prefab_health",
+              "dependencies",
+              "asmdef_audit",
+              "project_health",
+              "materials",
+              "animation_analysis",
+              "shader_analysis"
+            ]
           },
           "type": "array"
         },
@@ -562,7 +624,17 @@
         "exclude_rules": {
           "description": "Deny-list. Always wins over categories and include_rules.",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "missing_references",
+              "scene_prefab_health",
+              "dependencies",
+              "asmdef_audit",
+              "project_health",
+              "materials",
+              "animation_analysis",
+              "shader_analysis"
+            ]
           },
           "type": "array"
         },
@@ -579,12 +651,22 @@
         "include_rules": {
           "description": "Allow-list applied to the resolved rule set. When `categories` is set, include_rules narrows to their intersection; without `categories` it is additive on top of the auto-selected set.",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "missing_references",
+              "scene_prefab_health",
+              "dependencies",
+              "asmdef_audit",
+              "project_health",
+              "materials",
+              "animation_analysis",
+              "shader_analysis"
+            ]
           },
           "type": "array"
         },
         "page_size": {
-          "description": "Page the issues list (M22 uniform paging; balanced/full). When set, the response carries a `pagination` block with a `next_cursor` to resume. Omit to receive the whole issues list in one response.",
+          "description": "Page the issues list (uniform paging; balanced/full). When set, the response carries a `pagination` block with a `next_cursor` to resume. Omit to receive the whole issues list in one response.",
           "minimum": 1,
           "type": "integer"
         },
@@ -605,7 +687,7 @@
         },
         "profile": {
           "default": "compact",
-          "description": "Token-budget output profile (M22). 'compact' (default) = passed + issue counts grouped by severity (issues[] stripped; drill in with balanced/full). 'balanced'/'full' = the full issues list (paged when page_size is set).",
+          "description": "Token-budget output profile. 'compact' (default) = passed + issue counts grouped by severity (issues[] stripped; drill in with balanced/full). 'balanced'/'full' = the full issues list (paged when page_size is set).",
           "enum": [
             "compact",
             "balanced",
@@ -1261,8 +1343,10 @@
           "type": "string"
         },
         "path": {
-          "description": "[bounds / ground_check / nearest] Target hierarchy path \"Root/Child/Leaf\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "point": {
           "description": "[ground_check / nearest] Probe point as \"x,y,z\" when no target object is given.",
@@ -1291,6 +1375,17 @@
         "tag": {
           "description": "[nearest] Only include objects with this tag.",
           "type": "string"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -1609,6 +1704,38 @@
         "project_path": {
           "description": "Explicit Unity project root for this read-only probe; overrides the configured project for this call.",
           "type": "string"
+        },
+        "tool_name": {
+          "type": "string",
+          "description": "Exact lookup: one full schema and its lifecycle, route, availability, tags and example."
+        },
+        "query": {
+          "type": "string"
+        },
+        "group": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "route": {
+          "enum": [
+            "local",
+            "live",
+            "batch",
+            "offline",
+            "offline-first",
+            "compressible"
+          ]
+        },
+        "mutating": {
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -2255,8 +2382,10 @@
           "type": "string"
         },
         "prefab_asset_path": {
-          "description": "Prefab asset path to instantiate.",
-          "type": "string"
+          "description": "Deprecated alias; use asset_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path"
         },
         "rotation": {
           "description": "Optional world-space Euler rotation in degrees as \"x,y,z\". Defaults to 0,0,0.",
@@ -2273,13 +2402,44 @@
         "scene_path": {
           "description": "Optional target scene asset path (e.g. 'Assets/Scenes/Bootstrap.unity') for the instance root. The scene must already be loaded (use unity_open_mcp_scene_open Additive first). Omit to instantiate in the active scene. Ignored when parent_path is supplied (the parent's scene wins).",
           "type": "string"
+        },
+        "asset_path": {
+          "type": "string",
+          "description": "Prefab asset path to instantiate.",
+          "x-wire-key": "prefab_asset_path"
+        },
+        "prefab_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path",
+          "description": "Deprecated alias; use asset_path."
         }
       },
       "required": [
-        "prefab_asset_path",
         "paths_hint"
       ],
-      "type": "object"
+      "type": "object",
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "required": [
+                "asset_path"
+              ]
+            },
+            {
+              "required": [
+                "prefab_asset_path"
+              ]
+            },
+            {
+              "required": [
+                "prefab_path"
+              ]
+            }
+          ]
+        }
+      ]
     }
   },
   "unity_open_mcp_prefab_create": {
@@ -2313,8 +2473,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Hierarchy path of the scene GameObject (fallback address).",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "New .prefab path (+ scene path when connect is true). The gate's validation scope.",
@@ -2324,15 +2486,59 @@
           "type": "array"
         },
         "prefab_asset_path": {
+          "description": "Deprecated alias; use asset_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "asset_path": {
+          "type": "string",
           "description": "Destination prefab asset path. Must start with 'Assets/' and end with '.prefab'.",
-          "type": "string"
+          "x-wire-key": "prefab_asset_path"
+        },
+        "prefab_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path",
+          "description": "Deprecated alias; use asset_path."
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
-        "prefab_asset_path",
         "paths_hint"
       ],
-      "type": "object"
+      "type": "object",
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "required": [
+                "asset_path"
+              ]
+            },
+            {
+              "required": [
+                "prefab_asset_path"
+              ]
+            },
+            {
+              "required": [
+                "prefab_path"
+              ]
+            }
+          ]
+        }
+      ]
     }
   },
   "unity_open_mcp_prefab_open": {
@@ -2356,15 +2562,48 @@
           "type": "array"
         },
         "prefab_asset_path": {
+          "description": "Deprecated alias; use asset_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path"
+        },
+        "asset_path": {
+          "type": "string",
           "description": "Prefab asset path to open in the edit stage.",
-          "type": "string"
+          "x-wire-key": "prefab_asset_path"
+        },
+        "prefab_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path",
+          "description": "Deprecated alias; use asset_path."
         }
       },
       "required": [
-        "prefab_asset_path",
         "paths_hint"
       ],
-      "type": "object"
+      "type": "object",
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "required": [
+                "asset_path"
+              ]
+            },
+            {
+              "required": [
+                "prefab_asset_path"
+              ]
+            },
+            {
+              "required": [
+                "prefab_path"
+              ]
+            }
+          ]
+        }
+      ]
     }
   },
   "unity_open_mcp_prefab_close": {
@@ -2446,8 +2685,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Hierarchy path of the prefab instance (fallback address).",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Prefab asset path + scene path (the gate's validation scope).",
@@ -2455,6 +2696,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -2489,8 +2741,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Hierarchy path of the prefab instance (fallback address).",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Scene path holding the instance (the gate's validation scope).",
@@ -2498,6 +2752,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -2537,8 +2802,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Hierarchy path of the prefab instance (fallback address).",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Scene path holding the instance (the gate's validation scope).",
@@ -2546,6 +2813,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -2572,8 +2850,21 @@
           "type": "string"
         },
         "path": {
-          "description": "Hierarchy path of the prefab instance (fallback address).",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "type": "object"
@@ -2597,8 +2888,21 @@
           "type": "string"
         },
         "path": {
-          "description": "Hierarchy path of the target GameObject (fallback address).",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "type": "object"
@@ -2703,8 +3007,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Target hierarchy path \"Root/Child\". Middle-priority resolver.",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the target.",
@@ -2712,6 +3018,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -2746,8 +3063,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Source hierarchy path \"Root/Child\". Middle-priority resolver.",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the source and clone.",
@@ -2755,6 +3074,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -2795,8 +3125,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Targeted mode: hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "root_only": {
           "default": false,
@@ -2806,6 +3138,17 @@
         "tag": {
           "description": "List mode: filter by tag (must be a defined tag).",
           "type": "string"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "type": "object"
@@ -2898,8 +3241,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Target hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "pathPatchesPerGameObject": {
           "additionalProperties": {
@@ -2961,6 +3306,17 @@
         "tag": {
           "description": "New tag. Must be a defined tag (use editor_get_tags from Plan 5 to enumerate). Omit to leave unchanged.",
           "type": "string"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -3007,8 +3363,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Child hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the child.",
@@ -3021,6 +3379,17 @@
           "default": true,
           "description": "When true (default), preserves the GameObject's world position/rotation/scale across the reparent. Set false to keep local-space values instead.",
           "type": "boolean"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -3062,8 +3431,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -3071,6 +3442,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -3113,8 +3495,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -3122,6 +3506,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -3132,7 +3527,7 @@
     }
   },
   "unity_open_mcp_component_get": {
-    "description": "Read the serialized fields and (optionally) public properties of a single Component on a GameObject. Read-only (gate-free). Defaults to profile=\"compact\" (top-level serialized fields only; public properties omitted unless include_properties is true). Returns each field's path (SerializedProperty path), type, and current value so an agent can plan a component_modify without trial-and-error. Use property_path to drill into one subtree; use profile=\"balanced\" / \"full\" or page_size + cursor to expand without unbounded dumps. Address the host by instance_id > path > name; identify the component by instance_id (specific instance) or type_name (full name preferred, class-name fallback).",
+    "description": "Read the serialized fields and (optionally) public properties of a single Component on a GameObject. Read-only (gate-free). Defaults to profile=\"compact\" (top-level serialized fields only; public properties omitted unless include_properties is true). Returns each field's path (SerializedProperty path), type, and current value so an agent can plan a component_modify without trial-and-error. Use property_path to drill into one subtree; use profile=\"balanced\" / \"full\" or page_size + cursor to expand without unbounded dumps. Address the host by one of instance_id, game_object_path, or name; identify the component by component_instance_id (specific instance) or component_type (full name preferred, class-name fallback).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -3197,8 +3592,10 @@
           ]
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "profile": {
           "default": "compact",
@@ -3215,15 +3612,33 @@
           "type": "string"
         },
         "type_name": {
-          "description": "Component type to read (full name preferred, class-name fallback). Use this OR component_instance_id. Ignored when component_instance_id is set.",
-          "type": "string"
+          "description": "Deprecated alias; use component_type.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "component_type"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
+        },
+        "component_type": {
+          "type": "string",
+          "description": "Component type (full name preferred); alternative to component_instance_id.",
+          "x-wire-key": "type_name"
         }
       },
       "type": "object"
     }
   },
   "unity_open_mcp_component_modify": {
-    "description": "Modify serialized fields on a Component by path via SerializedObject. Undo-recorded. Mutating: runs the full gate path; `paths_hint` is the scene path that contains the host. `fields` is an array of {path, value, type?} patches where `path` is the SerializedProperty path (e.g. \"m_Color\", \"m_Mass\", \"m_Colors.Array.data[0]\"). Per-entry errors are accumulated, so a single bad patch does not abort the batch. Use component_get first to discover valid paths and value types. Address the host by instance_id > path > name; identify the component by component_instance_id or type_name.",
+    "description": "Modify serialized fields on a Component by path via SerializedObject. Undo-recorded. Mutating: runs the full gate path; `paths_hint` is the scene path that contains the host. `fields` is an array of {property_path, value, type?} patches where `property_path` is the SerializedProperty path (e.g. \"m_Color\", \"m_Mass\", \"m_Colors.Array.data[0]\"). Per-entry errors are accumulated, so a single bad patch does not abort the batch. Use component_get first to discover valid paths and value types. Address the host by one of instance_id, game_object_path, or name; identify the component by component_instance_id or component_type.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -3236,13 +3651,15 @@
           ]
         },
         "fields": {
-          "description": "Serialized-property patches to apply in order. Each entry: { path: string, value: any, type?: \"name\" | \"int\" }. value shape depends on the property's SerializedPropertyType — see component_get output. For enum properties, set type=\"name\" to set by enum name (default is int index). For object references, value is {\"path\": \"Assets/...\"} or {\"instance_id\": N} or null.",
+          "description": "Serialized-property patches to apply in order. Each entry: { property_path: string, value: any, type?: \"name\" | \"int\" }. value shape depends on the property's SerializedPropertyType — see component_get output. For enum properties, set type=\"name\" to set by enum name (default is int index). For object references, value is {\"path\": \"Assets/...\"} or {\"instance_id\": N} or null.",
           "items": {
             "additionalProperties": false,
             "properties": {
               "path": {
-                "description": "SerializedProperty.propertyPath (e.g. \"m_Color\", \"m_Mass\").",
-                "type": "string"
+                "description": "Deprecated alias; use property_path.",
+                "type": "string",
+                "deprecated": true,
+                "x-alias-for": "property_path"
               },
               "type": {
                 "description": "Optional hint. \"name\" = interpret value as an enum NAME (default is int index).",
@@ -3254,13 +3671,33 @@
               },
               "value": {
                 "description": "New value. Scalars/strings/bools as JSON primitives; vectors/colors as [x,y,(z,(w))]; object references as {\"path\": \"...\"} or null; enums as int (default) or name (when type=\"name\")."
+              },
+              "property_path": {
+                "type": "string",
+                "description": "SerializedProperty.propertyPath (e.g. \"m_Color\", \"m_Mass\").",
+                "x-wire-key": "path"
               }
             },
             "required": [
-              "path",
               "value"
             ],
-            "type": "object"
+            "type": "object",
+            "allOf": [
+              {
+                "anyOf": [
+                  {
+                    "required": [
+                      "property_path"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "path"
+                    ]
+                  }
+                ]
+              }
+            ]
           },
           "type": "array"
         },
@@ -3285,8 +3722,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -3296,8 +3735,26 @@
           "type": "array"
         },
         "type_name": {
-          "description": "Component type to modify (full name preferred, class-name fallback). Use this OR component_instance_id. Ignored when component_instance_id is set.",
-          "type": "string"
+          "description": "Deprecated alias; use component_type.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "component_type"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
+        },
+        "component_type": {
+          "type": "string",
+          "description": "Component type (full name preferred); alternative to component_instance_id.",
+          "x-wire-key": "type_name"
         }
       },
       "required": [
@@ -3364,8 +3821,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Destination asset path. Must start with 'Assets/' (or be relative to the project root) and end with '.unity'. Intermediate folders must already exist.",
-          "type": "string"
+          "description": "Deprecated alias; use asset_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the new `.unity` asset path.",
@@ -3382,13 +3841,33 @@
             "default"
           ],
           "type": "string"
+        },
+        "asset_path": {
+          "type": "string",
+          "description": "Destination asset path. Must start with 'Assets/' (or be relative to the project root) and end with '.unity'. Intermediate folders must already exist.",
+          "x-wire-key": "path"
         }
       },
       "required": [
-        "path",
         "paths_hint"
       ],
-      "type": "object"
+      "type": "object",
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "required": [
+                "asset_path"
+              ]
+            },
+            {
+              "required": [
+                "path"
+              ]
+            }
+          ]
+        }
+      ]
     }
   },
   "unity_open_mcp_scene_open": {
@@ -3419,8 +3898,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Asset path of the scene to open (must end with '.unity'). Must exist on disk.",
-          "type": "string"
+          "description": "Deprecated alias; use asset_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the target `.unity` asset path. Include currently-open scene paths too when `mode: 'single'` would close them.",
@@ -3428,13 +3909,33 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "asset_path": {
+          "type": "string",
+          "description": "Asset path of the scene to open (must end with '.unity'). Must exist on disk.",
+          "x-wire-key": "path"
         }
       },
       "required": [
-        "path",
         "paths_hint"
       ],
-      "type": "object"
+      "type": "object",
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "required": [
+                "asset_path"
+              ]
+            },
+            {
+              "required": [
+                "path"
+              ]
+            }
+          ]
+        }
+      ]
     }
   },
   "unity_open_mcp_scene_save": {
@@ -3455,8 +3956,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Dual-purpose. When it matches an opened scene's asset path (e.g. 'Assets/Scenes/Foo.unity'), it selects that scene and saves it back to its own path (path-as-identity). When it does not match an opened scene, it is a save-as destination for the active or `name`-selected scene and must end with '.unity'.",
-          "type": "string"
+          "description": "Deprecated alias; use asset_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the destination `.unity` asset path (the scene's existing path when `path` is omitted).",
@@ -3464,6 +3967,11 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "asset_path": {
+          "type": "string",
+          "description": "Dual-purpose. When it matches an opened scene's asset path (e.g. 'Assets/Scenes/Foo.unity'), it selects that scene and saves it back to its own path (path-as-identity). When it does not match an opened scene, it is a save-as destination for the active or `name`-selected scene and must end with '.unity'.",
+          "x-wire-key": "path"
         }
       },
       "required": [
@@ -3490,8 +3998,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Opened scene asset path (e.g. 'Assets/Scenes/Foo.unity') to unload. Resolves the scene by its asset path — the authoritative identity. When supplied, takes precedence over `name`. Use scene_list_opened to enumerate opened scene paths.",
-          "type": "string"
+          "description": "Deprecated alias; use asset_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the unloaded scene's asset path (or its name when it is not yet asset-backed).",
@@ -3499,6 +4009,11 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "asset_path": {
+          "type": "string",
+          "description": "Opened scene asset path (e.g. 'Assets/Scenes/Foo.unity') to unload. Resolves the scene by its asset path — the authoritative identity. When supplied, takes precedence over `name`. Use scene_list_opened to enumerate opened scene paths.",
+          "x-wire-key": "path"
         }
       },
       "required": [
@@ -3525,8 +4040,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Opened scene asset path (e.g. 'Assets/Scenes/Foo.unity') to mark as active. Resolves the scene by its asset path — the authoritative identity. When supplied, takes precedence over `name`. Use scene_list_opened to enumerate opened scene paths.",
-          "type": "string"
+          "description": "Deprecated alias; use asset_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene's asset path.",
@@ -3534,6 +4051,11 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "asset_path": {
+          "type": "string",
+          "description": "Opened scene asset path (e.g. 'Assets/Scenes/Foo.unity') to mark as active. Resolves the scene by its asset path — the authoritative identity. When supplied, takes precedence over `name`. Use scene_list_opened to enumerate opened scene paths.",
+          "x-wire-key": "path"
         }
       },
       "required": [
@@ -3591,8 +4113,10 @@
           "type": "integer"
         },
         "path": {
-          "description": "Opened scene asset path (e.g. 'Assets/Scenes/Foo.unity') to read. Resolves the scene by its asset path — the authoritative identity. When supplied, takes precedence over `name`. Omit (and omit `name`) to read the active scene.",
-          "type": "string"
+          "description": "Deprecated alias; use asset_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "asset_path"
         },
         "profile": {
           "default": "compact",
@@ -3602,6 +4126,11 @@
             "balanced",
             "full"
           ]
+        },
+        "asset_path": {
+          "type": "string",
+          "description": "Opened scene asset path (e.g. 'Assets/Scenes/Foo.unity') to read. Resolves the scene by its asset path — the authoritative identity. When supplied, takes precedence over `name`. Omit (and omit `name`) to read the active scene.",
+          "x-wire-key": "path"
         }
       },
       "type": "object"
@@ -3653,8 +4182,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Hierarchy path of the target GameObject (fallback address).",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path containing the target.",
@@ -3667,6 +4198,17 @@
           "description": "Optional SceneView size (half-extent of the framing box). Omit to derive from the target bounds.",
           "minimum": 0,
           "type": "number"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -4006,6 +4548,64 @@
       "type": "object"
     }
   },
+  "unity_open_mcp_upgrade": {
+    "description": "Preview or apply a coordinated update of the open Unity project to one trio version. Scans project and home-scoped MCP client configs, agent-facing prose/examples, and the bridge + verify UPM pins. Home configs are rewritten only when their UNITY_PROJECT_PATH belongs exclusively to the open project. `dry_run` defaults true and returns the exact per-file report without writing. With `dry_run:false`, config/prose files receive one-time `.bak` backups before rewriting; a Git-installed bridge and verify pair are then re-pinned atomically through Unity Package Manager, which may reload the Editor. Embedded/file bridge installs are preserved and reported while selected config/prose updates remain available. Omit `target_version` to resolve the latest published npm version explicitly for this call.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "target_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Target trio version (X.Y.Z). Omit to query the latest npm release."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "default": true,
+          "description": "Preview only by default. Set false to write selected files and schedule UPM."
+        },
+        "update_upm": {
+          "type": "boolean",
+          "default": true,
+          "description": "Update the bridge + verify Git packages atomically when the bridge source is Git."
+        },
+        "update_project_configs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Update MCP client configs found in this project or its repository ancestors."
+        },
+        "update_home_configs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Update home-scoped configs only when the entry belongs exclusively to this project."
+        },
+        "update_prose": {
+          "type": "boolean",
+          "default": true,
+          "description": "Update allowlisted agent prose, installed core skills, and MCP config examples."
+        },
+        "paths_hint": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "Packages/manifest.json"
+          ],
+          "description": "Audit scope materialized automatically. The gate is off because this workflow mutates package/configuration pins rather than Unity assets; packages-lock.json is implicit."
+        },
+        "gate": {
+          "enum": [
+            "enforce",
+            "warn",
+            "off"
+          ],
+          "default": "off",
+          "description": "Defaults off: project-asset validation does not model external configs or UPM pins."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
   "unity_open_mcp_console_clear": {
     "description": "Clear the Unity Editor console. Mutates console state only (no asset writes), so it is gate-free and returns directly without the gate envelope — same footing as unity_senses_read_console with clear: true. Complements read_console (the read side). Prefer this over raw execute_csharp LogEntries.Clear() — schema-validated and surfaced as a first-class tool so a failed clear is visible as a structured error.",
     "inputSchema": {
@@ -4125,8 +4725,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Hierarchy path (e.g. 'Player/Body') of a scene object to select. Single-target shorthand — prefer targets[] when selecting more than one.",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "targets": {
           "description": "Multi-selection list. When provided, overrides the single-target shorthand fields. Each entry resolves by instance_id > asset_path > path > name (asset_path wins for disk assets; the others resolve scene objects). Pass an empty array (or omit every target field) to clear the selection.",
@@ -4150,6 +4752,17 @@
             "type": "object"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "type": "object"
@@ -4787,14 +5400,34 @@
         "exclude_rules": {
           "description": "Deny-list. Always wins over categories and include_rules.",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "missing_references",
+              "scene_prefab_health",
+              "dependencies",
+              "asmdef_audit",
+              "project_health",
+              "materials",
+              "animation_analysis",
+              "shader_analysis"
+            ]
           },
           "type": "array"
         },
         "include_rules": {
           "description": "Allow-list applied to the resolved rule set (same semantics as validate_edit).",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "missing_references",
+              "scene_prefab_health",
+              "dependencies",
+              "asmdef_audit",
+              "project_health",
+              "materials",
+              "animation_analysis",
+              "shader_analysis"
+            ]
           },
           "type": "array"
         },
@@ -4828,14 +5461,34 @@
         "exclude_rules": {
           "description": "Deny-list. Always wins over categories and include_rules.",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "missing_references",
+              "scene_prefab_health",
+              "dependencies",
+              "asmdef_audit",
+              "project_health",
+              "materials",
+              "animation_analysis",
+              "shader_analysis"
+            ]
           },
           "type": "array"
         },
         "include_rules": {
           "description": "Allow-list applied to the resolved rule set.",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "missing_references",
+              "scene_prefab_health",
+              "dependencies",
+              "asmdef_audit",
+              "project_health",
+              "materials",
+              "animation_analysis",
+              "shader_analysis"
+            ]
           },
           "type": "array"
         },
@@ -5616,8 +6269,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -5625,6 +6280,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -5672,8 +6338,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -5681,6 +6349,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -5712,8 +6391,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -5721,6 +6402,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -5767,8 +6459,10 @@
           "type": "boolean"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -5776,6 +6470,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -5817,8 +6522,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -5831,6 +6538,17 @@
           "default": "4,4,4",
           "description": "Volume size as 'x,y,z' (local space).",
           "type": "string"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -5882,8 +6600,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -5901,6 +6621,17 @@
           "default": 0,
           "description": "Link width (0 = point-to-point).",
           "type": "number"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -5947,8 +6678,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -5971,6 +6704,17 @@
           "default": 0.1,
           "description": "Stop this far from the destination.",
           "type": "number"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -6006,8 +6750,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -6015,6 +6761,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -6047,8 +6804,21 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "type": "object"
@@ -6060,7 +6830,7 @@
       "additionalProperties": false,
       "properties": {
         "component_type": {
-          "description": "Which NavMesh component to modify.",
+          "description": "Component type (full name preferred); alternative to component_instance_id.",
           "enum": [
             "NavMeshSurface",
             "NavMeshAgent",
@@ -6092,8 +6862,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -6101,6 +6873,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -6509,8 +7292,21 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "type": "object"
@@ -6576,8 +7372,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path.",
@@ -6585,6 +7383,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -6638,8 +7447,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path.",
@@ -6647,6 +7458,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -6704,8 +7526,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path.",
@@ -6713,6 +7537,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -6795,8 +7630,21 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "type": "object"
@@ -6848,8 +7696,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path.",
@@ -6857,6 +7707,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -7044,19 +7905,21 @@
     }
   },
   "unity_open_mcp_manage_tools": {
-    "description": "Manage which tool groups are visible in this session. Sessions start with two groups enabled: `core` and `gate-and-verify`; activate other groups on demand to add their tools to your ListTools surface (and deactivate to hide them). State is ephemeral and per-session — it resets to those two defaults when the MCP server restarts. Actions: `list_groups` (show every group with active flag, description, and tool roster), `activate` (enable a group — its tools become visible), `deactivate` (hide a group's tools), `reset` (restore the two default-on groups), `suggest` (recommend groups for a task intent and/or tags WITHOUT changing state — the read-only path), `activate_for` (activate the recommended groups for an intent and/or tags in one call). Prefer `activate_for(intent=\"…\")` over hand-picking group ids: state what you are about to do and the server brings the right groups online, including `gate-intelligence` when the task looks mutating or verify-related. Always call `list_groups` first to discover group ids when you need to browse or hand-pick. Group availability also depends on the Unity domain dependency being compiled in — see `unity_open_mcp_capabilities` for compiled-state availability per group. Some groups **auto-activate** when their Unity package is installed (e.g. `shadergraph` when `com.unity.shadergraph` is present) — these surface in `list_groups` with `activationSource: \"auto\"` and require no manual call; deactivate to hide them. Visibility note: activation is ADDITIVE (activating one group never drops another). After activate/activate_for the server emits `notifications/tools/list_changed`, but newly-activated tools only appear in your tool list if your client honors that notification and re-issues tools/list — if the tools do not show up, manually re-request the tool list, or route the tool by id through batch_execute (which works regardless of listChanged support).",
+    "description": "Manage tool visibility; invoke activated tools through a stable route; or use editor_search to build a human-facing Unity Search query (open_ui explicitly opts into focus). Sessions start with two groups enabled: `core` and `gate-and-verify`; activate other groups on demand to add their tools to your ListTools surface (and deactivate to hide them). State is ephemeral and per-session — it resets to those two defaults when the MCP server restarts. Actions: `list_groups` (show every group with active flag, description, and tool roster), `activate` (enable a group — its tools become visible), `deactivate` (hide a group's tools), `reset` (restore the two default-on groups), `suggest` (recommend groups for a task intent and/or tags WITHOUT changing state — the read-only path), `activate_for` (activate the recommended groups for an intent and/or tags in one call). Prefer `activate_for(intent=\"…\")` over hand-picking group ids: state what you are about to do and the server brings the right groups online, including `gate-intelligence` when the task looks mutating or verify-related. Always call `list_groups` first to discover group ids when you need to browse or hand-pick. Group availability also depends on the Unity domain dependency being compiled in — see `unity_open_mcp_capabilities` for compiled-state availability per group. Some groups **auto-activate** when their Unity package is installed (e.g. `shadergraph` when `com.unity.shadergraph` is present) — these surface in `list_groups` with `activationSource: \"auto\"` and require no manual call; deactivate to hide them. Visibility note: activation is ADDITIVE (activating one group never drops another). After activate/activate_for the server emits `notifications/tools/list_changed`, but newly-activated tools only appear in your tool list if your client honors that notification and re-issues tools/list — if the tools do not show up, manually re-request the tool list, or call manage_tools(action: invoke, tool_name, arguments), which uses the normal tool route even without listChanged support.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "action": {
-          "description": "list_groups: enumerate every group with active flag + tool roster. activate / deactivate: toggle one group (requires `group`). reset: restore the two default-on groups. suggest: recommend groups for an `intent` and/or `tags` WITHOUT changing state (read-only). activate_for: activate the recommended groups for an `intent` and/or `tags` in one call (idempotent; emits list_changed when the visible set changes).",
+          "description": "list_groups: enumerate every group with active flag + tool roster. activate / deactivate: toggle one group (requires `group`). reset: restore the two default-on groups. suggest: recommend groups for an `intent` and/or `tags` WITHOUT changing state (read-only). activate_for: activate the recommended groups for an `intent` and/or `tags` in one call, returning compact new schemas (idempotent; emits list_changed when the visible set changes).",
           "enum": [
             "list_groups",
             "activate",
             "deactivate",
             "reset",
             "suggest",
-            "activate_for"
+            "activate_for",
+            "invoke",
+            "editor_search"
           ]
         },
         "group": {
@@ -7073,6 +7936,27 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "search_text": {
+          "type": "string",
+          "description": "Literal asset name for editor_search, a human collaboration aid; use search_assets/find_references for structured data."
+        },
+        "asset_type": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.]*$"
+        },
+        "open_ui": {
+          "type": "boolean",
+          "description": "editor_search only: explicitly open/focus Unity Search. Omitted/false returns the query without UI interaction."
+        },
+        "tool_name": {
+          "type": "string",
+          "description": "Exact activated tool name for invoke; obtain its schema from capabilities(tool_name)."
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Arguments for invoke; validated against the target schema before its normal route, gates and lifecycle checks."
         }
       },
       "required": [
@@ -7152,8 +8036,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host's scene path.",
@@ -7186,6 +8072,17 @@
         "tangent_out": {
           "description": "Optional out-tangent as 'x,y,z'.",
           "type": "string"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -7221,8 +8118,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host's scene path.",
@@ -7251,6 +8150,17 @@
         "tangent_out": {
           "description": "Optional new out-tangent as 'x,y,z'.",
           "type": "string"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -7288,8 +8198,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host's scene path.",
@@ -7306,6 +8218,17 @@
         "tangent_mode": {
           "description": "Tangent mode. Valid: AutoSmooth, Broken, Mirrored, Linear, BezierSmooth.",
           "type": "string"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -7330,8 +8253,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "spline_index": {
           "default": 0,
@@ -7342,6 +8267,17 @@
           "default": 0.5,
           "description": "Normalized interpolation ratio (0..1, clamped).",
           "type": "number"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "type": "object"
@@ -7362,13 +8298,26 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "spline_index": {
           "default": 0,
           "description": "Spline index within the container (0 = primary).",
           "type": "integer"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "type": "object"
@@ -7401,8 +8350,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host's scene path.",
@@ -7410,6 +8361,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -7466,8 +8428,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -7485,6 +8449,17 @@
           "default": 30,
           "description": "Spot angle in degrees (Spot only).",
           "type": "number"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -7539,8 +8514,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -7577,6 +8554,17 @@
         "spot_angle": {
           "description": "Spot angle in degrees (Spot only).",
           "type": "number"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -7612,8 +8600,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -7621,6 +8611,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -7663,8 +8664,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the probe's scene path and (for custom mode) the output cubemap asset path.",
@@ -7676,6 +8679,11 @@
         "target_path": {
           "description": "Assets/-rooted .cubemap path (required for bake_mode='custom'). The cubemap asset is created if absent.",
           "type": "string"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
         }
       },
       "required": [
@@ -7699,8 +8707,21 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "type": "object"
@@ -7790,8 +8811,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the scene path that contains the host.",
@@ -7824,6 +8847,17 @@
           "default": 1,
           "description": "Volume 0-1.",
           "type": "number"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -7884,8 +8918,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path (and the mixer asset path when mixer_group_path is set). No whole-project fallback.",
@@ -7917,6 +8953,17 @@
         "volume": {
           "description": "Volume 0-1.",
           "type": "number"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -8031,8 +9078,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host's (or new root's) scene path.",
@@ -8063,6 +9112,17 @@
           "default": 0,
           "description": "Canvas sorting order (higher = drawn on top).",
           "type": "integer"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -8207,8 +9267,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Parent hierarchy path \"Root/Parent\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the parent scene path. No whole-project fallback.",
@@ -8220,6 +9282,17 @@
         "spacing": {
           "description": "Spacing as 'x,y' (GridLayoutGroup) or 'x' (HV groups — y ignored). Defaults to 0.",
           "type": "string"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -8235,7 +9308,7 @@
       "additionalProperties": false,
       "properties": {
         "component_type": {
-          "description": "uGUI component type name. One of Text | TMP_Text | Image | Button | Slider | Toggle | InputField | Canvas | CanvasScaler | GraphicRaycaster | HorizontalLayoutGroup | VerticalLayoutGroup | GridLayoutGroup | LayoutElement | Selectable.",
+          "description": "Component type (full name preferred); alternative to component_instance_id.",
           "type": "string"
         },
         "fields_json": {
@@ -8263,8 +9336,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path. No whole-project fallback.",
@@ -8272,6 +9347,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -8324,8 +9410,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path. No whole-project fallback.",
@@ -8354,6 +9442,17 @@
           "default": 1,
           "description": "Source weight (0-1). Clamped. Ignored when no source is provided.",
           "type": "number"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -8408,8 +9507,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path. No whole-project fallback.",
@@ -8417,6 +9518,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -8456,8 +9568,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path. No whole-project fallback.",
@@ -8477,6 +9591,17 @@
           "default": 0.5,
           "description": "Screen-relative transition height (0-1). Clamped.",
           "type": "number"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -8581,8 +9706,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host Terrain GameObject hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path. No whole-project fallback.",
@@ -8600,6 +9727,17 @@
           "default": 0,
           "description": "Start Y index in the heightmap for the region write.",
           "type": "integer"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -8654,8 +9792,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host Terrain GameObject hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path. When a new TerrainLayer asset is created (layer_path under Assets/ and a fresh layer), include the layer .terrainlayer asset path too. No whole-project fallback.",
@@ -8673,6 +9813,17 @@
           "default": 0,
           "description": "Start Y index in the alphamap for the region write.",
           "type": "integer"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -8742,8 +9893,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host Terrain GameObject hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path. No whole-project fallback.",
@@ -8760,6 +9913,17 @@
           "description": "Tree prototype index. When >= the terrain's current prototype count, a prototype is seeded from prototype_prefab_path.",
           "minimum": 0,
           "type": "integer"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -8814,8 +9978,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host Terrain GameObject hierarchy path \"Root/Child\".",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path. No whole-project fallback.",
@@ -8841,6 +10007,17 @@
         "top_path": {
           "description": "Top neighbor Terrain GameObject hierarchy path. Pass an empty value or omit to clear the side. The GameObject must carry a Terrain component.",
           "type": "string"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -9311,8 +10488,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path (used when instance_id is 0).",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path.",
@@ -9320,6 +10499,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -9366,8 +10556,10 @@
           "type": "number"
         },
         "path": {
-          "description": "Host hierarchy path.",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path.",
@@ -9375,6 +10567,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -9409,8 +10612,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path.",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path.",
@@ -9418,6 +10623,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -9453,8 +10669,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path.",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path.",
@@ -9462,6 +10680,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -9493,8 +10722,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Camera hierarchy path.",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path.",
@@ -9502,6 +10733,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -9713,8 +10955,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path.",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — host scene path + the asset path.",
@@ -9722,6 +10966,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -9845,8 +11100,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path.",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path.",
@@ -9873,6 +11130,17 @@
           "default": 0,
           "description": "Cell z coordinate.",
           "type": "integer"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -9904,8 +11172,10 @@
           "type": "string"
         },
         "path": {
-          "description": "Host hierarchy path.",
-          "type": "string"
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path"
         },
         "paths_hint": {
           "description": "Mutation scope — the host scene path.",
@@ -9938,6 +11208,17 @@
           "default": 0,
           "description": "Cell z plane.",
           "type": "integer"
+        },
+        "game_object_path": {
+          "type": "string",
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "x-wire-key": "path"
+        },
+        "target_path": {
+          "type": "string",
+          "deprecated": true,
+          "x-alias-for": "game_object_path",
+          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -10684,7 +11965,7 @@
     }
   },
   "unity_open_mcp_batch_execute": {
-    "description": "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — cuts agent↔Unity latency and token cost for multi-object setup (e.g. spawn N cubes + create materials + assign in one call). Each entry in `commands` carries a full tool id (`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group (always visible). Live-only — NOT headless `batchCapable`; there is no batch spawn fallback when the bridge is down.\n\nNOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". The two are independent axes; nestability is decided by the pre-flight refusals below.\n\nEvery step is schema/lifecycle preflighted before dispatch. All-read batches need no paths_hint, checkpoint, gate, or undo group. Mixed/mutating batches require the explicit union paths_hint. Safety: a mutating batch shares ONE gate cycle (one checkpoint → all steps → one validate/delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step errors are collected. Partial failure semantics: a successful step is NOT rolled back when a later step fails (same as Coplay). A partial batch (at least one step committed) propagates `mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its validate/delta on the committed work and waits for the asset/compile settle. Gate outcome describes validation independently of mutation.success; read `batch.results[]` for the breakdown and undo with a single `editor_undo` if needed. A total failure (no step committed) skips the validate/delta with gate.outcome: skipped and skippedReason: mutation_failed. Run `unity_open_mcp_validate_edit` on the touched paths to confirm health after a partial run.\n\nv1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. `batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package / upgrade, scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, settings_set_player, mutating execute_csharp / invoke_method / disruptive execute_menu) is refused up-front with a `batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its default Single mode replaces the active scene stack and can discard unsaved changes in open scenes). Script writes/deletes, undo/redo, play transitions, and non-preview fixes also require their top-level routes. Use those tools as single top-level calls instead.\n\nA step whose terminal result is produced by the SERVER rather than by the Editor dispatch is refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns `{status:\"started\", runId}` immediately and the server polls a results file to turn that into a real result, which only happens on the top-level route. Inside a batch nothing polls, so the step would be recorded `success` carrying the non-terminal \"started\" body and the run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
+    "description": "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — cuts agent↔Unity latency and token cost for multi-object setup (e.g. spawn N cubes + create materials + assign in one call). Each entry in `commands` carries a full tool id (`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group (always visible). Live-only — NOT headless `batchCapable`; there is no batch spawn fallback when the bridge is down.\n\nNOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". The two are independent axes; nestability is decided by the pre-flight refusals below.\n\nEvery step is schema/lifecycle preflighted before dispatch. All-read batches need no paths_hint, checkpoint, gate, or undo group. Mixed/mutating batches require the explicit union paths_hint. Safety: a mutating batch shares ONE gate cycle (one checkpoint → all steps → one validate/delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step errors are collected. Partial failure semantics: a successful step is NOT rolled back when a later step fails. A partial batch (at least one step committed) propagates `mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its validate/delta on the committed work and waits for the asset/compile settle. Gate outcome describes validation independently of mutation.success; read `batch.results[]` for the breakdown and undo with a single `editor_undo` if needed. A total failure (no step committed) skips the validate/delta with gate.outcome: skipped and skippedReason: mutation_failed. Run `unity_open_mcp_validate_edit` on the touched paths to confirm health after a partial run.\n\nv1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. `batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package / upgrade, scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, settings_set_player, mutating execute_csharp / invoke_method / disruptive execute_menu) is refused up-front with a `batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its default Single mode replaces the active scene stack and can discard unsaved changes in open scenes). Script writes/deletes, undo/redo, play transitions, and non-preview fixes also require their top-level routes. Use those tools as single top-level calls instead.\n\nA step whose terminal result is produced by the SERVER rather than by the Editor dispatch is refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns `{status:\"started\", runId}` immediately and the server polls a results file to turn that into a real result, which only happens on the top-level route. Inside a batch nothing polls, so the step would be recorded `success` carrying the non-terminal \"started\" body and the run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
     "inputSchema": {
       "type": "object",
       "required": [
@@ -10737,7 +12018,7 @@
         "parallel": {
           "type": "boolean",
           "default": false,
-          "description": "Accepted but ignored in v1 — Unity's API is main-thread, so execution is always sequential. The flag is kept for source compatibility with Coplay agents."
+          "description": "Accepted but ignored in v1 — Unity's API is main-thread, so execution is always sequential. The response reports that sequential execution was used."
         }
       },
       "additionalProperties": false
@@ -11104,64 +12385,6 @@
           "minimum": 1,
           "maximum": 100,
           "description": "Number of OnMouseDrag calls between from and to (action: drag). Capped at 100 to bound main-thread cost. Default 8."
-        }
-      },
-      "additionalProperties": false
-    }
-  },
-  "unity_open_mcp_upgrade": {
-    "description": "Preview or apply a coordinated update of the open Unity project to one trio version. Scans project and home-scoped MCP client configs, agent-facing prose/examples, and the bridge + verify UPM pins. Home configs are rewritten only when their UNITY_PROJECT_PATH belongs exclusively to the open project. `dry_run` defaults true and returns the exact per-file report without writing. With `dry_run:false`, config/prose files receive one-time `.bak` backups before rewriting; a Git-installed bridge and verify pair are then re-pinned atomically through Unity Package Manager, which may reload the Editor. Embedded/file bridge installs are preserved and reported while selected config/prose updates remain available. Omit `target_version` to resolve the latest published npm version explicitly for this call.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "target_version": {
-          "type": "string",
-          "pattern": "^\\d+\\.\\d+\\.\\d+$",
-          "description": "Target trio version (X.Y.Z). Omit to query the latest npm release."
-        },
-        "dry_run": {
-          "type": "boolean",
-          "default": true,
-          "description": "Preview only by default. Set false to write selected files and schedule UPM."
-        },
-        "update_upm": {
-          "type": "boolean",
-          "default": true,
-          "description": "Update the bridge + verify Git packages atomically when the bridge source is Git."
-        },
-        "update_project_configs": {
-          "type": "boolean",
-          "default": true,
-          "description": "Update MCP client configs found in this project or its repository ancestors."
-        },
-        "update_home_configs": {
-          "type": "boolean",
-          "default": true,
-          "description": "Update home-scoped configs only when the entry belongs exclusively to this project."
-        },
-        "update_prose": {
-          "type": "boolean",
-          "default": true,
-          "description": "Update allowlisted agent prose, installed core skills, and MCP config examples."
-        },
-        "paths_hint": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [
-            "Packages/manifest.json"
-          ],
-          "description": "Audit scope materialized automatically. The gate is off because this workflow mutates package/configuration pins rather than Unity assets; packages-lock.json is implicit."
-        },
-        "gate": {
-          "enum": [
-            "enforce",
-            "warn",
-            "off"
-          ],
-          "default": "off",
-          "description": "Defaults off: project-asset validation does not model external configs or UPM pins."
         }
       },
       "additionalProperties": false

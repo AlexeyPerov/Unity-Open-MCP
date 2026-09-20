@@ -387,7 +387,7 @@ namespace UnityOpenMcpBridge.MetaTools
             if (commands.Count > limit)
                 return ToolDispatchResult.Fail("batch_too_many_commands", $"Batch has {commands.Count} commands; the limit is {limit}.");
             var errors = new List<string>();
-            BatchSchemaValidator.Validate(body, BridgeBatchSchemas.ByTool["unity_open_mcp_batch_execute"], "batch", errors);
+            BatchSchemaValidator.ValidateRequest(body, BridgeBatchSchemas.ByTool["unity_open_mcp_batch_execute"], errors);
             string errorCode = errors.Count == 0 ? null : "batch_invalid_step";
             for (int i = 0; i < commands.Count; i++)
             {

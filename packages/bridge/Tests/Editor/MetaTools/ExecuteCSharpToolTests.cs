@@ -7,6 +7,22 @@ namespace UnityOpenMcpBridge.Tests
     public static class ExecuteCSharpToolTests
     {
         [Test]
+        public static void BareObjectUsesUnityAlias()
+        {
+            var result = ExecuteCSharpTool.Execute("{\"code\":\"return typeof(Object).FullName;\",\"read_only\":true}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            StringAssert.Contains("UnityEngine.Object", result.Output);
+        }
+
+        [Test]
+        public static void ExplicitObjectAliasWins()
+        {
+            var result = ExecuteCSharpTool.Execute("{\"code\":\"using Object = System.Object;\\nreturn typeof(Object).FullName;\",\"read_only\":true}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            StringAssert.Contains("System.Object", result.Output);
+        }
+
+        [Test]
         public static void Execute_MissingCode_ReturnsValidationError()
         {
             var result = ExecuteCSharpTool.Execute("{}");

@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+import { copySkillReferences } from "./copy-references.js";
 // Auto-generated agent skill builder.
 //
 // Reads project state from disk (Unity version, installed packages, key
@@ -493,6 +495,8 @@ export async function writeSkillToClients(
     }
     await ensureParentDir(abs);
     await writeFile(abs, content, "utf-8");
+    const template = resolveTemplateSkillPath() ?? fileURLToPath(new URL("./SKILL.md", import.meta.url));
+    await copySkillReferences(template, abs);
     results.push({
       client,
       relativePath: rel,
@@ -532,8 +536,7 @@ async function ensureParentDir(filePath: string): Promise<void> {
  * degrades to the standalone full-inventory output. Never throws.
  */
 export async function readTemplateWorkflow(): Promise<string | null> {
-  const templatePath = resolveTemplateSkillPath();
-  if (!templatePath) return null;
+  const templatePath = resolveTemplateSkillPath() ?? new URL("./SKILL.md", import.meta.url);
   try {
     const raw = await readFile(templatePath, "utf-8");
     return raw.endsWith("\n") ? raw : `${raw}\n`;

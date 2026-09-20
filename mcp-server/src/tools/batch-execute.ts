@@ -27,7 +27,7 @@ export const batchExecute = makeTool(
     "delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure " +
     "and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step " +
     "errors are collected. Partial failure semantics: a successful step is NOT rolled back when a " +
-    "later step fails (same as Coplay). A partial batch (at least one step committed) propagates " +
+    "later step fails. A partial batch (at least one step committed) propagates " +
     "`mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its " +
     "validate/delta on the committed work and waits for the asset/compile settle. Gate outcome describes " +
     "validation independently of mutation.success; read `batch.results[]` for the breakdown and undo " +
@@ -96,7 +96,7 @@ export const batchExecute = makeTool(
             default: false,
             description:
               "Accepted but ignored in v1 — Unity's API is main-thread, so execution is always " +
-              "sequential. The flag is kept for source compatibility with Coplay agents.",
+              "sequential. The response reports that sequential execution was used.",
           },
         },
   },

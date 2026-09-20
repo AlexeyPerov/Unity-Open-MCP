@@ -179,3 +179,39 @@ resurrect it even when its package is still installed (the deactivation is
 sticky for the session, cleared only by an explicit `activate` or by `reset`).
 Removing a package only drops a group that was auto-activated; a group
 reactivated by hand remains a manual session choice.
+
+## Exact schemas, filtered discovery, and stable invocation
+
+`unity_open_mcp_capabilities(tool_name: "unity_open_mcp_component_modify")`
+returns exactly one complete schema, lifecycle class, potential mutability,
+group, tags, availability, activation state, route policy, and minimal argument
+example. Unknown names return `unknown_tool`. The example uses illustrative
+locators: replace them with paths from your project before invocation.
+
+For browsing, combine `query` (case-insensitive name/description substring),
+`group`, `tag`, `available`, `active`, `route`, and `mutating`. Results sort by
+tool name and default to 20 per page; use `page_size` and `pagination.next_cursor`.
+`available: null` means the live inventory is unknown, and does not match either
+boolean filter. Local/offline-capable routes stay available without an Editor.
+Route policies describe possible routing, not a promise that a running Editor
+will permit a headless call. `mutating` is potential mutability: read-only
+arguments can narrow the actual execution contract.
+
+`activate_for` returns compact schemas for newly activated groups in `tools`;
+repeat activation is idempotent and returns no already-active tools. Clients
+that ignore `notifications/tools/list_changed` can call the always-visible
+`manage_tools(action: "invoke", tool_name: "…", arguments: {...})`. The target
+must be active. Its schema, normal live/local/offline routing, scope, gate,
+denial, and lifecycle checks all still apply. Recursive invocation of
+`manage_tools` is rejected. Use this for activated recovery tools instead of
+putting them in a live batch.
+
+## Human-facing Unity Search
+
+`manage_tools(action: "editor_search", search_text: "Player", asset_type: "Prefab")`
+returns `p: t:Prefab "Player"` and `opened: false` without contacting Unity or
+changing focus. `search_text` is a literal term; quotes, backslashes, and line
+breaks are sanitized. `asset_type` accepts a type name, not query operators.
+Only explicit `open_ui: true` opens/focuses Unity Search with that query, using
+the normal live C# route. This is a human collaboration aid; use `search_assets`
+and `find_references` for structured results. No raw YAML is returned.

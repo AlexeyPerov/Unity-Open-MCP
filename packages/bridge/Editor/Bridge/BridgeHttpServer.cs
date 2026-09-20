@@ -845,6 +845,18 @@ namespace UnityOpenMcpBridge
                 BridgeHttpResponse.SendJsonError(context, 413, "request_too_large", ex.Message);
                 return;
             }
+            if (BridgeBatchSchemas.ByTool.TryGetValue(toolName, out var requestSchema))
+            {
+                var errors = new List<string>();
+                BatchSchemaValidator.ValidateRequest(body, requestSchema, errors);
+                if (errors.Count > 0)
+                {
+                    BridgeHttpResponse.SendJsonError(context, 400, "invalid_arguments", string.Join("; ", errors));
+                    return;
+                }
+                var deprecations = BatchSchemaValidator.Deprecations(body, requestSchema);
+                if (deprecations.Count > 0) context.Response.Headers["X-Unity-Open-MCP-Deprecations"] = string.Join("; ", deprecations);
+            }
             var timeoutMs = BridgeRequestBody.ExtractTimeoutMs(body);
             var activity = BridgeActivityRecorder.CurrentActivity;
 
@@ -867,7 +879,7 @@ namespace UnityOpenMcpBridge
 
             if (DirectResponseTools.Contains(toolName))
             {
-                HandleDirectResponseTool(context, toolName, body, timeoutMs);
+                HandleDirectResponseTool(context, toolName, BridgeBatchSchemas.ByTool.TryGetValue(toolName, out var directSchema) ? BatchSchemaValidator.WireArguments(body, directSchema) : body, timeoutMs);
                 return;
             }
 
@@ -1302,6 +1314,8 @@ namespace UnityOpenMcpBridge
         // (which would re-run auth / queue / toggle / paths_hint enforcement).
         internal static ToolDispatchResult DispatchTool(string toolName, string body)
         {
+            if (BridgeBatchSchemas.ByTool.TryGetValue(toolName, out var wireSchema))
+                body = BatchSchemaValidator.WireArguments(body, wireSchema);
             return toolName switch
             {
                 "unity_open_mcp_execute_csharp" => ExecuteCSharpTool.Execute(body),

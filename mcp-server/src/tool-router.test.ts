@@ -453,16 +453,14 @@ test("route: pull_events drains queued events when live is up", async () => {
   assert.equal(body.started, true);
 });
 
-test("route: pull_events caps max_events at 1000", async () => {
+test("route: pull_events rejects max_events above 1000 before dispatch", async () => {
   const live = makeFakeLive({ available: true });
   const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
 
   const result = await router.route("unity_senses_pull_events", { max_events: 999999 });
   const body = parseBody(result);
-  assert.equal(result.isError, false);
-  // The fake yields an empty list; we only assert the call accepted the cap
-  // and returned a well-formed result (no overflow error).
-  assert.ok(Array.isArray(body.events));
+  assert.equal(result.isError, true);
+  assert.equal(errorCode(result), "invalid_arguments");
 });
 
 // ---------------------------------------------------------------------------
@@ -492,7 +490,7 @@ test("route: find_references requires asset_path or guid when offline", async ()
 
     const result = await router.route("unity_open_mcp_find_references", {});
     assert.equal(result.isError, true);
-    assert.equal(errorCode(result), "missing_parameter");
+    assert.equal(errorCode(result), "invalid_arguments");
   });
 });
 
@@ -501,7 +499,7 @@ test("route: find_references goes live when bridge is available", async () => {
     const live = makeFakeLive({ available: true });
     const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
 
-    await router.route("unity_open_mcp_find_references", { guid: "deadbeef" });
+    await router.route("unity_open_mcp_find_references", { guid: "deadbeefdeadbeefdeadbeefdeadbeef" });
     assert.equal(live.calls.length, 1);
     assert.equal(live.calls[0].tool, "unity_open_mcp_find_references");
   });
@@ -521,7 +519,7 @@ test("route: find_references tags _source=live when served by the bridge", async
   });
   const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
 
-  const result = await router.route("unity_open_mcp_find_references", { guid: "deadbeef" });
+  const result = await router.route("unity_open_mcp_find_references", { guid: "deadbeefdeadbeefdeadbeefdeadbeef" });
   assert.equal(live.calls.length, 1);
   assert.equal(parseBody(result)._source, "live");
   assert.equal(routeOf(result), "live");
@@ -595,7 +593,7 @@ test("route: non-batch tool routes to live and tags _route=live", async () => {
   const batch = makeFakeBatch();
   const router = makeRouter(live, batch, "/proj", makeFakeEventStream());
 
-  const result = await router.route("unity_open_mcp_invoke_method", { method: "Foo" });
+  const result = await router.route("unity_open_mcp_invoke_method", { type_name: "Example", method_name: "Foo" });
   assert.equal(live.calls.length, 1);
   assert.equal(batch.calls.length, 0);
   assert.equal(routeOf(result), "live");
@@ -872,7 +870,7 @@ test("route: verify tools always route to batch even when live is available", as
     });
     const router = makeRouter(live, batch, "/proj", makeFakeEventStream());
 
-    const result = await router.route(tool, {});
+    const result = await router.route(tool, tool.endsWith("regression_check") ? { baseline_path: "baseline.json" } : {});
     assert.equal(live.calls.length, 0, `${tool} must never hit the live bridge`);
     assert.equal(batch.calls.length, 1, `${tool} must always go to batch`);
     assert.equal(routeOf(result), "batch", `${tool} _route.route`);
@@ -978,7 +976,7 @@ test("route: read_asset local validation error carries route=local, not live", a
     const result = await router.route("unity_open_mcp_read_asset", {});
     const body = parseBody(result);
     assert.equal(result.isError, true);
-    assert.equal(errorCode(result), "missing_parameter");
+    assert.equal(errorCode(result), "invalid_arguments");
     assert.equal(body._source, "local");
     assert.equal(routeOf(result), "local");
     assert.equal(live.calls.length, 0);
@@ -1335,7 +1333,7 @@ test("route: manage_tools unknown action returns structured error", async () => 
     action: "bogus",
   });
   assert.equal(result.isError, true);
-  assert.equal(errorCode(result), "unknown_action");
+  assert.equal(errorCode(result), "invalid_arguments");
 });
 
 test("route: manage_tools does not hit the live bridge", async () => {
@@ -1786,7 +1784,7 @@ test("route: manage_tools unknown_action error lists the new actions", async () 
     action: "bogus",
   });
   assert.equal(result.isError, true);
-  assert.equal(errorCode(result), "unknown_action");
+  assert.equal(errorCode(result), "invalid_arguments");
   const body = parseBody(result);
   const msg = (body.error as { message: string }).message;
   assert.match(msg, /suggest/);
@@ -2618,7 +2616,7 @@ test("route: hub_install_editor missing version -> missing_parameter, local sour
     const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, hub);
     const result = await router.route("unity_open_mcp_hub_install_editor", {});
     assert.equal(result.isError, true);
-    assert.equal(errorCode(result), "missing_parameter");
+    assert.equal(errorCode(result), "invalid_arguments");
     assert.equal(parseBody(result)._source, "local");
     // Missing param short-circuits before the backend is touched.
     assert.equal(hub.calls.length, 0);
@@ -2685,7 +2683,7 @@ test("route: hub_set_install_path missing path -> missing_parameter", async () =
     const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, hub);
     const result = await router.route("unity_open_mcp_hub_set_install_path", {});
     assert.equal(result.isError, true);
-    assert.equal(errorCode(result), "missing_parameter");
+    assert.equal(errorCode(result), "invalid_arguments");
     assert.equal(hub.calls.length, 0);
     assert.equal(live.calls.length, 0);
   });
@@ -3905,7 +3903,7 @@ test("H2: live find_references default profile (no profile arg) preserves the fu
   const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
 
   const result = await router.route("unity_open_mcp_find_references", {
-    guid: "deadbeef",
+    guid: "deadbeefdeadbeefdeadbeefdeadbeef",
   });
   assert.equal(live.calls.length, 1);
   const body = parseBody(result);
@@ -3944,7 +3942,7 @@ test("H2: live find_references explicit compact profile drops referencedBy + der
   const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
 
   const result = await router.route("unity_open_mcp_find_references", {
-    guid: "deadbeef",
+    guid: "deadbeefdeadbeefdeadbeefdeadbeef",
     profile: "compact",
   });
   const body = parseBody(result);
@@ -3982,7 +3980,7 @@ test("H2: live find_references compact profile with object-form referencedBy doe
   const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
 
   const result = await router.route("unity_open_mcp_find_references", {
-    guid: "deadbeef",
+    guid: "deadbeefdeadbeefdeadbeefdeadbeef",
     profile: "compact",
   });
   const body = parseBody(result);
@@ -4015,7 +4013,7 @@ test("H2: live find_references balanced profile with paging keeps page + paginat
   const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
 
   const result = await router.route("unity_open_mcp_find_references", {
-    guid: "deadbeef",
+    guid: "deadbeefdeadbeefdeadbeefdeadbeef",
     profile: "balanced",
     page_size: 2,
   });
@@ -4054,7 +4052,7 @@ test("H2: live find_references balanced profile without paging keeps the full li
   const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
 
   const result = await router.route("unity_open_mcp_find_references", {
-    guid: "deadbeef",
+    guid: "deadbeefdeadbeefdeadbeefdeadbeef",
     profile: "balanced",
   });
   const body = parseBody(result);
@@ -4154,7 +4152,7 @@ test("H2: live find_references body that fails to parse passes through untouched
   const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
 
   const result = await router.route("unity_open_mcp_find_references", {
-    guid: "deadbeef",
+    guid: "deadbeefdeadbeefdeadbeefdeadbeef",
   });
   assert.equal(result.isError, true);
   // Body is the raw text — no _source / _route stamp on a non-JSON body.
@@ -4189,7 +4187,7 @@ test("H2: live find_references ERROR body still carries _source / _route stamps 
   const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
 
   const result = await router.route("unity_open_mcp_find_references", {
-    guid: "deadbeef",
+    guid: "deadbeefdeadbeefdeadbeefdeadbeef",
   });
   assert.equal(result.isError, true);
   const body = parseBody(result);
@@ -4598,4 +4596,56 @@ test("core project selectors use the selected project's endpoint instead of the 
     rmSync(path, { force: true });
     await rm(root, { recursive: true, force: true });
   }
+});
+
+
+test("route: stable invoke reaches activated tools without a list refresh", async () => {
+  const live = makeFakeLive({ available: true });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+  await router.route("unity_open_mcp_manage_tools", { action: "activate", group: "typed-editor" });
+  const result = await router.route("unity_open_mcp_manage_tools", { action: "invoke", tool_name: "unity_open_mcp_component_get", arguments: { game_object_path: "Main Camera", component_type: "UnityEngine.Transform" } });
+  assert.equal(result.isError, false);
+  assert.equal(live.calls.at(-1)?.tool, "unity_open_mcp_component_get");
+  assert.equal(live.calls.at(-1)?.args.path, "Main Camera");
+  assert.equal(live.calls.at(-1)?.args.type_name, "UnityEngine.Transform");
+  const before = live.calls.length;
+  const invalid = await router.route("unity_open_mcp_manage_tools", { action: "invoke", tool_name: "unity_open_mcp_component_modify", arguments: { modifications: [] } });
+  assert.equal(invalid.isError, true);
+  assert.equal(live.calls.length, before);
+});
+
+test("route: invoke refuses inactive targets and recursion; activation carries schemas", async () => {
+  const router = makeRouter(makeFakeLive(), makeFakeBatch(), "/proj", makeFakeEventStream());
+  for (const tool_name of ["unity_open_mcp_component_get", "unity_open_mcp_manage_tools", "invented"]) {
+    assert.equal(errorCode(await router.route("unity_open_mcp_manage_tools", { action: "invoke", tool_name })), "tool_not_active");
+  }
+  const result = parseBody(await router.route("unity_open_mcp_manage_tools", { action: "activate_for", tags: ["scene"] }));
+  assert.ok((result.tools as any[]).some(t => t.name === "unity_open_mcp_component_get" && t.inputSchema));
+  const again = parseBody(await router.route("unity_open_mcp_manage_tools", { action: "activate_for", tags: ["scene"] }));
+  assert.deepEqual(again.tools, []);
+});
+
+test("route: human Search builds query without touching the Editor by default", async () => {
+  const live = makeFakeLive({ available: true });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+  const result = parseBody(await router.route("unity_open_mcp_manage_tools", { action: "editor_search", search_text: "Player", asset_type: "Prefab" }));
+  assert.equal(result.query, 'p: t:Prefab "Player"');
+  assert.equal(result.opened, false);
+  assert.equal(live.calls.length, 0);
+  await router.route("unity_open_mcp_manage_tools", { action: "editor_search", search_text: "Player", open_ui: true });
+  assert.equal(live.calls.at(-1)?.tool, "unity_open_mcp_execute_csharp");
+  assert.equal(live.calls.at(-1)?.args.read_only, true);
+});
+
+test("route: activated compile recovery uses its top-level route through invoke", async () => {
+  const live = makeFakeLive({ available: true });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+  await router.route("unity_open_mcp_manage_tools", { action: "activate", group: "typed-editor" });
+  const result = await router.route("unity_open_mcp_manage_tools", {
+    action: "invoke", tool_name: "unity_open_mcp_recompile_scripts", arguments: { paths_hint: ["Assets/Probe.cs"] },
+  });
+  assert.equal(result.isError, false);
+  assert.equal(live.calls.at(-1)?.tool, "unity_open_mcp_recompile_scripts");
+  assert.deepEqual(live.calls.at(-1)?.args.paths_hint, ["Assets/Probe.cs"]);
+  assert.equal(live.calls.at(-1)?.args.gate, "enforce");
 });

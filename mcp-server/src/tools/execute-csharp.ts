@@ -4,7 +4,7 @@ import { GATE_PROP, PATHS_HINT_TYPE, IGNORE_SCENE_DIRTY_BASE, CONFIRM_BYPASS_BAS
 
 export const executeCsharp = makeTool(
   "unity_open_mcp_execute_csharp",
-  "Compile and run a C# snippet in the Editor (Roslyn). Primary escape hatch — " +
+  "Compile and run a C# snippet in the Editor (Roslyn). Object defaults to UnityEngine.Object via an injected alias; explicit caller Object aliases win. Primary escape hatch — " +
     "covers most Editor APIs without typed tools. The snippet compiles into its " +
     "OWN assembly, so it sees only the PUBLIC members of your project's " +
     "assemblies: an `internal` member (the natural visibility for a testable " +

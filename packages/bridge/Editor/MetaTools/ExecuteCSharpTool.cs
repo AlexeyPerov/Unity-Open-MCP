@@ -430,6 +430,9 @@ namespace UnityOpenMcpBridge.MetaTools
             foreach (var u in hoistedUsings)
                 if (seen.Add(u)) allUsings.Add(u);
 
+            if (!allUsings.Exists(u => System.Text.RegularExpressions.Regex.IsMatch(u, @"^Object\s*=")))
+                allUsings.Add("Object = UnityEngine.Object");
+
             var sb = new StringBuilder(cleanedBody.Length + allUsings.Count * 30 + 320);
             foreach (var u in allUsings)
                 sb.AppendLine($"using {u};");

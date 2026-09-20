@@ -7,11 +7,11 @@ export const componentModify = makeTool(
   "unity_open_mcp_component_modify",
   "Modify serialized fields on a Component by path via SerializedObject. Undo-recorded. " +
     "Mutating: runs the full gate path; `paths_hint` is the scene path that contains the host. " +
-    "`fields` is an array of {path, value, type?} patches where `path` is the SerializedProperty " +
+    "`fields` is an array of {property_path, value, type?} patches where `property_path` is the SerializedProperty " +
     "path (e.g. \"m_Color\", \"m_Mass\", \"m_Colors.Array.data[0]\"). Per-entry errors are " +
     "accumulated, so a single bad patch does not abort the batch. Use component_get first to " +
-    "discover valid paths and value types. Address the host by instance_id > path > name; " +
-    "identify the component by component_instance_id or type_name.",
+    "discover valid paths and value types. Address the host by one of instance_id, game_object_path, or name; " +
+    "identify the component by component_instance_id or component_type.",
   {
     required: ["fields", "paths_hint"],
         properties: {
@@ -43,7 +43,7 @@ export const componentModify = makeTool(
           fields: {
             type: "array",
             description:
-              "Serialized-property patches to apply in order. Each entry: { path: string, value: any, type?: \"name\" | \"int\" }. " +
+              "Serialized-property patches to apply in order. Each entry: { property_path: string, value: any, type?: \"name\" | \"int\" }. " +
               "value shape depends on the property's SerializedPropertyType — see component_get output. " +
               "For enum properties, set type=\"name\" to set by enum name (default is int index). " +
               "For object references, value is {\"path\": \"Assets/...\"} or {\"instance_id\": N} or null.",

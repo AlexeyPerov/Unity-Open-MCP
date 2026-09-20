@@ -1,7 +1,7 @@
 // Copy non-TypeScript assets the published package ships alongside dist/:
 //   - the canonical core skill (byte-for-byte, for `setup`)
 //   - the MCP wrapper template (for `setup --wrapper`)
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, cp } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,3 +22,5 @@ for (const asset of assets) {
   await mkdir(dirname(asset.destination), { recursive: true });
   await copyFile(asset.source, asset.destination);
 }
+
+await cp(join(packageRoot, "..", "skills", "unity-open-mcp", "references"), join(packageRoot, "dist", "skill", "references"), { recursive: true });

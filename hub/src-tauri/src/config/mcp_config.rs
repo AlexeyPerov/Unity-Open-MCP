@@ -1723,7 +1723,7 @@ fn build_skill_target(
     // markdown doc) so the plan answers the question without a separate
     // command. Missing source or read errors leave it `false`.
     let up_to_date = match (exists, source) {
-        (true, Some(src)) => matches_opt(src, &target_path).unwrap_or(false),
+        (true, Some(src)) => matches_opt(src, &target_path).unwrap_or(false) && skill_references_match(src, &target_path),
         _ => false,
     };
     SkillCopyTarget {
@@ -1757,6 +1757,40 @@ fn resolve_source_skill(
     } else {
         None
     }
+}
+
+fn skill_references_match(source_skill: &Path, target_skill: &Path) -> bool {
+    fn tree_matches(source: &Path, target: &Path) -> bool {
+        if !source.is_dir() { return true; }
+        let Ok(mut entries) = fs::read_dir(source) else { return false; };
+        entries.all(|entry| {
+            let Ok(entry) = entry else { return false; };
+            let Ok(kind) = entry.file_type() else { return false; };
+            let dest = target.join(entry.file_name());
+            if kind.is_dir() { tree_matches(&entry.path(), &dest) }
+            else if kind.is_file() { matches_opt(&entry.path(), &dest).unwrap_or(false) }
+            else { true }
+        })
+    }
+    tree_matches(&source_skill.parent().unwrap().join("references"), &target_skill.parent().unwrap().join("references"))
+}
+
+// Reference paths are discovered beneath the manifest-owned skill directory.
+fn copy_skill_references(source_skill: &Path, target_skill: &Path) -> std::io::Result<()> {
+    fn copy_tree(source: &Path, target: &Path) -> std::io::Result<()> {
+        if !source.is_dir() { return Ok(()); }
+        fs::create_dir_all(target)?;
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            let dest = target.join(entry.file_name());
+            // Never follow a reference symlink outside the skill tree.
+            if kind.is_dir() { copy_tree(&entry.path(), &dest)?; }
+            else if kind.is_file() { fs::copy(entry.path(), dest)?; }
+        }
+        Ok(())
+    }
+    copy_tree(&source_skill.parent().unwrap().join("references"), &target_skill.parent().unwrap().join("references"))
 }
 
 fn copy_skill_files_at(
@@ -1802,9 +1836,9 @@ fn copy_skill_files_at(
         // installed the same template), copying is a no-op and backing up
         // the target would overwrite the `.bak` from run 1 — which holds
         // the user's real customizations — with the template, destroying
-        // those notes permanently. The planner already computed
-        // `up_to_date` via a byte-for-byte `matches_opt` check.
-        if target.exists && !target.up_to_date {
+        // those notes permanently. Compare the entrypoint separately so a
+        // reference-only refresh does not replace the existing root backup.
+        if target.exists && !matches_opt(&source, &target_path).unwrap_or(false) {
             let backup = target_path.with_extension("md.bak");
             if let Err(e) = fs::copy(&target_path, &backup) {
                 return Err(SkillCopyError::new(
@@ -1827,6 +1861,8 @@ fn copy_skill_files_at(
                 ),
             ));
         }
+        copy_skill_references(&source, &target_path).map_err(|e|
+            SkillCopyError::new("writeFailed", format!("cannot copy skill references: {}", e)))?;
         let mut recorded = target.clone();
         recorded.exists = true;
         if target.exists {
@@ -2953,6 +2989,25 @@ mod tests {
             fs::read_to_string(&claude_target).unwrap(),
             "# unity-open-mcp\n\nToolkit content.\n"
         );
+    }
+
+    #[test]
+    fn copy_skill_files_includes_linked_references_for_every_target() {
+        let project = tempdir().unwrap();
+        let root = tempdir().unwrap();
+        make_fake_skill_manifest(root.path());
+        let folder = root.path().join("skills/unity-open-mcp");
+        write_text(&folder.join("SKILL.md"), "# Core\n");
+        write_text(&folder.join("references/workflow.md"), "# Workflow\n");
+        let result = copy_skill_files_at(&make_skill_params(project.path(), root.path(), McpClientId::Manual), true).unwrap();
+        for target in result.copied {
+            let path = PathBuf::from(target.target_path);
+            let reference = path.parent().unwrap().join("references/workflow.md");
+            assert_eq!(fs::read_to_string(&reference).unwrap(), "# Workflow\n");
+            fs::remove_file(reference).unwrap();
+        }
+        let plan = plan_skill_copy_at(&make_skill_params(project.path(), root.path(), McpClientId::Manual)).unwrap();
+        assert!(plan.targets.iter().all(|target| !target.up_to_date));
     }
 
     #[test]

@@ -22,7 +22,7 @@ import { makeTool } from "./schema-fragments.js";
 // recommendation (no invented groups) and points the caller at `list_groups`.
 export const manageTools = makeTool(
   "unity_open_mcp_manage_tools",
-  "Manage which tool groups are visible in this session. Sessions start " +
+  "Manage tool visibility; invoke activated tools through a stable route; or use editor_search to build a human-facing Unity Search query (open_ui explicitly opts into focus). Sessions start " +
     "with two groups enabled: `core` and `gate-and-verify`; activate other " +
     "groups on demand to add their tools to your ListTools surface (and " +
     "deactivate to hide them). State is ephemeral and per-session — it resets " +
@@ -50,13 +50,18 @@ export const manageTools = makeTool(
     "`notifications/tools/list_changed`, but newly-activated tools only " +
     "appear in your tool list if your client honors that notification and " +
     "re-issues tools/list — if the tools do not show up, manually re-request " +
-    "the tool list, or route the tool by id through batch_execute (which " +
-    "works regardless of listChanged support).",
+    "the tool list, or call manage_tools(action: invoke, tool_name, arguments), which uses " +
+    "the normal tool route even without listChanged support.",
   {
     required: ["action"],
         properties: {
+          search_text: { type: "string", description: "Literal asset name for editor_search, a human collaboration aid; use search_assets/find_references for structured data." },
+          asset_type: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_.]*$" },
+          open_ui: { type: "boolean", description: "editor_search only: explicitly open/focus Unity Search. Omitted/false returns the query without UI interaction." },
+          tool_name: { type: "string", description: "Exact activated tool name for invoke; obtain its schema from capabilities(tool_name)." },
+          arguments: { type: "object", additionalProperties: true, description: "Arguments for invoke; validated against the target schema before its normal route, gates and lifecycle checks." },
           action: {
-            enum: ["list_groups", "activate", "deactivate", "reset", "suggest", "activate_for"],
+            enum: ["list_groups", "activate", "deactivate", "reset", "suggest", "activate_for", "invoke", "editor_search"],
             description:
               "list_groups: enumerate every group with active flag + tool roster. " +
               "activate / deactivate: toggle one group (requires `group`). " +
@@ -64,7 +69,7 @@ export const manageTools = makeTool(
               "suggest: recommend groups for an `intent` and/or `tags` WITHOUT " +
               "changing state (read-only). " +
               "activate_for: activate the recommended groups for an `intent` " +
-              "and/or `tags` in one call (idempotent; emits list_changed when " +
+              "and/or `tags` in one call, returning compact new schemas (idempotent; emits list_changed when " +
               "the visible set changes).",
           },
           group: {

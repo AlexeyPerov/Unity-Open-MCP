@@ -1,3 +1,4 @@
+import { copySkillReferences } from "../skill/copy-references.js";
 import { readFile, stat, mkdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -183,6 +184,7 @@ export async function runSetupCommand(
         try {
           await mkdir(dirname(skillPath), { recursive: true });
           await writeFile(skillPath, skillBytes);
+          await copySkillReferences(opts.skillSourcePath ?? resolveBundledSkillPath()!, skillPath);
         } catch (error) {
           throw ioError(`Could not write skill to ${skillPath}`, error);
         }

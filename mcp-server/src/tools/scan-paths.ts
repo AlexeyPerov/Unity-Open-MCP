@@ -4,7 +4,7 @@ import { makeTool } from "./schema-fragments.js";
 export const scanPaths = makeTool(
   "unity_open_mcp_scan_paths",
   "Run one or more ported verify rules scoped to paths. For a single rule, pass categories: [\"missing_references\"]. " +
-    "Unknown rule IDs error with availableRules. Use include_rules / exclude_rules to filter the auto-selected set " +
+    "Valid rule IDs are enumerated in the schema; unknown IDs fail before dispatch. Use include_rules / exclude_rules to filter the auto-selected set " +
     "(exclude always wins; include narrows an explicit categories list, otherwise it is additive). " +
     "fail_on_severity defaults to the project setting verify.severityThreshold in .unity-open-mcp/settings.json. " +
     "Default (`profile: 'compact'`) returns passed + issue counts grouped by severity (no per-issue list); raise to " +
@@ -19,7 +19,7 @@ export const scanPaths = makeTool(
             type: "array",
             items: { type: "string" },
             description:
-              "Verify rule IDs; auto-selected from paths if omitted. Unknown IDs error with availableRules.",
+              "Verify rule IDs; auto-selected from paths if omitted. Valid IDs are enumerated below.",
           },
           include_rules: {
             type: "array",
@@ -38,7 +38,7 @@ export const scanPaths = makeTool(
             enum: ["compact", "balanced", "full"],
             default: "compact",
             description:
-              "Token-budget output profile (M22). 'compact' (default) = passed + issue counts grouped by severity " +
+              "Token-budget output profile. 'compact' (default) = passed + issue counts grouped by severity " +
               "(issues[] stripped; drill in with balanced/full). 'balanced'/'full' = the full issues list (paged when " +
               "page_size is set).",
           },
@@ -46,7 +46,7 @@ export const scanPaths = makeTool(
             type: "integer",
             minimum: 1,
             description:
-              "Page the issues list (M22 uniform paging; balanced/full). When set, the response carries a `pagination` block " +
+              "Page the issues list (uniform paging; balanced/full). When set, the response carries a `pagination` block " +
               "with a `next_cursor` to resume. Omit to receive the whole issues list in one response.",
           },
           cursor: {

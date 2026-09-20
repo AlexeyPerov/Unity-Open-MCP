@@ -14,6 +14,14 @@ export const agentCapabilities = makeTool(
     "actually need. The response echoes `profile` and a `profileHint` naming what was folded away.",
   {
     properties: {
+          tool_name: { type: "string", description: "Exact lookup: one full schema and its lifecycle, route, availability, tags and example." },
+          query: { type: "string" },
+          group: { type: "string" },
+          tag: { type: "string" },
+          available: { type: "boolean" },
+          active: { type: "boolean" },
+          route: { enum: ["local", "live", "batch", "offline", "offline-first", "compressible"] },
+          mutating: { type: "boolean" },
           project_path: { type: "string", description: "Explicit Unity project root for this read-only probe; overrides the configured project for this call." },
           kind: {
             enum: ["tools", "rules", "fixes"],

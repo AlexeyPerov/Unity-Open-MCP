@@ -705,3 +705,37 @@ modify project assets.
 - `mcp-server/src/capabilities/tool-groups.ts`
 - `mcp-server/src/tool-session-state.ts`
 - `mcp-server/src/cli/`
+
+## Locator and argument contract
+
+Prefer `asset_path` for the target asset, `game_object_path` for a hierarchy
+selector, `component_type` for a component type, and `property_path` for a
+serialized-property patch. Role-specific locators such as `parent_path`,
+`scene_path`, and asset-read subtree filters retain their distinct meanings.
+Get the exact tool schema before calling: no single locator is valid for every
+tool. For example, `component_modify` accepts:
+
+```json
+{
+  "game_object_path": "Main Camera",
+  "component_type": "UnityEngine.Transform",
+  "fields": [{ "property_path": "m_LocalPosition", "value": [0, 1, -10] }],
+  "paths_hint": ["Assets/Scenes/Main.unity"]
+}
+```
+
+Unambiguous historical aliases remain declared with `deprecated: true` and
+`x-alias-for`; MCP responses emit deprecation notes (direct HTTP exposes
+`X-Unity-Open-MCP-Deprecations`). Canonical keys map to existing handler keys
+through schema-owned `x-wire-key` metadata. Mixing aliases for one selector is
+rejected, as are multiple host selectors or a component ID alongside a type
+selector that would otherwise be ignored. Unknown keys, invalid types, enums and bounds fail before dispatch
+with `invalid_arguments`; a missing required argument may be reported by the
+MCP entrypoint as `missing_required_argument`. Batch preflight validates every
+nested command before step zero. Arbitrary patch values remain opaque.
+
+`scan_paths` enumerates valid rule IDs in `categories`, `include_rules`, and
+`exclude_rules`. The offline-only `offline_integrity` reporting category is
+not a selectable VerifyRunner rule and is excluded from those enums. C# snippets inject `using Object = UnityEngine.Object;` unless
+an explicit caller alias already exists. They still run in a separate assembly;
+internal-member access requires reflection or a suitable test assembly.

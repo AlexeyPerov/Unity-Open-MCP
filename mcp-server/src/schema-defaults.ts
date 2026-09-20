@@ -71,6 +71,7 @@ export function withSchemaDefaults(
   const out: Record<string, unknown> = { ...args };
   for (const [key, schema] of Object.entries(properties)) {
     if (key in out) continue;
+    if (Object.entries(properties).some(([alias, prop]) => alias in args && (prop as Record<string, unknown>)["x-alias-for"] === key)) continue;
     const def = supportedDefault(schema?.default);
     if (def !== undefined) out[key] = def;
   }

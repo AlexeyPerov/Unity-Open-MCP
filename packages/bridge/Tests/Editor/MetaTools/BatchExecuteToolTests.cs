@@ -39,6 +39,40 @@ namespace UnityOpenMcpBridge.Tests
         // -------------------------------------------------------------------
 
         [Test]
+        public void BatchOuterTransportTimeoutIsAccepted()
+        {
+            var result = BatchExecuteTool.Preflight("{\"commands\":[{\"tool\":\"unity_open_mcp_gameobject_find\",\"params\":{\"game_object_path\":\"Missing\"}}],\"timeout_ms\":30000}", out var mutating);
+            Assert.IsNull(result, result?.ErrorMessage);
+            Assert.IsFalse(mutating);
+        }
+
+        [Test]
+        public void CanonicalComponentSchemaMapsNestedPropertyWithoutChangingValue()
+        {
+            var schema = BridgeBatchSchemas.ByTool["unity_open_mcp_component_modify"];
+            const string body = "{\"game_object_path\":\"Main Camera\",\"component_type\":\"UnityEngine.Transform\",\"fields\":[{\"property_path\":\"m_LocalPosition\",\"value\":{\"path\":\"untouched\"}}],\"paths_hint\":[\"Assets/Main.unity\"]}";
+            var errors = new System.Collections.Generic.List<string>();
+            BatchSchemaValidator.ValidateRequest(body, schema, errors);
+            Assert.IsEmpty(errors);
+            var wire = BatchSchemaValidator.WireArguments(body, schema);
+            StringAssert.Contains("\"path\":\"Main Camera\"", wire);
+            StringAssert.Contains("\"type_name\":\"UnityEngine.Transform\"", wire);
+            StringAssert.Contains("\"path\":\"m_LocalPosition\"", wire);
+            StringAssert.Contains("\"value\":{\"path\":\"untouched\"}", wire);
+        }
+
+        [Test]
+        public void AliasConflictAndUnknownKeyRejectedBeforeDispatch()
+        {
+            var schema = BridgeBatchSchemas.ByTool["unity_open_mcp_gameobject_find"];
+            var errors = new System.Collections.Generic.List<string>();
+            BatchSchemaValidator.ValidateRequest("{\"path\":\"A\",\"game_object_path\":\"B\",\"typo\":true}", schema, errors);
+            Assert.GreaterOrEqual(errors.Count, 2);
+            StringAssert.Contains("game_object_path", string.Join(";", errors));
+            Assert.IsNotEmpty(BatchSchemaValidator.Deprecations("{\"path\":\"A\"}", schema));
+        }
+
+        [Test]
         public void Execute_MissingCommands_ReturnsMissingParameter()
         {
             var result = BatchExecuteTool.Execute("{}");

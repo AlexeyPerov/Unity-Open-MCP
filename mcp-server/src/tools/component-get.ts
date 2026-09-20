@@ -11,8 +11,8 @@ export const componentGet = makeTool(
     "field's path (SerializedProperty path), type, and current value so an agent can plan a " +
     "component_modify without trial-and-error. Use property_path to drill into one subtree; use " +
     "profile=\"balanced\" / \"full\" or page_size + cursor to expand without unbounded dumps. " +
-    "Address the host by instance_id > path > name; identify the component by instance_id " +
-    "(specific instance) or type_name (full name preferred, class-name fallback).",
+    "Address the host by one of instance_id, game_object_path, or name; identify the component by component_instance_id " +
+    "(specific instance) or component_type (full name preferred, class-name fallback).",
   {
     properties: {
           instance_id: {

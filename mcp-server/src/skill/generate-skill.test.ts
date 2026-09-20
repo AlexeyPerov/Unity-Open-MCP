@@ -598,3 +598,19 @@ test("generateSkill with includeWorkflow=false omits template prose", async () =
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("installed skill references resolve for every manifest client", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "uomcp-skill-refs-"));
+  try {
+    const { readFile: read } = await import("node:fs/promises");
+    const { loadClientPathsManifest } = await import("./client-paths.js");
+    const clients = Object.keys(loadClientPathsManifest().clients);
+    const targets = await writeSkillToClients(dir, "# core", clients);
+    for (const target of targets) {
+      for (const name of ["discovery-and-groups", "compile-and-safe-mode", "routing-and-lifecycle", "batch-and-gates", "yaml-and-offline-work", "senses-and-tests"]) {
+        const content = await read(join(target.absolutePath, "..", "references", `${name}.md`), "utf8");
+        assert.ok(content.length > 0, `${target.client}/${name}`);
+      }
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

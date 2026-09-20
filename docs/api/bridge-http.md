@@ -172,3 +172,17 @@ independently of `mutation.success`. Existing delta and next-step fields remain.
 `effectiveReadOnly` is additive response metadata; audit records also include it
 and `skippedReason`. `request_rejected`, `gate_off`, `no_scope`, `read_only`, and
 `play_mode` identify other skip causes.
+
+### Published argument schemas
+
+Requests for shipped tools are validated against the generated MCP schemas
+before dispatch. Unknown keys, selector conflicts, invalid types, bounds and
+enums return HTTP 400 with `invalid_arguments`. Dispatcher-owned transport
+fields remain valid at the outer request boundary; nested batch commands keep
+their stricter scope/lifecycle preflight.
+
+Canonical locator keys and their declared deprecated aliases map structurally
+to handler arguments, including component patch `property_path`. Arbitrary
+patch values are not rewritten. Direct HTTP alias use is reported in the
+`X-Unity-Open-MCP-Deprecations` response header. See the
+[locator contract](mcp-tools.md#locator-and-argument-contract) for examples.

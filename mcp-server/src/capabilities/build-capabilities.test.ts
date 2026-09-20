@@ -1238,3 +1238,13 @@ test("buildCapabilities walks the rules/fixes catalog ONCE for counts (single-pa
   assert.equal(ruleIterations, 1, "rules catalog must be iterated exactly once for counts");
   assert.equal(fixIterations, 1, "fixes catalog must be iterated exactly once for counts");
 });
+
+test("exact discovery preserves the catalog lifecycle and group vocabulary", async () => {
+  const { discoverTools } = await import("./discovery.js");
+  const { ALL_TOOLS } = await import("../tools/index.js");
+  const { ToolSessionState } = await import("../tool-session-state.js");
+  const result = discoverTools(ALL_TOOLS, new Set(), new ToolSessionState(), undefined, { tool_name: "unity_open_mcp_recompile_scripts" });
+  assert.equal(result.tools[0].lifecycle, "compile-reload");
+  assert.equal(result.tools[0].group, "typed-editor");
+  assert.equal(result.tools[0].mutating, true);
+});

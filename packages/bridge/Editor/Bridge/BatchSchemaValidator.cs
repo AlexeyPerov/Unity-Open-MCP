@@ -54,6 +54,15 @@ namespace UnityOpenMcpBridge
             if (type == "object" || Raw(schema, "properties") != null)
             {
                 var properties = Raw(schema, "properties") ?? "{}";
+                if (Raw(properties, "game_object_path") != null)
+                {
+                    var selectors = new List<string>();
+                    foreach (var selector in new[] { "instance_id", "game_object_path", "path", "target_path", "name" })
+                        if (Raw(properties, selector) != null && Supplied(value, selector)) selectors.Add(selector);
+                    if (selectors.Count > 1) errors.Add(path + ": supply only one GameObject selector (prefer game_object_path); ignored keys: " + string.Join(", ", selectors));
+                    if (Supplied(value, "component_instance_id") && (Supplied(value, "component_type") || Supplied(value, "type_name")))
+                        errors.Add(path + ": component_instance_id and component_type are alternatives");
+                }
                 foreach (var key in JsonBody.GetStringArray(JsonBody.TopLevelField(schema, "required"), "required") ?? Array.Empty<string>())
                 {
                     if (root && (key == "paths_hint" || key == "gate")) continue;
@@ -62,8 +71,15 @@ namespace UnityOpenMcpBridge
                 foreach (var key in JsonBody.GetObjectKeys(value) ?? new List<string>())
                 {
                     var child = Raw(properties, key);
-                    if (child == null && Raw(schema, "additionalProperties") == "false") errors.Add(path + "." + key + " is unknown");
-                    else if (child != null) Validate(Raw(value, key), child, path + "." + key, errors);
+                    if (child == null && Raw(schema, "additionalProperties") == "false") errors.Add(path + "." + key + " is unknown; allowed canonical keys: " + string.Join(", ", JsonBody.GetObjectKeys(properties)));
+                    else if (child != null) {
+                        var canonical = Str(child, "x-alias-for");
+                        if (canonical != null)
+                            foreach (var other in JsonBody.GetObjectKeys(value) ?? new List<string>())
+                                if (other != key && (other == canonical || Str(Raw(properties, other) ?? "{}", "x-alias-for") == canonical))
+                                { errors.Add(path + "." + key + " conflicts with another selector; use only " + canonical); break; }
+                        Validate(Raw(value, key), child, path + "." + key, errors);
+                    }
                 }
             }
             if (type == "array")
@@ -87,6 +103,67 @@ namespace UnityOpenMcpBridge
                 if (double.TryParse(Raw(schema, "exclusiveMaximum"), NumberStyles.Float, CultureInfo.InvariantCulture, out var high) && numeric >= high)
                     errors.Add(path + " violates exclusiveMaximum");
             }
+        }
+
+        private static bool Supplied(string body, string key)
+        {
+            var raw = Raw(body, key);
+            return raw != null && raw != "null" && raw != "0" && raw != "\"0\"" && raw != "\"\"";
+        }
+
+        internal static void ValidateRequest(string body, string schema, List<string> errors)
+        {
+            if (!BridgeJson.IsValidJsonObject(body)) { errors.Add("args must be valid JSON"); return; }
+            // The HTTP dispatcher consumes these keys even when a tool has no parameters.
+            var properties = Raw(schema, "properties") ?? "{}";
+            var fields = new List<string>();
+            foreach (var key in JsonBody.GetObjectKeys(body) ?? new List<string>())
+            {
+                if (Raw(properties, key) == null && (key == "timeout_ms" || key == "gate" || key == "ignore_scene_dirty" || key == "confirm_bypass")) continue;
+                fields.Add(BridgeJson.EscapeString(key) + ":" + Raw(body, key));
+            }
+            Validate("{" + string.Join(",", fields) + "}", schema, "args", errors);
+        }
+
+        internal static List<string> Deprecations(string body, string schema)
+        {
+            var notes = new List<string>();
+            var properties = Raw(schema, "properties") ?? "{}";
+            foreach (var key in JsonBody.GetObjectKeys(body) ?? new List<string>())
+            {
+                var property = Raw(properties, key) ?? "{}";
+                var canonical = Str(property, "x-alias-for");
+                if (canonical != null) notes.Add(key + " is deprecated; use " + canonical);
+                var value = Raw(body, key);
+                var items = Raw(property, "items");
+                if (items != null && value != null && value.TrimStart().StartsWith("["))
+                    foreach (var item in JsonBody.GetArrayRawValues(value)) notes.AddRange(Deprecations(item, items));
+            }
+            var commands = Raw(body, "commands");
+            if (commands != null && commands.TrimStart().StartsWith("["))
+                foreach (var command in JsonBody.GetArrayRawValues(commands))
+                    if (BridgeBatchSchemas.ByTool.TryGetValue(Str(command, "tool") ?? "", out var nestedSchema))
+                        notes.AddRange(Deprecations(Raw(command, "params") ?? "{}", nestedSchema));
+            return notes;
+        }
+
+        // Schema-owned aliases are normalized structurally: patch values are never rewritten.
+        internal static string WireArguments(string value, string schema)
+        {
+            var properties = Raw(schema, "properties");
+            if (value == null) return "null";
+            if (value.TrimStart().StartsWith("[") && Raw(schema, "items") != null)
+                return "[" + string.Join(",", JsonBody.GetArrayRawValues(value).ConvertAll(v => WireArguments(v, Raw(schema, "items")))) + "]";
+            if (properties == null || !value.TrimStart().StartsWith("{")) return value;
+            var fields = new List<string>();
+            foreach (var key in JsonBody.GetObjectKeys(value) ?? new List<string>())
+            {
+                var property = Raw(properties, key) ?? "{}";
+                var canonical = Str(property, "x-alias-for");
+                var target = Str(property, "x-wire-key") ?? (canonical == null ? key : Str(Raw(properties, canonical) ?? "{}", "x-wire-key") ?? canonical);
+                fields.Add(BridgeJson.EscapeString(target) + ":" + WireArguments(Raw(value, key), property));
+            }
+            return "{" + string.Join(",", fields) + "}";
         }
 
         private static void Bound(double value, string schema, string min, string max, string path, List<string> errors)
