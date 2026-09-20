@@ -60,6 +60,7 @@ import { bridgeStatus } from "./bridge-status.js";
 // visibility). Server-only meta-tool; routes local, always visible regardless
 // of which groups the current session has activated.
 import { manageTools } from "./manage-tools.js";
+import { jobs } from "./jobs.js";
 import { projectCommands } from "./project-commands.js";
 // M16 Plan 1 — typed project & asset management tools.
 import { assetsCreateFolder } from "./assets-create-folder.js";
@@ -603,6 +604,7 @@ export const BRIDGE_ADMIN_TOOLS: Tool[] = [bridgeStatus];
 export const M18_PLAN2_TOOLS: Tool[] = [manageTools];
 
 export const PROJECT_COMMAND_TOOLS: Tool[] = [projectCommands];
+export const JOB_TOOLS: Tool[] = [jobs];
 
 // M16 Plan 1 — Project & Asset Management typed tools. Mutating members run
 // the full gate path with `paths_hint`; read-only members (shader reads,
@@ -1156,6 +1158,7 @@ export const M26_PLAN2_HUB_TOOLS: Tool[] = [
 
 export const ALL_TOOLS: Tool[] = [
   ...PROJECT_COMMAND_TOOLS,
+  ...JOB_TOOLS,
   ...M2_TOOLS,
   ...M2_5_TOOLS,
   ...M3_TOOLS,

@@ -82,6 +82,7 @@ function parseGroups() {
 // ---------------------------------------------------------------------------
 
 const LOCAL_PINNED = new Set([
+  "unity_open_mcp_jobs",
   "unity_open_mcp_capabilities", "unity_open_mcp_list_rules", "unity_open_mcp_generate_skill",
   "unity_open_mcp_manage_tools", "unity_open_mcp_bridge_status", "unity_senses_pull_events",
   "unity_open_mcp_hub_list_editors", "unity_open_mcp_hub_available_releases",

@@ -260,6 +260,7 @@ test("no tool file inlines the canonical gate enum literal (all use ...GATE_PROP
  *    is stripped from the start POST (see LiveClient.handleRunTests).
  */
 const NON_TRANSPORT_TIMEOUT_TOOLS = new Set([
+  "unity_open_mcp_jobs", // Local bounded observation, not a bridge POST timeout.
   "unity_open_mcp_compile_check",
   "unity_senses_run_tests",
 ]);

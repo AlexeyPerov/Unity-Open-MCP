@@ -1,3 +1,6 @@
+import { JobManager, JobManagerError, type JobOwner } from "./jobs/job-manager.js";
+import { handleJobs } from "./jobs/handler.js";
+import { PROCESS_AGENT_ID } from "./agent-identity.js";
 import { buildEditorSearch } from "./editor-search.js";
 import { withSchemaDefaults } from "./schema-defaults.js";
 import { validateSchema, wireArguments } from "./tool-contract.js";
@@ -698,6 +701,22 @@ function bridgeStatusRecoveryHint(
 }
 
 export class ToolRouter implements Router {
+  private jobManager?: JobManager;
+  get jobs(): JobManager { return this.jobManager ??= new JobManager(); }
+  closeJobs(): void { this.jobManager?.close(); }
+
+  async routeJobs(args: Record<string, unknown>, identity?: { agent: string; port?: number }): Promise<CallToolResult> {
+    const definition = ALL_TOOLS.find(t => t.name === "unity_open_mcp_jobs")!;
+    const errors = validateSchema(args, definition.inputSchema);
+    if (errors.length) return localError("invalid_arguments", errors.join("; "));
+    const owner: JobOwner = { project: this.projectPath || "default", agent: identity?.agent ?? PROCESS_AGENT_ID,
+      ...(identity?.port === undefined ? {} : { port: identity.port }) };
+    try { return sourceResult(await handleJobs(this.jobs, owner, args) as Record<string, unknown>, "local"); }
+    catch (error) {
+      return localError(error instanceof JobManagerError ? error.code : "invalid_arguments", error instanceof Error ? error.message : String(error));
+    }
+  }
+
   private readonly modelCache = new AssetModelCache();
 
   /**
@@ -725,6 +744,7 @@ export class ToolRouter implements Router {
       ["unity_open_mcp_generate_skill", (_l, a) => this.routeGenerateSkill(a)],
       ["unity_open_mcp_manage_tools", (l, a) => this.routeManageTools(a, l)],
       ["unity_open_mcp_project_commands", (l, a) => this.routeProjectCommands(a, l)],
+      ["unity_open_mcp_jobs", (_l, a) => this.routeJobs(a)],
       ["unity_open_mcp_bridge_status", (l, a) => this.routeBridgeStatus(a, l)],
       // M31 Plan 3 — Editor fd-exhaustion operator surfaces. restart_editor
       // is the reactive kill half (acts AFTER the Editor is hung);
@@ -838,7 +858,7 @@ export class ToolRouter implements Router {
   }
 
   private async routeUnchecked(live: LiveClient, toolName: string, args: Record<string, unknown>): Promise<CallToolResult> {
-    const localProbe = ["unity_open_mcp_project_commands", "unity_open_mcp_read_compile_errors", "unity_open_mcp_bridge_status", "unity_open_mcp_capabilities",
+    const localProbe = ["unity_open_mcp_jobs", "unity_open_mcp_project_commands", "unity_open_mcp_read_compile_errors", "unity_open_mcp_bridge_status", "unity_open_mcp_capabilities",
       "unity_open_mcp_restart_editor", "unity_open_mcp_resource_pressure", "unity_open_mcp_manage_tools",
       "unity_open_mcp_list_assets", "unity_open_mcp_list_rules", "unity_open_mcp_generate_skill", "unity_senses_pull_events"].includes(toolName);
     if (!localProbe && this.projectPath && classifyInstance(readInstanceLock(this.projectPath)) === "reloading") {

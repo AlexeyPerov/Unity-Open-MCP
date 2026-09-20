@@ -23,6 +23,7 @@ definitions live in `mcp-server/src/tools/`.
 | [CLI and automation](cli-automation.md) | CLI commands, options, JSON output, and links to canonical CI behavior. |
 | [CI templates](../ci/README.md) | Pipeline shape, CLI exit codes, baselines, and provider templates. |
 | [Input simulation](input-simulation.md) | Pointer delivery, device events, frame stepping, and supported input boundaries. |
+| [Asynchronous jobs](jobs.md) | Job lifecycle, observation, idempotency, cancellation, retention and adapter contracts. |
 | [MCP resources](resources.md) | Resource URIs, payloads, and resource routing. |
 
 ## Tool families

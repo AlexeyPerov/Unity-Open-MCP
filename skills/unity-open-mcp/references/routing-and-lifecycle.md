@@ -35,3 +35,13 @@ Treat `capabilities.routePolicy` + `batchCapable` as source of truth. `batchCapa
 
 
 Snippets import `Object = UnityEngine.Object` automatically unless the caller supplies an Object alias. Snippets run in a separate assembly and can access public APIs. Use explicit reflection for inspection of internals; assembly-access bypass is not supported.
+
+## Session-owned jobs
+
+`unity_open_mcp_jobs` stays local and visible while Unity reloads or disconnects.
+Use it only when an operation has an explicit job adapter; declarations alone do
+not enable a job. `wait` observes for at most 30 seconds without owning execution.
+A lost connection is not proof of failure: `orphaned` requires operation-specific
+evidence before any retry. `cancel_requested` is not cancellation confirmation.
+Terminal records and idempotency keys survive for 30 minutes in the same server
+session, but not across a server restart. Keep routing and agent metadata stable.

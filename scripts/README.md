@@ -111,3 +111,7 @@ and exact description over stdio. Use the demo fixture for a non-empty catalog.
 The S3 project-command check lists and describes the live catalog. When the known
 read-only demo fixture is present, it also invokes that fixture and checks missing
 argument rejection in the same stdio session without refreshing the tool list.
+
+The S0 `jobs_list` probe checks the local job surface without creating work.
+Use `node scripts/mcp-full-test.mjs --only jobs_list` for that read-only probe.
+Job state-machine and adapter tests run in the MCP package unit suite.

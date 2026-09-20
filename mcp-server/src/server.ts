@@ -179,6 +179,7 @@ export function createServer(
     sessionState,
     notifyToolListChanged,
   );
+  server.onclose = () => router.closeJobs();
   const resourceRouter = new ResourceRouter({
     live: liveClient,
     pingCache,
@@ -234,6 +235,8 @@ export function createServer(
           });
         }
       }
+      // Job identity is per request, even when the bridge port is unchanged.
+      if (name === "unity_open_mcp_jobs") return router.routeJobs(routedArgs, { agent: routing.agentId, port: routing.portOverride });
       // No port override → default router (the common single-bridge case).
       if (routing.portOverride === undefined) {
         return router.route(name, routedArgs);

@@ -123,6 +123,7 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_inputsystem_controlscheme_add", 316 },
             { "unity_open_mcp_inputsystem_get", 161 },
             { "unity_open_mcp_invoke_method", 839 },
+            { "unity_open_mcp_jobs", 305 },
             { "unity_open_mcp_light_add", 507 },
             { "unity_open_mcp_light_modify", 445 },
             { "unity_open_mcp_light_set", 526 },

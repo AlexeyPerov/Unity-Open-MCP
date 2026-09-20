@@ -44,3 +44,18 @@ options stay outside `args`. Check `mutation.output.result` and the normal gate 
 lifecycle envelope. After timeout or reload, inspect post-state before retrying.
 Async/cancellable declarations do not yet start jobs; do not bypass unavailable
 commands with reflection or nest project commands in `batch_execute`.
+
+## Asynchronous job observation
+
+Use the always-visible `unity_open_mcp_jobs` for explicitly supported asynchronous
+operations. `start` requires `tool_or_command`, adapter `args`, and an
+`idempotency_key` for mutations. The initial surface has no production adapters;
+async catalog declarations alone do not enable jobs. An unsupported target must
+not be retried as an arbitrary background tool.
+
+Keep the job id and the same project/port/agent identity for `status`, `wait`,
+`cancel` and `list`. A wait timeout leaves execution running. Reuse the same key
+and arguments after a start response is lost. Cancellation is cooperative and may
+be unsupported. Treat `orphaned` as an unknown outcome; inspect operation evidence
+before retrying. Records and keys expire 30 minutes after completion and are lost
+on server restart. See [Routing and lifecycle](references/routing-and-lifecycle.md).

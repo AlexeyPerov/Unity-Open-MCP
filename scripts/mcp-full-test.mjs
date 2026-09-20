@@ -182,6 +182,7 @@ function buildSuite() {
   // BAND A — lifecycle & meta
   // =====================================================================
   s("ping", "A", "unity_open_mcp_ping");
+  s("jobs_list", "A", "unity_open_mcp_jobs", { action: "list", limit: 1 });
   s("project_commands_list", "A", "unity_open_mcp_project_commands", { action: "list", limit: 1 });
   s("editor_status", "A", "unity_open_mcp_editor_status");
   s("bridge_status", "A", "unity_open_mcp_bridge_status");
@@ -1042,7 +1043,7 @@ function main() {
   // click Don't Save manually once.
   console.log("--- preflight ---");
   // Catalog-only reachability is read-only and does not need scene cleanup.
-  const catalogOnly = selected.every(step => step.tool === "unity_open_mcp_project_commands");
+  const catalogOnly = selected.every(step => ["unity_open_mcp_project_commands", "unity_open_mcp_jobs"].includes(step.tool));
   if (!catalogOnly) {
     dismissBlockingModals(runEnv);
     closeInitTestScenes(opts.project, runEnv);
