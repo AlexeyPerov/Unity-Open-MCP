@@ -75,3 +75,11 @@ MCP server owns offline log fallback, provenance labeling, bounded reload re-pro
 and headless output classification. It never starts headless Unity when a live
 Editor owns the project. Read-only project selectors on `capabilities` and
 `bridge_status` resolve their own project lock, port, and authentication per call.
+
+### Project command catalog boundary
+
+The bridge reflection scan owns project command declarations and generated
+parameter schemas. The MCP server exposes a stable always-visible list/describe
+meta-tool, using a bounded authenticated live catalog GET without caching or
+batch fallback. Project entries remain outside built-in dispatch and session
+groups. See [Project command catalog](api/project-commands.md).

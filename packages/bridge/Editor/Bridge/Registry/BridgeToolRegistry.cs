@@ -12,21 +12,14 @@ namespace UnityOpenMcpBridge
     {
         private static readonly Dictionary<string, BridgeToolEntry> _tools = new();
 
-        // M18 Plan 6 / T18.6.2 — the tool ids that were rejected during the
-        // last Scan() because an earlier assembly had already registered them
-        // (e.g. a legacy extension pack + the embedded bridge copy both define
-        // `unity_open_mcp_navigation_surface_add`). Each colliding name is
-        // recorded once regardless of how many duplicates were seen. Exposed
-        // via DuplicateCount / DuplicateToolNames so the duplicate-registration
-        // guard is observable to EditMode tests + diagnostics without relying
-        // on Unity's log capture. The first-wins LogWarning below stays.
+        // Colliding IDs are removed from dispatch, never resolved by assembly order.
         private static readonly List<string> _duplicateToolNames = new();
 
         public static int Count => _tools.Count;
 
         /// <summary>Number of distinct tool ids that collided across assemblies
         /// during the last <see cref="Scan"/>. Non-zero means a duplicate
-        /// registration was detected and silently kept first-registered.</summary>
+        /// registration was detected and all candidates were rejected.</summary>
         public static int DuplicateCount => _duplicateToolNames.Count;
 
         // Production scan entry point. Excludes test assemblies (anything
@@ -48,12 +41,13 @@ namespace UnityOpenMcpBridge
             _tools.Clear();
             _duplicateToolNames.Clear();
 
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            var projectCommands = new List<ProjectCommandCatalog.Entry>();
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies().OrderBy(a => a.FullName, StringComparer.Ordinal))
             {
                 if (!includeTestAssemblies && IsTestAssembly(assembly)) continue;
                 try
                 {
-                    ScanAssembly(assembly);
+                    ScanAssembly(assembly, projectCommands);
                 }
                 catch (Exception e)
                 {
@@ -61,11 +55,13 @@ namespace UnityOpenMcpBridge
                 }
             }
 
+            ProjectCommandCatalog.Publish(projectCommands);
+
             if (_duplicateToolNames.Count > 0)
             {
                 Debug.LogWarning(
                     $"[BridgeToolRegistry] {_duplicateToolNames.Count} duplicate tool id(s) detected across assemblies " +
-                    $"(kept first registered): {string.Join(", ", _duplicateToolNames)}");
+                    $"(all conflicting registrations rejected): {string.Join(", ", _duplicateToolNames)}");
             }
 
             Debug.Log($"[BridgeToolRegistry] Registered {_tools.Count} typed tool(s)");
@@ -79,9 +75,9 @@ namespace UnityOpenMcpBridge
             return _duplicateToolNames.AsReadOnly();
         }
 
-        private static void ScanAssembly(Assembly assembly)
+        private static void ScanAssembly(Assembly assembly, List<ProjectCommandCatalog.Entry> projectCommands)
         {
-            foreach (var type in assembly.GetTypes())
+            foreach (var type in assembly.GetTypes().OrderBy(t => t.FullName, StringComparer.Ordinal))
             {
                 if (!type.IsClass) continue;
                 if (type.GetCustomAttribute<BridgeToolTypeAttribute>() == null) continue;
@@ -90,14 +86,22 @@ namespace UnityOpenMcpBridge
                 {
                     var attr = method.GetCustomAttribute<BridgeToolAttribute>();
                     if (attr == null) continue;
-                    if (!attr.Enabled) continue;
-
-                    if (_tools.ContainsKey(attr.Name))
+                    if (attr is ProjectCommandAttribute command)
                     {
-                        Debug.LogWarning($"[BridgeToolRegistry] Duplicate tool name '{attr.Name}' — keeping first registered");
-                        // M18 Plan 6 / T18.6.2 — record each colliding id once so
-                        // the duplicate-registration guard (EditMode test + CI) can
-                        // observe it without log capture.
+                        projectCommands.Add(ProjectCommandCatalog.Create(method, command));
+                        continue;
+                    }
+                    if (!attr.Enabled) continue;
+                    if (attr.Name.StartsWith("project.", StringComparison.Ordinal))
+                    {
+                        Debug.LogWarning($"[BridgeToolRegistry] {method.DeclaringType.FullName}.{method.Name}: project.* IDs require ProjectCommandAttribute.");
+                        continue;
+                    }
+
+                    if (_tools.ContainsKey(attr.Name) || _duplicateToolNames.Contains(attr.Name))
+                    {
+                        _tools.Remove(attr.Name);
+                        Debug.LogWarning($"[BridgeToolRegistry] Duplicate tool name '{attr.Name}' — all registrations rejected");
                         if (!_duplicateToolNames.Contains(attr.Name))
                             _duplicateToolNames.Add(attr.Name);
                         continue;

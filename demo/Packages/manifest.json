@@ -12,7 +12,8 @@
     "com.unity.splines": "2.9.0",
     "com.unity.timeline": "1.8.12",
     "com.unity.ugui": "2.5.0",
-    "com.unity.modules.physicscore2d": "1.0.0"
+    "com.unity.modules.physicscore2d": "1.0.0",
+    "com.unity-open-mcp.project-command-fixture": "file:com.unity-open-mcp.project-command-fixture"
   },
   "scopedRegistries": [],
   "testables": [

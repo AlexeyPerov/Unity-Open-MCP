@@ -30,3 +30,13 @@ Use exact schemas, scoped mutations, and gate evidence to work on the selected U
 - Before batching, interpreting a failed gate, or applying fixes: [Batch and gates](references/batch-and-gates.md).
 - Before file-level repair, YAML edits, or offline asset investigation: [YAML and offline work](references/yaml-and-offline-work.md).
 - Before screenshots, event capture, or test runs: [Senses and tests](references/senses-and-tests.md).
+
+### Project-owned command discovery
+
+Use `unity_open_mcp_project_commands(action="list", query="…", limit=20)` to
+find project commands; page using `nextOffset`. Describe an exact catalog id
+with `action="describe", id="project.owner.command"` for its schema, safety
+metadata and availability diagnostics. This tool stays visible regardless of
+active groups and reads fresh metadata after recompilation. Discovery is
+currently supported; invocation/jobs are not. Do not treat async/cancellable
+declarations as running-job support or bypass unavailable commands with reflection.

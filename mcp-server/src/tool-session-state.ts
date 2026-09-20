@@ -80,6 +80,7 @@ export type ActivationSource = "default" | "manual" | "auto" | "suppressed";
  * applies.
  */
 const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
+  "unity_open_mcp_project_commands",
   "unity_open_mcp_capabilities",
   "unity_open_mcp_list_rules",
   "unity_open_mcp_generate_skill",

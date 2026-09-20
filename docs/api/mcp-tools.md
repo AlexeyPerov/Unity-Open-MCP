@@ -740,3 +740,8 @@ nested command before step zero. Arbitrary patch values remain opaque.
 not a selectable VerifyRunner rule and is excluded from those enums. C# snippets inject `using Object = UnityEngine.Object;` unless
 an explicit caller alias already exists. They still run in a separate assembly;
 internal-member access requires reflection or a suitable test assembly.
+
+## Project-owned commands
+
+See [Project command catalog](project-commands.md) for the always-visible
+`unity_open_mcp_project_commands` list/describe surface and C# authoring contract.

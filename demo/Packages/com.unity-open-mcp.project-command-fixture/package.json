@@ -1,0 +1,10 @@
+{
+  "name": "com.unity-open-mcp.project-command-fixture",
+  "version": "1.0.0",
+  "displayName": "Project Command Fixture",
+  "description": "Editor-only typed project command discovery fixture.",
+  "unity": "6000.0",
+  "dependencies": {
+    "com.alexeyperov.unity-open-mcp-bridge": "1.2.3"
+  }
+}

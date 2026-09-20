@@ -103,3 +103,7 @@ loop; the second checks uGUI event delivery and interaction reporting. Both
 require uGUI and Input System. Run serially, without another live test session.
 The replay temporarily enters play mode (including from an unsaved scene), never
 saves scenes, and restores its initial play/edit state and disposable fixtures.
+
+Project command catalog coverage: S0 `--band A --only project_commands` runs a
+read-only catalog probe without scene cleanup; S3 band T checks bounded listing
+and exact description over stdio. Use the demo fixture for a non-empty catalog.

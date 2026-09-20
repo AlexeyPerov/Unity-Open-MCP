@@ -186,3 +186,10 @@ to handler arguments, including component patch `property_path`. Arbitrary
 patch values are not rewritten. Direct HTTP alias use is reported in the
 `X-Unity-Open-MCP-Deprecations` response header. See the
 [locator contract](mcp-tools.md#locator-and-argument-contract) for examples.
+
+## Project command metadata
+
+`GET /tools?catalog=project_commands` selects the bounded, versioned
+[project command catalog](project-commands.md#bridge-transport). Plain `GET /tools`
+keeps the existing compiled inventory response. Duplicate built-in registry ids
+are rejected for every candidate and reported in registration diagnostics.

@@ -182,6 +182,7 @@ function buildSuite() {
   // BAND A — lifecycle & meta
   // =====================================================================
   s("ping", "A", "unity_open_mcp_ping");
+  s("project_commands_list", "A", "unity_open_mcp_project_commands", { action: "list", limit: 1 });
   s("editor_status", "A", "unity_open_mcp_editor_status");
   s("bridge_status", "A", "unity_open_mcp_bridge_status");
   s("capabilities", "A", "unity_open_mcp_capabilities", { kind: "tools", include_planned: false });
@@ -1040,10 +1041,14 @@ function main() {
   // the node binary — without it, dismiss is best-effort and you may need to
   // click Don't Save manually once.
   console.log("--- preflight ---");
-  dismissBlockingModals(runEnv);
-  closeInitTestScenes(opts.project, runEnv);
-  revertMainSceneIfDirty(opts.project, runEnv);
-  dismissBlockingModals(runEnv);
+  // Catalog-only reachability is read-only and does not need scene cleanup.
+  const catalogOnly = selected.every(step => step.tool === "unity_open_mcp_project_commands");
+  if (!catalogOnly) {
+    dismissBlockingModals(runEnv);
+    closeInitTestScenes(opts.project, runEnv);
+    revertMainSceneIfDirty(opts.project, runEnv);
+    dismissBlockingModals(runEnv);
+  }
   const preflight = invokeTool(opts.project, "unity_open_mcp_editor_status", {}, 15_000, runEnv);
   const preCode = preflight?.result?.error?.code;
   if (preflight?.isError === true && preCode === "main_thread_blocked") {
@@ -1069,7 +1074,7 @@ function main() {
     if (interrupted) process.exit(1);
     interrupted = true;
     console.error("\n^C — interrupted; running cleanup before exit...");
-    if (!opts.noCleanup) cleanupViaBridge(opts.project, runEnv);
+    if (!catalogOnly && !opts.noCleanup) cleanupViaBridge(opts.project, runEnv);
     process.exit(1);
   };
   process.on("SIGINT", onSigInt);
@@ -1108,8 +1113,8 @@ function main() {
 
   process.removeListener("SIGINT", onSigInt);
 
-  const ranBandC = !opts.band || opts.band.includes("C");
-  const ranBandG = !opts.band || opts.band.includes("G");
+  const ranBandC = !catalogOnly && (!opts.band || opts.band.includes("C"));
+  const ranBandG = !catalogOnly && (!opts.band || opts.band.includes("G"));
   let isolation = null;
 
   // Post-suite: dismiss save modals, unload InitTestScene*, discard Main dirty state.
@@ -1127,7 +1132,7 @@ function main() {
   }
 
   // Always attempt cleanup of the temp fixture root unless --no-cleanup.
-  if (!opts.noCleanup && (!opts.band || opts.band.includes("C"))) {
+  if (!catalogOnly && !opts.noCleanup && (!opts.band || opts.band.includes("C"))) {
     console.log("");
     console.log("--- cleanup ---");
     cleanupViaBridge(opts.project, runEnv);

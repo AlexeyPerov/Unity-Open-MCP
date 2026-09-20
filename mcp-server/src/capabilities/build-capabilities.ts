@@ -135,6 +135,7 @@ export const TOOL_CATEGORY_OVERRIDES: Record<string, string> = {
   // because they MUST stay always-visible (an agent needs to reach
   // capabilities / list_rules / generate_skill before any other tool).
   unity_open_mcp_capabilities: "capability-discovery",
+  unity_open_mcp_project_commands: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",
   // The remaining meta-tools (pull_events, read_compile_errors,

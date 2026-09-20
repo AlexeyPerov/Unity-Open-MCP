@@ -1,0 +1,9 @@
+{
+  "name": "UnityOpenMcp.ProjectCommandFixture.Editor",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ]
+}

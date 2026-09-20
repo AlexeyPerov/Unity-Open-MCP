@@ -724,6 +724,7 @@ export class ToolRouter implements Router {
       ["unity_open_mcp_list_rules", (_l, a) => this.routeListRules(a)],
       ["unity_open_mcp_generate_skill", (_l, a) => this.routeGenerateSkill(a)],
       ["unity_open_mcp_manage_tools", (l, a) => this.routeManageTools(a, l)],
+      ["unity_open_mcp_project_commands", (l, a) => this.routeProjectCommands(a, l)],
       ["unity_open_mcp_bridge_status", (l, a) => this.routeBridgeStatus(a, l)],
       // M31 Plan 3 — Editor fd-exhaustion operator surfaces. restart_editor
       // is the reactive kill half (acts AFTER the Editor is hung);
@@ -837,7 +838,7 @@ export class ToolRouter implements Router {
   }
 
   private async routeUnchecked(live: LiveClient, toolName: string, args: Record<string, unknown>): Promise<CallToolResult> {
-    const localProbe = ["unity_open_mcp_read_compile_errors", "unity_open_mcp_bridge_status", "unity_open_mcp_capabilities",
+    const localProbe = ["unity_open_mcp_project_commands", "unity_open_mcp_read_compile_errors", "unity_open_mcp_bridge_status", "unity_open_mcp_capabilities",
       "unity_open_mcp_restart_editor", "unity_open_mcp_resource_pressure", "unity_open_mcp_manage_tools",
       "unity_open_mcp_list_assets", "unity_open_mcp_list_rules", "unity_open_mcp_generate_skill", "unity_senses_pull_events"].includes(toolName);
     if (!localProbe && this.projectPath && classifyInstance(readInstanceLock(this.projectPath)) === "reloading") {
@@ -1758,6 +1759,14 @@ export class ToolRouter implements Router {
       `Unknown action '${action}'. Valid actions: list_groups, activate, ` +
         `deactivate, reset, suggest, activate_for, invoke, editor_search.`,
     );
+  }
+
+  private async routeProjectCommands(args: Record<string, unknown>, live: LiveClient): Promise<CallToolResult> {
+    const allowed = args.action === "describe" ? ["action", "id"] : ["action", "query", "tags", "group", "package", "offset", "limit"];
+    if (Object.keys(args).some(k => !allowed.includes(k)) || (args.action === "describe" && !args.id))
+      return sourceResult({ error: { code: "invalid_arguments", message: "describe requires an exact id only; list accepts filters and paging only." } }, "local", true);
+    const body = await live.projectCommands(args);
+    return injectRouteMeta(sourceResult(body, "live", !!body.error), { route: "live" });
   }
 
   private async manageToolsListGroups(live: LiveClient): Promise<CallToolResult> {

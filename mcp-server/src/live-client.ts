@@ -1774,6 +1774,24 @@ export class LiveClient implements Router {
     }
   }
 
+  /** Fresh authenticated bounded catalog read; no disk/session cache can hide a reload. */
+  async projectCommands(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams({ catalog: "project_commands" });
+    for (const key of ["action", "id", "query", "group", "package", "offset", "limit"])
+      if (args[key] !== undefined) query.set(key, String(args[key]));
+    for (const tag of (args.tags as string[] | undefined) ?? []) query.append("tag", tag);
+    try {
+      const response = await this.fetchWithTimeout(`/tools?${query}`, { method: "GET" }, 5_000);
+      if (!response.ok) return { error: { code: "catalog_unavailable", message: `Bridge catalog HTTP ${response.status}.` } };
+      const body = await response.json() as Record<string, unknown>;
+      if (body.catalogVersion !== 1 || (!body.error && (args.action === "describe" ? !body.command : !Array.isArray(body.commands))))
+        return { error: { code: "catalog_unsupported", message: "Bridge does not support project command catalog version 1. Update the bridge." } };
+      return body;
+    } catch {
+      return { error: { code: "catalog_unavailable", message: "Project command catalog requires a reachable live Editor. Retry after compilation/reload settles." } };
+    }
+  }
+
   /**
    * M18 Plan 2 / T18.2.3 — fetch the compiled-state tool inventory from the
    * bridge (`GET /tools`). Returns the set of tool names the bridge compiled

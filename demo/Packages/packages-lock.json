@@ -311,6 +311,14 @@
         "com.unity.modules.physics": "1.0.0",
         "com.unity.modules.animation": "1.0.0"
       }
+    },
+    "com.unity-open-mcp.project-command-fixture": {
+      "version": "file:com.unity-open-mcp.project-command-fixture",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {
+        "com.alexeyperov.unity-open-mcp-bridge": "1.2.3"
+      }
     }
   }
 }

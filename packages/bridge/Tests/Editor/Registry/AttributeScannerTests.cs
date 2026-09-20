@@ -154,7 +154,7 @@ namespace UnityOpenMcpBridge.Tests
         // M18 Plan 6 / T18.6.2 — models the "embedded bridge copy + legacy
         // extension pack present" duplicate-registration scenario: two
         // [BridgeToolType] classes in different assemblies/declaring the SAME
-        // tool id. The registry must keep the first-registered entry and
+        // tool id. The registry must reject all conflicting entries and
         // surface the collision via DuplicateCount / DuplicateToolNames so the
         // guard is observable without log capture. (The real-world case is the
         // embedded navigation tools vs. the legacy
@@ -208,23 +208,17 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
-        public static void Scan_Collision_KeepsFirst()
+        public static void Scan_Collision_RejectsAll()
         {
-            Assert.IsTrue(BridgeToolRegistry.TryGet("test_collision_tool", out var entry));
-            // BridgeToolEntry.Method is the CLR MethodInfo; its Name is the C# method
-            // name, not the return value. First-wins policy (ScanAssembly skips a
-            // duplicate tool name) means the registered method is Tool_CollisionFirst.First().
-            Assert.AreEqual("First", entry.Method.Name);
-            // Confirm first-wins semantically: invoking must return the first tool's value.
-            var instance = entry.GetInstance();
-            Assert.AreEqual("first", entry.Method.Invoke(instance, null));
+            Assert.IsFalse(BridgeToolRegistry.Contains("test_collision_tool"));
+            Assert.IsNull(BridgeToolRegistry.TryDispatch("test_collision_tool", "{}"));
         }
 
         // M18 Plan 6 / T18.6.2 — the duplicate-registration guard. When two
         // [BridgeToolType] classes declare the same id (the "embedded + legacy
         // pack present" shape, see TestFixtureK), the registry must:
         //   (a) record the collision in DuplicateToolNames / DuplicateCount,
-        //   (b) register the tool exactly once (first-wins), never twice.
+        //   (b) reject all conflicting candidates.
         // This is the EditMode half of the M18 Plan 6 duplicate guard; the CI
         // half (compile the bridge with 0 domain packages) is the
         // compile-matrix leg.
@@ -248,19 +242,8 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void Scan_Duplicate_CollisionDoesNotRegisterTwice()
         {
-            // First-wins: the colliding id is registered exactly once.
-            Assert.IsTrue(BridgeToolRegistry.Contains("test_duplicate_guard_tool"));
-            int occurrences = 0;
-            foreach (var entry in BridgeToolRegistry.All())
-            {
-                if (entry.Name == "test_duplicate_guard_tool") occurrences++;
-            }
-            Assert.AreEqual(1, occurrences,
-                "A duplicate tool id must register exactly once (first-wins), never twice.");
-
-            // The registered entry is the first-seen class's method.
-            Assert.IsTrue(BridgeToolRegistry.TryGet("test_duplicate_guard_tool", out var kept));
-            Assert.AreEqual("First", kept.Method.Name);
+            Assert.IsFalse(BridgeToolRegistry.Contains("test_duplicate_guard_tool"));
+            Assert.IsFalse(BridgeToolRegistry.TryGet("test_duplicate_guard_tool", out _));
         }
 
         [Test]

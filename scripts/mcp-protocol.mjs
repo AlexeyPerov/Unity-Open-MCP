@@ -183,6 +183,7 @@ function buildSuite() {
     // Band T — tools/call
     { id: "call_local_capabilities", band: "T", desc: "tools/call capabilities (local-routed, no Unity)", requiresLive: false },
     { id: "call_live_ping", band: "T", desc: "tools/call ping (live-routed; needs bridge)", requiresLive: true },
+    { id: "project_commands_catalog", band: "T", desc: "project command list/describe via stable MCP tool", requiresLive: true },
     // Band M — manage_tools session + list_changed
     { id: "manage_tools_activate_list_changed", band: "M", desc: "manage_tools(activate) → notifications/tools/list_changed", requiresLive: false },
     { id: "manage_tools_deactivate", band: "M", desc: "manage_tools(deactivate) → restore session", requiresLive: false },
@@ -239,7 +240,7 @@ async function runStep(step, client, opts, results) {
       const res = await client.request("tools/list", {});
       const tools = res?.tools ?? [];
       client.toolsList = tools;
-      pass = tools.length > 0;
+      pass = tools.length > 0 && tools.some(t => t.name === "unity_open_mcp_project_commands");
       detail = `${tools.length} tools advertised`;
     } else if (step.id === "call_local_capabilities") {
       const res = await client.request("tools/call", {
@@ -247,6 +248,16 @@ async function runStep(step, client, opts, results) {
       });
       pass = !res?.isError;
       detail = pass ? "capabilities returned" : `err=${res?.content?.[0]?.text ?? "unknown"}`;
+    } else if (step.id === "project_commands_catalog") {
+      const res = await client.request("tools/call", { name: "unity_open_mcp_project_commands", arguments: { action: "list", limit: 1 } });
+      const body = JSON.parse(res.content[0].text);
+      pass = !res.isError && body.catalogVersion === 1 && body.commands.length <= 1;
+      if (pass && body.commands.length) {
+        const described = await client.request("tools/call", { name: "unity_open_mcp_project_commands", arguments: { action: "describe", id: body.commands[0].id } });
+        const command = JSON.parse(described.content[0].text).command;
+        pass = !described.isError && command.id === body.commands[0].id && !!command.inputSchema && command.invocationSupported === false;
+      }
+      detail = pass ? "bounded catalog and exact describe returned" : JSON.stringify(body);
     } else if (step.id === "call_live_ping") {
       const res = await client.request("tools/call", {
         name: "unity_open_mcp_ping", arguments: {},

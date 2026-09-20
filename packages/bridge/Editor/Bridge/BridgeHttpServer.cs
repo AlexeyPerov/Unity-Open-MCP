@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -1314,6 +1315,8 @@ namespace UnityOpenMcpBridge
         // (which would re-run auth / queue / toggle / paths_hint enforcement).
         internal static ToolDispatchResult DispatchTool(string toolName, string body)
         {
+            if (BridgeToolRegistry.DuplicateToolNames().Contains(toolName))
+                return ToolDispatchResult.Fail("duplicate_tool_id", "All conflicting registrations were rejected: " + toolName);
             if (BridgeBatchSchemas.ByTool.TryGetValue(toolName, out var wireSchema))
                 body = BatchSchemaValidator.WireArguments(body, wireSchema);
             return toolName switch
@@ -1673,6 +1676,20 @@ namespace UnityOpenMcpBridge
         // tools compiled in appear with a non-empty tool roster.
         private static void HandleToolsList(HttpListenerContext context)
         {
+            if (context.Request.QueryString["catalog"] == "project_commands")
+            {
+                var q = context.Request.QueryString;
+                int offset = 0, limit = 20;
+                if ((q["offset"] != null && !int.TryParse(q["offset"], out offset)) ||
+                    (q["limit"] != null && !int.TryParse(q["limit"], out limit)))
+                {
+                    BridgeHttpResponse.SendJson(context, 200, ProjectCommandCatalog.Error("invalid_arguments", "Invalid paging integer."));
+                    return;
+                }
+                BridgeHttpResponse.SendJson(context, 200, ProjectCommandCatalog.Query(q["action"] ?? "list", q["id"], q["query"],
+                    q.GetValues("tag"), q["group"], q["package"], offset, limit));
+                return;
+            }
             // Build the unioned tool-name set first.
             var names = new HashSet<string>(KnownTools, StringComparer.Ordinal);
             foreach (var entry in BridgeToolRegistry.All())
