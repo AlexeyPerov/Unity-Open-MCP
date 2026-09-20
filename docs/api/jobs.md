@@ -21,6 +21,12 @@ Progress reports coarse observation phases, without invented percentages.
 Terminal results retain the test summary; failing tests or an aborted run make
 the job fail. Tests have no mutation gate in their existing runner contract.
 Direct calls to `unity_senses_run_tests` still start and wait synchronously.
+Native execution is deferred to a one-shot Editor update after acknowledgement;
+starting a run does not depend on an inspector repaint. Import workers do not
+manage native test markers. Cleanup preserves markers owned by another live
+Editor process, and reload reattaches only the current Editor's markers. Entering
+PlayMode aborts only an existing EditMode run; the requested PlayMode run retains
+its callbacks/marker for reload and result-file handoff.
 
 For a project command, pass its exact catalog id as `tool_or_command` and an
 invocation envelope as `args`, for example:
@@ -33,6 +39,11 @@ invocation envelope as `args`, for example:
   "args": {"args": {"seconds": 60}, "gate": "enforce"}
 }
 ```
+
+After start, call `{"action":"status","job_id":"<returned id>"}`, then
+`{"action":"wait","job_id":"<returned id>","timeout_ms":10000}` until terminal.
+A queued/running response is not completion. Inspect the terminal result and gate,
+including failed or cancelled jobs; keep the same routing identity for every call.
 
 The nested `args` holds typed command parameters. `schema_version`, `paths_hint`,
 `gate`, `ignore_scene_dirty`, and `confirm_bypass` belong alongside it. Starts

@@ -1,0 +1,48 @@
+{
+  "id": "m34-playmode-tests",
+  "title": "Preserve the original run across PlayMode reload",
+  "milestone": "m34",
+  "engineId": "unity",
+  "requirementLevel": "required-core",
+  "order": 80,
+  "tags": [
+    "project-commands",
+    "jobs"
+  ],
+  "steps": [
+    {
+      "id": "setup",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Build mcp-server and open the demo with bridge, verify and the Editor-only project-command fixture. Use one persistent MCP session. Preserve existing dirty scenes/settings and snapshot only disposable fixture files before mutation."
+    },
+    {
+      "id": "run",
+      "type": "agent_prompt",
+      "title": "Preserve the original run across PlayMode reload",
+      "payload": "Start unity_senses_run_tests through jobs with play_mode:true, test_class:Demo.Tests.ExamplePlayModeTests and a unique key. Call status and wait through native reload. Repeat same-key start. Record job id, result runId and native test total."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "Original run id equals job id; three fixture tests pass after reload.",
+        "Same-key retry returns the same terminal record without another native run."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Record evidence, timings and restoration"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Record result"
+    }
+  ],
+  "reset": {
+    "note": "Wait for terminal execution before restoring saved fixture bytes under Assets/_ValidationSuite/ProjectCommands. Preserve pre-existing files, scene changes and settings. Never restart an uncertain operation for cleanup."
+  }
+}

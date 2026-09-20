@@ -1,0 +1,52 @@
+{
+  "id": "m34-reload-disconnect",
+  "title": "Keep lost ownership orphaned without redispatch",
+  "milestone": "m34",
+  "engineId": "unity",
+  "requirementLevel": "optional",
+  "order": 60,
+  "tags": [
+    "project-commands",
+    "jobs"
+  ],
+  "steps": [
+    {
+      "id": "setup",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Build mcp-server and open the demo with bridge, verify and the Editor-only project-command fixture. Use one persistent MCP session. Preserve existing dirty scenes/settings and snapshot only disposable fixture files before mutation."
+    },
+    {
+      "id": "run",
+      "type": "agent_prompt",
+      "title": "Keep lost ownership orphaned without redispatch",
+      "payload": "Run the project lost-record adapter and dropped-start transport tests. In a disposable demo session, start long_write during preparation and request script compilation, then observe its original job id. Retry the same key/args once after reconnect."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "Lost domain record or ambiguous transport produces orphaned, never false success.",
+        "Same key returns original record and does not restart; inspect output before a new key."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Record evidence, timings and restoration"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Record result"
+    }
+  ],
+  "reset": {
+    "note": "Wait for terminal execution before restoring saved fixture bytes under Assets/_ValidationSuite/ProjectCommands. Preserve pre-existing files, scene changes and settings. Never restart an uncertain operation for cleanup."
+  },
+  "automatedCoverage": [
+    "mcp-server/src/jobs/adapters.test.ts",
+    "mcp-server/src/jobs/live-transport.test.ts"
+  ]
+}

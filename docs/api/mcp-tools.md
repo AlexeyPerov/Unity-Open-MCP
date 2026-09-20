@@ -23,6 +23,7 @@ definitions live in `mcp-server/src/tools/`.
 | [CLI and automation](cli-automation.md) | CLI commands, options, JSON output, and links to canonical CI behavior. |
 | [CI templates](../ci/README.md) | Pipeline shape, CLI exit codes, baselines, and provider templates. |
 | [Input simulation](input-simulation.md) | Pointer delivery, device events, frame stepping, and supported input boundaries. |
+| [Project commands](project-commands.md) | Editor-only authoring, typed list/describe/invoke, schema versions and safety boundaries. |
 | [Asynchronous jobs](jobs.md) | Job lifecycle, observation, idempotency, cancellation, retention and adapter contracts. |
 | [MCP resources](resources.md) | Resource URIs, payloads, and resource routing. |
 
@@ -750,4 +751,6 @@ internal-member access requires reflection or a suitable test assembly.
 ## Project-owned commands
 
 See [Project command catalog](project-commands.md) for the always-visible
-`unity_open_mcp_project_commands` list/describe surface and C# authoring contract.
+`unity_open_mcp_project_commands` list/describe/invoke surface, C# authoring,
+schema versions and safety contract. Async declarations use the [job workflow](jobs.md):
+start, status, bounded wait, then inspect the retained terminal result and gate.

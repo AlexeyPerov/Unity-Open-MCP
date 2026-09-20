@@ -1,0 +1,48 @@
+{
+  "id": "m34-mutation-exclusion",
+  "title": "Exclude competing mutations and native test starts",
+  "milestone": "m34",
+  "engineId": "unity",
+  "requirementLevel": "required-core",
+  "order": 50,
+  "tags": [
+    "project-commands",
+    "jobs"
+  ],
+  "steps": [
+    {
+      "id": "setup",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Build mcp-server and open the demo with bridge, verify and the Editor-only project-command fixture. Use one persistent MCP session. Preserve existing dirty scenes/settings and snapshot only disposable fixture files before mutation."
+    },
+    {
+      "id": "run",
+      "type": "agent_prompt",
+      "title": "Exclude competing mutations and native test starts",
+      "payload": "Start long_write for 5 seconds. While preparing, invoke write_fixture and directly start unity_senses_run_tests for Demo.Tests.ExampleEditModeTests. Keep project-command reads and job status running. Wait for the original job."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "Competing synchronous mutation and native test start return job_busy.",
+        "Reads/status remain reachable; original job completes with its own gate."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Record evidence, timings and restoration"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Record result"
+    }
+  ],
+  "reset": {
+    "note": "Wait for terminal execution before restoring saved fixture bytes under Assets/_ValidationSuite/ProjectCommands. Preserve pre-existing files, scene changes and settings. Never restart an uncertain operation for cleanup."
+  }
+}

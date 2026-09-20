@@ -34,7 +34,7 @@ Use exact schemas, scoped mutations, and gate evidence to work on the selected U
 ### Project-owned commands
 
 Use `unity_open_mcp_project_commands(action="list", query="…", limit=20)` to
-find project commands; page using `nextOffset`. Describe an exact catalog id
+find project commands; page using `nextOffset`. Always describe an exact catalog id
 with `action="describe", id="project.owner.command"` for its schema, safety
 metadata and availability diagnostics. This tool stays visible regardless of
 active groups and reads fresh metadata after recompilation. Invoke with `action="invoke", command_id="project.owner.command", args={...}`.
@@ -56,6 +56,8 @@ commands (`args: {args: {...}, gate, paths_hint}`). Read terminal project-job ga
 results even on failure/cancellation. An unsupported target must not be retried as
 an arbitrary background tool.
 
+After start, call `status`; a queued acknowledgement is not completion. Use bounded
+`wait` calls until terminal, then inspect the retained result and gate.
 Keep the job id and the same project/port/agent identity for `status`, `wait`,
 `cancel` and `list`. A wait timeout leaves execution running. Reuse the same key
 and arguments after a start response is lost. Cancellation is cooperative and may

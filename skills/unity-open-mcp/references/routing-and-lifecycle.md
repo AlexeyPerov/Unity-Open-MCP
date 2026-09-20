@@ -45,3 +45,10 @@ A lost connection is not proof of failure: `orphaned` requires operation-specifi
 evidence before any retry. `cancel_requested` is not cancellation confirmation.
 Terminal records and idempotency keys survive for 30 minutes in the same server
 session, but not across a server restart. Keep routing and agent metadata stable.
+
+
+For project commands, exact describe precedes invoke/start. After async start,
+call status and bounded wait; inspect terminal gate results even on failure or
+cancellation. A job does not weaken scope, deny or dirty-scene policy. Never use
+reflection to bypass an unavailable declaration. Builds/imports/packages/bakes
+are unsupported job targets.

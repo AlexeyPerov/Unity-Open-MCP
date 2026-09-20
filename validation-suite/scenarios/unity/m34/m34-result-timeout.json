@@ -1,0 +1,51 @@
+{
+  "id": "m34-result-timeout",
+  "title": "Bound result observation without a second start",
+  "milestone": "m34",
+  "engineId": "unity",
+  "requirementLevel": "optional",
+  "order": 100,
+  "tags": [
+    "project-commands",
+    "jobs"
+  ],
+  "steps": [
+    {
+      "id": "setup",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Build mcp-server and open the demo with bridge, verify and the Editor-only project-command fixture. Use one persistent MCP session. Preserve existing dirty scenes/settings and snapshot only disposable fixture files before mutation."
+    },
+    {
+      "id": "run",
+      "type": "agent_prompt",
+      "title": "Bound result observation without a second start",
+      "payload": "Run jobs/live-transport.test.ts with the HTTP fixture that acknowledges start but never writes its result file. Observe the one-second budget and retry the same idempotency key. Also run dropped-start-response coverage."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "Result timeout yields orphaned/unknown; start count remains exactly one.",
+        "No second native POST after either ambiguous start or exhausted result wait."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Record evidence, timings and restoration"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Record result"
+    }
+  ],
+  "reset": {
+    "note": "Wait for terminal execution before restoring saved fixture bytes under Assets/_ValidationSuite/ProjectCommands. Preserve pre-existing files, scene changes and settings. Never restart an uncertain operation for cleanup."
+  },
+  "automatedCoverage": [
+    "mcp-server/src/jobs/live-transport.test.ts"
+  ]
+}

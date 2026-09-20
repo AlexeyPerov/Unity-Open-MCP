@@ -33,6 +33,18 @@ namespace ProjectCommandFixture
             return Write("Async project command completed.");
         }
 
+        [ProjectCommand("project.demo.partial_output", Title = "Partial output fixture", Description = "Write disposable output, then fail to exercise terminal validation.",
+            Package = "demo.project-commands", IsMutating = true, Async = true,
+            Lifecycle = LifecyclePolicy.EditorSettle, PathsHint = new[] { "Assets/_ValidationSuite/ProjectCommands" })]
+        public static async System.Threading.Tasks.Task<string> PartialOutput(ProjectCommandContext context, bool invalidJson = true)
+        {
+            await System.Threading.Tasks.Task.Delay(50);
+            context.ReportPhase("writing before failure");
+            Write("Partial output requires inspection.");
+            if (invalidJson) return "{broken";
+            throw new System.InvalidOperationException("Fixture failed after writing.");
+        }
+
         [ProjectCommand("project.demo.reload_fixture", Title = "Reload fixture", Description = "Request compilation for lifecycle validation.",
             Package = "demo.project-commands", IsMutating = true, Lifecycle = LifecyclePolicy.RestartThenSettle,
             PathsHint = new[] { "Packages/com.unity-open-mcp.project-command-fixture" })]

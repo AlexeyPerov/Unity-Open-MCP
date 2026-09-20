@@ -285,3 +285,25 @@ bridge is down and the log is stale, start the Editor from the Hub and use
 - [MCP client configuration](setup/client-configuration.md) — client paths and copy-paste snippets
 - [Bridge HTTP API](api/bridge-http.md) — `/ping` and listener contract
 - [Routing and lifecycle](api/routing-lifecycle.md) — route classes and recovery
+
+
+## Project commands and asynchronous jobs
+
+- Missing or unavailable command: list, then describe its exact id and inspect
+  assembly/type diagnostics. Recompile declarations in an Editor-only assembly;
+  resolve duplicate ids instead of choosing an arbitrary candidate.
+- `command_schema_changed`: describe again and review the new contract before
+  submitting revised arguments. Never hide a stale schema by replaying blindly.
+- `job_busy`: another project command owns the mutation interval. Read its status
+  and wait for terminal validation before starting a mutation or native test run.
+- `not_cancellable`: execution is unchanged. Observe the existing job; cancellation
+  is supported only by explicitly cooperative project commands.
+- A wait times out: keep the id and call status/wait with the same project, port
+  and agent identity. This is an observation timeout, not an execution failure.
+- `orphaned` or `job_not_found`: inspect the affected assets or original test run
+  evidence before any new start. Same-key retries retain an orphaned record within
+  the same process, but expired records or a restarted server lose deduplication.
+- Builds, imports, package operations and bakes have no job adapter. An unsupported
+  target is a refusal, not permission to wrap arbitrary blocking code as a job.
+
+See [project command authoring](api/project-commands.md) and [job workflows](api/jobs.md).

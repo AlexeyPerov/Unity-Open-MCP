@@ -1,0 +1,49 @@
+{
+  "id": "m34-long-authoring",
+  "title": "Observe authoring beyond the synchronous timeout",
+  "milestone": "m34",
+  "engineId": "unity",
+  "requirementLevel": "required-core",
+  "order": 20,
+  "tags": [
+    "project-commands",
+    "jobs"
+  ],
+  "steps": [
+    {
+      "id": "setup",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Build mcp-server and open the demo with bridge, verify and the Editor-only project-command fixture. Use one persistent MCP session. Preserve existing dirty scenes/settings and snapshot only disposable fixture files before mutation."
+    },
+    {
+      "id": "run",
+      "type": "agent_prompt",
+      "title": "Observe authoring beyond the synchronous timeout",
+      "payload": "Describe project.demo.long_write. Start a 60-second job with gate enforce and a unique key. Call status immediately, then 10-second waits until terminal. Repeat identical start, and try the same key with seconds:59. Record start latency, phases after 55 seconds, total elapsed, response sizes and number of calls. Repeat terminal status/wait/start and compare checkpoint and result."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "One job and one write; changed arguments conflict.",
+        "Wait timeout leaves execution running; terminal gate passes with one retained checkpoint/validation.",
+        "Compare the measured >55-second operation to the documented 55-second synchronous cap; do not replay uncertain mutations."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Record evidence, timings and restoration"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Record result"
+    }
+  ],
+  "reset": {
+    "note": "Wait for terminal execution before restoring saved fixture bytes under Assets/_ValidationSuite/ProjectCommands. Preserve pre-existing files, scene changes and settings. Never restart an uncertain operation for cleanup."
+  }
+}

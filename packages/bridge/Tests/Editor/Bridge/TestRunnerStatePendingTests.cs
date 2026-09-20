@@ -11,6 +11,18 @@ namespace UnityOpenMcpBridge.Tests
     // does not guess — see code-review finding B8.
     public class TestRunnerStatePendingTests
     {
+        private string markerDirectory;
+        [SetUp] public void IsolateMarkers()
+        {
+            markerDirectory = Path.Combine(Path.GetTempPath(), "bridge-test-markers-" + System.Guid.NewGuid().ToString("N"));
+            TestRunnerService.StatusDirOverride = markerDirectory;
+        }
+        [TearDown] public void RestoreMarkers()
+        {
+            TestRunnerService.StatusDirOverride = null;
+            if (Directory.Exists(markerDirectory)) Directory.Delete(markerDirectory, true);
+        }
+
         // Each test uses a unique runId and clears its pending file in cleanup
         // so the suite never leaves a marker that OnAfterAssemblyReload would
         // pick up on the next domain reload.
@@ -299,7 +311,7 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
-        public void SweepDeadProcessMarkers_FinalizesForeignPidMarkers()
+        public void SweepDeadProcessMarkers_FinalizesDeadPidMarkers()
         {
             var runId = RunId("deadpid");
             try
@@ -312,7 +324,7 @@ namespace UnityOpenMcpBridge.Tests
                 File.WriteAllText(path,
                     "{\"runId\":\"" + runId + "\",\"assemblyName\":\"GameTests\"," +
                     "\"testNamespace\":\"\",\"testClass\":\"\",\"testMethod\":\"\"," +
-                    "\"playMode\":false,\"includePasses\":true,\"pid\":1," +
+                    "\"playMode\":false,\"includePasses\":true,\"pid\":2147483647," +
                     "\"createdAt\":" + System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + "}");
 
                 TestRunnerState.SweepDeadProcessMarkers();
@@ -333,6 +345,76 @@ namespace UnityOpenMcpBridge.Tests
                 ClearResults(runId);
                 Clear(runId);
             }
+        }
+
+        [Test]
+        public void EnteringPlayModePreservesPlayRunAndAbortsOnlyEditRun()
+        {
+            // Isolate the callback registry so this test cannot drain its own
+            // native runner while exercising the real transition handler.
+            var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+            var registry = (System.Collections.IList)typeof(TestRunnerState).GetField("ActiveRegistry", flags).GetValue(null);
+            var saved = new object[registry.Count];
+            registry.CopyTo(saved, 0);
+            registry.Clear();
+            var apis = new System.Collections.Generic.List<UnityEngine.ScriptableObject>();
+            var entryType = typeof(TestRunnerState).GetNestedType("ActiveCallbacks", System.Reflection.BindingFlags.NonPublic);
+            try
+            {
+                foreach (var mode in new[] { "EditMode", "PlayMode" })
+                {
+                    var entry = System.Activator.CreateInstance(entryType);
+                    var api = UnityEngine.ScriptableObject.CreateInstance(entryType.GetField("Api").FieldType);
+                    apis.Add(api);
+                    entryType.GetField("Api").SetValue(entry, api);
+                    entryType.GetField("RunId").SetValue(entry, mode);
+                    entryType.GetField("Mode").SetValue(entry, mode);
+                    registry.Add(entry);
+                    TestRunnerState.MarkPending(mode, null, null, null, null, mode == "PlayMode");
+                }
+                typeof(TestRunnerState).GetMethod("OnPlayModeStateChanged", flags)
+                    .Invoke(null, new object[] { UnityEditor.PlayModeStateChange.ExitingEditMode });
+                Assert.AreEqual(1, registry.Count);
+                Assert.AreEqual("PlayMode", entryType.GetField("Mode").GetValue(registry[0]));
+                Assert.IsFalse(File.Exists(TestRunnerService.PendingFilePath("EditMode")));
+                Assert.IsTrue(File.Exists(TestRunnerService.PendingFilePath("PlayMode")));
+                StringAssert.Contains("playmode_entered", File.ReadAllText(TestRunnerService.ResultsFilePath("EditMode")));
+                Assert.IsFalse(File.Exists(TestRunnerService.ResultsFilePath("PlayMode")));
+            }
+            finally
+            {
+                registry.Clear();
+                foreach (var entry in saved) registry.Add(entry);
+                foreach (var api in apis) if (api != null) UnityEngine.Object.DestroyImmediate(api);
+            }
+        }
+
+        [Test]
+        public void ForeignLiveProcessMarkerIsNeitherSweptNorSuperseded()
+        {
+            int foreignPid = 0;
+            var processes = System.Diagnostics.Process.GetProcesses();
+            try
+            {
+                foreach (var process in processes)
+                    if (process.Id > 0 && process.Id != System.Diagnostics.Process.GetCurrentProcess().Id)
+                    { foreignPid = process.Id; break; }
+            }
+            finally { foreach (var process in processes) process.Dispose(); }
+            if (foreignPid == 0) Assert.Ignore("No foreign process available.");
+            var runId = RunId("foreign-live");
+            try
+            {
+                var json = "{\"runId\":\"" + runId + "\",\"playMode\":false,\"pid\":" + foreignPid + "}";
+                Directory.CreateDirectory(TestRunnerService.StatusDir);
+                File.WriteAllText(TestRunnerService.PendingFilePath(runId), json);
+                Assert.IsFalse(TestRunnerState.OwnsMarker(json));
+                TestRunnerState.SweepDeadProcessMarkers();
+                TestRunnerState.AbortOtherPendingRuns("another-run");
+                Assert.IsTrue(File.Exists(TestRunnerService.PendingFilePath(runId)));
+                Assert.IsFalse(File.Exists(TestRunnerService.ResultsFilePath(runId)));
+            }
+            finally { ClearResults(runId); Clear(runId); }
         }
 
         [Test]

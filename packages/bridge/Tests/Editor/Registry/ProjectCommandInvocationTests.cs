@@ -159,6 +159,17 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("\"durationMs\":42", audit);
             StringAssert.Contains("\"jobId\":null", audit);
         }
+        [Test] public void AuditIdentityDoesNotIncludeArgumentOrResultPayloads()
+        {
+            Register();
+            var body = Body(Valid.Replace("\"required\":null", "\"required\":\"secret-argument-sentinel\""));
+            var result = Dispatch(body);
+            ProjectCommandInvocation.Decorate(result, body, 1);
+            var audit = new BridgeAuditRecord { ProjectCommandJson = result.ProjectCommandJson }.ToJsonLine();
+            StringAssert.DoesNotContain("secret-argument-sentinel", audit);
+            StringAssert.DoesNotContain("9223372036854775807", audit);
+            StringAssert.Contains("project.tests.invoke", audit);
+        }
         [Test] public void DenyRulesMatchExactCommandIdentityAndRequireExplicitBypass()
         {
             Assert.IsFalse(BridgeDenyList.EvaluateProjectCommand("project.tests.invoke", new[] { "^project\\.tests\\." }, false).Allowed);

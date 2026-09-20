@@ -72,3 +72,49 @@ test("test adapter preserves legacy result, owns run id, requires deduplication 
   assert.equal(done.state, "succeeded"); assert.equal(starts, 1);
   assert.equal(manager.start(owner, "tests", {}, "same").job_id, job.job_id);
 });
+
+for (const terminal of [
+  { status: "completed", summary: { failed: 1, total: 2 } },
+  { status: "aborted", summary: { failed: 0, total: 2 } },
+]) test(`test adapter retains ${terminal.status}/${terminal.summary.failed} failure without inventing a gate`, async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  const live = { runTestsJob: async (args: any, started: () => void) => {
+    started(); return { content: [{ type: "text", text: JSON.stringify({ ...terminal, runId: args.run_id }) }] };
+  } } as unknown as LiveClient;
+  manager.register("tests", testRunOperation(() => live));
+  const job = manager.start(owner, "tests", {}, "failure");
+  const done = await manager.wait(owner, job.job_id, 2000);
+  assert.equal(done.state, "failed");
+  assert.equal((done.result as any).status, terminal.status);
+  assert.equal((done.result as any).gate, undefined);
+});
+
+test("project partial-output failure retains terminal validation across observations and retries", async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  let starts = 0;
+  const result = { mutation: { success: false, partialCommit: true, error: { code: "execution_error" } },
+    gate: { checkpointId: "one-checkpoint", validation: { complete: true } } };
+  const live = { projectCommands: async () => catalog, projectCommandJob: async (args: any) => {
+    if (args.action === "start") starts++;
+    return { job_id: args.job_id, state: "failed", result };
+  } } as unknown as LiveClient;
+  manager.register("project.test.async", projectCommandOperation("project.test.async", true, () => live));
+  const job = manager.start(owner, "project.test.async", {}, "partial");
+  const done = await manager.wait(owner, job.job_id, 2000);
+  assert.equal(done.state, "failed"); assert.deepEqual(done.result, result);
+  assert.deepEqual(manager.status(owner, job.job_id), done);
+  assert.deepEqual(manager.start(owner, "project.test.async", {}, "partial"), done);
+  assert.equal(starts, 1);
+});
+
+for (const changed of [
+  { available: false }, { async: false }, { cancellable: false },
+  { inputSchema: { type: "object", required: ["required"] } },
+]) test(`project job rejects changed declaration before transport: ${JSON.stringify(changed)}`, async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  const live = { projectCommands: async () => ({ command: { ...catalog.command, ...changed } }),
+    projectCommandJob: async () => assert.fail("Rejected declaration must not execute") } as unknown as LiveClient;
+  manager.register("project.test.async", projectCommandOperation("project.test.async", true, () => live));
+  const job = manager.start(owner, "project.test.async", {}, "invalid");
+  assert.equal((await manager.wait(owner, job.job_id, 2000)).state, "failed");
+});

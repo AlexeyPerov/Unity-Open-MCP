@@ -56,6 +56,9 @@ namespace UnityOpenMcpBridge.TestRunner
 
         static TestRunnerState()
         {
+            // Import workers also load Editor assemblies. They must not sweep
+            // or reattach the interactive Editor's test runs.
+            if (Application.isBatchMode) return;
             // A destroyed runner can leave a callback registration after terminal output.
             // The pending marker, cleared before result publication, owns execution.
             ProjectCommandJobs.TestRunActive = () => Tool_TestRunner.RunScheduled
@@ -85,7 +88,7 @@ namespace UnityOpenMcpBridge.TestRunner
             // runs are synchronous on the main thread and cannot survive a
             // play-mode entry; their onFinished never fires.
             if (state != PlayModeStateChange.ExitingEditMode) return;
-            DrainActiveCallbacks("playmode_entered");
+            DrainActiveCallbacks("playmode_entered", "EditMode");
         }
 
         /// <summary>Track a freshly registered (api, callbacks) pair so a leaked
@@ -118,12 +121,12 @@ namespace UnityOpenMcpBridge.TestRunner
         /// instead of silence. `null` suppresses the write (used by the
         /// beforeAssemblyReload drain, where the domain is ending and a pending
         /// PlayMode run is expected to resume).</param>
-        internal static void DrainActiveCallbacks(string reason = null)
+        internal static void DrainActiveCallbacks(string reason = null, string onlyMode = null)
         {
             if (ActiveRegistry.Count == 0) return;
             // Iterate over a snapshot — UnregisterActive mutates the list.
-            var snapshot = ActiveRegistry.ToArray();
-            ActiveRegistry.Clear();
+            var snapshot = ActiveRegistry.FindAll(entry => onlyMode == null || entry.Mode == onlyMode).ToArray();
+            ActiveRegistry.RemoveAll(entry => onlyMode == null || entry.Mode == onlyMode);
             foreach (var entry in snapshot)
             {
                 if (entry.Api != null && entry.Callbacks != null)
@@ -187,7 +190,7 @@ namespace UnityOpenMcpBridge.TestRunner
                 sb.Append("\"playMode\":").Append(playMode ? "true" : "false").Append(',');
                 sb.Append("\"includePasses\":").Append(includePasses ? "true" : "false");
                 // specs/feedback.md 2026-08-24 — record the Editor process that
-                // owns this run. A marker whose pid is not the CURRENT process
+                // owns this run. A marker whose pid is confirmed dead
                 // was written by an Editor that is gone (killed, crashed,
                 // relaunched), so its run can never resume: the TestRunnerApi
                 // and its callbacks died with the process. SweepDeadProcessMarkers
@@ -236,6 +239,7 @@ namespace UnityOpenMcpBridge.TestRunner
                     var json = File.ReadAllText(file);
                     var runId = JsonBody.GetString(json, "runId");
                     if (string.IsNullOrEmpty(runId) || runId == currentRunId) continue;
+                    if (!OwnsMarker(json)) continue;
                     var playMode = JsonBody.GetBool(json, "playMode", true);
                     TestRunnerService.WriteAbortedFile(runId, playMode ? "PlayMode" : "EditMode", "superseded_by_run");
                 }
@@ -291,7 +295,7 @@ namespace UnityOpenMcpBridge.TestRunner
         // terminal answer and clears the marker.
         //
         // Deliberately narrower than the TTL rule below: this only touches
-        // markers whose pid is present and foreign. A marker with no pid predates
+        // markers whose pid is present and confirmed dead. A marker with no pid predates
         // this field, and one with THIS pid may be a live run — both are left to
         // the existing TTL/reattach logic.
         internal static void SweepDeadProcessMarkers()
@@ -306,9 +310,9 @@ namespace UnityOpenMcpBridge.TestRunner
                     var runId = JsonBody.GetString(json, "runId");
                     if (string.IsNullOrEmpty(runId)) continue;
                     var pid = JsonBody.GetLong(json, "pid", 0);
-                    // 0 = absent (pre-field marker). Only a KNOWN foreign pid is
-                    // proof the owning process is gone.
-                    if (pid <= 0 || pid == currentPid) continue;
+                    // A foreign PID may be another live Editor. Unknown process
+                    // liveness is not evidence that its native run stopped.
+                    if (pid <= 0 || pid == currentPid || IsProcessAlive(pid)) continue;
                     var playMode = JsonBody.GetBool(json, "playMode", true);
                     TestRunnerService.WriteAbortedFile(
                         runId, playMode ? "PlayMode" : "EditMode", "editor_process_gone");
@@ -318,6 +322,24 @@ namespace UnityOpenMcpBridge.TestRunner
             {
                 Debug.LogWarning($"[TestRunnerState] SweepDeadProcessMarkers error: {ex.Message}");
             }
+        }
+
+        internal static bool OwnsMarker(string json)
+        {
+            var pid = JsonBody.GetLong(json, "pid", 0);
+            return pid <= 0 || pid == System.Diagnostics.Process.GetCurrentProcess().Id;
+        }
+
+        private static bool IsProcessAlive(long pid)
+        {
+            if (pid > int.MaxValue) return false;
+            try
+            {
+                using (var process = System.Diagnostics.Process.GetProcessById((int)pid))
+                    return !process.HasExited;
+            }
+            catch (ArgumentException) { return false; }
+            catch { return true; } // Permission/probe failure is not proof of death.
         }
 
         private static void OnAfterAssemblyReload()
@@ -340,6 +362,7 @@ namespace UnityOpenMcpBridge.TestRunner
                     var json = File.ReadAllText(file);
                     var runId = JsonBody.GetString(json, "runId");
                     if (string.IsNullOrEmpty(runId)) continue;
+                    if (!OwnsMarker(json)) continue;
 
                     // B9 — discard stale markers. A pending file older than the
                     // TTL is from a failed/crashed run (Execute threw and the

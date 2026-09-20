@@ -28,7 +28,7 @@ Pinned exceptions:
 - Always offline: `list_assets`.
 - Live compile snapshot with offline log fallback, never batch: `read_compile_errors`.
 - Always local: `capabilities`, `manage_tools`, `generate_skill`,
-  `bridge_status`, `restart_editor`, `resource_pressure`, `hub_*`, and
+  `bridge_status`, `restart_editor`, `resource_pressure`, `jobs`, `hub_*`, and
   event-pull meta-tools.
 - Always offline when transitive impact is requested: `dependencies` with
   `include_impact=true`.
@@ -355,3 +355,18 @@ are left untouched. Known disruptive snippet calls retain the default protection
 `read_only` is an assertion, not proof that arbitrary C# is safe. Mixed batches
 retain `editor_settle`, union scope, and one gate/undo group. Nested reload and
 server-polled operations are rejected during preflight before step zero.
+
+## Project commands and jobs
+
+`project_commands` list/describe read the authenticated live catalog; invoke uses
+the live gate/lifecycle pipeline. They never spawn batch Unity. Describe the exact
+id before invocation and pin its schema version when retaining a planned call.
+
+`jobs` is an always-visible local orchestration surface. Start delegates only to
+an explicitly supported live adapter; status/wait/cancel/list address the retained
+session-owned record. Start acknowledgement is not completion: call status, then
+bounded wait until terminal. Wait timeout does not cancel the native operation.
+Project commands losing their domain-local record become orphaned; test jobs can
+survive PlayMode reload through the same run-id result-file handoff. Neither path
+replays an ambiguous start. See [project commands](project-commands.md) and
+[jobs](jobs.md) for ownership, retention and cancellation contracts.

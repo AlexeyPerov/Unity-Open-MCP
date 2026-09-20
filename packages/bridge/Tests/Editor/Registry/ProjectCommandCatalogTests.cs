@@ -46,6 +46,12 @@ namespace UnityOpenMcpBridge.Tests
 
         [TearDown] public void Restore() => BridgeToolRegistry.Scan();
 
+        public static string Snapshot(int count = 2) => "{}";
+        [Test] public void MinimalSchemaSnapshotPinsPublicVocabulary()
+        {
+            Assert.AreEqual("{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\",\"x-project-command\":true,\"additionalProperties\":false,\"properties\":{\"count\":{\"allOf\":[{\"type\":\"integer\",\"minimum\":-2147483648,\"maximum\":2147483647}],\"default\":2}},\"required\":[]}",
+                Entry("Snapshot").Schema);
+        }
         [Test] public void EverySupportedShapeHasDeterministicSchema()
         {
             var e = Entry();

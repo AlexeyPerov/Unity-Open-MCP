@@ -31,7 +31,9 @@ namespace UnityOpenMcpBridge.TestRunner
         internal const int MaxFieldLength = 2000;
         internal const int MaxStackTraceLength = 4000;
 
-        internal static readonly string StatusDir = Path.Combine(
+        // Test-only isolation for marker sweeps; never redirect a live runner.
+        internal static string StatusDirOverride;
+        internal static string StatusDir => StatusDirOverride ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             BridgeConstants.SettingsDirName);
 

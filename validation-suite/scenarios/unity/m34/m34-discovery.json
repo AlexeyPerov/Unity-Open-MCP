@@ -1,0 +1,48 @@
+{
+  "id": "m34-discovery",
+  "title": "Discover, describe and safely invoke project commands",
+  "milestone": "m34",
+  "engineId": "unity",
+  "requirementLevel": "required-core",
+  "order": 10,
+  "tags": [
+    "project-commands",
+    "jobs"
+  ],
+  "steps": [
+    {
+      "id": "setup",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Build mcp-server and open the demo with bridge, verify and the Editor-only project-command fixture. Use one persistent MCP session. Preserve existing dirty scenes/settings and snapshot only disposable fixture files before mutation."
+    },
+    {
+      "id": "run",
+      "type": "agent_prompt",
+      "title": "Discover, describe and safely invoke project commands",
+      "payload": "List project.demo commands in one persistent MCP session. Describe project.demo.catalog_fixture and record assembly/type, schema_version, schema and response bytes. Invoke with labels:null and that version; reject limit:99 and unknown arguments. Describe long_write and verify its context parameter is absent and async/cancellable metadata present. Do not reconnect or refresh tools/list."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "Read fixture succeeds; invalid arguments never reach user code.",
+        "Exact describe precedes invoke; record latency and call count against an explicit reflection/menu discovery baseline."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Record evidence, timings and restoration"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Record result"
+    }
+  ],
+  "reset": {
+    "note": "Wait for terminal execution before restoring saved fixture bytes under Assets/_ValidationSuite/ProjectCommands. Preserve pre-existing files, scene changes and settings. Never restart an uncertain operation for cleanup."
+  }
+}

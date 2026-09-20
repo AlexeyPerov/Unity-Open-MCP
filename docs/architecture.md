@@ -79,7 +79,18 @@ Editor owns the project. Read-only project selectors on `capabilities` and
 ### Project command catalog boundary
 
 The bridge reflection scan owns project command declarations and generated
-parameter schemas. The MCP server exposes a stable always-visible list/describe
-meta-tool, using a bounded authenticated live catalog GET without caching or
-batch fallback. Project entries remain outside built-in dispatch and session
-groups. See [Project command catalog](api/project-commands.md).
+parameter schemas. The MCP server exposes a stable always-visible
+list/describe/invoke meta-tool, using a bounded authenticated live catalog GET
+without caching or batch fallback. Invocation rechecks the schema and passes
+through the bridge scope, deny, gate, audit and lifecycle pipeline. Project
+entries remain outside built-in dispatch and session groups. See [Project command catalog](api/project-commands.md).
+
+
+### Asynchronous operation ownership
+
+The MCP job manager owns scheduling, idempotency keys and bounded session-local
+observations. Explicit adapters connect it to domain-local project commands and
+the native test runner's run-id file handoff. The bridge owns execution, Unity
+main-thread access, mutation exclusion, checkpoint and terminal validation.
+Reload cannot resume project command code; lost ownership is orphaned. Job state
+is not persisted across MCP restarts. [Jobs](api/jobs.md) documents these limits.

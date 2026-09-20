@@ -1,0 +1,56 @@
+{
+  "id": "m34-security-schema",
+  "title": "Check declaration, policy and generated contracts",
+  "milestone": "m34",
+  "engineId": "unity",
+  "requirementLevel": "optional",
+  "order": 120,
+  "tags": [
+    "project-commands",
+    "jobs"
+  ],
+  "steps": [
+    {
+      "id": "setup",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Build mcp-server and open the demo with bridge, verify and the Editor-only project-command fixture. Use one persistent MCP session. Preserve existing dirty scenes/settings and snapshot only disposable fixture files before mutation."
+    },
+    {
+      "id": "run",
+      "type": "agent_prompt",
+      "title": "Check declaration, policy and generated contracts",
+      "payload": "Run ProjectCommandCatalogTests and ProjectCommandInvocationTests in EditMode; run MCP project-command/job negative tests and both generated-schema/token checks. Inspect fixture and bridge asmdefs for Editor-only platforms. Verify denied/disabled commands, invalid scope, duplicate identities, schema changes, output limits and audit payload exclusion."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "No player/runtime exposure or direct per-command dispatch.",
+        "Deny bypass requires gate off plus confirmation; scope/schema/disabled boundaries remain enforced.",
+        "Generated checks and schema snapshot pass; audit omits argument/result values."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Record evidence, timings and restoration"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Record result"
+    }
+  ],
+  "reset": {
+    "note": "Wait for terminal execution before restoring saved fixture bytes under Assets/_ValidationSuite/ProjectCommands. Preserve pre-existing files, scene changes and settings. Never restart an uncertain operation for cleanup."
+  },
+  "automatedCoverage": [
+    "packages/bridge/Tests/Editor/Registry/ProjectCommandCatalogTests.cs",
+    "packages/bridge/Tests/Editor/Registry/ProjectCommandInvocationTests.cs",
+    "mcp-server/src/project-commands.test.ts",
+    "packages/bridge/Tests/Editor/Bridge/TestRunnerStatePendingTests.cs",
+    "packages/bridge/Tests/Editor/Integration/TestRunnerToolTests.cs"
+  ]
+}

@@ -97,13 +97,13 @@ namespace UnityOpenMcpBridge.TestRunner
             // synchronously on the main thread (the same thread this tool
             // dispatches on), so a 33-45s test run held the dispatch queue and
             // every subsequent tool timed out. Defer Execute to the next editor
-            // tick (delayCall) so this method returns the documented
+            // tick (update) so this method returns the documented
             // {status:"started", runId} envelope IMMEDIATELY, before the test
             // runner starts. Results are polled via the results file the
             // callbacks write — the agent's next step is unchanged.
             //
-            // delayCall fires once on the next main-thread update, which is the
-            // earliest point TestRunnerApi will accept the run anyway. The
+            // Use a one-shot update callback: delayCall can remain pending
+            // indefinitely when the Editor has no inspector repaint. The
             // callbacks (registered below) own the api lifetime and the results
             // file write, so no further coordination is needed here.
             RunScheduled = true;
@@ -148,7 +148,7 @@ namespace UnityOpenMcpBridge.TestRunner
                     TestRunnerService.WriteResultsFile(runId, mode, results, includePasses);
                 });
 
-            EditorApplication.delayCall += () =>
+            ScheduleOnUpdate(() =>
             {
                 RunScheduled = false;
                 // A6 — sweep any leaked (api, callbacks) pair from a previous
@@ -178,7 +178,7 @@ namespace UnityOpenMcpBridge.TestRunner
 
                 // Re-resolve api inside the deferred call: TestRunnerApi is a
                 // ScriptableObject and must be created on the main thread (which
-                // delayCall guarantees), and the callbacks close over it so the
+                // update guarantees), and the callbacks close over it so the
                 // onFinished callback can destroy it.
                 api = ScriptableObject.CreateInstance<TestRunnerApi>();
                 api.RegisterCallbacks(callbacks);
@@ -207,10 +207,21 @@ namespace UnityOpenMcpBridge.TestRunner
                     // would reattach on EVERY subsequent recompile — arming the
                     // B8 bug (unwanted PlayMode run) for the rest of the
                     // session. Same defense if a domain reload lands between
-                    // MarkPending and this delayCall closure firing.
+                    // MarkPending and this deferred closure firing.
                     TestRunnerState.ClearPending(runId);
                 }
+            });
+        }
+
+        internal static void ScheduleOnUpdate(Action action)
+        {
+            EditorApplication.CallbackFunction callback = null;
+            callback = () =>
+            {
+                EditorApplication.update -= callback;
+                action();
             };
+            EditorApplication.update += callback;
         }
     }
 }

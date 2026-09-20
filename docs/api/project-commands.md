@@ -230,3 +230,50 @@ It accepts `action: start | status | cancel`, a UUID `job_id`, and `invocation`
 (the ordinary invoke envelope) on start. Records are scoped to `X-Agent-Id`;
 unknown owners and lost records return `job_not_found`. Normal MCP callers use
 `unity_open_mcp_jobs`, which owns scheduling, idempotency and retained results.
+
+## Assembly setup and verification
+
+Place the example above in `Editor/Reports.cs`, beside this
+`Editor/ContentTools.Editor.asmdef` (use a unique assembly name):
+
+```json
+{
+  "name": "ContentTools.Editor",
+  "references": ["com.alexeyperov.unity-open-mcp-bridge.Editor"],
+  "includePlatforms": ["Editor"]
+}
+```
+
+Install the bridge and verify packages first. The Editor-only platform constraint
+keeps declarations and their bridge dependency out of player builds. After a
+clean compile, list with `query: "project.content"`, describe the exact
+`project.content.report` id, then invoke with `args: {"limit": 10}` and the
+returned `schema_version`. Expect `mutation.output.result.count: 0` and a skipped
+read-only gate. Try `limit: 51` and an unknown property: both must fail before
+user code. Recompile after changing the signature and confirm the old version
+is refused. Do not hardcode a schema fingerprint across builds.
+
+For mutations, test a disposable declared folder with gate enforce, missing or
+traversing scope, denied/disabled declarations, and partial failure. For async
+commands also test status immediately after start, a short observation timeout,
+same-key retries, cancellation before the first write, and terminal gate retention.
+The [demo fixture](../../demo/Packages/com.unity-open-mcp.project-command-fixture/README.md)
+provides executable read, write, long-running, and partial-output examples.
+
+## Security boundaries
+
+Commands execute trusted Editor code with the Editor's filesystem privileges.
+Review the declaring assembly/type as well as the exact id; duplicate identities
+fail closed. Read-only and cancellation annotations are author promises, not a
+sandbox. Keep secrets out of returned JSON, exception messages and progress text:
+the shared serializer bounds output but does not discover or redact arbitrary
+secrets in project-authored strings. Audit deliberately omits argument and result
+payloads, recording identity, scope, timing and gate outcome instead. The existing
+opt-in audit rotation bounds retained files; jobs additionally bound arguments,
+results and phase text as described in [job limits](jobs.md#identity-limits-and-retention).
+
+The authenticated loopback bridge and Editor-only assembly are the execution
+boundary. Agent/project/port ownership isolates job observations within the MCP
+process; agent ids are trusted routing metadata, not separate user credentials.
+Neither gate off nor a caller-provided scope enables disabled declarations,
+bypasses schema validation, or grants access to another owner's job.

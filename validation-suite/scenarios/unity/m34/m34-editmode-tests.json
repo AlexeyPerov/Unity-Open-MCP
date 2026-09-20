@@ -1,0 +1,48 @@
+{
+  "id": "m34-editmode-tests",
+  "title": "Run native EditMode tests through jobs",
+  "milestone": "m34",
+  "engineId": "unity",
+  "requirementLevel": "required-core",
+  "order": 70,
+  "tags": [
+    "project-commands",
+    "jobs"
+  ],
+  "steps": [
+    {
+      "id": "setup",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Build mcp-server and open the demo with bridge, verify and the Editor-only project-command fixture. Use one persistent MCP session. Preserve existing dirty scenes/settings and snapshot only disposable fixture files before mutation."
+    },
+    {
+      "id": "run",
+      "type": "agent_prompt",
+      "title": "Run native EditMode tests through jobs",
+      "payload": "Start unity_senses_run_tests through jobs for UnityOpenMcpBridge.Tests.ProjectCommandCatalogTests, ProjectCommandInvocationTests and GatePolicyTests, using separate keys and include_passes:false. Call status then wait for each terminal result. Run Demo.Tests.ExampleEditModeTests.Addition_WorksCorrectly through the direct synchronous tool. Run Example_FailingTest through jobs as an intentional failure control; its failed summary must be retained."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "Selected positive native suites have nonzero totals and zero failures; the intentional failing demo method produces one failed test and a failed job. No synthetic gate is added.",
+        "Direct synchronous runner retains its terminal behavior."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Record evidence, timings and restoration"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Record result"
+    }
+  ],
+  "reset": {
+    "note": "Wait for terminal execution before restoring saved fixture bytes under Assets/_ValidationSuite/ProjectCommands. Preserve pre-existing files, scene changes and settings. Never restart an uncertain operation for cleanup."
+  }
+}
