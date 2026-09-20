@@ -12,7 +12,7 @@
 |-------------------------|--------------------------------|------------------------------|
 
 <p align="center">
-  <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="Unity Open MCP" width="250">
+  <img src="assets/brand/openmcp-wordmark-color-v2.svg" alt="Open MCP" width="508">
 </p>
 
 Unity Open MCP gives AI agents a typed, safety-gated tool surface for Unity
