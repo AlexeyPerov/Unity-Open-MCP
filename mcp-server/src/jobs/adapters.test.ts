@@ -44,6 +44,26 @@ test("project job losing bridge record is orphaned and never starts again", asyn
   assert.equal(starts, 1);
 });
 
+test("project job that never reaches a terminal state is cancelled once and orphaned at the deadline", async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  let cancels = 0;
+  const live = { projectCommands: async () => catalog, projectCommandJob: async (args: any) => {
+    if (args.action === "cancel") cancels++;
+    return { job_id: args.job_id, state: "running", phase: "still preparing" };
+  } } as unknown as LiveClient;
+  manager.register("project.test.async", projectCommandOperation("project.test.async", true, () => live, { deadlineMs: 40, pollIntervalMs: 5 }));
+  const job = manager.start(owner, "project.test.async", {}, "same");
+  const done = await manager.wait(owner, job.job_id, 2000);
+  assert.equal(done.state, "orphaned");
+  assert.equal(done.lifecycle.state, "disconnected");
+  assert.match(done.lifecycle.evidence ?? "", /no terminal state/);
+  assert.equal(cancels, 1);
+  // The execution slot is released: a new job for the same project can start.
+  const next = manager.start(owner, "project.test.async", { args: { other: true } }, "next");
+  await manager.wait(owner, next.job_id, 2000);
+  assert.notEqual(manager.status(owner, next.job_id).state, "queued");
+});
+
 test("bridge preflight rejection is a known failure with its gate envelope", async t => {
   const manager = new JobManager(); t.after(() => manager.close());
   const result = { mutation: { success: false, error: { code: "invalid_paths", message: "scope" } }, gate: { skipped: true } };

@@ -324,6 +324,11 @@ export class LiveClient implements Router {
    *  env-pinned port to the lock port. */
   private readonly envPort: number | undefined;
 
+  /** Agent identity this client sends as X-Agent-Id (job ownership key). */
+  get agentIdentity(): string { return this.agentId; }
+  /** Authoritative port this client was pinned to (env or per-request override), if any. */
+  get pinnedPort(): number | undefined { return this.envPort; }
+
   constructor(
     port: number,
     pingCache: PingCache,

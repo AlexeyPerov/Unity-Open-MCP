@@ -227,14 +227,5 @@ namespace UnityOpenMcpBridge
             return policy == LifecyclePolicy.EditorSettle
                 || policy == LifecyclePolicy.RestartThenSettle;
         }
-
-        // Should the active-scene dirty guard preflight this tool? Only ops that
-        // can disrupt the editor (recompile, scene switch) are guarded —
-        // mutating-but-settled ops (apply_fix, reserialize) never trigger
-        // Unity's native save modal, so guarding them would just add friction.
-        public static bool RequiresDirtyGuard(string toolName)
-        {
-            return Resolve(toolName) == LifecyclePolicy.RestartThenSettle;
-        }
     }
 }

@@ -374,8 +374,12 @@ namespace UnityOpenMcpBridge.MetaTools
         }
 
         internal static ToolDispatchResult Preflight(string body, out bool isMutating)
+            => Preflight(body, out isMutating, out _);
+
+        internal static ToolDispatchResult Preflight(string body, out bool isMutating, out BatchPlan plan)
         {
             isMutating = false;
+            plan = new BatchPlan();
             if (!BridgeJson.IsCompleteJson(body))
                 return ToolDispatchResult.Fail("batch_invalid_step", "Batch request must be one complete JSON object.");
             var rawCommands = JsonBody.GetTopLevelRawValue(body, "commands");
@@ -436,8 +440,11 @@ namespace UnityOpenMcpBridge.MetaTools
                     errorCode = errorCode ?? "batch_nested_reload_unsafe";
                     errors.Add("commands[" + i + "] tool '" + tool + "' imports/deletes scripts and may reload the domain. Call it top-level and wait for compilation.");
                 }
-                if (tool != "unity_open_mcp_batch_execute") isMutating |= EffectiveToolContract.IsMutating(tool, args);
+                bool stepMutating = tool != "unity_open_mcp_batch_execute" && EffectiveToolContract.IsMutating(tool, args);
+                isMutating |= stepMutating;
+                plan.Steps.Add(new BatchStep { Tool = tool, ParamsBody = args, IsMutating = stepMutating });
             }
+            plan.IsMutating = isMutating;
             var combination = ValidateStructure(body);
             if (combination != null && combination.ErrorMessage.Contains("writes a script"))
             {
@@ -450,16 +457,19 @@ namespace UnityOpenMcpBridge.MetaTools
 
         public static ToolDispatchResult Execute(string body)
         {
-            var refusal = Preflight(body, out _);
+            var refusal = Preflight(body, out _, out var plan);
             if (refusal != null) return refusal;
+            return Execute(body, plan);
+        }
+
+        // Dispatch loop for an already-preflighted request. Callers that hold a
+        // plan from Preflight (the HTTP handler via BatchExecuteGateRunner) use
+        // this entry so the body is not parsed and validated a second time.
+        internal static ToolDispatchResult Execute(string body, BatchPlan plan)
+        {
             var sw = Stopwatch.StartNew();
             bool failFast = JsonBody.GetBool(JsonBody.TopLevelField(body, "fail_fast"), "fail_fast", true);
-            var steps = new List<BatchStep>();
-            foreach (var raw in JsonBody.GetArrayRawValues(JsonBody.GetTopLevelRawValue(body, "commands")))
-                steps.Add(new BatchStep {
-                    Tool = JsonBody.GetString(JsonBody.TopLevelField(raw, "tool"), "tool"),
-                    ParamsBody = JsonBody.GetTopLevelRawValue(raw, "params") ?? "{}"
-                });
+            var steps = plan.Steps;
             // --- BridgeBatchRunHistory live progress -------------------------
             // One BeginRun / CompleteRun pair around the whole loop so the
             // operator's Activity Batch section shows in-flight progress without
@@ -524,7 +534,7 @@ namespace UnityOpenMcpBridge.MetaTools
                     if (stepResult.Success)
                     {
                         successCount++;
-                        if (EffectiveToolContract.IsMutating(step.Tool, step.ParamsBody)) committedCount++;
+                        if (step.IsMutating) committedCount++;
                         BridgeBatchRunHistory.SetEntryStatus(i, BridgeBatchEntryStatus.Done, stepSw.ElapsedMilliseconds);
                         results.Add(new BatchStepResult
                         {
@@ -678,10 +688,21 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        private struct BatchStep
+        internal struct BatchStep
         {
             public string Tool;
             public string ParamsBody;
+            // Resolved once during preflight so the dispatch loop does not
+            // re-derive the effective contract per step.
+            public bool IsMutating;
+        }
+
+        // Preflight output handed down the dispatch chain (HTTP handler → gate
+        // runner → dispatch loop) so one request is parsed and validated once.
+        internal sealed class BatchPlan
+        {
+            public readonly List<BatchStep> Steps = new List<BatchStep>();
+            public bool IsMutating;
         }
 
         private struct BatchStepResult

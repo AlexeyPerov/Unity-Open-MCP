@@ -761,7 +761,14 @@ export class ToolRouter implements Router {
       ["unity_open_mcp_generate_skill", (_l, a) => this.routeGenerateSkill(a)],
       ["unity_open_mcp_manage_tools", (l, a) => this.routeManageTools(a, l)],
       ["unity_open_mcp_project_commands", (l, a) => this.routeProjectCommands(a, l)],
-      ["unity_open_mcp_jobs", (_l, a) => this.routeJobs(a)],
+      // Reached via manage_tools(action: invoke) or a port-override route. The
+      // owner must match what server.ts derives for a direct call: the
+      // request's agent id, plus the port ONLY when this is a per-request
+      // override client (the default client's env pin is not an override).
+      ["unity_open_mcp_jobs", (l, a) => this.routeJobs(a, {
+        agent: l.agentIdentity,
+        ...(l === this.live ? {} : { port: l.pinnedPort }),
+      })],
       ["unity_open_mcp_bridge_status", (l, a) => this.routeBridgeStatus(a, l)],
       // M31 Plan 3 — Editor fd-exhaustion operator surfaces. restart_editor
       // is the reactive kill half (acts AFTER the Editor is hung);

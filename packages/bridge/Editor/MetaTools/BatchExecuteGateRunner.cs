@@ -11,12 +11,21 @@ namespace UnityOpenMcpBridge.MetaTools
     {
         public static GateDispatchResult Execute(
             string body, string gateMode, string[] pathsHint)
+            => Execute(body, gateMode, pathsHint, null);
+
+        // `plan` is the preflight output the HTTP handler already computed for
+        // this request; null means "not preflighted yet" (direct/test callers).
+        internal static GateDispatchResult Execute(
+            string body, string gateMode, string[] pathsHint, BatchExecuteTool.BatchPlan plan)
         {
-            var refusal = BatchExecuteTool.Preflight(body, out var isMutating);
-            if (refusal != null) return GatePolicy.Skipped(refusal, "request_rejected");
-            if (!isMutating)
+            if (plan == null)
             {
-                var read = BatchExecuteTool.Execute(body);
+                var refusal = BatchExecuteTool.Preflight(body, out _, out plan);
+                if (refusal != null) return GatePolicy.Skipped(refusal, "request_rejected");
+            }
+            if (!plan.IsMutating)
+            {
+                var read = BatchExecuteTool.Execute(body, plan);
                 var skipped = GatePolicy.Skipped(read, read.Success ? "read_only" : "mutation_failed");
                 skipped.EffectiveReadOnly = true;
                 return skipped;
@@ -41,7 +50,7 @@ namespace UnityOpenMcpBridge.MetaTools
                 // delta). BatchExecuteTool.Execute runs the nested dispatch
                 // loop + BridgeBatchRunHistory progress + per-step collection.
                 result = GatePolicy.Execute(mode, pathsHint,
-                    () => BatchExecuteTool.Execute(body));
+                    () => BatchExecuteTool.Execute(body, plan));
             }
             finally
             {

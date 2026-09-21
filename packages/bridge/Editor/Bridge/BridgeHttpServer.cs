@@ -920,9 +920,12 @@ namespace UnityOpenMcpBridge
                 }
             }
             bool batchMutating = true;
+            // Preflight once here; the plan travels with the dispatch so the
+            // gate runner and the step loop do not re-parse the same body.
+            BatchExecuteTool.BatchPlan batchPlan = null;
             if (toolName == "unity_open_mcp_batch_execute")
             {
-                var refusal = BatchExecuteTool.Preflight(body, out batchMutating);
+                var refusal = BatchExecuteTool.Preflight(body, out batchMutating, out batchPlan);
                 if (refusal != null)
                 {
                     var rejected = GatePolicy.Skipped(refusal, "request_rejected");
@@ -1098,7 +1101,7 @@ namespace UnityOpenMcpBridge
                     if (System.Threading.Volatile.Read(ref timedOut.Value)) return;
                     try
                     {
-                        result = DispatchWithGate(toolName, body, effectiveGateMode, pathsHint);
+                        result = DispatchWithGate(toolName, body, effectiveGateMode, pathsHint, batchPlan);
                     }
                     catch (System.Exception e)
                     {
@@ -1255,7 +1258,8 @@ namespace UnityOpenMcpBridge
             return combined;
         }
 
-        private static GateDispatchResult DispatchWithGate(string toolName, string body, string gateMode, string[] pathsHint)
+        private static GateDispatchResult DispatchWithGate(string toolName, string body, string gateMode, string[] pathsHint,
+            BatchExecuteTool.BatchPlan batchPlan = null)
         {
             // M22 T22.1.3 — capture console entries emitted during this dispatch
             // (scene-dirty guard + checkpoint + validate + mutate) as a before/
@@ -1271,7 +1275,7 @@ namespace UnityOpenMcpBridge
             // built by the caller. Only the log COLLECTION is best-effort: a
             // reflection failure while reading optional console entries must
             // not fault an otherwise-successful dispatch.
-            var result = DispatchWithGateCore(toolName, body, gateMode, pathsHint);
+            var result = DispatchWithGatePlanned(toolName, body, gateMode, pathsHint, batchPlan);
             try
             {
                 result.Logs = LogEntriesReader.StopCapture(captureStart);
@@ -1283,12 +1287,20 @@ namespace UnityOpenMcpBridge
             return result;
         }
 
+        // Kept as the single 4-argument entry point (tests resolve it by name
+        // through reflection); the HTTP path uses the planned variant below.
         private static GateDispatchResult DispatchWithGateCore(string toolName, string body, string gateMode, string[] pathsHint)
+            => DispatchWithGatePlanned(toolName, body, gateMode, pathsHint, null);
+
+        private static GateDispatchResult DispatchWithGatePlanned(string toolName, string body, string gateMode, string[] pathsHint,
+            BatchExecuteTool.BatchPlan batchPlan)
         {
-            if (ProjectCommandJobs.Active && (EffectiveToolContract.IsMutating(toolName, body) || toolName == "unity_open_mcp_batch_execute"))
+            // Batch is checked by name first: EffectiveToolContract.IsMutating
+            // would otherwise re-run the whole batch preflight for this test.
+            if (ProjectCommandJobs.Active && (toolName == "unity_open_mcp_batch_execute" || EffectiveToolContract.IsMutating(toolName, body)))
                 return GatePolicy.Skipped(ToolDispatchResult.Fail("job_busy", "An asynchronous project command owns the Editor mutation scope."), "request_rejected");
             if (toolName == "unity_open_mcp_batch_execute")
-                return BatchExecuteGateRunner.Execute(body, gateMode, pathsHint);
+                return BatchExecuteGateRunner.Execute(body, gateMode, pathsHint, batchPlan);
             if (toolName == ProjectCommandInvocation.ToolName)
             {
                 var refusal = ProjectCommandInvocation.Preflight(body, out _, out _);

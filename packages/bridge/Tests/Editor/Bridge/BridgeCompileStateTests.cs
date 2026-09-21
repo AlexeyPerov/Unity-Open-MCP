@@ -48,5 +48,28 @@ namespace UnityOpenMcpBridge.Tests
             }
             finally { Directory.Delete(root, true); }
         }
+
+        [Test]
+        public void StatSignature_ChangesOnWriteOrMembership_WithoutReadingContent()
+        {
+            var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                var path = Path.Combine(root, "Probe.cs");
+                File.WriteAllText(path, "class Probe {}");
+                var before = BridgeCompileState.StatSignature(new[] { path });
+                Assert.AreEqual(before, BridgeCompileState.StatSignature(new[] { path }));
+                File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddHours(1));
+                Assert.AreNotEqual(before, BridgeCompileState.StatSignature(new[] { path }));
+                Assert.AreNotEqual(before, BridgeCompileState.StatSignature(Array.Empty<string>()));
+                // A missing file still yields a deterministic signature instead of throwing.
+                var missing = Path.Combine(root, "Missing.cs");
+                Assert.AreEqual(
+                    BridgeCompileState.StatSignature(new[] { missing }),
+                    BridgeCompileState.StatSignature(new[] { missing }));
+            }
+            finally { Directory.Delete(root, true); }
+        }
     }
 }

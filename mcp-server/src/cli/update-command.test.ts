@@ -28,6 +28,16 @@ const okProcess = async (): Promise<ProcessResult> => ({
   stderr: "",
 });
 
+/** package.json reader that declares unity-open-mcp only under `projectDir`. */
+function manifestAt(projectDir: string): (path: string) => Promise<string> {
+  return async (path) => {
+    if (path === `${projectDir}/package.json`) {
+      return JSON.stringify({ dependencies: { "unity-open-mcp": "^1.2.3" } });
+    }
+    throw Object.assign(new Error(`ENOENT: ${path}`), { code: "ENOENT" });
+  };
+}
+
 test("compareSemver handles stable, prerelease, and build metadata", () => {
   assert.equal(compareSemver("1.3.0", "1.2.9"), 1);
   assert.equal(compareSemver("1.2.3", "1.2.3+build.4"), 0);
@@ -185,6 +195,7 @@ test("local install mode runs npm install in the owning project", async () => {
       fetch: npmLatest("1.3.0"),
       env: {},
       packageRoot: "/work/game-tools/node_modules/unity-open-mcp",
+      readTextFile: manifestAt("/work/game-tools"),
       runProcess: async (_command, args, cwd) => {
         calls.push({ args, cwd });
         if (args[0] === "root") {
@@ -201,6 +212,54 @@ test("local install mode runs npm install in the owning project", async () => {
   });
 });
 
+test("local install mode keeps the on-disk casing of the owning project path", async () => {
+  const calls: Array<{ args: string[]; cwd?: string }> = [];
+  const result = await runUpdateCommand({
+    currentVersion: "1.2.3",
+    check: false,
+    json: true,
+    dependencies: {
+      fetch: npmLatest("1.3.0"),
+      env: {},
+      packageRoot: "/home/Dev/Projects/MyGame/node_modules/unity-open-mcp",
+      readTextFile: manifestAt("/home/Dev/Projects/MyGame"),
+      runProcess: async (_command, args, cwd) => {
+        calls.push({ args, cwd });
+        if (args[0] === "root") {
+          return { exitCode: 0, stdout: "/opt/npm/lib/node_modules\n", stderr: "" };
+        }
+        return { exitCode: 0, stdout: "updated", stderr: "" };
+      },
+    },
+  });
+  assert.equal(result.exitCode, 0);
+  assert.equal(calls[1]?.cwd, "/home/Dev/Projects/MyGame");
+});
+
+test("a failed `npm root -g` probe never turns a global install into a local one", async () => {
+  const calls: string[][] = [];
+  const result = await runUpdateCommand({
+    currentVersion: "1.2.3",
+    check: false,
+    json: true,
+    dependencies: {
+      fetch: npmLatest("1.3.0"),
+      env: {},
+      packageRoot: "/usr/local/lib/node_modules/unity-open-mcp",
+      // No package.json declares unity-open-mcp under /usr/local/lib.
+      readTextFile: manifestAt("/nowhere"),
+      runProcess: async (_command, args) => {
+        calls.push(args);
+        return { exitCode: 1, stdout: "", stderr: "npm ERR! prefix unavailable" };
+      },
+    },
+  });
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(calls, [["root", "--global"]]);
+  assert.equal((result.json as { installMode: string }).installMode, "unknown");
+  assert.equal((result.json as { applied: boolean }).applied, false);
+});
+
 test("npm install failure uses exit 12 and preserves project/config ownership", async () => {
   const result = await runUpdateCommand({
     currentVersion: "1.2.3",
@@ -210,6 +269,7 @@ test("npm install failure uses exit 12 and preserves project/config ownership", 
       fetch: npmLatest("1.3.0"),
       env: {},
       packageRoot: "/work/node_modules/unity-open-mcp",
+      readTextFile: manifestAt("/work"),
       runProcess: async (_command, args) =>
         args[0] === "root"
           ? { exitCode: 0, stdout: "/global/node_modules\n", stderr: "" }

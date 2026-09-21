@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { dirname, resolve, sep } from "node:path";
+import { readFile } from "node:fs/promises";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -37,6 +38,8 @@ export interface UpdateCommandDependencies {
   env: NodeJS.ProcessEnv;
   packageRoot: string;
   cwd: string;
+  /** Reads a UTF-8 text file; rejects when it does not exist. */
+  readTextFile: (path: string) => Promise<string>;
 }
 
 export interface UpdateCommandOptions {
@@ -83,6 +86,7 @@ const defaultDependencies: UpdateCommandDependencies = {
   env: process.env,
   packageRoot: resolve(dirname(fileURLToPath(import.meta.url)), "../.."),
   cwd: process.cwd(),
+  readTextFile: (path) => readFile(path, "utf8"),
 };
 
 export async function runUpdateCommand(
@@ -313,7 +317,11 @@ async function fetchJson(
 async function detectInstallTarget(
   deps: UpdateCommandDependencies,
 ): Promise<InstallTarget> {
-  const normalizedRoot = normalizePath(deps.packageRoot);
+  // Comparisons run on a lower-cased copy, but any path handed back to npm
+  // (the local install's cwd) must keep the on-disk casing: case-sensitive
+  // filesystems reject a lower-cased directory with ENOENT.
+  const forwardRoot = forwardSlashes(deps.packageRoot);
+  const normalizedRoot = forwardRoot.toLowerCase();
   if (
     deps.env.npm_command === "exec" ||
     deps.env.npm_lifecycle_event === "npx" ||
@@ -330,15 +338,38 @@ async function detectInstallTarget(
     }
   }
 
-  const marker = "/node_modules/";
-  const markerIndex = normalizedRoot.indexOf(marker);
+  // A project-local install is only certain when the owning package.json
+  // declares this package. Without that check a global install whose
+  // `npm root -g` probe failed would be mistaken for a local one and npm
+  // would be run inside the global lib directory.
+  const markerIndex = forwardRoot.search(/\/node_modules\//i);
   if (markerIndex > 0) {
-    return {
-      mode: "local",
-      cwd: denormalizePath(normalizedRoot.slice(0, markerIndex)),
-    };
+    const owner = denormalizePath(forwardRoot.slice(0, markerIndex));
+    if (await declaresDependency(deps, owner)) {
+      return { mode: "local", cwd: owner };
+    }
   }
   return { mode: "unknown", cwd: deps.cwd };
+}
+
+async function declaresDependency(
+  deps: UpdateCommandDependencies,
+  projectDir: string,
+): Promise<boolean> {
+  try {
+    const manifest: unknown = JSON.parse(
+      await deps.readTextFile(join(projectDir, "package.json")),
+    );
+    if (!isRecord(manifest)) return false;
+    return ["dependencies", "devDependencies", "optionalDependencies"].some(
+      (field) => {
+        const section = manifest[field];
+        return isRecord(section) && typeof section[PACKAGE_NAME] === "string";
+      },
+    );
+  } catch {
+    return false;
+  }
 }
 
 function projectUpdateGuidance(): string {
@@ -396,8 +427,12 @@ export function compareSemver(a: string, b: string): number | null {
   return 0;
 }
 
+function forwardSlashes(path: string): string {
+  return path.replaceAll("\\", "/").replace(/\/$/, "");
+}
+
 function normalizePath(path: string): string {
-  return path.replaceAll("\\", "/").replace(/\/$/, "").toLowerCase();
+  return forwardSlashes(path).toLowerCase();
 }
 
 function denormalizePath(path: string): string {

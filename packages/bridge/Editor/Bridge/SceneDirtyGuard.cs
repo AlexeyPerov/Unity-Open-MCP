@@ -38,10 +38,18 @@ namespace UnityOpenMcpBridge
                 };
         }
 
-        // Returns true if the guard should preflight this tool. Mirrors
-        // ToolLifecycle.RequiresDirtyGuard so callers don't double-decide.
+        // Returns true if the guard should preflight this tool. Only ops whose
+        // EFFECTIVE lifecycle can disrupt the editor (recompile, scene switch)
+        // are guarded — mutating-but-settled ops (apply_fix, reserialize) never
+        // trigger Unity's native save modal, so guarding them would just add
+        // friction. This is the single decision point; callers do not re-derive it.
         public static bool AppliesTo(string toolName, string body)
         {
+            // A batch can never carry a RestartThenSettle step (preflight refuses
+            // them), so the guard never applies. Short-circuit before
+            // EffectiveToolContract.Lifecycle, which would otherwise re-run the
+            // whole batch preflight just to learn that.
+            if (toolName == "unity_open_mcp_batch_execute") return false;
             if (EffectiveToolContract.Lifecycle(toolName, body) != LifecyclePolicy.RestartThenSettle) return false;
             // Additive scene_create / scene_open do not close any open scene,
             // so a dirty scene cannot be lost and the native save modal cannot

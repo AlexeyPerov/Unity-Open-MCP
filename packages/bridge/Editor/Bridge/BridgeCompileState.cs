@@ -16,6 +16,18 @@ namespace UnityOpenMcpBridge
         private const string Prefix = "UnityOpenMcp.Compile.";
         private static readonly StringBuilder Errors = new StringBuilder();
 
+        // /compile-state is requested after every successful live tool call, so
+        // the content fingerprint must not be recomputed per request. The cache
+        // is keyed by a cheap stat signature (path + length + mtime) of the same
+        // file set: content is only re-hashed when that signature changes, and
+        // the stat pass itself is skipped when the last check is recent.
+        // Started() bypasses the throttle so a compile generation always records
+        // the exact inputs it was built from.
+        private const double RevalidateIntervalSeconds = 2.0;
+        private static string _cachedFingerprint;
+        private static string _cachedSignature;
+        private static double _cachedAtEditorTime = double.NegativeInfinity;
+
         static BridgeCompileState()
         {
             CompilationPipeline.compilationStarted += Started;
@@ -35,23 +47,59 @@ namespace UnityOpenMcpBridge
             return Convert.ToBase64String(hash.ComputeHash(Encoding.UTF8.GetBytes(text.ToString())));
         }
 
-        private static string Sources()
+        // Membership + size + mtime of the input set. Cheap (no file reads);
+        // any content write changes mtime, so a stable signature means the
+        // cached content fingerprint is still valid.
+        internal static string StatSignature(string[] paths)
+        {
+            using var hash = SHA256.Create();
+            var text = new StringBuilder();
+            foreach (var path in paths.Distinct().OrderBy(p => p, StringComparer.Ordinal))
+            {
+                var info = new FileInfo(path);
+                text.Append(path).Append(':')
+                    .Append(info.Exists ? info.Length : -1).Append(':')
+                    .Append(info.Exists ? info.LastWriteTimeUtc.Ticks : 0).Append('\n');
+            }
+            return Convert.ToBase64String(hash.ComputeHash(Encoding.UTF8.GetBytes(text.ToString())));
+        }
+
+        private static string[] SourceFiles()
+        {
+            // Include unimported Assets files and assembly definitions as well as
+            // pipeline-owned package sources. A newly written script must invalidate truth.
+            return CompilationPipeline.GetAssemblies().SelectMany(a => a.sourceFiles)
+                .Concat(Directory.GetFiles("Assets", "*", SearchOption.AllDirectories)
+                    .Where(p => p.EndsWith(".cs") || p.EndsWith(".asmdef") || p.EndsWith(".asmref")))
+                .Concat(UnityEditor.PackageManager.PackageInfo.GetAllRegisteredPackages()
+                    .Where(p => p.source == UnityEditor.PackageManager.PackageSource.Local || p.source == UnityEditor.PackageManager.PackageSource.Embedded)
+                    .SelectMany(p => Directory.GetFiles(p.resolvedPath, "*", SearchOption.AllDirectories))
+                    .Where(p => p.EndsWith(".cs") || p.EndsWith(".asmdef") || p.EndsWith(".asmref")))
+                .Concat(new[] { "Packages/manifest.json", "ProjectSettings/ProjectSettings.asset" })
+                .ToArray();
+        }
+
+        private static string Sources(bool force)
         {
             try
             {
-                // Include unimported Assets files and assembly definitions as well as
-                // pipeline-owned package sources. A newly written script must invalidate truth.
-                var files = CompilationPipeline.GetAssemblies().SelectMany(a => a.sourceFiles)
-                    .Concat(Directory.GetFiles("Assets", "*", SearchOption.AllDirectories)
-                        .Where(p => p.EndsWith(".cs") || p.EndsWith(".asmdef") || p.EndsWith(".asmref")))
-                    .Concat(UnityEditor.PackageManager.PackageInfo.GetAllRegisteredPackages()
-                        .Where(p => p.source == UnityEditor.PackageManager.PackageSource.Local || p.source == UnityEditor.PackageManager.PackageSource.Embedded)
-                        .SelectMany(p => Directory.GetFiles(p.resolvedPath, "*", SearchOption.AllDirectories))
-                        .Where(p => p.EndsWith(".cs") || p.EndsWith(".asmdef") || p.EndsWith(".asmref")))
-                    .Concat(new[] { "Packages/manifest.json", "ProjectSettings/ProjectSettings.asset" });
-                return Fingerprint(files.ToArray());
+                var now = EditorApplication.timeSinceStartup;
+                if (!force && _cachedFingerprint != null && now - _cachedAtEditorTime < RevalidateIntervalSeconds)
+                    return _cachedFingerprint;
+                var files = SourceFiles();
+                var signature = StatSignature(files);
+                if (_cachedFingerprint == null || signature != _cachedSignature)
+                    _cachedFingerprint = Fingerprint(files);
+                _cachedSignature = signature;
+                _cachedAtEditorTime = now;
+                return _cachedFingerprint;
             }
-            catch { return ""; } // unreadable inputs can never certify a clean compile
+            catch
+            {
+                _cachedFingerprint = null;
+                _cachedSignature = null;
+                return ""; // unreadable inputs can never certify a clean compile
+            }
         }
 
         private static double AssemblyMtime()
@@ -69,7 +117,7 @@ namespace UnityOpenMcpBridge
         {
             SessionState.SetInt(Prefix + "generation", SessionState.GetInt(Prefix + "generation", 0) + 1);
             SessionState.SetBool(Prefix + "completed", false);
-            SessionState.SetString(Prefix + "inputs", Sources());
+            SessionState.SetString(Prefix + "inputs", Sources(force: true));
             SessionState.SetString(Prefix + "before", AssemblyMtime().ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             Errors.Clear();
         }
@@ -99,13 +147,16 @@ namespace UnityOpenMcpBridge
         {
             var inputs = SessionState.GetString(Prefix + "inputs", "");
             var completed = SessionState.GetBool(Prefix + "completed", false);
-            var matches = completed && inputs.Length > 0 && inputs == Sources();
+            var matches = completed && inputs.Length > 0 && inputs == Sources(force: false);
             var failed = SessionState.GetBool(Prefix + "failed", false) || EditorUtility.scriptCompilationFailed;
             var status = EditorApplication.isCompiling ? "currently_compiling"
                 : completed && !matches ? "assembly_stale" : failed ? "compile_failed"
                 : matches ? "no_errors_found" : "indeterminate";
+            // Same identity the instance lock and /ping publish, so the server's
+            // projectPath comparison cannot drift on cwd casing or symlink form.
+            var projectPath = BridgeSession.ProjectPath ?? Path.GetFullPath(".");
             return "{\"status\":" + BridgeJson.EscapeString(status)
-                + ",\"projectPath\":" + BridgeJson.EscapeString(Path.GetFullPath("."))
+                + ",\"projectPath\":" + BridgeJson.EscapeString(projectPath)
                 + ",\"generation\":" + SessionState.GetInt(Prefix + "generation", 0)
                 + ",\"sourceMatches\":" + (matches ? "true" : "false")
                 + ",\"beforeAssemblyMtimeMs\":" + SessionState.GetString(Prefix + "before", "0")

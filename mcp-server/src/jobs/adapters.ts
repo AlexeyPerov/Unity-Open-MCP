@@ -37,7 +37,13 @@ export function testRunOperation(client: ClientFor): JobOperation {
   };
 }
 
-export function projectCommandOperation(id: string, cancellable: boolean, client: ClientFor): JobOperation {
+/** Bound the bridge status poll so a hung async command cannot own the project queue forever. */
+export const PROJECT_JOB_DEFAULT_DEADLINE_MS = 30 * 60_000;
+export interface ProjectJobPollOptions { deadlineMs?: number; pollIntervalMs?: number }
+
+export function projectCommandOperation(id: string, cancellable: boolean, client: ClientFor, poll: ProjectJobPollOptions = {}): JobOperation {
+  const deadlineMs = poll.deadlineMs ?? PROJECT_JOB_DEFAULT_DEADLINE_MS;
+  const pollIntervalMs = poll.pollIntervalMs ?? 500;
   return {
     mutating: true, cancellable,
     validate(args) {
@@ -58,6 +64,7 @@ export function projectCommandOperation(id: string, cancellable: boolean, client
       let cancelSent = false;
       let phase: string | undefined;
       let ownershipConfirmed = false;
+      const startedAt = Date.now();
       while (true) {
         if (response.error || response.mutation?.success === false) {
           if (response.error?.code === "job_not_found") context.lifecycle("disconnected", "Bridge lost domain-local job ownership.", false);
@@ -72,7 +79,18 @@ export function projectCommandOperation(id: string, cancellable: boolean, client
         if (response.state === "succeeded") return { state: "succeeded", result: response.result };
         if (response.state === "cancelled") return { state: "cancelled", result: response.result };
         if (response.state === "failed") return { state: "failed", error: { code: "command_failed", message: "See terminal gate/command result." }, result: response.result };
-        await delay(500);
+        if (Date.now() - startedAt >= deadlineMs) {
+          // The bridge never reported a terminal state. Ask it to stop when the
+          // contract allows, then release this job's execution slot as orphaned:
+          // the remote outcome is unknown, so a blind retry is not safe.
+          if (cancellable && !cancelSent) {
+            cancelSent = true;
+            try { await live.projectCommandJob({ action: "cancel", job_id: context.jobId }); } catch { /* best effort */ }
+          }
+          context.lifecycle("disconnected", `Bridge job reported no terminal state within ${deadlineMs} ms; outcome unknown.`, false);
+          return { state: "failed", error: { code: "job_deadline_exceeded", message: `No terminal state within ${deadlineMs} ms.` }, result: response };
+        }
+        await delay(pollIntervalMs);
         const action = context.signal.aborted && !cancelSent ? "cancel" : "status";
         response = await live.projectCommandJob({ action, job_id: context.jobId });
         if (action === "cancel") cancelSent = true;
