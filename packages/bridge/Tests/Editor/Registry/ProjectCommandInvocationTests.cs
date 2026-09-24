@@ -113,6 +113,7 @@ namespace UnityOpenMcpBridge.Tests
             // additive scene beside it. Reuse that disposable scene in this case.
             var active = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
             bool reuse = string.IsNullOrEmpty(active.path);
+            bool wasDirty = active.isDirty;
             var scene = reuse ? active : UnityEditor.SceneManagement.EditorSceneManager.NewScene(
                 UnityEditor.SceneManagement.NewSceneSetup.EmptyScene, UnityEditor.SceneManagement.NewSceneMode.Additive);
             try
@@ -122,7 +123,15 @@ namespace UnityOpenMcpBridge.Tests
                 Assert.IsFalse(guard.Allowed);
                 CollectionAssert.Contains(guard.DirtyScenePaths, "(unsaved scene)");
             }
-            finally { if (!reuse) UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true); }
+            finally
+            {
+                if (!reuse) UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
+                // Hand the reused session scene back in the state we found it.
+                else if (!wasDirty)
+                    typeof(UnityEditor.SceneManagement.EditorSceneManager)
+                        .GetMethod("ClearSceneDirtiness", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static)
+                        ?.Invoke(null, new object[] { scene });
+            }
         }
         [Test] public void MissingLifecycleAndAsyncExecutionFailClosed()
         {

@@ -69,8 +69,8 @@ namespace UnityOpenMcpBridge
         // from blocking automation. Off by default; enable for demo/CI projects.
         public bool autoSaveDirtyScenes = false;
 
-        // M27 Plan 4 — `batch_execute` nested-command cap. Default 25 (Coplay
-        // parity), hard max 100. Clamped on load/write; out-of-range values on
+        // M27 Plan 4 — `batch_execute` nested-command cap. Default 25, hard
+        // max 100. Clamped on load/write; out-of-range values on
         // disk fall back to the default. Governs how many typed tool calls one
         // `unity_open_mcp_batch_execute` invocation may carry.
         public int batchExecuteMaxCommands = 25;
@@ -506,8 +506,8 @@ namespace UnityOpenMcpBridge
         public const int MaxFairQueueReadsPerFrame = 50;
         public const int DefaultFairQueueReadsPerFrame = 5;
 
-        // M27 Plan 4 — batch_execute nested-command cap clamps. Default 25
-        // (Coplay parity), hard max 100. Out-of-range values fall back to the
+        // M27 Plan 4 — batch_execute nested-command cap clamps. Default 25,
+        // hard max 100. Out-of-range values fall back to the
         // default rather than being rejected.
         public const int MinBatchExecuteMaxCommands = 1;
         public const int MaxBatchExecuteMaxCommands = 100;

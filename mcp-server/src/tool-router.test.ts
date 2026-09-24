@@ -12,7 +12,7 @@ import { utimesSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
-import { ToolRouter } from "./tool-router.js";
+import { ToolRouter, setReleaseLookupForTest } from "./tool-router.js";
 // M31-optimizations Plan 1 / L14 — pure helper + module-load flag for the
 // route-logging gate, exercised by the L14 tests at the bottom of this file.
 import {
@@ -4674,4 +4674,105 @@ test("route: activated compile recovery uses its top-level route through invoke"
   assert.equal(live.calls.at(-1)?.tool, "unity_open_mcp_recompile_scripts");
   assert.deepEqual(live.calls.at(-1)?.args.paths_hint, ["Assets/Probe.cs"]);
   assert.equal(live.calls.at(-1)?.args.gate, "enforce");
+});
+
+// ---------------------------------------------------------------------------
+// unity_open_mcp_upgrade — the release lookups (latest npm version, GitHub
+// bridge-tag confirmation) run on the SERVER, never on the Editor main thread.
+// The bridge only ever receives a resolved target_version.
+// ---------------------------------------------------------------------------
+
+function upgradePreview(upmEnabled: boolean): CallToolResult {
+  return {
+    content: [{
+      type: "text",
+      text: JSON.stringify({
+        mutation: { success: true, output: { status: "ok", phase: "preview", upmEnabled }, error: null },
+        gate: { mode: "off", skipped: true, validation: null, delta: null },
+      }),
+    }],
+    isError: false,
+  };
+}
+
+test("route: upgrade without target_version resolves the latest release on the server and forwards it", async () => {
+  const restore = setReleaseLookupForTest({
+    latest: async () => ({ version: "9.9.9" }),
+    confirmBridgeTag: async () => { throw new Error("must not be called for a dry run"); },
+  });
+  try {
+    const live = makeFakeLive({ available: true, result: upgradePreview(true) });
+    const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+    const result = await router.route("unity_open_mcp_upgrade", { dry_run: true });
+    assert.equal(result.isError, false);
+    assert.equal(live.calls.length, 1);
+    assert.equal(live.calls[0].tool, "unity_open_mcp_upgrade");
+    assert.equal(live.calls[0].args.target_version, "9.9.9");
+    assert.equal(live.calls[0].args.dry_run, true);
+  } finally {
+    restore();
+  }
+});
+
+test("route: upgrade apply confirms the bridge release tag from the preview and refuses a missing tag before forwarding", async () => {
+  let confirmedFor: string | null = null;
+  const restore = setReleaseLookupForTest({
+    latest: async () => { throw new Error("target_version was given"); },
+    confirmBridgeTag: async (version) => {
+      confirmedFor = version;
+      return { confirmed: false, error: `Release tag bridge-v${version} was not found.` };
+    },
+  });
+  try {
+    const live = makeFakeLive({ available: true, result: upgradePreview(true) });
+    const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+    const result = await router.route("unity_open_mcp_upgrade", {
+      target_version: "1.2.3", dry_run: false, update_upm: true,
+    });
+    assert.equal(result.isError, true);
+    assert.equal(errorCode(result), "release_tag_unavailable");
+    assert.equal(confirmedFor, "1.2.3");
+    // Only the dry-run preview reached the bridge; the apply never did.
+    assert.equal(live.calls.length, 1);
+    assert.equal(live.calls[0].args.dry_run, true);
+  } finally {
+    restore();
+  }
+});
+
+test("route: upgrade apply skips the tag lookup when the preview will not re-pin through UPM", async () => {
+  const restore = setReleaseLookupForTest({
+    latest: async () => { throw new Error("target_version was given"); },
+    confirmBridgeTag: async () => { throw new Error("embedded bridge: no UPM step, no GitHub call"); },
+  });
+  try {
+    const live = makeFakeLive({ available: true, result: upgradePreview(false) });
+    const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+    const result = await router.route("unity_open_mcp_upgrade", {
+      target_version: "1.2.3", dry_run: false, update_upm: true,
+    });
+    assert.equal(result.isError, false);
+    // Preview, then the real apply.
+    assert.deepEqual(live.calls.map((c) => c.args.dry_run), [true, false]);
+    assert.equal(live.calls[1].args.target_version, "1.2.3");
+  } finally {
+    restore();
+  }
+});
+
+test("route: upgrade lookup failure is latest_version_failed and never reaches the bridge", async () => {
+  const restore = setReleaseLookupForTest({
+    latest: async () => { throw new Error("npm: offline; GitHub: offline"); },
+    confirmBridgeTag: async () => ({ confirmed: true }),
+  });
+  try {
+    const live = makeFakeLive({ available: true });
+    const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+    const result = await router.route("unity_open_mcp_upgrade", {});
+    assert.equal(result.isError, true);
+    assert.equal(errorCode(result), "latest_version_failed");
+    assert.equal(live.calls.length, 0);
+  } finally {
+    restore();
+  }
 });

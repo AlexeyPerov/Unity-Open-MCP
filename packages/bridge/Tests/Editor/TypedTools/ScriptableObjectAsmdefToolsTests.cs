@@ -104,8 +104,8 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(LifecyclePolicy.RestartThenSettle,
                 ToolLifecycle.Resolve("unity_open_mcp_asmdef_modify"));
             // RestartThenSettle ops are preflighted by the active-scene dirty guard.
-            Assert.IsTrue(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_asmdef_create"));
-            Assert.IsTrue(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_asmdef_modify"));
+            Assert.IsTrue(SceneDirtyGuard.AppliesTo("unity_open_mcp_asmdef_create", "{}"));
+            Assert.IsTrue(SceneDirtyGuard.AppliesTo("unity_open_mcp_asmdef_modify", "{}"));
         }
 
         [Test]

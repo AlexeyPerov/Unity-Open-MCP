@@ -84,7 +84,10 @@ Arguments belonging to another action are rejected. Each snapshot includes
 Unix timestamps in milliseconds, progress when known, declared cancellability,
 lifecycle state/evidence (`not_started` until the adapter reports transport state),
 up to 32 recent events, and terminal result/error when
-available. All responses use the normal local source/error envelope.
+available. A job that has to be orphaned while its adapter is still returning
+(ownership evidence lost) keeps that last result and records the adapter's own
+outcome as an `adapter_outcome` event; `orphaned` stays the authoritative state.
+All responses use the normal local source/error envelope.
 
 Jobs follow `queued` → `running` → `succeeded`, `failed`, or `orphaned`.
 Cooperative cancellation adds `cancel_requested` → `cancelled`; completion may

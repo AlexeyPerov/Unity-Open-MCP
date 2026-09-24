@@ -89,6 +89,7 @@ namespace UnityOpenMcpBridge
         private static readonly object _cacheLock = new object();
         private static volatile PatternCache _csharpCache;
         private static volatile PatternCache _menuCache;
+        private static volatile PatternCache _projectCommandCache;
 
         sealed class PatternCache
         {
@@ -161,7 +162,7 @@ namespace UnityOpenMcpBridge
         public static DenyResult EvaluateProjectCommand(string id, string[] patterns, bool bypass)
         {
             if (bypass) return DenyResult.Allow();
-            return Match(id, Compile(patterns), "project_commands",
+            return Match(id, GetOrCompileProjectCommand(patterns), "project_commands",
                 "Use another command or retry with gate: \"off\" and confirm_bypass: true.");
         }
 
@@ -245,6 +246,25 @@ namespace UnityOpenMcpBridge
             }
         }
 
+        // Same double-checked cache as the csharp/menu slots. A missing
+        // settings field reads as null; map it to the shared empty singleton so
+        // the reference-equality check still hits instead of recompiling an
+        // empty list on every project-command invocation.
+        private static PatternCache GetOrCompileProjectCommand(string[] source)
+        {
+            source ??= Array.Empty<string>();
+            var existing = _projectCommandCache;
+            if (existing != null && ReferenceEquals(existing.Source, source)) return existing;
+            lock (_cacheLock)
+            {
+                existing = _projectCommandCache;
+                if (existing != null && ReferenceEquals(existing.Source, source)) return existing;
+                var compiled = Compile(source);
+                _projectCommandCache = compiled;
+                return compiled;
+            }
+        }
+
         private static PatternCache Compile(string[] source)
         {
             if (source == null || source.Length == 0)
@@ -283,6 +303,7 @@ namespace UnityOpenMcpBridge
             {
                 _csharpCache = null;
                 _menuCache = null;
+                _projectCommandCache = null;
             }
         }
     }

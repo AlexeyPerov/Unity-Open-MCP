@@ -44,20 +44,22 @@ namespace UnityOpenMcpBridge
         // trigger Unity's native save modal, so guarding them would just add
         // friction. This is the single decision point; callers do not re-derive it.
         public static bool AppliesTo(string toolName, string body)
+            => AppliesTo(EffectiveToolContract.Resolve(toolName, body), body);
+
+        // The dispatcher already holds the request's resolved contract (whose
+        // Lifecycle is None for read batches and refused requests, so a batch
+        // needs no name check here); decide from it instead of re-deriving the
+        // lifecycle — and, for batch_execute, re-running the whole preflight.
+        internal static bool AppliesTo(ToolRequestContract contract, string body)
         {
-            // A batch can never carry a RestartThenSettle step (preflight refuses
-            // them), so the guard never applies. Short-circuit before
-            // EffectiveToolContract.Lifecycle, which would otherwise re-run the
-            // whole batch preflight just to learn that.
-            if (toolName == "unity_open_mcp_batch_execute") return false;
-            if (EffectiveToolContract.Lifecycle(toolName, body) != LifecyclePolicy.RestartThenSettle) return false;
+            if (contract.Lifecycle != LifecyclePolicy.RestartThenSettle) return false;
             // Additive scene_create / scene_open do not close any open scene,
             // so a dirty scene cannot be lost and the native save modal cannot
             // fire — the guard would only add friction. The shipped schema tells
             // the agent exactly this ("No effect for 'additive' mode"). Only the
             // default Single mode (which closes every open scene without saving)
             // is preflighted. (B-N8.)
-            if (IsAdditiveSceneOp(toolName, body)) return false;
+            if (IsAdditiveSceneOp(contract.ToolName, body)) return false;
             // Explicit opt-out: the agent takes responsibility for the dirty
             // state (the lightweight --force equivalent — no auto-save).
             return !JsonBody.GetBool(JsonBody.TopLevelField(body, "ignore_scene_dirty"), "ignore_scene_dirty");

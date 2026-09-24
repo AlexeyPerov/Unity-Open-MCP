@@ -5,13 +5,21 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import type { CliCommandResult } from "./commands.js";
+import { isRecord } from "./json-guards.js";
+import {
+  PACKAGE_NAME,
+  compareSemver,
+  resolveLatestVersion,
+  type LatestVersion,
+} from "../release-lookup.js";
+
+// The release lookups live in `release-lookup.ts` (shared with the
+// `unity_open_mcp_upgrade` route); re-exported so this command stays the one
+// entry point existing importers know.
+export { compareSemver, resolveLatestVersion } from "../release-lookup.js";
+export type { ReleaseSource } from "../release-lookup.js";
 
 const execFileAsync = promisify(execFile);
-const PACKAGE_NAME = "unity-open-mcp";
-const NPM_LATEST_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
-const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/AlexeyPerov/Unity-Open-MCP/releases?per_page=30";
-const REQUEST_TIMEOUT_MS = 10_000;
 
 export const UPDATE_EXIT = {
   AVAILABLE: 10,
@@ -19,7 +27,6 @@ export const UPDATE_EXIT = {
   INSTALL_FAILED: 12,
 } as const;
 
-export type ReleaseSource = "npm" | "github";
 export type InstallMode = "npx" | "global" | "local" | "unknown";
 
 export interface ProcessResult {
@@ -49,12 +56,6 @@ export interface UpdateCommandOptions {
   dependencies?: Partial<UpdateCommandDependencies>;
 }
 
-interface LatestVersion {
-  version: string;
-  source: ReleaseSource;
-  fallbackReason?: string;
-}
-
 interface InstallTarget {
   mode: InstallMode;
   cwd?: string;
@@ -68,6 +69,12 @@ const defaultDependencies: UpdateCommandDependencies = {
         cwd,
         encoding: "utf8",
         maxBuffer: 4 * 1024 * 1024,
+        // `npm` is `npm.cmd` on Windows, which Node can only start through
+        // the shell (a bare execFile fails with `spawn npm ENOENT`). The
+        // arguments this command passes are fixed literals, so shell
+        // quoting is not a concern.
+        shell: process.platform === "win32",
+        windowsHide: true,
       });
       return { exitCode: 0, stdout: result.stdout, stderr: result.stderr };
     } catch (error) {
@@ -255,65 +262,6 @@ export async function runUpdateCommand(
   };
 }
 
-export async function resolveLatestVersion(
-  fetchImpl: typeof globalThis.fetch,
-): Promise<LatestVersion> {
-  let npmFailure = "npm registry lookup failed";
-  try {
-    const body = await fetchJson(fetchImpl, NPM_LATEST_URL);
-    const version = isRecord(body) ? body.version : undefined;
-    if (typeof version === "string" && parseSemver(version)) {
-      return { version, source: "npm" };
-    }
-    npmFailure = "npm registry returned no valid version";
-  } catch (error) {
-    npmFailure = error instanceof Error ? error.message : String(error);
-  }
-
-  try {
-    const body = await fetchJson(fetchImpl, GITHUB_RELEASES_URL);
-    if (!Array.isArray(body)) throw new Error("GitHub returned an invalid release list");
-    const versions = body
-      .filter(isRecord)
-      .filter((release) => release.draft !== true && release.prerelease !== true)
-      .map((release) => release.tag_name)
-      .filter(
-        (tag): tag is string =>
-          typeof tag === "string" && /^v\d+\.\d+\.\d+$/.test(tag),
-      )
-      .map((tag) => tag.slice(1))
-      .filter((version) => parseSemver(version) !== null)
-      .sort((a, b) => compareSemver(b, a) ?? 0);
-    if (versions.length === 0) throw new Error("GitHub has no stable trio release tag");
-    return { version: versions[0], source: "github", fallbackReason: npmFailure };
-  } catch (error) {
-    const githubFailure = error instanceof Error ? error.message : String(error);
-    throw new Error(`npm: ${npmFailure}; GitHub: ${githubFailure}`);
-  }
-}
-
-async function fetchJson(
-  fetchImpl: typeof globalThis.fetch,
-  url: string,
-): Promise<unknown> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const response = await fetchImpl(url, {
-      headers: { Accept: "application/json", "User-Agent": "unity-open-mcp-update" },
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      throw new Error(
-        `${new URL(url).hostname} returned HTTP ${response.status}`,
-      );
-    }
-    return await response.json();
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 async function detectInstallTarget(
   deps: UpdateCommandDependencies,
 ): Promise<InstallTarget> {
@@ -380,53 +328,6 @@ function projectUpdateGuidance(): string {
   );
 }
 
-interface Semver {
-  major: number;
-  minor: number;
-  patch: number;
-  prerelease: string[];
-}
-
-function parseSemver(value: string): Semver | null {
-  const match = value.match(
-    /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/,
-  );
-  if (!match) return null;
-  return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3]),
-    prerelease: match[4]?.split(".") ?? [],
-  };
-}
-
-export function compareSemver(a: string, b: string): number | null {
-  const left = parseSemver(a);
-  const right = parseSemver(b);
-  if (!left || !right) return null;
-  for (const key of ["major", "minor", "patch"] as const) {
-    if (left[key] !== right[key]) return left[key] > right[key] ? 1 : -1;
-  }
-  if (left.prerelease.length === 0 || right.prerelease.length === 0) {
-    if (left.prerelease.length === right.prerelease.length) return 0;
-    return left.prerelease.length === 0 ? 1 : -1;
-  }
-  const length = Math.max(left.prerelease.length, right.prerelease.length);
-  for (let index = 0; index < length; index++) {
-    const l = left.prerelease[index];
-    const r = right.prerelease[index];
-    if (l === undefined) return -1;
-    if (r === undefined) return 1;
-    if (l === r) continue;
-    const lNumeric = /^\d+$/.test(l);
-    const rNumeric = /^\d+$/.test(r);
-    if (lNumeric && rNumeric) return Number(l) > Number(r) ? 1 : -1;
-    if (lNumeric !== rNumeric) return lNumeric ? -1 : 1;
-    return l > r ? 1 : -1;
-  }
-  return 0;
-}
-
 function forwardSlashes(path: string): string {
   return path.replaceAll("\\", "/").replace(/\/$/, "");
 }
@@ -441,10 +342,6 @@ function denormalizePath(path: string): string {
 
 function isWithin(candidate: string, parent: string): boolean {
   return candidate === parent || candidate.startsWith(`${parent}/`);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function lastNonEmptyLine(value: string): string {

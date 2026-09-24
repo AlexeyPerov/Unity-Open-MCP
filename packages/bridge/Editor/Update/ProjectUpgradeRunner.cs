@@ -19,7 +19,7 @@ namespace UnityOpenMcpBridge.Update
 
         static ProjectUpgradeRunner()
         {
-            EditorApplication.delayCall += RecoverPendingState;
+            EditorUpdateOnce.Schedule(RecoverPendingState);
         }
 
         internal readonly struct Options
@@ -202,7 +202,9 @@ namespace UnityOpenMcpBridge.Update
             {
                 message += " Unity Package Manager update scheduled; the Editor may reload.";
                 var version = plan.TargetVersion;
-                EditorApplication.delayCall += () => StartUpmUpdate(version);
+                // Not delayCall: the MCP-driven apply runs in an Editor nobody
+                // is repainting, and delayCall can sit pending there forever.
+                EditorUpdateOnce.Schedule(() => StartUpmUpdate(version));
             }
             else if (!string.IsNullOrEmpty(plan.UpmReason))
             {

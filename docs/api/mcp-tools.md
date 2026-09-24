@@ -457,6 +457,15 @@ CompilationPipeline generation whose source content still matches is authoritati
 `assembly_stale`. The response records `generation`, `sourceMatches`,
 `beforeAssemblyMtimeMs`, and `afterAssemblyMtimeMs` (Unix milliseconds). Touching
 unchanged content does not invalidate a confirmed compile. Editing source does.
+`compile_failed` outranks `assembly_stale`: a failed compile keeps reporting its
+diagnostics until the next compile finishes, with `sourceMatches: false` when the
+sources changed in between. The fingerprint covers `.cs`, `.asmdef` and `.asmref`
+files only; project-settings and package-manifest edits start their own compile
+and never flip a clean generation to `assembly_stale` on their own.
+Right after a domain reload the bridge recomputes that fingerprint in the
+background; until the pass completes it reports `indeterminate` — never
+`assembly_stale` — and the server falls back to its log and mtime heuristics
+for that result.
 Old log errors and issues remain separately in `historicalLogErrors` and
 `historicalLogIssues`; they do not override a confirmed current compile.
 
@@ -568,7 +577,13 @@ only to give the gate a scoped hint (the edited scripts).
 Plans or applies the same single-project update shown in the bridge window's
 **Status → Updates** section. It lives in the `typed-editor` group and defaults
 to `dry_run: true`. `target_version` accepts a plain `X.Y.Z`; when omitted, the
-explicit tool call queries the latest npm release. Category flags independently
+MCP server resolves the latest npm release before forwarding the call, and for
+an apply whose preview will re-pin through UPM it also confirms that the
+`bridge-v<version>` release tag exists (`release_tag_unavailable` otherwise).
+The bridge tool itself performs no network I/O, so it never blocks the Editor
+main thread; a direct bridge caller must pass `target_version` or run
+**Check latest** in the bridge window first (`target_version_required`).
+Category flags independently
 select UPM, project configs, home configs, and agent-facing prose.
 
 The preview reports each file, pins found, intended action, and skip reason.

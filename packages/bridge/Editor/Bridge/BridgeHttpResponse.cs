@@ -51,7 +51,10 @@ namespace UnityOpenMcpBridge
                 {
                     context.Response.StatusCode = statusCode;
                     context.Response.ContentType = "application/json; charset=utf-8";
-                    context.Response.KeepAlive = false;
+                    // Keep-alive stays on: the X-Request-Id echo below already
+                    // correlates each reply with its request, and closing the
+                    // connection per response would cost the MCP server a new
+                    // TCP handshake (and the Editor a socket) on every tool call.
                     var requestId = context.Request.Headers["X-Request-Id"];
                     if (!string.IsNullOrEmpty(requestId) && requestId.Length <= 128)
                         context.Response.Headers["X-Request-Id"] = requestId;

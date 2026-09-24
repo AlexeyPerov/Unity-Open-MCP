@@ -376,7 +376,9 @@ namespace UnityOpenMcpBridge.MetaTools
         internal static ToolDispatchResult Preflight(string body, out bool isMutating)
             => Preflight(body, out isMutating, out _);
 
-        internal static ToolDispatchResult Preflight(string body, out bool isMutating, out BatchPlan plan)
+        // `envelopeValidated`: the HTTP handler already validated this body
+        // against the batch_execute request schema at the transport boundary.
+        internal static ToolDispatchResult Preflight(string body, out bool isMutating, out BatchPlan plan, bool envelopeValidated = false)
         {
             isMutating = false;
             plan = new BatchPlan();
@@ -392,7 +394,7 @@ namespace UnityOpenMcpBridge.MetaTools
             if (commands.Count > limit)
                 return ToolDispatchResult.Fail("batch_too_many_commands", $"Batch has {commands.Count} commands; the limit is {limit}.");
             var errors = new List<string>();
-            BatchSchemaValidator.ValidateRequest(body, BridgeBatchSchemas.ByTool["unity_open_mcp_batch_execute"], errors);
+            if (!envelopeValidated) BatchSchemaValidator.ValidateRequest(body, BridgeBatchSchemas.ByTool["unity_open_mcp_batch_execute"], errors);
             string errorCode = errors.Count == 0 ? null : "batch_invalid_step";
             for (int i = 0; i < commands.Count; i++)
             {

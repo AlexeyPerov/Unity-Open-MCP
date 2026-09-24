@@ -133,19 +133,19 @@ namespace UnityOpenMcpBridge.Tests
             // Only ops that can disrupt the editor are guarded — apply_fix /
             // reserialize never trigger the native save modal, so guarding them
             // would be pure friction.
-            Assert.IsTrue(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_execute_csharp"));
-            Assert.IsTrue(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_invoke_method"));
-            Assert.IsTrue(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_execute_menu"));
+            Assert.IsTrue(SceneDirtyGuard.AppliesTo("unity_open_mcp_execute_csharp", "{}"));
+            Assert.IsTrue(SceneDirtyGuard.AppliesTo("unity_open_mcp_invoke_method", "{}"));
+            Assert.IsTrue(SceneDirtyGuard.AppliesTo("unity_open_mcp_execute_menu", "{}"));
             // B11 — scene_create / scene_open default to Single mode, which
             // closes every open scene without saving: the dirty guard must
             // preflight them.
-            Assert.IsTrue(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_scene_create"));
-            Assert.IsTrue(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_scene_open"));
+            Assert.IsTrue(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_create", "{}"));
+            Assert.IsTrue(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_open", "{}"));
 
-            Assert.IsFalse(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_apply_fix"));
-            Assert.IsFalse(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_reserialize"));
-            Assert.IsFalse(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_find_members"));
-            Assert.IsFalse(ToolLifecycle.RequiresDirtyGuard("unity_senses_run_tests"));
+            Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_apply_fix", "{}"));
+            Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_reserialize", "{}"));
+            Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_find_members", "{}"));
+            Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_senses_run_tests", "{}"));
         }
 
         // ----- wire string round-trip -----

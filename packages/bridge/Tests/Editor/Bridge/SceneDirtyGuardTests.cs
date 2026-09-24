@@ -11,10 +11,12 @@ namespace UnityOpenMcpBridge.Tests
     // M13 T4.2 — active-scene dirty guard.
     //
     // The guard's AppliesTo() is a pure decision over (toolName, body) and is
-    // fully unit-testable. Check() touches EditorSceneManager (main-thread
-    // Editor API); in a fresh EditMode session GetSceneManagerSetup() returns
-    // null/empty, so Check() returns Allow — we assert that contract rather
-    // than synthesizing dirty scenes (which would need a loaded test scene).
+    // fully unit-testable. Check() enumerates the scenes SceneManager has
+    // loaded (not GetSceneManagerSetup(), which omits unsaved additive scenes)
+    // and refuses when any of them is dirty — including an untitled one whose
+    // path is empty. The live-session tests below derive their expectation
+    // from the same SceneManager state instead of assuming a clean session:
+    // earlier fixtures legitimately dirty the scratch scene.
     public static class SceneDirtyGuardTests
     {
         // ----- AppliesTo: which tools are guarded -----
@@ -122,17 +124,77 @@ namespace UnityOpenMcpBridge.Tests
                     "{\"mode\":\"additive\",\"ignore_scene_dirty\":false}"));
         }
 
-        // ----- Check: null/empty scene setup => Allow -----
+        // ----- Check(): the live SceneManager contract -----
 
         [Test]
-        public static void Check_NoSceneSetup_Allows()
+        public static void Check_LoadedScenes_RefusesExactlyWhenOneIsDirty()
         {
-            // Fresh EditMode session: GetSceneManagerSetup() returns null when
-            // no scene is loaded. The guard must allow rather than block every
-            // disruptive op in setups it can't introspect.
+            // Allowed iff no loaded scene is dirty; a refused result names every
+            // dirty scene, with "(unsaved scene)" standing in for an empty path.
+            var expected = new System.Collections.Generic.List<string>();
+            for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
+            {
+                var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
+                if (scene.isDirty)
+                    expected.Add(string.IsNullOrEmpty(scene.path) ? "(unsaved scene)" : scene.path);
+            }
+
             var result = SceneDirtyGuard.Check();
-            Assert.IsTrue(result.Allowed);
-            Assert.IsNull(result.DirtyScenePaths);
+
+            Assert.AreEqual(expected.Count == 0, result.Allowed);
+            if (expected.Count == 0)
+                Assert.IsNull(result.DirtyScenePaths);
+            else
+                CollectionAssert.AreEqual(expected, result.DirtyScenePaths);
+        }
+
+        [Test]
+        public static void Check_DirtyUnsavedAdditiveScene_Refuses()
+        {
+            // The reason Check() enumerates SceneManager: an unsaved scene has
+            // no path and GetSceneManagerSetup() would not list it, yet a
+            // Single-mode scene switch discards it without a prompt. Unity
+            // refuses to add a scene next to an unsaved untitled one, so in
+            // that session (the usual headless case) the untitled scratch
+            // scene itself is the subject; otherwise an additive scratch scene
+            // is created so the test never replaces the session's own scene.
+            var active = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            bool reuse = string.IsNullOrEmpty(active.path);
+            bool wasDirty = active.isDirty;
+            var scratch = reuse ? active : EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+            GameObject marker = null;
+            try
+            {
+                // Put the marker INSIDE the scratch scene: NewScene(Additive) does
+                // not activate the new scene, so a bare `new GameObject` would land
+                // in — and permanently dirty — the session's own active scene.
+                marker = new GameObject("__MCPTest_SceneDirtyGuard");
+                UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(marker, scratch);
+                EditorSceneManager.MarkSceneDirty(scratch);
+                Assert.IsTrue(scratch.isDirty, "precondition: additive scratch scene is dirty");
+
+                var result = SceneDirtyGuard.Check();
+
+                Assert.IsFalse(result.Allowed);
+                CollectionAssert.Contains(result.DirtyScenePaths, "(unsaved scene)");
+                StringAssert.Contains("ignore_scene_dirty", result.RefusalMessage);
+            }
+            finally
+            {
+                if (marker != null) UnityEngine.Object.DestroyImmediate(marker);
+                if (!reuse) EditorSceneManager.CloseScene(scratch, true);
+                else if (!wasDirty) ClearSceneDirtiness(scratch);
+            }
+        }
+
+        // The session's untitled scene is reused when Unity refuses an additive
+        // scene beside it; hand it back in the state we found it.
+        private static void ClearSceneDirtiness(UnityEngine.SceneManagement.Scene scene)
+        {
+            typeof(EditorSceneManager)
+                .GetMethod("ClearSceneDirtiness",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+                ?.Invoke(null, new object[] { scene });
         }
 
         // ----- Check(SceneSetup[]): the dirty-branch seam -----

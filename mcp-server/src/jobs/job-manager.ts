@@ -88,8 +88,10 @@ export class JobManager {
     this.cleanupTimer.unref();
   }
   hasOperation(name: string): boolean { return this.operations.has(name); }
-  register(name: string, operation: JobOperation): void {
-    if (this.operations.has(name)) throw new Error(`Duplicate job operation: ${name}`);
+  operation(name: string): JobOperation | undefined { return this.operations.get(name); }
+  /** `replace` swaps an adapter whose bridge-side contract changed; jobs already running keep the operation they started with. */
+  register(name: string, operation: JobOperation, replace = false): void {
+    if (!replace && this.operations.has(name)) throw new Error(`Duplicate job operation: ${name}`);
     this.operations.set(name, operation);
   }
   private copy<T>(value: T): T {
@@ -97,6 +99,15 @@ export class JobManager {
     if (json === undefined || Buffer.byteLength(json) > this.options.maxPayloadBytes)
       throw new JobManagerError("job_payload_too_large", "Job payload exceeds the configured JSON byte limit.");
     return JSON.parse(json) as T;
+  }
+  /** A terminal result above the payload limit is dropped, never allowed to turn a known outcome into an orphan. */
+  private boundedResult(value: unknown): unknown {
+    if (value === undefined) return undefined;
+    try { return this.copy(value); }
+    catch (error) {
+      if (!(error instanceof JobManagerError) || error.code !== "job_payload_too_large") throw error;
+      return { truncated: true, code: error.code, message: `Result exceeded ${this.options.maxPayloadBytes} bytes and was not retained; the job state is authoritative.` };
+    }
   }
   private event(entry: Entry, kind: string, detail: string): void {
     entry.view.updated_at = this.now();
@@ -252,8 +263,17 @@ export class JobManager {
     };
     try {
       const outcome = await entry.operation.run(entry.args, context);
-      if (terminal(entry.view.state)) return;
-      if ("result" in outcome) entry.view.result = this.copy(outcome.result);
+      if (terminal(entry.view.state)) {
+        // The adapter orphaned the job through lifecycle() (or the manager
+        // closed) and only THEN returned: the terminal state stays
+        // authoritative, but the payload it came back with — e.g. the bridge's
+        // own timeout envelope with the run id — is the evidence an operator
+        // needs, so keep it instead of dropping it on the floor.
+        if ("result" in outcome && entry.view.result === undefined) entry.view.result = this.boundedResult(outcome.result);
+        if (outcome.state === "failed") this.event(entry, "adapter_outcome", `${outcome.error.code}: ${outcome.error.message}`);
+        return;
+      }
+      if ("result" in outcome) entry.view.result = this.boundedResult(outcome.result);
       if (outcome.state === "failed") entry.view.error = this.copy(outcome.error);
       else if (outcome.state !== "succeeded" && (outcome.state !== "cancelled" || !entry.operation.cancellable || !entry.controller.signal.aborted))
         throw new Error("Invalid terminal outcome or cancellation without acknowledgement");

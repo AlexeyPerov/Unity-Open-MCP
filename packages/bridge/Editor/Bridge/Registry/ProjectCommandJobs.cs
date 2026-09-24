@@ -90,9 +90,7 @@ namespace UnityOpenMcpBridge
             entry.Cancellable = command.Attribute.Cancellable;
             entries.Add(id, entry);
             // Let the start transport finish before checkpointing or invoking project code.
-            EditorApplication.CallbackFunction begin = null;
-            begin = () => { EditorApplication.update -= begin; _ = Run(entry, command, values); };
-            EditorApplication.update += begin;
+            EditorUpdateOnce.Schedule(() => _ = Run(entry, command, values));
             return Snapshot(entry);
         }
         private static async Task Run(Entry entry, ProjectCommandCatalog.Entry command, object[] values)

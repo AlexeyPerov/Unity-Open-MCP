@@ -897,46 +897,25 @@ namespace UnityOpenMcpBridge
 
             var gateMode = BridgeRequestBody.ExtractGateMode(body);
             var sw = Stopwatch.StartNew();
+            // Resolved once per request: preflight, effective mutation and
+            // lifecycle, request-derived scope and envelope identity travel
+            // with the dispatch, so the gate runner and the batch step loop
+            // never re-parse the body and no tool needs a name check here.
+            var contract = EffectiveToolContract.Resolve(toolName, body,
+                envelopeValidated: BridgeBatchSchemas.ByTool.ContainsKey(toolName));
             string FailureEnvelope(string json, string code, string message)
-            {
-                if (toolName != ProjectCommandInvocation.ToolName) return json;
-                var failed = GatePolicy.Skipped(ToolDispatchResult.Fail(code, message), "request_rejected");
-                ProjectCommandInvocation.Decorate(failed, body, sw.ElapsedMilliseconds);
-                BridgeAuditRecorder.RecordGateRun(toolName, gateMode, failed, ProjectCommandInvocation.ScopedPaths(body));
-                return "{\"projectCommand\":" + failed.ProjectCommandJson + "," + json.Substring(1);
-            }
+                => contract.WrapFailure(json, code, message, gateMode, sw.ElapsedMilliseconds);
 
-            if (toolName == ProjectCommandInvocation.ToolName)
+            if (contract.Refusal != null)
             {
-                var refusal = ProjectCommandInvocation.Preflight(body, out _, out _);
-                if (refusal != null)
-                {
-                    var rejected = GatePolicy.Skipped(refusal, "request_rejected");
-                    ProjectCommandInvocation.Decorate(rejected, body, sw.ElapsedMilliseconds);
-                    BridgeAuditRecorder.RecordGateRun(toolName, gateMode, rejected, ProjectCommandInvocation.ScopedPaths(body));
-                    BridgeActivityRecorder.ApplyToolResultToActivity(activity, rejected, sw.ElapsedMilliseconds);
-                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildGateEnvelope(rejected, gateMode, EffectiveToolContract.Lifecycle(toolName, body)));
-                    return;
-                }
+                var rejected = GatePolicy.Skipped(contract.Refusal, "request_rejected");
+                contract.Decorate(rejected, sw.ElapsedMilliseconds);
+                BridgeAuditRecorder.RecordGateRun(toolName, gateMode, rejected, contract.ScopedPaths);
+                BridgeActivityRecorder.ApplyToolResultToActivity(activity, rejected, sw.ElapsedMilliseconds);
+                BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildGateEnvelope(rejected, gateMode, contract.Lifecycle));
+                return;
             }
-            bool batchMutating = true;
-            // Preflight once here; the plan travels with the dispatch so the
-            // gate runner and the step loop do not re-parse the same body.
-            BatchExecuteTool.BatchPlan batchPlan = null;
-            if (toolName == "unity_open_mcp_batch_execute")
-            {
-                var refusal = BatchExecuteTool.Preflight(body, out batchMutating, out batchPlan);
-                if (refusal != null)
-                {
-                    var rejected = GatePolicy.Skipped(refusal, "request_rejected");
-                    BridgeAuditRecorder.RecordGateRun(toolName, gateMode, rejected, null);
-                    BridgeActivityRecorder.ApplyToolResultToActivity(activity, rejected, sw.ElapsedMilliseconds);
-                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildGateEnvelope(rejected, gateMode, LifecyclePolicy.None));
-                    return;
-                }
-            }
-            bool isMutating = toolName == "unity_open_mcp_batch_execute"
-                ? batchMutating : EffectiveToolContract.IsMutating(toolName, body);
+            bool isMutating = contract.IsMutating;
             // Effective gate precedence (docs/api/bridge-http.md#gate-policy):
             //   valid request `gate`  →  project default (BridgeGateDefaultPolicy).
             // ExtractGateMode already resolves (1) → (2); the [BridgeTool].Gate
@@ -970,9 +949,8 @@ namespace UnityOpenMcpBridge
             bool reserializeAllPathsInvalid = false;
             if (isMutating)
             {
-                pathsHint = toolName == ProjectCommandInvocation.ToolName
-                    ? ProjectCommandInvocation.ScopedPaths(body)
-                    : JsonBody.GetStringArray(JsonBody.TopLevelField(body, "paths_hint"), "paths_hint");
+                pathsHint = contract.ScopedPaths
+                    ?? JsonBody.GetStringArray(JsonBody.TopLevelField(body, "paths_hint"), "paths_hint");
                 if (pathsHint == null || pathsHint.Length == 0)
                 {
                     if (toolName == "unity_open_mcp_apply_fix")
@@ -1101,7 +1079,7 @@ namespace UnityOpenMcpBridge
                     if (System.Threading.Volatile.Read(ref timedOut.Value)) return;
                     try
                     {
-                        result = DispatchWithGate(toolName, body, effectiveGateMode, pathsHint, batchPlan);
+                        result = DispatchWithGate(toolName, body, effectiveGateMode, pathsHint, contract);
                     }
                     catch (System.Exception e)
                     {
@@ -1143,9 +1121,7 @@ namespace UnityOpenMcpBridge
                 // response returns while the Editor is still importing what the
                 // successful steps wrote. A total failure (Success == false,
                 // PartialCommit == false) committed nothing and skips the wait.
-                var lifecycle = toolName == "unity_open_mcp_batch_execute"
-                    ? (result.EffectiveReadOnly ? LifecyclePolicy.None : LifecyclePolicy.EditorSettle)
-                    : EffectiveToolContract.Lifecycle(toolName, body);
+                var lifecycle = contract.Lifecycle;
                 if (result.Mutation != null
                     && (result.Mutation.Success || result.Mutation.PartialCommit)
                     && ToolLifecycle.RequiresSettleWait(lifecycle))
@@ -1200,7 +1176,7 @@ namespace UnityOpenMcpBridge
                         result.AgentNextSteps = AppendStep(result.AgentNextSteps, fdAdvisory);
                 }
 
-                if (toolName == ProjectCommandInvocation.ToolName) ProjectCommandInvocation.Decorate(result, body, sw.ElapsedMilliseconds);
+                contract.Decorate(result, sw.ElapsedMilliseconds);
                 BridgeAuditRecorder.RecordGateRun(toolName, effectiveGateMode, result, pathsHint);
                 BridgeActivityRecorder.ApplyToolResultToActivity(activity, result, sw.ElapsedMilliseconds);
                 BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildGateEnvelope(result, effectiveGateMode, lifecycle));
@@ -1259,7 +1235,7 @@ namespace UnityOpenMcpBridge
         }
 
         private static GateDispatchResult DispatchWithGate(string toolName, string body, string gateMode, string[] pathsHint,
-            BatchExecuteTool.BatchPlan batchPlan = null)
+            ToolRequestContract contract = null)
         {
             // M22 T22.1.3 — capture console entries emitted during this dispatch
             // (scene-dirty guard + checkpoint + validate + mutate) as a before/
@@ -1275,7 +1251,7 @@ namespace UnityOpenMcpBridge
             // built by the caller. Only the log COLLECTION is best-effort: a
             // reflection failure while reading optional console entries must
             // not fault an otherwise-successful dispatch.
-            var result = DispatchWithGatePlanned(toolName, body, gateMode, pathsHint, batchPlan);
+            var result = DispatchWithGatePlanned(toolName, body, gateMode, pathsHint, contract);
             try
             {
                 result.Logs = LogEntriesReader.StopCapture(captureStart);
@@ -1293,20 +1269,20 @@ namespace UnityOpenMcpBridge
             => DispatchWithGatePlanned(toolName, body, gateMode, pathsHint, null);
 
         private static GateDispatchResult DispatchWithGatePlanned(string toolName, string body, string gateMode, string[] pathsHint,
-            BatchExecuteTool.BatchPlan batchPlan)
+            ToolRequestContract contract)
         {
-            // Batch is checked by name first: EffectiveToolContract.IsMutating
-            // would otherwise re-run the whole batch preflight for this test.
-            if (ProjectCommandJobs.Active && (toolName == "unity_open_mcp_batch_execute" || EffectiveToolContract.IsMutating(toolName, body)))
+            // Direct and test callers arrive without the HTTP handler's contract.
+            contract ??= EffectiveToolContract.Resolve(toolName, body);
+            if (ProjectCommandJobs.Active && contract.IsMutating)
                 return GatePolicy.Skipped(ToolDispatchResult.Fail("job_busy", "An asynchronous project command owns the Editor mutation scope."), "request_rejected");
-            if (toolName == "unity_open_mcp_batch_execute")
-                return BatchExecuteGateRunner.Execute(body, gateMode, pathsHint, batchPlan);
-            if (toolName == ProjectCommandInvocation.ToolName)
-            {
-                var refusal = ProjectCommandInvocation.Preflight(body, out _, out _);
-                if (refusal != null) return GatePolicy.Skipped(refusal, "request_rejected");
-            }
-            bool isMutating = EffectiveToolContract.IsMutating(toolName, body);
+            if (contract.Refusal != null) return GatePolicy.Skipped(contract.Refusal, "request_rejected");
+            if (contract.BatchPlan != null)
+                return BatchExecuteGateRunner.Execute(body, gateMode, pathsHint, contract.BatchPlan);
+            bool isMutating = contract.IsMutating;
+            // Tools whose contract already bound their arguments (project
+            // commands) dispatch through that binding; everything else takes
+            // the plain name-switch path.
+            Func<ToolDispatchResult> invoke = contract.Invoke ?? (() => DispatchTool(toolName, body));
 
             var mode = GatePolicy.ParseMode(gateMode);
 
@@ -1315,8 +1291,9 @@ namespace UnityOpenMcpBridge
             // settled ops (apply_fix, reserialize) never trigger the native save
             // modal, so guarding them would just add friction. Runs on the main
             // thread (this whole method is dispatched via MainThreadDispatcher),
-            // which is required for EditorSceneManager access.
-            if (SceneDirtyGuard.AppliesTo(toolName, body))
+            // which is required for EditorSceneManager access. The decision is
+            // taken from the resolved contract, not re-derived from the body.
+            if (SceneDirtyGuard.AppliesTo(contract, body))
             {
                 var guard = SceneDirtyGuard.Check();
                 if (!guard.Allowed && SceneDirtyAutoSave.IsEnabled)
@@ -1341,7 +1318,7 @@ namespace UnityOpenMcpBridge
 
             if (!isMutating)
             {
-                var nonMutatingResult = DispatchTool(toolName, body);
+                var nonMutatingResult = invoke();
                 return new GateDispatchResult
                 {
                     Mutation = nonMutatingResult,
@@ -1360,7 +1337,7 @@ namespace UnityOpenMcpBridge
             if (toolName == "unity_open_mcp_apply_fix")
                 return ApplyFixGateRunner.Execute(body, gateMode, pathsHint);
 
-            return GatePolicy.Execute(mode, pathsHint, () => DispatchTool(toolName, body));
+            return GatePolicy.Execute(mode, pathsHint, invoke);
         }
 
         // M27 Plan 4 — made internal so BatchExecuteTool can reuse the EXACT same

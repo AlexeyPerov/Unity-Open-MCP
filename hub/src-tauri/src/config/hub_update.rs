@@ -76,6 +76,10 @@ pub struct HubUpdateStatus {
     pub release: Option<HubUpdateRelease>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// A newer release is cached but its notice is hidden (dismissed or
+    /// snoozed). Lets the Settings panel say so instead of "up to date".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hidden_release_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -237,6 +241,20 @@ fn status_from_cache(
     message: Option<String>,
 ) -> HubUpdateStatus {
     let release = visible_release(cache, running, now);
+    // Newer than the running build, but suppressed by dismiss/remind-later.
+    let hidden_release_version = if release.is_some() {
+        None
+    } else {
+        cache
+            .available
+            .as_ref()
+            .filter(|cached| {
+                Version::parse(&cached.version)
+                    .map(|version| version > *running)
+                    .unwrap_or(false)
+            })
+            .map(|cached| cached.version.clone())
+    };
     HubUpdateStatus {
         state: if release.is_some() {
             "available".to_string()
@@ -251,6 +269,7 @@ fn status_from_cache(
         manual_download_url: RELEASES_PAGE.to_string(),
         release,
         message,
+        hidden_release_version,
     }
 }
 
@@ -292,6 +311,14 @@ fn check_sync(force: bool, official: bool, path: &Path, now: u64) -> HubUpdateSt
         && now.saturating_sub(cache.checked_at_epoch) < CHECK_INTERVAL_SECONDS
     {
         return status_from_cache(&cache, &running, now, "throttled", None);
+    }
+
+    if force {
+        // An explicit "Check for updates" asks to see what is out there again:
+        // a dismissed or snoozed notice comes back when the cached release is
+        // still newer than the running build.
+        cache.dismissed_version = None;
+        cache.remind_after_epoch = 0;
     }
 
     // Record the attempt before touching the network. A write failure is
@@ -344,6 +371,7 @@ pub async fn check_hub_update(force: Option<bool>) -> HubUpdateStatus {
         manual_download_url: RELEASES_PAGE.into(),
         release: None,
         message: Some(format!("update check task failed: {e}")),
+        hidden_release_version: None,
     })
 }
 
@@ -613,5 +641,16 @@ mod tests {
         assert!(visible_release(&cache, &running, 201).is_some());
         cache.dismissed_version = Some("1.3.0".into());
         assert!(visible_release(&cache, &running, 201).is_none());
+
+        // A hidden notice must not read as "up to date": the status names the
+        // suppressed release so the Settings panel can say so.
+        let hidden = status_from_cache(&cache, &running, 201, "throttled", None);
+        assert_eq!(hidden.state, "throttled");
+        assert!(hidden.release.is_none());
+        assert_eq!(hidden.hidden_release_version.as_deref(), Some("1.3.0"));
+        cache.dismissed_version = None;
+        let shown = status_from_cache(&cache, &running, 201, "throttled", None);
+        assert_eq!(shown.state, "available");
+        assert!(shown.hidden_release_version.is_none());
     }
 }

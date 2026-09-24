@@ -10,6 +10,9 @@
     if (hubUpdateStore.status?.release) {
       return `Version ${hubUpdateStore.status.release.version} is available.`;
     }
+    if (hubUpdateStore.status?.hiddenReleaseVersion) {
+      return `Version ${hubUpdateStore.status.hiddenReleaseVersion} is available; its notice was dismissed or snoozed. Check for updates to show it again.`;
+    }
     if (hubUpdateStore.state === "upToDate" || hubUpdateStore.state === "throttled") {
       return "You’re up to date.";
     }

@@ -80,7 +80,7 @@ namespace UnityOpenMcpBridge.Update
                     return new Result(false, null,
                         $"Bridge tag check failed with HTTP {(int)response.StatusCode}.");
                 var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                return body.IndexOf("bridge-v" + version, StringComparison.Ordinal) >= 0
+                return ContainsExactBridgeTag(body, version)
                     ? new Result(true, version, null)
                     : new Result(false, null, $"Release tag bridge-v{version} was not found.");
             }
@@ -88,6 +88,15 @@ namespace UnityOpenMcpBridge.Update
             {
                 return new Result(false, null, "Bridge tag check failed: " + e.Message);
             }
+        }
+
+        // matching-refs is a PREFIX query: asking for bridge-v1.2.3 also returns
+        // bridge-v1.2.30, so only the exact ref name proves the tag exists.
+        internal static bool ContainsExactBridgeTag(string body, string version)
+        {
+            if (string.IsNullOrEmpty(body) || string.IsNullOrEmpty(version)) return false;
+            var pattern = "\"ref\"\\s*:\\s*\"refs/tags/bridge-v" + Regex.Escape(version) + "\"";
+            return Regex.IsMatch(body, pattern, RegexOptions.CultureInvariant);
         }
 
         internal static void Remember(Result result)

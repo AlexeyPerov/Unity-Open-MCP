@@ -4,8 +4,8 @@ import { buildCapabilities } from "./build-capabilities.js";
 import { INTENT_TAGS } from "./intent-groups.js";
 import { filterVisibleTools, type ToolSessionState } from "../tool-session-state.js";
 import { applyPaging } from "../output-profile.js";
+import { isLocalTool } from "../local-tools.js";
 
-const LOCAL = new Set(["capabilities", "manage_tools", "generate_skill", "list_rules", "bridge_status", "restart_editor", "resource_pressure", "read_compile_errors", "jobs"] .map(n => `unity_open_mcp_${n}`));
 const POTENTIALLY_MUTATING_LOCAL = new Set(["unity_open_mcp_jobs", "unity_open_mcp_restart_editor", "unity_open_mcp_hub_install_editor", "unity_open_mcp_hub_install_modules", "unity_open_mcp_hub_set_install_path"]);
 
 function exampleValue(s: any, key: string): any {
@@ -33,7 +33,7 @@ export function discoverTools(tools: Tool[], batch: ReadonlySet<string>, session
   const visible = new Set(filterVisibleTools(tools, session).map(t => t.name));
   const built = buildCapabilities({ tools, batchToolNames: batch, rules: [], fixes: [], availableBridgeTools: inventory }, { kind: "tools", includePlanned: false });
   const rows = (built.tools ?? []).map(t => {
-    const local = LOCAL.has(t.name) || t.name.startsWith("unity_open_mcp_hub_") || t.name === "unity_senses_pull_events";
+    const local = isLocalTool(t.name);
     const tags = INTENT_TAGS.filter(tag => t.group && tag.groups.includes(t.group)).map(tag => tag.tag);
     return { ...t, routePolicy: local ? "local" : ALWAYS_BATCH_TOOLS.has(t.name) ? "batch" : t.routePolicy,
       mutating: !!t.inputSchema.properties?.gate || POTENTIALLY_MUTATING_LOCAL.has(t.name),

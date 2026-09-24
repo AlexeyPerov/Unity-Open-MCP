@@ -308,8 +308,7 @@ namespace UnityOpenMcpBridge
 
         // M27 Plan 4 — batch_execute nested-command cap. Exposes the
         // batchExecuteMaxCommands project setting (default 25, hard max 100)
-        // so an operator can tune it from the Settings tab. Mirrors the
-        // Coplay parity knob (configurable in the Editor UI).
+        // so an operator can tune it from the Settings tab.
         private void DrawBatchLimitsSection()
         {
             EditorGUILayout.Space(4);

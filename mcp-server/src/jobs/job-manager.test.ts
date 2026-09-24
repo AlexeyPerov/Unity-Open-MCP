@@ -165,14 +165,40 @@ test("paging is deterministic, bound to owner/filter/session and excludes later 
   assert.throws(() => restarted.status(owner, ids[0]), { code: "job_not_found" });
 });
 
-test("invalid preflight does not reserve a key; oversized terminal data cannot masquerade as success", async t => {
+test("invalid preflight does not reserve a key; an oversized terminal result is dropped, not turned into an orphan", async t => {
   const m = manager(t, { maxPayloadBytes: 128 });
-  m.register("bounded", { mutating: true, cancellable: false,
+  const bounded: JobOperation = { mutating: true, cancellable: false,
     validate(args) { if (args.invalid) throw new Error("invalid adapter args"); },
-    async run() { return { state: "succeeded", result: "x".repeat(129) }; } });
+    async run() { return { state: "succeeded", result: "x".repeat(129) }; } };
+  m.register("bounded", bounded);
   assert.throws(() => m.start(owner, "bounded", { invalid: true }, "key"), /invalid adapter args/);
   assert.equal(m.list(owner).jobs.length, 0);
   const job = m.start(owner, "bounded", {}, "key"); await tick();
-  assert.equal(m.status(owner, job.job_id).state, "orphaned");
-  assert.equal(m.status(owner, job.job_id).result, undefined);
+  // The operation completed; only its payload is too large to retain. A large
+  // test-results file must not read as "outcome unknown, do not retry".
+  const done = m.status(owner, job.job_id);
+  assert.equal(done.state, "succeeded");
+  assert.equal(done.error, undefined);
+  assert.deepEqual(done.result, { truncated: true, code: "job_payload_too_large",
+    message: "Result exceeded 128 bytes and was not retained; the job state is authoritative." });
+  // Adapters can be swapped when the bridge-side contract changes; plain re-registration stays an error.
+  const swapped: JobOperation = { ...bounded, cancellable: true };
+  assert.throws(() => m.register("bounded", swapped), /Duplicate job operation/);
+  m.register("bounded", swapped, true);
+  assert.equal(m.operation("bounded"), swapped);
+});
+
+test("an adapter that orphans the job before returning keeps its evidence without changing the state", async t => {
+  const m = manager(t), f = fixture(); m.register("operation", f.operation);
+  const job = m.start(owner, "operation", {}, "key"); await tick();
+  // The adapter lost ownership evidence (results file never appeared) and
+  // says so, then still hands back the bridge's own envelope.
+  f.pending[0].context.lifecycle("disconnected", "results file never appeared", false);
+  f.pending[0].finish({ state: "failed", error: { code: "test_results_timeout", message: "budget expired" }, result: { runId: "abc" } });
+  await tick();
+  const snapshot = m.status(owner, job.job_id);
+  assert.equal(snapshot.state, "orphaned");
+  assert.equal(snapshot.error?.code, "job_owner_lost");
+  assert.deepEqual(snapshot.result, { runId: "abc" });
+  assert.ok(snapshot.events.some(e => e.kind === "adapter_outcome" && e.detail.includes("test_results_timeout")));
 });

@@ -24,5 +24,15 @@ namespace UnityOpenMcpBridge.Tests.Update
             Assert.IsNull(result.Version);
             Assert.IsNotEmpty(result.Error);
         }
+
+        [Test]
+        public void ContainsExactBridgeTag_RejectsPrefixMatches()
+        {
+            const string body = "[{\"ref\":\"refs/tags/bridge-v1.2.30\"}]";
+            Assert.IsFalse(LatestVersionCheck.ContainsExactBridgeTag(body, "1.2.3"));
+            Assert.IsTrue(LatestVersionCheck.ContainsExactBridgeTag(body, "1.2.30"));
+            Assert.IsTrue(LatestVersionCheck.ContainsExactBridgeTag("[{ \"ref\" : \"refs/tags/bridge-v1.2.3\" }]", "1.2.3"));
+            Assert.IsFalse(LatestVersionCheck.ContainsExactBridgeTag("[]", "1.2.3"));
+        }
     }
 }

@@ -23,7 +23,7 @@ else
   project_path="${workspace_root}"
 fi
 
-for marker in Assets Packages ProjectSettings; do
+for marker in __UNITY_ROOT_MARKERS__; do
   if [ ! -d "${project_path}/${marker}" ]; then
     echo "unity-open-mcp: ${project_path} is not a Unity project root (missing ${marker}/)." >&2
     echo "unity-open-mcp: set UNITY_SUBPATH to the Unity folder relative to ${workspace_root}." >&2

@@ -5,8 +5,8 @@ import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 // sequentially inside the already-open Editor. NOT the headless batch fallback
 // (`batchCapable: false`; not in BATCH_TOOL_NAMES). The bridge wraps the whole
 // sequence in a single checkpoint → N steps → one validate/delta gate cycle
-// (one undo group for the whole batch), so it is strictly safer than Coplay's
-// non-transactional sequential invoke.
+// (one undo group for the whole batch), so a partial failure is scoped,
+// validated, and undoable as one unit.
 //
 // Default cap is 25 commands (hard max 100), configurable in
 // `.unity-open-mcp/settings.json` (`batchExecuteMaxCommands`).

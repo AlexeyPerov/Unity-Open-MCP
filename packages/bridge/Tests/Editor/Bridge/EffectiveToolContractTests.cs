@@ -17,6 +17,18 @@ namespace UnityOpenMcpBridge.Tests
         [MenuItem("Tools/Open MCP Test/Inspect"), BridgeReadOnlyMenu]
         public static void InspectMenu() { }
 
+        // BatchExecuteTool.Preflight accepts a step only when the typed-tool
+        // registry knows it. Production fills the registry at bridge startup,
+        // which never runs in an isolated test session, so the batch tests
+        // below passed only when an earlier class happened to scan first.
+        // Scan here (leaving a registry another fixture already populated
+        // untouched) so the class is order-independent.
+        [OneTimeSetUp]
+        public void EnsureTypedToolRegistry()
+        {
+            if (BridgeToolRegistry.Count == 0) BridgeToolRegistry.Scan();
+        }
+
         [Test]
         public void VerifierMenu_ExactDeclaration_SkipsScopeAndLifecycle()
         {

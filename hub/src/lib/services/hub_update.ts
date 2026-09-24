@@ -26,6 +26,8 @@ export interface HubUpdateStatus {
   manualDownloadUrl: string;
   release?: HubUpdateRelease;
   message?: string;
+  /** A newer release is cached but its notice was dismissed or snoozed. */
+  hiddenReleaseVersion?: string;
 }
 
 export interface HubUpdateApplyResult {

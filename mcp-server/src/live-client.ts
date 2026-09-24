@@ -10,7 +10,7 @@ import { EditorWedgeCache, scanForFdExhaustion } from "./editor-wedge.js";
 import type { FdExhaustionScan } from "./editor-wedge.js";
 import { detectStaleAssembly } from "./unity-log.js";
 import { deriveIsError } from "./gate-error.js";
-import { readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -18,7 +18,7 @@ import {
   readDismissConfig,
   type PollAndDismissOptions,
 } from "./dialog-dismiss.js";
-import { readInstanceLock, classifyInstance, lockPath, isPidAlive, statusDir, hasRecentPendingTestRun, resolveRefreshedEndpoint } from "./instance-discovery.js";
+import { readInstanceLock, classifyInstance, lockPath, isPidAlive, statusDir, hasRecentPendingTestRun, resolveRefreshedEndpoint, normalizePath } from "./instance-discovery.js";
 import type { InstanceClassification } from "./instance-discovery.js";
 import {
   bridgeBaseUrl,
@@ -55,6 +55,16 @@ import { lifecycleFor } from "./capabilities/lifecycle.js";
 // M23 Plan 3 — per-process agent identity (sent as X-Agent-Id so the bridge's
 // fair round-robin queue can schedule across agents).
 import { PROCESS_AGENT_ID } from "./agent-identity.js";
+
+/** Mirrors BridgeCompileState.RevalidateIntervalSeconds on the bridge. */
+const COMPILE_STATE_REUSE_MS = 2000;
+
+function canonicalProjectPath(p: string): string {
+  let real = p;
+  try { real = realpathSync.native(p); } catch { /* unresolvable here: compare as spelled */ }
+  const norm = normalizePath(real);
+  return process.platform === "win32" ? norm.toLowerCase() : norm;
+}
 
 const PING_TIMEOUT_MS = 5_000;
 
@@ -323,6 +333,13 @@ export class LiveClient implements Router {
    *  the constructor used; without it a refresh would silently switch from an
    *  env-pinned port to the lock port. */
   private readonly envPort: number | undefined;
+  /** Last /compile-state body for the per-result staleness check. The bridge
+   *  revalidates its own fingerprint at most every 2 s, so re-fetching inside
+   *  that window buys nothing and doubles the request count under a burst of
+   *  read tools. Invalidated around compile-reload tools. */
+  private compileStateCache: { at: number; body: Record<string, unknown> | null } | null = null;
+  /** Memoized outcome of the bridge-vs-server project-path comparison. */
+  private projectMatch: { reported: string; same: boolean } | null = null;
 
   /** Agent identity this client sends as X-Agent-Id (job ownership key). */
   get agentIdentity(): string { return this.agentId; }
@@ -400,9 +417,34 @@ export class LiveClient implements Router {
       const res = await this.fetchWithTimeout("/compile-state", { method: "GET" }, 2000);
       const body = await res.json() as Record<string, unknown>;
       if (!res.ok || typeof body.generation !== "number" || typeof body.status !== "string") return null;
-      if (this.projectPath && body.projectPath !== this.projectPath) return null;
+      if (this.projectPath && !this.sameProject(body.projectPath)) return null;
       return body;
     } catch { return null; }
+  }
+
+  /** `readCompileState` with a short reuse window (see `compileStateCache`). */
+  private async readCompileStateCached(): Promise<Record<string, unknown> | null> {
+    const cached = this.compileStateCache;
+    if (cached && Date.now() - cached.at < COMPILE_STATE_REUSE_MS) return cached.body;
+    const body = await this.readCompileState();
+    this.compileStateCache = { at: Date.now(), body };
+    return body;
+  }
+
+  private invalidateCompileState(): void {
+    this.compileStateCache = null;
+  }
+
+  /** The bridge reports DirectoryInfo.FullName while the server holds a
+   *  path.resolve'd string; separators, drive-letter case and /private-style
+   *  symlinks can differ for the same project, and a strict compare would
+   *  silently disable live compile state. Compare canonical forms instead. */
+  private sameProject(reported: unknown): boolean {
+    if (typeof reported !== "string" || !this.projectPath) return false;
+    if (this.projectMatch?.reported === reported) return this.projectMatch.same;
+    const same = canonicalProjectPath(reported) === canonicalProjectPath(this.projectPath);
+    this.projectMatch = { reported, same };
+    return same;
   }
 
   async isLiveAvailable(fetchTimeoutMs?: number): Promise<boolean> {
@@ -580,7 +622,9 @@ export class LiveClient implements Router {
     const annotate = isCompileReload && shouldAnnotateCompileVerify(toolName);
     const before = annotate ? await this.captureCompileSnapshot() : null;
 
+    if (isCompileReload) this.invalidateCompileState();
     const result = await this.postTool(toolName, args, true, 1, commandLifecycle);
+    if (isCompileReload) this.invalidateCompileState();
 
     if (annotate && !result.isError && before !== null) {
       return this.annotateCompileVerify(toolName, result, before, args);
@@ -1026,12 +1070,25 @@ export class LiveClient implements Router {
       parsed.error == null &&
       parsed._staleDomain === undefined
     ) {
-      const liveCompile = await this.readCompileState();
+      const liveCompile = await this.readCompileStateCached();
       const staleAsm = liveCompile?.status === "no_errors_found" && liveCompile.sourceMatches === true
         ? null : liveCompile?.status === "assembly_stale"
           ? { staleAssembly: true, newerSources: [], hint: "Source content changed after the completed compile generation. Recompile before trusting this result." }
           : this.resolveStaleAssembly();
-      if (liveCompile) parsed._compileState = liveCompile;
+      if (liveCompile) {
+        // Compact projection only. The full body carries `errors[]` — every
+        // CS diagnostic of a failed compile — and would repeat it on every
+        // read result for the rest of the session; read_compile_errors owns
+        // the list. Keep just the fields that qualify THIS result.
+        parsed._compileState = {
+          status: liveCompile.status,
+          generation: liveCompile.generation,
+          sourceMatches: liveCompile.sourceMatches,
+          beforeAssemblyMtimeMs: liveCompile.beforeAssemblyMtimeMs,
+          afterAssemblyMtimeMs: liveCompile.afterAssemblyMtimeMs,
+          errorCount: Array.isArray(liveCompile.errors) ? liveCompile.errors.length : 0,
+        };
+      }
       if (staleAsm != null && staleAsm.staleAssembly) {
         // specs/feedback.md 2026-08-14 — a stale assembly plus a wedged build
         // driver is not a footnote, it is an execution-integrity failure. In

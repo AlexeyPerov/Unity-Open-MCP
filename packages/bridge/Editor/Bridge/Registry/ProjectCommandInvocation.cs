@@ -31,7 +31,10 @@ namespace UnityOpenMcpBridge
                 ? entry.Attribute.PathsHint.Concat(supplied).Distinct(StringComparer.Ordinal).ToArray() : supplied;
         }
 
-        internal static ToolDispatchResult Preflight(string body, out ProjectCommandCatalog.Entry entry, out object[] values, ProjectCommandContext context = null)
+        // `envelopeValidated`: the HTTP handler already ran the request-schema
+        // validation for this body at the transport boundary; skip repeating it.
+        internal static ToolDispatchResult Preflight(string body, out ProjectCommandCatalog.Entry entry, out object[] values,
+            ProjectCommandContext context = null, bool envelopeValidated = false)
         {
             entry = null;
             values = null;
@@ -40,7 +43,7 @@ namespace UnityOpenMcpBridge
             var envelopeErrors = new List<string>();
             var allowed = new[] { "action", "command_id", "args", "schema_version", "paths_hint", "gate", "timeout_ms", "ignore_scene_dirty", "confirm_bypass" };
             if (JsonBody.GetObjectKeys(body).Any(key => !allowed.Contains(key))) envelopeErrors.Add("invoke accepts command_id, args, schema_version and transport options only.");
-            BatchSchemaValidator.ValidateRequest(body, BridgeBatchSchemas.ByTool[ToolName], envelopeErrors);
+            if (!envelopeValidated) BatchSchemaValidator.ValidateRequest(body, BridgeBatchSchemas.ByTool[ToolName], envelopeErrors);
             if (JsonBody.GetObjectKeys(body).Distinct(StringComparer.Ordinal).Count() != JsonBody.GetObjectKeys(body).Count)
                 envelopeErrors.Add("Duplicate transport keys are not allowed.");
             if (envelopeErrors.Count > 0) return ToolDispatchResult.Fail("invalid_arguments", string.Join("; ", envelopeErrors));
@@ -119,6 +122,15 @@ namespace UnityOpenMcpBridge
         {
             var refusal = Preflight(body, out var entry, out var values);
             if (refusal != null) return refusal;
+            return Execute(body, entry, values);
+        }
+
+        // Dispatch for an already-preflighted request. The HTTP path resolves
+        // the contract (and therefore runs Preflight) once per request and
+        // hands the bound entry/values down here, so argument validation and
+        // CLR binding are not repeated inside the gate.
+        internal static ToolDispatchResult Execute(string body, ProjectCommandCatalog.Entry entry, object[] values)
+        {
             try
             {
                 RecordStarted(body, entry);

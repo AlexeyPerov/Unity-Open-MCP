@@ -81,14 +81,22 @@ function parseGroups() {
 // 3. Route policy (mirrors mcp-server/src/tool-router.ts priority order)
 // ---------------------------------------------------------------------------
 
-const LOCAL_PINNED = new Set([
-  "unity_open_mcp_jobs",
-  "unity_open_mcp_capabilities", "unity_open_mcp_list_rules", "unity_open_mcp_generate_skill",
-  "unity_open_mcp_manage_tools", "unity_open_mcp_bridge_status", "unity_senses_pull_events",
-  "unity_open_mcp_hub_list_editors", "unity_open_mcp_hub_available_releases",
-  "unity_open_mcp_hub_install_editor", "unity_open_mcp_hub_install_modules",
-  "unity_open_mcp_hub_get_install_path", "unity_open_mcp_hub_set_install_path",
-]);
+// Local route set — parsed from the MCP server's single source of truth
+// (mcp-server/src/local-tools.ts: LOCAL_TOOL_NAMES + the hub_* prefix rule in
+// isLocalTool) so this script can never drift from what the router does.
+const LOCAL_TOOLS_FILE = resolve(REPO_ROOT, "mcp-server", "src", "local-tools.ts");
+function parseLocalToolNames() {
+  const source = readFileSync(LOCAL_TOOLS_FILE, "utf8");
+  const literal = source.match(/LOCAL_TOOL_NAMES[^=]*=\s*new Set\(\[([\s\S]*?)\]\)/);
+  if (!literal) throw new Error(`Could not parse LOCAL_TOOL_NAMES from ${LOCAL_TOOLS_FILE}`);
+  const names = new Set([...literal[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+  if (names.size === 0) throw new Error(`LOCAL_TOOL_NAMES in ${LOCAL_TOOLS_FILE} is empty`);
+  return names;
+}
+const LOCAL_TOOL_NAMES = parseLocalToolNames();
+function isLocalTool(toolName) {
+  return LOCAL_TOOL_NAMES.has(toolName) || toolName.startsWith("unity_open_mcp_hub_");
+}
 const OFFLINE_PINNED = new Set([
   "unity_open_mcp_list_assets", "unity_open_mcp_read_compile_errors",
   "unity_open_mcp_read_asset", "unity_open_mcp_search_assets",
@@ -104,7 +112,7 @@ const BATCH_FALLBACK = new Set([
 ]);
 
 function routeFor(toolName) {
-  if (LOCAL_PINNED.has(toolName)) return "local";
+  if (isLocalTool(toolName)) return "local";
   if (OFFLINE_PINNED.has(toolName)) return "offline";
   if (BATCH_META.has(toolName)) return "batch";
   if (BATCH_FALLBACK.has(toolName)) return "live+batch";

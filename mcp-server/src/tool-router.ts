@@ -9,6 +9,8 @@ import { discoverTools, compactDiscoverySchema } from "./capabilities/discovery.
 import { PingCache } from "./ping-cache.js";
 import { resolveProjectPath, validateUnityProjectRoot } from "./project-path.js";
 import { resolvePort, resolveAuthToken } from "./instance-discovery.js";
+import { skipsReloadProbe } from "./local-tools.js";
+import { confirmBridgeReleaseTag, resolveLatestVersion, type BridgeTagConfirmation } from "./release-lookup.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import { LiveClient } from "./live-client.js";
@@ -307,6 +309,29 @@ function transformLiveResult(
 // because it is resolved entirely in the MCP server.
 function localError(code: string, message: string): CallToolResult {
   return sourceResult({ error: { code, message } }, "local", true);
+}
+
+/**
+ * Release lookups behind `unity_open_mcp_upgrade`. Injectable so unit tests
+ * never touch npm or GitHub; production uses the shared `release-lookup`
+ * module with the global fetch.
+ */
+export interface ReleaseLookup {
+  latest(): Promise<{ version: string }>;
+  confirmBridgeTag(version: string): Promise<BridgeTagConfirmation>;
+}
+
+const defaultReleaseLookup: ReleaseLookup = {
+  latest: () => resolveLatestVersion(globalThis.fetch.bind(globalThis)),
+  confirmBridgeTag: (version) => confirmBridgeReleaseTag(version, globalThis.fetch.bind(globalThis)),
+};
+let releaseLookup: ReleaseLookup = defaultReleaseLookup;
+
+/** Test seam for the upgrade route's network lookups. Returns a restore function. */
+export function setReleaseLookupForTest(lookup: ReleaseLookup | null): () => void {
+  const previous = releaseLookup;
+  releaseLookup = lookup ?? defaultReleaseLookup;
+  return () => { releaseLookup = previous; };
 }
 
 // M26 Plan 2 — gate-consistent envelope shape for the mutating Hub control
@@ -716,15 +741,27 @@ export class ToolRouter implements Router {
       const clientFor = (jobOwner: JobOwner) => jobOwner.port === undefined
         ? jobOwner.agent === PROCESS_AGENT_ID ? this.live : this.live.forAgent(jobOwner.agent)
         : new LiveClient(jobOwner.port, new PingCache(), resolveAuthToken(this.projectPath, jobOwner.port), this.projectPath, jobOwner.agent, jobOwner.port);
-      if (args.action === "start" && typeof args.tool_or_command === "string" && !this.jobs.hasOperation(args.tool_or_command)) {
+      if (args.action === "start" && typeof args.tool_or_command === "string") {
         const name = args.tool_or_command;
-        if (name === "unity_senses_run_tests") this.jobs.register(name, testRunOperation(clientFor));
-        else if (name.startsWith("project.")) {
+        if (name === "unity_senses_run_tests") {
+          if (!this.jobs.hasOperation(name)) this.jobs.register(name, testRunOperation(clientFor));
+        } else if (name.startsWith("project.")) {
+          // Re-read the catalog on every start: a domain reload can change the
+          // command's async/cancellable declaration, and an adapter frozen at
+          // first registration would refuse the job for the rest of the session.
           const catalog = await clientFor(owner).projectCommands({ action: "describe", id: name });
+          if (catalog.error) {
+            // A transport/catalog failure (bridge down, reloading, too old) is
+            // not "this command is unsupported": surface the catalog's own
+            // code so the agent retries instead of abandoning the plan.
+            const failure = catalog.error as { code?: string; message?: string };
+            throw new JobManagerError(failure.code ?? "catalog_unavailable", failure.message ?? "Project command catalog is unavailable.");
+          }
           const command = catalog.command as Record<string, unknown> | undefined;
           if (!command?.available || !command.async) throw new JobManagerError("job_operation_unsupported", "Target must be an available async project command.");
-          // Concurrent catalog reads may race; register the adapter only once.
-          if (!this.jobs.hasOperation(name)) this.jobs.register(name, projectCommandOperation(name, command.cancellable === true, clientFor));
+          const cancellable = command.cancellable === true;
+          if (this.jobs.operation(name)?.cancellable !== cancellable)
+            this.jobs.register(name, projectCommandOperation(name, cancellable, clientFor), true);
         }
       }
       return sourceResult(await handleJobs(this.jobs, owner, args) as Record<string, unknown>, "local");
@@ -761,6 +798,9 @@ export class ToolRouter implements Router {
       ["unity_open_mcp_generate_skill", (_l, a) => this.routeGenerateSkill(a)],
       ["unity_open_mcp_manage_tools", (l, a) => this.routeManageTools(a, l)],
       ["unity_open_mcp_project_commands", (l, a) => this.routeProjectCommands(a, l)],
+      // Live tool whose release lookups (npm latest, GitHub tag) run HERE so
+      // the Editor main thread never blocks on the network.
+      ["unity_open_mcp_upgrade", (l, a) => this.routeUpgrade(a, l)],
       // Reached via manage_tools(action: invoke) or a port-override route. The
       // owner must match what server.ts derives for a direct call: the
       // request's agent id, plus the port ONLY when this is a per-request
@@ -884,9 +924,7 @@ export class ToolRouter implements Router {
   }
 
   private async routeUnchecked(live: LiveClient, toolName: string, args: Record<string, unknown>): Promise<CallToolResult> {
-    const localProbe = ["unity_open_mcp_jobs", "unity_open_mcp_project_commands", "unity_open_mcp_read_compile_errors", "unity_open_mcp_bridge_status", "unity_open_mcp_capabilities",
-      "unity_open_mcp_restart_editor", "unity_open_mcp_resource_pressure", "unity_open_mcp_manage_tools",
-      "unity_open_mcp_list_assets", "unity_open_mcp_list_rules", "unity_open_mcp_generate_skill", "unity_senses_pull_events"].includes(toolName);
+    const localProbe = skipsReloadProbe(toolName);
     if (!localProbe && this.projectPath && classifyInstance(readInstanceLock(this.projectPath)) === "reloading") {
       // One bounded re-probe. No headless fallback can acquire this Editor's project.
       await new Promise(resolve => setTimeout(resolve, 250));
@@ -1805,6 +1843,53 @@ export class ToolRouter implements Router {
       `Unknown action '${action}'. Valid actions: list_groups, activate, ` +
         `deactivate, reset, suggest, activate_for, invoke, editor_search.`,
     );
+  }
+
+  /**
+   * `unity_open_mcp_upgrade` is a live tool, but its network lookups run HERE
+   * rather than inside the bridge: the bridge tool executes on the Editor main
+   * thread, where a 10 s registry timeout would freeze the Editor and every
+   * queued bridge request. The bridge only ever receives a resolved
+   * `target_version`, and an apply that will re-pin through UPM is forwarded
+   * only after the `bridge-v<version>` release tag was confirmed to exist —
+   * the same preview → confirm → apply order the bridge window follows.
+   */
+  private async routeUpgrade(args: Record<string, unknown>, live: LiveClient): Promise<CallToolResult> {
+    const forwarded: Record<string, unknown> = { ...args };
+    if (forwarded.target_version === undefined) {
+      try {
+        forwarded.target_version = (await releaseLookup.latest()).version;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return injectRouteMeta(
+          localError("latest_version_failed", `Could not resolve the latest published version: ${detail}. Pass target_version explicitly.`),
+          { route: "local" },
+        );
+      }
+    }
+    if (forwarded.dry_run === false && forwarded.update_upm !== false) {
+      // Preview first: only a plan that really re-pins through UPM needs the
+      // GitHub tag check (an embedded or file: bridge install skips UPM, so it
+      // must also work offline).
+      const preview = await live.route("unity_open_mcp_upgrade", { ...forwarded, dry_run: true });
+      const previewBody = parseResultBody(preview);
+      const mutation = previewBody?.mutation;
+      const output = (mutation && typeof mutation === "object" ? (mutation as Record<string, unknown>).output : previewBody) as Record<string, unknown> | undefined;
+      if (preview.isError || (output && typeof output === "object" && output.error !== undefined)) {
+        return injectRouteMeta(preview, { route: "live" });
+      }
+      if (output && typeof output === "object" && output.upmEnabled === true) {
+        const version = String(forwarded.target_version);
+        const tag = await releaseLookup.confirmBridgeTag(version);
+        if (!tag.confirmed) {
+          return injectRouteMeta(
+            localError("release_tag_unavailable", tag.error ?? `Release tag bridge-v${version} was not found.`),
+            { route: "local" },
+          );
+        }
+      }
+    }
+    return injectRouteMeta(await live.route("unity_open_mcp_upgrade", forwarded), { route: "live" });
   }
 
   private async routeProjectCommands(args: Record<string, unknown>, live: LiveClient): Promise<CallToolResult> {

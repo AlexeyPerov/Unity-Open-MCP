@@ -213,15 +213,8 @@ namespace UnityOpenMcpBridge.TestRunner
             });
         }
 
-        internal static void ScheduleOnUpdate(Action action)
-        {
-            EditorApplication.CallbackFunction callback = null;
-            callback = () =>
-            {
-                EditorApplication.update -= callback;
-                action();
-            };
-            EditorApplication.update += callback;
-        }
+        // Kept as the TestRunner-facing name (tests reference it); the shared
+        // one-shot scheduler lives in the bridge assembly.
+        internal static void ScheduleOnUpdate(Action action) => EditorUpdateOnce.Schedule(action);
     }
 }

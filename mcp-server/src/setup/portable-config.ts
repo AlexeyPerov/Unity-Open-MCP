@@ -24,6 +24,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { PROJECT_PATH_ENV_VAR } from "../constants.js";
+import { UNITY_ROOT_MARKERS } from "../project-path.js";
 
 export type ConfigStrategy = "interpolation" | "args" | "wrapper" | "absolute";
 
@@ -260,6 +261,7 @@ export function renderWrapperScript(options: WrapperOptions): string {
   return readWrapperTemplate()
     .replace("__WORKSPACE_FROM_SCRIPT__", upward)
     .replace("__UNITY_SUBPATH__", toPosix(options.unitySubpath))
+    .replace("__UNITY_ROOT_MARKERS__", UNITY_ROOT_MARKERS.join(" "))
     .replace("__UNITY_OPEN_MCP_VERSION__", options.version);
 }
 

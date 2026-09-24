@@ -26,13 +26,22 @@ namespace UnityOpenMcpBridge.Update
         {
             try
             {
+                // This tool runs on the Editor main thread, so it performs NO
+                // network I/O: a slow registry would freeze the Editor and the
+                // whole bridge request queue. The two lookups the flow needs
+                // run where they can be awaited instead — the MCP server
+                // resolves the latest npm release and confirms the bridge
+                // release tag before forwarding an apply, and the bridge
+                // window's Status → Updates panel awaits both off-thread.
                 var version = VersionPinRewriter.NormalizeVersion(target_version);
                 if (string.IsNullOrEmpty(version))
                 {
-                    var latest = LatestVersionCheck.CheckAsync().GetAwaiter().GetResult();
-                    if (!latest.Success)
-                        return Error("latest_version_failed", latest.Error);
-                    version = latest.Version;
+                    version = LatestVersionCheck.CachedVersion;
+                    if (string.IsNullOrEmpty(version))
+                        return Error("target_version_required",
+                            "Pass target_version (X.Y.Z). The MCP server resolves the latest npm release " +
+                            "automatically; a direct bridge caller can run Status → Updates → Check latest " +
+                            "in the bridge window first.");
                 }
                 if (!VersionPinRewriter.IsVersion(version))
                     return Error("invalid_target_version", "target_version must be a plain X.Y.Z.");
@@ -46,14 +55,9 @@ namespace UnityOpenMcpBridge.Update
                 if (dry_run)
                     return ProjectUpgradeRunner.ToJson(plan, "preview");
 
-                // Confirm that the release actually carries the UPM tag before
-                // scheduling Package Manager. Config-only updates need no GitHub call.
-                if (plan.UpmEnabled)
-                {
-                    var tag = LatestVersionCheck.ConfirmBridgeTagAsync(version).GetAwaiter().GetResult();
-                    if (!tag.Success) return Error("release_tag_unavailable", tag.Error);
-                }
-
+                // A caller that skipped the server-side release-tag confirmation
+                // still gets a nonexistent tag reported: Package Manager fails
+                // the request and ProjectUpgradeRunner.LastReport records it.
                 var applied = ProjectUpgradeRunner.Apply(plan);
                 if (!applied.Success) return Error("upgrade_apply_failed", applied.Message);
                 return ProjectUpgradeRunner.ToJson(plan, "applied", applied);

@@ -1,5 +1,5 @@
 import { copySkillReferences } from "../skill/copy-references.js";
-import { readFile, stat, mkdir, writeFile } from "node:fs/promises";
+import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +9,8 @@ import {
   resolveTemplateSkillPath,
 } from "../skill/client-paths.js";
 import { PROJECT_PATH_ENV_VAR } from "../constants.js";
+import { validateUnityProjectRoot } from "../project-path.js";
+import { isRecord } from "./json-guards.js";
 import {
   catalogIdForSetupClient,
   portableEnv,
@@ -281,16 +283,13 @@ async function validateProject(input: string | undefined): Promise<string> {
     );
   }
   const project = resolve(input);
-  for (const required of ["Assets", "Packages", "ProjectSettings"]) {
-    try {
-      if (!(await stat(join(project, required))).isDirectory()) throw new Error();
-    } catch {
-      throw new SetupError(
-        "not_unity_project",
-        `${project} is not a Unity project root: missing ${required}/.`,
-        2,
-      );
-    }
+  const validation = validateUnityProjectRoot(project);
+  if (!validation.valid) {
+    throw new SetupError(
+      "not_unity_project",
+      `${project} is not a Unity project root: missing ${validation.missing.map((m) => `${m}/`).join(", ")}.`,
+      2,
+    );
   }
   return project;
 }
@@ -683,10 +682,6 @@ function countLines(bytes: Buffer): number {
   const text = bytes.toString("utf8");
   const newlines = (text.match(/\n/g) ?? []).length;
   return text.endsWith("\n") ? newlines : newlines + 1;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
