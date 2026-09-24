@@ -5,7 +5,12 @@ import { stat } from "node:fs/promises";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import { trackBatchChild } from "./child-supervision.js";
-import { resolveUnityPath, scannedHubRoots } from "./unity-install-discovery.js";
+import {
+  readProjectUnityVersion,
+  resolveUnityPathForProject,
+  scannedHubRoots,
+  type UnityPathResolution,
+} from "./unity-install-discovery.js";
 import {
   readInstanceLock,
   isPidAlive,
@@ -526,35 +531,40 @@ export class BatchSpawn implements Router {
   private projectPath: string;
   private timeoutMs: number;
   private readonly discoveryRoots?: string[];
+  private readonly resolutionError?: Extract<UnityPathResolution, { ok: false }>;
 
   constructor(options: BatchSpawnOptions = {}) {
     this.discoveryRoots = options.discoveryRoots;
 
-    // UNITY_PATH env (validated, wins) -> auto-discovered install (preferred
-    // version from the running bridge's lock when available) -> none.
-    const lock = readInstanceLock(options.projectPath ?? process.env.UNITY_PROJECT_PATH ?? "");
-    const resolved = resolveUnityPath(lock?.unityVersion, this.discoveryRoots);
-    if (resolved) {
-      this.unityPath = resolved.path;
-      this.unityPathSource = resolved.source;
-      if (resolved.source === "discovered") {
+    const requestedProjectPath =
+      options.projectPath ?? process.env.UNITY_PROJECT_PATH ?? "";
+    const lock = readInstanceLock(requestedProjectPath);
+
+    // Resolve the project path before the editor executable: ProjectVersion.txt
+    // is authoritative even when the bridge has not started and no lock exists.
+    this.projectPath = requestedProjectPath || lock?.projectPath || "";
+    const projectVersion = readProjectUnityVersion(this.projectPath);
+    const preferredVersion = projectVersion ?? lock?.unityVersion ?? null;
+    const allowVersionMismatch =
+      process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH === "1";
+    const resolution = resolveUnityPathForProject(
+      preferredVersion,
+      this.discoveryRoots,
+      allowVersionMismatch,
+    );
+    if (resolution.ok) {
+      this.unityPath = resolution.value.path;
+      this.unityPathSource = resolution.value.source;
+      if (resolution.value.source === "discovered") {
         console.error(
-          `[unity-open-mcp] Unity path auto-discovered: ${resolved.path} (version ${resolved.version}). Set UNITY_PATH to override.`,
+          `[unity-open-mcp] Unity path auto-discovered: ${resolution.value.path} (version ${resolution.value.version}). Set UNITY_PATH to override.`,
         );
       }
     } else {
       this.unityPath = "";
       this.unityPathSource = "none";
+      this.resolutionError = resolution;
     }
-
-    // UNITY_PROJECT_PATH env -> instance lock's projectPath (so batch works
-    // with zero env vars when the bridge has run the project at least once)
-    // -> empty.
-    this.projectPath =
-      options.projectPath ??
-      process.env.UNITY_PROJECT_PATH ??
-      lock?.projectPath ??
-      "";
 
     // Parse the timeout env override with a finiteness/positivity guard:
     // a non-numeric value (e.g. "abc") parses to NaN, and setTimeout(fn, NaN)
@@ -742,6 +752,28 @@ export class BatchSpawn implements Router {
   }
 
   private async validateUnityPath(): Promise<CallToolResult | null> {
+    if (this.resolutionError?.reason === "preferred_not_installed") {
+      const available = this.resolutionError.availableVersions.length > 0
+        ? this.resolutionError.availableVersions.join(", ")
+        : "none discovered";
+      return makeErrorResult({
+        code: "unity_version_not_installed",
+        message:
+          `This project requires Unity ${this.resolutionError.preferredVersion}, but that exact editor is not installed ` +
+          `(available: ${available}). No Unity process was started, because opening a project with a different ` +
+          "version can rewrite package and project metadata. Install the exact version, set UNITY_PATH to it, " +
+          "or explicitly opt in with UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1.",
+      });
+    }
+    if (this.resolutionError?.reason === "env_version_mismatch") {
+      return makeErrorResult({
+        code: "unity_version_mismatch",
+        message:
+          `This project requires Unity ${this.resolutionError.preferredVersion}, but UNITY_PATH points to ` +
+          `Unity ${this.resolutionError.configuredVersion}. No Unity process was started. Correct UNITY_PATH ` +
+          "or explicitly opt in with UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1.",
+      });
+    }
     if (!this.unityPath) {
       // No explicit UNITY_PATH AND auto-discovery found nothing. List the
       // scanned roots so the user/agent knows where to install Unity or set

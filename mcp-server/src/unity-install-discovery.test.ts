@@ -11,7 +11,9 @@ import {
   defaultHubRoots,
   discoverUnityInstalls,
   executableForInstall,
+  readProjectUnityVersion,
   resolveUnityPath,
+  resolveUnityPathForProject,
   scannedHubRoots,
   versionMatches,
 } from "./unity-install-discovery.js";
@@ -220,6 +222,87 @@ test("resolveUnityPath: preferredVersion pins the right minor line", () => {
     if (saved === undefined) delete process.env.UNITY_PATH;
     else process.env.UNITY_PATH = saved;
   }
+});
+
+test("resolveUnityPath: exact editor wins over a newer patch on the same minor line", () => {
+  const saved = process.env.UNITY_PATH;
+  delete process.env.UNITY_PATH;
+  try {
+    withTempRoot((root) => {
+      fakeInstall(root, "6000.0.50f1");
+      fakeInstall(root, "6000.0.10f1");
+      const resolved = resolveUnityPath("6000.0.10f1", [root]);
+      assert.equal(resolved?.version, "6000.0.10f1");
+    });
+  } finally {
+    if (saved === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = saved;
+  }
+});
+
+test("resolveUnityPathForProject: refuses a neighbouring patch by default", () => {
+  const saved = process.env.UNITY_PATH;
+  delete process.env.UNITY_PATH;
+  try {
+    withTempRoot((root) => {
+      fakeInstall(root, "6000.0.50f1");
+      const resolved = resolveUnityPathForProject("6000.0.10f1", [root]);
+      assert.equal(resolved.ok, false);
+      if (!resolved.ok) {
+        assert.equal(resolved.reason, "preferred_not_installed");
+        assert.deepEqual(resolved.availableVersions, ["6000.0.50f1"]);
+      }
+    });
+  } finally {
+    if (saved === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = saved;
+  }
+});
+
+test("resolveUnityPathForProject: explicit mismatch opt-in permits fallback", () => {
+  const saved = process.env.UNITY_PATH;
+  delete process.env.UNITY_PATH;
+  try {
+    withTempRoot((root) => {
+      fakeInstall(root, "6000.0.50f1");
+      const resolved = resolveUnityPathForProject("6000.0.10f1", [root], true);
+      assert.equal(resolved.ok, true);
+      if (resolved.ok) assert.equal(resolved.value.version, "6000.0.50f1");
+    });
+  } finally {
+    if (saved === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = saved;
+  }
+});
+
+test("resolveUnityPathForProject: mismatched Hub UNITY_PATH is refused", () => {
+  const saved = process.env.UNITY_PATH;
+  try {
+    withTempRoot((root) => {
+      process.env.UNITY_PATH = fakeInstall(root, "6000.0.50f1");
+      const resolved = resolveUnityPathForProject("6000.0.10f1", [root]);
+      assert.equal(resolved.ok, false);
+      if (!resolved.ok) {
+        assert.equal(resolved.reason, "env_version_mismatch");
+        assert.equal(resolved.configuredVersion, "6000.0.50f1");
+      }
+    });
+  } finally {
+    if (saved === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = saved;
+  }
+});
+
+test("readProjectUnityVersion reads BOM-prefixed ProjectVersion.txt", () => {
+  withTempRoot((root) => {
+    const settings = join(root, "ProjectSettings");
+    mkdirSync(settings, { recursive: true });
+    writeFileSync(
+      join(settings, "ProjectVersion.txt"),
+      "\uFEFFm_EditorVersion: 2022.3.62f2\n",
+    );
+    assert.equal(readProjectUnityVersion(root), "2022.3.62f2");
+  });
 });
 
 test("resolveUnityPath: returns null when env unset AND discovery empty", () => {

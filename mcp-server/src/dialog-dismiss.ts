@@ -121,6 +121,8 @@ export interface DismissProbeOptions {
    * the modal is blocked (audit line, no click) unless this is set.
    */
   allowUnsavedSceneDismiss: boolean;
+  /** Allow continuing through a non-matching Editor warning. Off by default. */
+  allowVersionMismatch: boolean;
   /**
    * M12 — optional abort signal. When fired while a probe is in flight, the
    * underlying `execFile`/`execFileSync` child is killed so the loop can exit
@@ -203,6 +205,7 @@ function buildTokenTable(opts: DismissProbeOptions): {
       opts.policy,
       opts.allowProjectUpgrade,
       opts.allowUnsavedSceneDismiss,
+      opts.allowVersionMismatch,
     );
     kinds[kind] = {
       fragments: [...DIALOG_TITLE_FRAGMENTS[kind]],
@@ -216,6 +219,7 @@ function buildTokenTable(opts: DismissProbeOptions): {
         opts.policy,
         opts.allowProjectUpgrade,
         opts.allowUnsavedSceneDismiss,
+        opts.allowVersionMismatch,
       ),
     ],
     genericTokens: [...genericFallbackTokens(opts.policy)],
@@ -437,8 +441,9 @@ export function macosDismissAppleScript(opts: DismissProbeOptions): string {
   // path (AppleScript's named-button click works but is brittle across
   // Unity versions); instead it classifies the window title and presses
   // Return to click the FOCUSED (default) button — which under the default /
-  // auto / ignore / recover policies IS the safe choice (Ignore on
-  // launch-errors, Continue on non-matching-editor, OK on auto-graphics-api).
+  // auto / ignore / recover policies IS the safe choice for launch-errors and
+  // auto-graphics-api. Non-matching Editor is handled explicitly below: block
+  // it by default, or Return-click only after an explicit mismatch opt-in.
   // Project Upgrade is detected and reported as `blocked` (never Return-clicked
   // without the explicit opt-in). The token table from buildTokenTable is
   // consulted only to decide whether the policy declines a kind entirely
@@ -452,7 +457,13 @@ export function macosDismissAppleScript(opts: DismissProbeOptions): string {
   // or safe-mode on non_matching/auto_graphics (no safe button), the loop
   // should NOT click — return not-found so polling continues.
   const dismissesLaunch = preferenceTokensForPolicy("launch_errors", opts.policy, opts.allowProjectUpgrade) !== null;
-  const dismissesNonMatch = preferenceTokensForPolicy("non_matching_editor", opts.policy, opts.allowProjectUpgrade) !== null;
+  const dismissesNonMatch = preferenceTokensForPolicy(
+    "non_matching_editor",
+    opts.policy,
+    opts.allowProjectUpgrade,
+    opts.allowUnsavedSceneDismiss,
+    opts.allowVersionMismatch,
+  ) !== null;
   const dismissesGraphics = preferenceTokensForPolicy("auto_graphics_api", opts.policy, opts.allowProjectUpgrade) !== null;
   // scene_modified_externally: safe to Return-click (focused button is Reload)
   // under auto/ignore/recover. unsaved_scene_changes is intentionally NOT
@@ -497,6 +508,17 @@ on run
           -- though the focused button is usually Confirm. Report blocked.
           if (wt contains "Upgrade") and (wt contains "Project") then
             return "blocked:" & "project_upgrade"
+          end if
+          -- A mismatched Editor can rewrite project/package metadata during
+          -- load. Never press the focused Continue button without opt-in.
+          if (wt contains "Non-Matching Editor") or (wt contains "Non Matching Editor") then
+            if ${(opts.allowVersionMismatch ? "true" : "false")} then
+              set frontmost to true
+              key code 36
+              return "dismissed:Focus:non_matching_editor"
+            else
+              return "blocked:" & "non_matching_editor"
+            end if
           end if
           -- Unsaved scene changes: blocked unless the dedicated opt-in is set.
           if ${(opts.allowUnsavedSceneDismiss ? "false" : "true")} then
@@ -723,10 +745,15 @@ async function tryDismissLinuxX11(
   //   - decline kinds (tokens === null) → skip (treat as not-found).
   //   - otherwise activate the window + send Return to click the focused
   //     (default) button. Under default/auto/ignore/recover the default
-  //     button is the safe choice for launch_errors / non_matching_editor /
-  //     auto_graphics_api. Project upgrade is never clicked here (blocked).
+  //     button is the safe choice for launch_errors / auto_graphics_api.
+  //     Non-matching Editor and project upgrade are blocked without opt-in.
   const blocked = new Set<string>(
-    blockedKindsForPolicy(opts.policy, opts.allowProjectUpgrade, opts.allowUnsavedSceneDismiss),
+    blockedKindsForPolicy(
+      opts.policy,
+      opts.allowProjectUpgrade,
+      opts.allowUnsavedSceneDismiss,
+      opts.allowVersionMismatch,
+    ),
   );
   const kinds = Object.keys(DIALOG_TITLE_FRAGMENTS) as DialogKind[];
   // Prefer launch_errors first (the common stall), then the safe kinds, then
@@ -777,6 +804,7 @@ async function tryDismissLinuxX11(
         opts.policy,
         opts.allowProjectUpgrade,
         opts.allowUnsavedSceneDismiss,
+        opts.allowVersionMismatch,
       );
       const fragments = DIALOG_TITLE_FRAGMENTS[kind];
       // Probe this kind's fragments one at a time.
@@ -1079,6 +1107,8 @@ function isPermanentDismissError(message: string): boolean {
  *   - `UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1` opts in to auto-dismissing
  *     the "Unsaved changes to scene" modal (destructive under every policy —
  *     off by default). See isUnsavedSceneBlocked.
+ *   - `UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1` opts in to opening a project
+ *     with a different Unity Editor version. Without it the dialog is blocked.
  *   - `UNITY_OPEN_MCP_DISMISS_TIMEOUT_MS` overrides the overall timeout.
  *   - `UNITY_OPEN_MCP_DISMISS_INTERVAL_MS` overrides the poll interval.
  *
@@ -1092,6 +1122,7 @@ export interface DismissConfig {
   policy: DialogPolicy;
   allowProjectUpgrade: boolean;
   allowUnsavedSceneDismiss: boolean;
+  allowVersionMismatch: boolean;
 }
 
 export function readDismissConfig(
@@ -1113,6 +1144,8 @@ export function readDismissConfig(
     allowProjectUpgrade: env.UNITY_OPEN_MCP_ALLOW_PROJECT_UPGRADE === "1",
     allowUnsavedSceneDismiss:
       env.UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS === "1",
+    allowVersionMismatch:
+      env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH === "1",
   };
 }
 
@@ -1140,6 +1173,7 @@ export interface PollAndDismissOptions {
   policy: DialogPolicy;
   allowProjectUpgrade: boolean;
   allowUnsavedSceneDismiss: boolean;
+  allowVersionMismatch: boolean;
   /**
    * Override the platform — exposed for tests so the polling logic can be
    * exercised across all three OS branches without hopping process.platform.
@@ -1206,6 +1240,7 @@ export async function pollAndDismissDialogs(
         policy: opts.policy,
         allowProjectUpgrade: opts.allowProjectUpgrade,
         allowUnsavedSceneDismiss: opts.allowUnsavedSceneDismiss,
+        allowVersionMismatch: opts.allowVersionMismatch,
         // M12 — thread the loop's abort signal into the probe so an in-flight
         // osascript/PowerShell child is killed the moment the readiness abort
         // fires, instead of running out its own ~5s timeout after the compile
@@ -1224,8 +1259,8 @@ export async function pollAndDismissDialogs(
         // Keep polling — the dialog may re-appear after the resolver fixes
         // one error and surfaces the next.
       } else if (outcome.kind === "blocked") {
-        // Project-upgrade / unsaved-scene-changes (or future blocked kind):
-        // log once per kind per run, then keep polling. A human must dismiss
+        // Destructive or version-mismatch dialog: log once per kind per run,
+        // then keep polling. A human must dismiss
         // it; exiting would hide the stall behind a clean-looking readiness
         // abort.
         if (!seenBlocked.has(outcome.dialog)) {
@@ -1233,6 +1268,8 @@ export async function pollAndDismissDialogs(
           const optIn =
             outcome.dialog === "project_upgrade"
               ? "Set UNITY_OPEN_MCP_ALLOW_PROJECT_UPGRADE=1 to opt in to auto-confirm (irreversible)."
+              : outcome.dialog === "non_matching_editor"
+                ? "Set UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1 only for an intentional upgrade or compatibility run."
               : outcome.dialog === "unsaved_scene_changes"
                 ? "Set UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1 to opt in to auto-dismiss (destructive — data loss either way)."
                 : "Dismiss it manually or change UNITY_OPEN_MCP_DIALOG_POLICY.";

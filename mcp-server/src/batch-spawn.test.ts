@@ -541,6 +541,49 @@ test("BatchClassificationError carries a targeted code for route()", () => {
   assert.ok(err.message.includes("live Editor"));
 });
 
+test("batch spawn refuses to open a project when its exact Unity version is unavailable", async () => {
+  const savedPath = process.env.UNITY_PATH;
+  const savedOptIn = process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH;
+  delete process.env.UNITY_PATH;
+  delete process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH;
+  try {
+    const tmp = mkdtempSync(join(tmpdir(), "batch-version-guard-"));
+    try {
+      mkdirSync(join(tmp, "ProjectSettings"), { recursive: true });
+      writeFileSync(
+        join(tmp, "ProjectSettings", "ProjectVersion.txt"),
+        "m_EditorVersion: 6000.0.10f1\n",
+      );
+      const installDir = join(tmp, "6000.0.50f1");
+      const exeRel = process.platform === "win32"
+        ? ["Editor", "Unity.exe"]
+        : process.platform === "darwin"
+          ? ["Unity.app", "Contents", "MacOS", "Unity"]
+          : ["Editor", "Unity"];
+      const exe = join(installDir, ...exeRel);
+      mkdirSync(dirname(exe), { recursive: true });
+      writeFileSync(exe, "fake");
+
+      const result = await new BatchSpawn({
+        discoveryRoots: [tmp],
+        projectPath: tmp,
+      }).route("unity_open_mcp_compile_check", {});
+      const body = parseBody(result);
+      const error = body.error as Record<string, string>;
+      assert.equal(error.code, "unity_version_not_installed");
+      assert.ok(error.message.includes("6000.0.10f1"));
+      assert.ok(error.message.includes("No Unity process was started"));
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  } finally {
+    if (savedPath === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = savedPath;
+    if (savedOptIn === undefined) delete process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH;
+    else process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH = savedOptIn;
+  }
+});
+
 test("compile_check with a live Editor open surfaces editor_instance_locked, not batch_spawn_failed", async () => {
   // Regression for the 2026-06-28 feedback entry: route() must emit
   // editor_instance_locked when the batch tail matches the project-lock

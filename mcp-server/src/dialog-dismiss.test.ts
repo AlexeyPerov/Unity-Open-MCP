@@ -43,6 +43,7 @@ const DEFAULT_PROBE_OPTS = {
   policy: "ignore" as const,
   allowProjectUpgrade: false,
   allowUnsavedSceneDismiss: false,
+  allowVersionMismatch: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -260,11 +261,19 @@ test("macosDismissAppleScript: dismisses unsaved-scene sheets when opt-in is set
   assert.ok(script.includes("Don't Save"), "cancel policy clicks Don't Save");
 });
 
-test("macosDismissAppleScript: dismisses launch-errors / non_matching_editor / auto_graphics_api under default policy", () => {
+test("macosDismissAppleScript: blocks non_matching_editor under default policy", () => {
   const script = macosDismissAppleScript(DEFAULT_PROBE_OPTS);
   assert.ok(script.includes("dismissed:Focus:launch_errors"));
-  assert.ok(script.includes("dismissed:Focus:non_matching_editor"));
+  assert.ok(script.includes('return "blocked:" & "non_matching_editor"'));
   assert.ok(script.includes("dismissed:Focus:auto_graphics_api"));
+});
+
+test("macosDismissAppleScript: mismatch opt-in allows non_matching_editor", () => {
+  const script = macosDismissAppleScript({
+    ...DEFAULT_PROBE_OPTS,
+    allowVersionMismatch: true,
+  });
+  assert.ok(script.includes("dismissed:Focus:non_matching_editor"));
 });
 
 // ---------------------------------------------------------------------------
@@ -277,6 +286,7 @@ test("tryDismissDialog: unsupported platform → error outcome", async () => {
     policy: "ignore",
     allowProjectUpgrade: false,
     allowUnsavedSceneDismiss: false,
+    allowVersionMismatch: false,
   });
   assert.equal(result.kind, "error");
   if (result.kind !== "error") return;
@@ -293,6 +303,7 @@ test("tryDismissDialog: linux with no xdotool on PATH → error mentioning xdoto
       policy: "ignore",
       allowProjectUpgrade: false,
       allowUnsavedSceneDismiss: false,
+      allowVersionMismatch: false,
     });
     assert.ok(["error", "not-found"].includes(result.kind));
     if (result.kind === "error") {
@@ -317,7 +328,19 @@ test("readDismissConfig: enabled by default with policy=ignore", () => {
     policy: "ignore",
     allowProjectUpgrade: false,
     allowUnsavedSceneDismiss: false,
+    allowVersionMismatch: false,
   });
+});
+
+test("readDismissConfig: UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1 opts in", () => {
+  assert.equal(
+    readDismissConfig({ UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH: "1" }).allowVersionMismatch,
+    true,
+  );
+  assert.equal(
+    readDismissConfig({ UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH: "true" }).allowVersionMismatch,
+    false,
+  );
 });
 
 test('readDismissConfig: UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1 disables (kill-switch)', () => {
@@ -408,6 +431,7 @@ const LOOP_OPTS = {
   policy: "ignore" as const,
   allowProjectUpgrade: false,
   allowUnsavedSceneDismiss: false,
+  allowVersionMismatch: false,
 };
 
 test("pollAndDismissDialogs: logs each dismissal once with dialog + policy", async () => {

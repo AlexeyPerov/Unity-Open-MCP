@@ -176,10 +176,20 @@ test("launch_errors / ignore with no matching button → null", () => {
 // preferredDialogButtonLabel — non_matching_editor (UCP test parity)
 // ---------------------------------------------------------------------------
 
-test("non_matching_editor / ignore → Continue", () => {
+test("non_matching_editor / ignore → blocked by default", () => {
+  const labels = ["Continue", "Quit"];
+  assert.equal(
+    preferredDialogButtonLabel("non_matching_editor", labels, "ignore"),
+    null,
+  );
+});
+
+test("non_matching_editor / ignore + explicit opt-in → Continue", () => {
   const labels = ["Continue", "Quit"];
   assert.deepEqual(
-    preferredDialogButtonLabel("non_matching_editor", labels, "ignore"),
+    preferredDialogButtonLabel("non_matching_editor", labels, "ignore", {
+      allowVersionMismatch: true,
+    }),
     { button: "Continue", token: "continue" },
   );
 });
@@ -440,37 +450,37 @@ test("preferenceTokensForPolicy: project_upgrade returns null without opt-in for
   }
 });
 
-test("blockedKindsForPolicy: default → [project_upgrade, unsaved_scene_changes]", () => {
-  // Both destructive-mutation guards are blocked by default: project_upgrade
-  // mutates project metadata, unsaved_scene_changes loses work either way.
+test("blockedKindsForPolicy: default includes version mismatch and destructive guards", () => {
   assert.deepEqual(blockedKindsForPolicy("ignore"), [
     "project_upgrade",
+    "non_matching_editor",
     "unsaved_scene_changes",
   ]);
   assert.deepEqual(blockedKindsForPolicy("auto"), [
     "project_upgrade",
+    "non_matching_editor",
     "unsaved_scene_changes",
   ]);
   assert.deepEqual(blockedKindsForPolicy("recover"), [
     "project_upgrade",
+    "non_matching_editor",
     "unsaved_scene_changes",
   ]);
 });
 
-test("blockedKindsForPolicy: project-upgrade opt-in only → [unsaved_scene_changes]", () => {
-  // The two opt-ins are independent: opting into project_upgrade does NOT
-  // unblock unsaved_scene_changes (still destructive).
+test("blockedKindsForPolicy: opt-ins are independent", () => {
   assert.deepEqual(blockedKindsForPolicy("ignore", true), [
+    "non_matching_editor",
     "unsaved_scene_changes",
   ]);
   assert.deepEqual(blockedKindsForPolicy("auto", true), [
+    "non_matching_editor",
     "unsaved_scene_changes",
   ]);
-});
-
-test("blockedKindsForPolicy: both opt-ins → []", () => {
-  assert.deepEqual(blockedKindsForPolicy("ignore", true, true), []);
-  assert.deepEqual(blockedKindsForPolicy("auto", true, true), []);
+  assert.deepEqual(blockedKindsForPolicy("ignore", true, true), [
+    "non_matching_editor",
+  ]);
+  assert.deepEqual(blockedKindsForPolicy("ignore", true, true, true), []);
 });
 
 test("blockedKindsForPolicy: manual → [] (manual declines everything, not 'blocked')", () => {

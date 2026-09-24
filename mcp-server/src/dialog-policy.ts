@@ -25,13 +25,14 @@
  * button on the same Unity modal:
  *
  *   - `auto`       — click the safest forward-progress button per dialog
- *                    (Ignore on launch-errors, Continue on version mismatch,
+ *                    (Ignore on launch-errors, block version mismatch,
  *                    OK on graphics-api, Confirm on project-upgrade — the
  *                    last gated behind an explicit opt-in, see below).
  *   - `manual`     — never click anything (same as the T4.5 opt-out). The
  *                    polling loop is skipped entirely.
- *   - `ignore`     — dismiss launch-errors with Ignore; Continue/OK on the
- *                    safe net-new kinds; NEVER confirm a project upgrade.
+ *   - `ignore`     — dismiss launch-errors with Ignore, block version
+ *                    mismatch, and accept safe informational dialogs; NEVER
+ *                    confirm a project upgrade.
  *                    This is the DEFAULT — it preserves the exact M13 T4.5
  *                    behaviour for launch-errors while adding two safe
  *                    dismissals and one safe block.
@@ -42,7 +43,9 @@
  *                    option.
  *   - `cancel`     — fail-fast: click Cancel/Quit/Close/No everywhere.
  *
- * Project Upgrade Required is special: it MUTATES the project irreversibly, so
+ * A Non-Matching Editor is refused unless
+ * `UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1` explicitly opts in. Project
+ * Upgrade Required is special: it MUTATES the project irreversibly, so
  * no policy value auto-confirms it. A separate opt-in switch
  * (`UNITY_OPEN_MCP_ALLOW_PROJECT_UPGRADE=1`) is required before ANY policy may
  * click Confirm on that dialog. See {@link isProjectUpgradeBlocked}.
@@ -275,6 +278,7 @@ export function preferenceTokensForPolicy(
   policy: DialogPolicy,
   allowProjectUpgrade = false,
   allowUnsavedSceneDismiss = false,
+  allowVersionMismatch = false,
 ): readonly string[] | null {
   // Project Upgrade: never confirm unless the dedicated opt-in is set,
   // regardless of policy. This is the irreversible-mutation guard.
@@ -287,7 +291,7 @@ export function preferenceTokensForPolicy(
     case "launch_errors":
       return launchErrorsTokens(policy);
     case "non_matching_editor":
-      return nonMatchingEditorTokens(policy);
+      return nonMatchingEditorTokens(policy, allowVersionMismatch);
     case "project_upgrade":
       // Only reached when allowProjectUpgrade === true.
       return projectUpgradeTokens(policy);
@@ -318,7 +322,22 @@ function launchErrorsTokens(policy: DialogPolicy): readonly string[] | null {
   }
 }
 
-function nonMatchingEditorTokens(policy: DialogPolicy): readonly string[] | null {
+function nonMatchingEditorTokens(
+  policy: DialogPolicy,
+  allowVersionMismatch: boolean,
+): readonly string[] | null {
+  // Opening with a different Editor can rewrite Packages/packages-lock.json,
+  // package manifests, serialized assets, and ProjectSettings before the
+  // bridge comes online. The default forward-progress policies do not click
+  // this dialog at all: macOS/Linux cannot reliably target Quit and pressing
+  // the focused button may select Continue. Explicit refusal policies may
+  // still close it.
+  if (
+    !allowVersionMismatch &&
+    (policy === "auto" || policy === "ignore" || policy === "recover")
+  ) {
+    return null;
+  }
   switch (policy) {
     case "auto":
     case "ignore":
@@ -470,17 +489,24 @@ export function genericFallbackTokens(policy: DialogPolicy): readonly string[] {
 /**
  * The kinds a policy explicitly declines to dismiss. Used by the polling loop
  * to report a `blocked` outcome (audit line, no click) instead of silently
- * ignoring the dialog. Currently `project_upgrade` and `unsaved_scene_changes`
- * under the default (no opt-ins) — the two destructive-mutation guards.
+ * ignoring the dialog. Project upgrade, version mismatch, and unsaved scene
+ * changes are blocked by default because each can mutate or lose project data.
  */
 export function blockedKindsForPolicy(
   policy: DialogPolicy,
   allowProjectUpgrade = false,
   allowUnsavedSceneDismiss = false,
+  allowVersionMismatch = false,
 ): readonly DialogKind[] {
   if (policy === "manual") return []; // manual declines everything — not "blocked"
   const blocked: DialogKind[] = [];
   if (!allowProjectUpgrade) blocked.push("project_upgrade");
+  if (
+    !allowVersionMismatch &&
+    (policy === "auto" || policy === "ignore" || policy === "recover")
+  ) {
+    blocked.push("non_matching_editor");
+  }
   // unsaved_scene_changes is destructive under every policy (data loss either
   // way); block it unless the dedicated opt-in is set. This means the dismiss
   // loop reports `blocked` with a clear audit line instead of silently passing
@@ -532,15 +558,21 @@ export function preferredDialogButtonLabel(
   kind: DialogKind,
   buttonLabels: readonly string[],
   policy: DialogPolicy,
-  opts: { allowProjectUpgrade?: boolean; allowUnsavedSceneDismiss?: boolean } = {},
+  opts: {
+    allowProjectUpgrade?: boolean;
+    allowUnsavedSceneDismiss?: boolean;
+    allowVersionMismatch?: boolean;
+  } = {},
 ): { button: string; token: string } | null {
   const allowProjectUpgrade = opts.allowProjectUpgrade ?? false;
   const allowUnsavedSceneDismiss = opts.allowUnsavedSceneDismiss ?? false;
+  const allowVersionMismatch = opts.allowVersionMismatch ?? false;
   const tokens = preferenceTokensForPolicy(
     kind,
     policy,
     allowProjectUpgrade,
     allowUnsavedSceneDismiss,
+    allowVersionMismatch,
   );
   if (tokens === null) return null;
   return matchTokens(tokens, buttonLabels);

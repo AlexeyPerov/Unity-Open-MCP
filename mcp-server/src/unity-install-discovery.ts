@@ -9,12 +9,12 @@
 //
 // Resolution precedence (see `resolveUnityPath`):
 //   1. `UNITY_PATH` env var (explicit, validated to exist — wins)
-//   2. auto-discovered installs, picking by `preferredVersion` prefix match
-//      against the running bridge's `unityVersion` when available, else newest
+//   2. auto-discovered installs, preferring an exact `preferredVersion` before
+//      any compatibility fallback, else newest
 //   3. null (caller surfaces `unity_not_discovered`)
 
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 /** A discovered Unity install: the editor executable path + its version folder name. */
@@ -31,6 +31,55 @@ export interface ResolvedUnityPath {
   path: string;
   version: string;
   source: UnityPathSource;
+}
+
+export type UnityPathResolution =
+  | { ok: true; value: ResolvedUnityPath }
+  | {
+      ok: false;
+      reason: "not_discovered" | "preferred_not_installed" | "env_version_mismatch";
+      preferredVersion?: string;
+      configuredVersion?: string;
+      availableVersions: string[];
+    };
+
+/** Read the exact editor version recorded by a Unity project. */
+export function readProjectUnityVersion(projectPath: string): string | null {
+  if (!projectPath) return null;
+  try {
+    const content = readFileSync(
+      join(projectPath, "ProjectSettings", "ProjectVersion.txt"),
+      "utf8",
+    );
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.replace(/^\uFEFF/, "");
+      const match = line.match(/^m_EditorVersion:\s*(\S.*?)\s*$/);
+      if (match?.[1]) return match[1];
+    }
+  } catch {
+    // Missing/unreadable metadata is handled by the caller's fallback path.
+  }
+  return null;
+}
+
+/**
+ * Best-effort version inference for a conventional Hub executable path.
+ * Unknown/custom layouts deliberately return null rather than guessing.
+ */
+export function inferUnityVersionFromExecutablePath(executablePath: string): string | null {
+  const absolute = resolve(executablePath);
+  let installDir: string;
+  if (process.platform === "darwin") {
+    // <version>/Unity.app/Contents/MacOS/Unity
+    installDir = dirname(dirname(dirname(dirname(absolute))));
+  } else {
+    // <version>/Editor/Unity[.exe]
+    installDir = dirname(dirname(absolute));
+  }
+  const candidate = basename(installDir);
+  return /^\d+(?:\.\d+){2}[abfpc]\d+(?:_\w+)?$/i.test(candidate)
+    ? candidate
+    : null;
 }
 
 /**
@@ -211,10 +260,91 @@ export function resolveUnityPath(
   if (installs.length === 0) return null;
 
   if (preferredVersion) {
+    // Exact must win even though the list is newest-first. Previously a newer
+    // patch on the same major.minor line matched first and shadowed an installed
+    // exact editor, which could open and rewrite a project with the wrong Unity.
+    const exact = installs.find((i) => i.version === preferredVersion);
+    if (exact) return { path: exact.path, version: exact.version, source: "discovered" };
     const match = installs.find((i) => versionMatches(i.version, preferredVersion));
     if (match) return { path: match.path, version: match.version, source: "discovered" };
   }
   // Newest first already.
   const newest = installs[0];
   return { path: newest.path, version: newest.version, source: "discovered" };
+}
+
+/**
+ * Fail-closed resolver for opening a concrete project in batch mode.
+ * Unlike the legacy/general resolver above, a known project version never
+ * falls through to a neighbouring patch or the newest installed editor unless
+ * the operator explicitly opts in to a mismatch.
+ */
+export function resolveUnityPathForProject(
+  preferredVersion: string | null,
+  roots?: string[],
+  allowVersionMismatch = false,
+): UnityPathResolution {
+  const installs = discoverUnityInstalls(roots);
+  const availableVersions = installs.map((install) => install.version);
+  const envPath = process.env.UNITY_PATH;
+
+  if (envPath) {
+    try {
+      if (existsSync(envPath) && statSync(envPath).isFile()) {
+        const normalized = resolve(envPath);
+        const discovered = installs.find((install) => resolve(install.path) === normalized);
+        const configuredVersion =
+          discovered?.version ?? inferUnityVersionFromExecutablePath(envPath);
+        if (
+          preferredVersion &&
+          configuredVersion &&
+          configuredVersion !== preferredVersion &&
+          !allowVersionMismatch
+        ) {
+          return {
+            ok: false,
+            reason: "env_version_mismatch",
+            preferredVersion,
+            configuredVersion,
+            availableVersions,
+          };
+        }
+        return {
+          ok: true,
+          value: {
+            path: envPath,
+            version: configuredVersion ?? "(env override)",
+            source: "env",
+          },
+        };
+      }
+    } catch {
+      // Preserve the existing behavior: an invalid override falls through to
+      // discovery, where the caller gets the most specific available error.
+    }
+  }
+
+  if (preferredVersion) {
+    const exact = installs.find((install) => install.version === preferredVersion);
+    if (exact) {
+      return { ok: true, value: { ...exact, source: "discovered" } };
+    }
+    if (!allowVersionMismatch) {
+      return {
+        ok: false,
+        reason: "preferred_not_installed",
+        preferredVersion,
+        availableVersions,
+      };
+    }
+  }
+
+  if (installs.length === 0) {
+    return { ok: false, reason: "not_discovered", availableVersions };
+  }
+
+  const fallback = preferredVersion
+    ? installs.find((install) => versionMatches(install.version, preferredVersion)) ?? installs[0]
+    : installs[0];
+  return { ok: true, value: { ...fallback, source: "discovered" } };
 }
