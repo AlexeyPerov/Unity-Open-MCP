@@ -26,6 +26,7 @@ CLI commands such as `wait-for-ready`.
 
 - `UNITY_OPEN_MCP_DIALOG_POLICY=auto|manual|ignore|recover|safe-mode|cancel` (default `ignore`)
 - `UNITY_OPEN_MCP_ALLOW_PROJECT_UPGRADE=1` — opt in to auto-confirming the irreversible Project Upgrade dialog; off by default
+- `UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1` — opt in to opening a project with a different Unity Editor; without it the Non-Matching Editor dialog is blocked without a click
 - `UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1` — opt in to auto-dismissing the "Unsaved changes to scene" modal (destructive under every policy; off by default)
 - `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1` — kill-switch; disables all OS clicks
 - `UNITY_OPEN_MCP_DISMISS_TIMEOUT_MS` (default 30000)
@@ -40,9 +41,9 @@ dialogs and **never** auto-confirming a project upgrade:
 
 | Policy | launch-errors | Non-Matching Editor | Project Upgrade | Auto Graphics API | Scene modified externally | Unsaved scene changes |
 | --- | --- | --- | --- | --- | --- | --- |
-| `ignore` (default) | Ignore | Continue | **blocked** (never auto-confirm) | OK | Reload/Revert | **blocked** (destructive) |
-| `auto` | Ignore | Continue | blocked unless opt-in | OK | Reload/Revert | blocked unless opt-in |
-| `recover` | Enter Safe Mode | Continue | blocked unless opt-in | OK | Reload/Revert | blocked unless opt-in |
+| `ignore` (default) | Ignore | **blocked** unless mismatch opt-in | **blocked** (never auto-confirm) | OK | Reload/Revert | **blocked** (destructive) |
+| `auto` | Ignore | blocked unless mismatch opt-in | blocked unless opt-in | OK | Reload/Revert | blocked unless opt-in |
+| `recover` | Enter Safe Mode | blocked unless mismatch opt-in | blocked unless opt-in | OK | Reload/Revert | blocked unless opt-in |
 | `safe-mode` | Enter Safe Mode | Quit | blocked | (declined) | (declined) | blocked |
 | `cancel` | Quit | Quit | Quit | Quit | Quit | Don't Save |
 | `manual` | — (no clicks at all) | — | — | — | — | — |
@@ -55,6 +56,13 @@ loss either way); set `UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1` to opt in
 — then `auto`/`ignore`/`recover` will click Save (preserve work). Both opt-ins
 are audited: each dismissal (or block) is logged once to the MCP server's
 stderr with the dialog kind, button, and policy.
+
+**Non-Matching Editor is also fail-closed.** Unity may resolve packages and
+rewrite project metadata before the bridge starts, so the default policies do
+not click the dialog. Set `UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1` only for an
+intentional upgrade or compatibility run; then `auto`/`ignore`/`recover`
+select Continue. The explicit `safe-mode` and `cancel` policies still select
+Quit.
 
 `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1` is the hard kill-switch: it
 disables all OS clicks regardless of policy (equivalent to `manual`, but

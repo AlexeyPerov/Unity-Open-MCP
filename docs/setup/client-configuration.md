@@ -184,6 +184,7 @@ committed config possible — [Portable MCP config](portable-config.md).
 | `UNITY_PROJECT_PATH` | yes, unless `--project-from-cwd` is passed | Unity project root; absolute, or relative to the working directory. |
 | `UNITY_OPEN_MCP_BRIDGE_PORT` | no | Pin a bridge port instead of path-based discovery. Machine-specific — do not commit it. |
 | `UNITY_PATH` | no | Explicit Unity executable for batch fallback. |
+| `UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH` | no | Set to `1` only to let batch fallback or startup-dialog automation open the project with a Unity version different from `ProjectVersion.txt`; mismatch is refused by default. |
 
 Startup modal env vars: [Dialog policy](../dialog-policy.md).
 

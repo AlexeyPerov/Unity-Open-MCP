@@ -123,8 +123,13 @@ Headless batch is for fallback and automation:
 - `execute_menu` allows only batch-viable operations such as asset refresh,
   reimport, and save.
 - Agent senses require a live Editor.
-- `UNITY_PROJECT_PATH` is required; set `UNITY_PATH` when editor discovery
-  cannot find the executable.
+- `UNITY_PROJECT_PATH` is required. Before every spawn, the server reads the
+  exact editor version from `ProjectSettings/ProjectVersion.txt` and selects
+  only that installed version. A missing exact install fails closed without
+  opening the project. `UNITY_PATH` may pin an executable, but a recognizable
+  mismatched Hub path is refused too. The explicit escape hatch
+  `UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1` restores mismatch fallback for an
+  intentional upgrade or compatibility test.
 
 `unity_senses_run_tests` has no MCP batch route. For Unity's own headless test
 runner, omit `-quit`; the runner exits itself after writing results. Unity test
@@ -171,6 +176,8 @@ pointed at a top-level call it cannot make.
 | `compile_timeout` | Compile wait exceeded. | Wait and re-probe; switch to offline compile errors if the bridge is dead. |
 | `editor_instance_locked` | Headless Unity cannot open a project held by the Editor. | Read the message's diagnosis: a fresh instance lock means the live bridge should be reachable (retry the live route); a live process with no listener means a booting Editor — wait and retry; no matching process means a stale `Temp/UnityLockfile`. The error names the invoked tool, and `agentNextSteps` carries the variant-specific remedy. |
 | `unity_not_discovered` | No Unity executable was found. | Install under a standard Hub path or set `UNITY_PATH`. |
+| `unity_version_not_installed` | The exact version in `ProjectVersion.txt` is not installed. No Editor was started. | Install that version or intentionally opt in with `UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1`. |
+| `unity_version_mismatch` | `UNITY_PATH` identifies a different Hub Editor version than the project requires. No Editor was started. | Correct `UNITY_PATH` or intentionally opt in with `UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1`. |
 | `unity_spawn_refused` | The configured Unity binary could not execute. | Correct `UNITY_PATH`; do not retry unchanged. |
 | `restart_signature_absent` | `restart_editor` was asked to kill but the `editor_fd_exhaustion` signature is NOT in the recent Editor.log tail. | Re-run `read_compile_errors`; do not kill the Editor for a fixable compile failure. A call with `confirm` absent/false is NOT an error — it returns a structured dry-run preview the agent can inspect before committing. |
 | `unity_process_not_found` | `restart_editor` / `resource_pressure` could not resolve a live Unity PID for this project. | Open Unity for this project (with `-projectPath`), or pass an explicit `pid` to `resource_pressure`. |
