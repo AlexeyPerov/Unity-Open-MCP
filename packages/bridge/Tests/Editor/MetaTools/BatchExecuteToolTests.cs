@@ -392,6 +392,55 @@ namespace UnityOpenMcpBridge.Tests
                 "Combo guard must read `file_path`, not `path`. Got: " + result.ErrorCode);
         }
 
+        [Test]
+        public void Preflight_ComboNamesRequestIndices_WhenAnUnknownStepIsLeftOutOfThePlan()
+        {
+            // The unknown tool at commands[1] is never planned, so the combo
+            // rule sees a two-step plan. It must still name the steps by their
+            // position in the REQUEST, and report alongside the other refusals.
+            var body = "{\"commands\":[" +
+                       "{\"tool\":\"unity_open_mcp_script_write\",\"params\":{\"file_path\":\"Assets/__MCPTest_Combo.cs\",\"content\":\"// x\"}}," +
+                       "{\"tool\":\"unity_open_mcp_not_a_real_tool\",\"params\":{}}," +
+                       "{\"tool\":\"unity_open_mcp_assets_refresh\",\"params\":{}}" +
+                       "]}";
+            var result = BatchExecuteTool.Preflight(body, out _);
+            Assert.IsNotNull(result);
+            StringAssert.Contains("commands[0] writes a script and commands[2]", result.ErrorMessage);
+            StringAssert.Contains("commands[1] tool 'unity_open_mcp_not_a_real_tool' is not available", result.ErrorMessage);
+        }
+
+        [Test]
+        public void Preflight_StepRefusalNamesItsOwnIndex()
+        {
+            // Per-step refusals take the index as a parameter; no message text
+            // is rewritten, so a later step is never reported as commands[0].
+            var body = "{\"commands\":[" +
+                       "{\"tool\":\"unity_open_mcp_assets_refresh\",\"params\":{}}," +
+                       "{\"tool\":\"unity_open_mcp_assets_refresh\",\"params\":{}}," +
+                       "{\"tool\":\"unity_open_mcp_compile_check\",\"params\":{}}" +
+                       "]}";
+            var result = BatchExecuteTool.Preflight(body, out _);
+            Assert.IsNotNull(result);
+            Assert.AreEqual("batch_tool_not_invokable", result.ErrorCode);
+            StringAssert.Contains("commands[2] tool 'unity_open_mcp_compile_check' is not invokable inside a batch", result.ErrorMessage);
+            StringAssert.DoesNotContain("commands[0] tool 'unity_open_mcp_compile_check'", result.ErrorMessage);
+        }
+
+        [Test]
+        public void Preflight_AbsentParamsIsEmptyObject_ExplicitNullIsRejected()
+        {
+            // Omitted params means "no arguments". An explicit null is rejected,
+            // matching the published schema (params is an object) and the MCP
+            // server's own pre-dispatch validation.
+            Assert.IsNull(BatchExecuteTool.Preflight(
+                "{\"commands\":[{\"tool\":\"unity_open_mcp_assets_refresh\"}]}", out _));
+            var rejected = BatchExecuteTool.Preflight(
+                "{\"commands\":[{\"tool\":\"unity_open_mcp_assets_refresh\",\"params\":null}]}", out _);
+            Assert.IsNotNull(rejected);
+            Assert.AreEqual("batch_invalid_step", rejected.ErrorCode);
+            StringAssert.Contains("commands[0].params must be object", rejected.ErrorMessage);
+        }
+
         // -------------------------------------------------------------------
         // Happy path: 3× gameobject_create
         // -------------------------------------------------------------------

@@ -29,8 +29,8 @@ namespace UnityOpenMcpBridge.MetaTools
     public static class BatchExecuteTool
     {
         // Default cap on nested commands. Overridable via
-        // BridgeProjectSettings.BatchExecuteMaxCommands (clamped 1–100). Coplay
-        // parity: 25 default, 100 hard max.
+        // BridgeProjectSettings.BatchExecuteMaxCommands (clamped 1–100):
+        // 25 default, 100 hard max.
         public const int DefaultMaxCommands = 25;
         public const int HardMaxCommands = 100;
 
@@ -204,172 +204,142 @@ namespace UnityOpenMcpBridge.MetaTools
             return step.Tool == "unity_open_mcp_assets_refresh";
         }
 
-        private static ToolDispatchResult ValidateStructure(string body)
+        // Per-step rules that depend only on this one step. Pure over
+        // (index, tool, params): the index is a parameter, so a refusal names
+        // the real step without rewriting message text. The rules run in a
+        // fixed order and the FIRST refusal wins. The deny-list must stay ahead
+        // of the lifecycle check: resolving a nested batch_execute's lifecycle
+        // would re-enter Preflight.
+        private static ToolDispatchResult ValidateStep(int index, string tool, string paramsBody)
         {
-            var sw = Stopwatch.StartNew();
-
-            // --- Parse + validate the commands array -------------------------
-            var commandsRaw = JsonBody.GetObjectArray(body, "commands");
-            if (commandsRaw == null || commandsRaw.Length == 0)
+            if (string.IsNullOrWhiteSpace(tool))
             {
                 return ToolDispatchResult.Fail(
-                    "missing_parameter",
-                    "'commands' is required and must be a non-empty array of { tool, params } entries.");
+                    "batch_invalid_step",
+                    $"commands[{index}] is missing a 'tool' name.");
             }
 
-            int maxCommands = BridgeProjectSettings.BatchExecuteMaxCommands;
-            if (maxCommands < 1) maxCommands = 1;
-            if (maxCommands > HardMaxCommands) maxCommands = HardMaxCommands;
-
-            if (commandsRaw.Length > maxCommands)
+            // Deny-list check (nesting / headless-only). These are the tools
+            // blocked for non-lifecycle reasons; RestartThenSettle tools are
+            // blocked separately below with a lifecycle-specific error.
+            if (DeniedNestedTools.Contains(tool))
             {
                 return ToolDispatchResult.Fail(
-                    "batch_too_many_commands",
-                    $"Batch has {commandsRaw.Length} commands; the limit is {maxCommands} " +
-                    $"(configurable via .unity-open-mcp/settings.json 'batchExecuteMaxCommands', " +
-                    $"hard max {HardMaxCommands}). Split the batch or raise the limit.");
+                    "batch_tool_not_invokable",
+                    WithAlternative(
+                        $"commands[{index}] tool '{tool}' is not invokable inside a batch " +
+                        "(nesting / headless-only restriction). Use it as a " +
+                        "single top-level call instead.",
+                        tool));
             }
 
-            bool failFast = JsonBody.GetBool(body, "fail_fast", true);
+            // Play-state transitions and a non-dry-run apply_fix need their own
+            // top-level runners (lifecycle wait / rollback); a nested step would
+            // bypass both.
+            if ((tool == "unity_open_mcp_editor_set_state"
+                && JsonBody.GetString(paramsBody, "state") != "pause")
+                || (tool == "unity_open_mcp_apply_fix" && !JsonBody.GetBool(paramsBody, "dry_run", true)))
+                return ToolDispatchResult.Fail("batch_tool_not_invokable",
+                    $"commands[{index}] tool '{tool}' requires its top-level lifecycle/rollback runner.");
 
-            // Pre-parse every step (tool + params) so a malformed entry fails
-            // the WHOLE batch before any side effect — a partial run caused by
-            // a mid-loop parse error would be worse than a clean rejection.
-            var steps = new List<BatchStep>(commandsRaw.Length);
-            for (int i = 0; i < commandsRaw.Length; i++)
+            // specs/feedback.md 2026-08-24 — a step whose terminal result is
+            // produced by the MCP server's results-file poller can never
+            // resolve inside a batch: nothing polls, so the step reports
+            // `success` with a non-terminal {"status":"started"} body and the
+            // run's outcome is unreachable. Refuse up-front rather than
+            // silently accepting a call that cannot answer.
+            if (ServerPolledTools.Contains(tool))
             {
-                var raw = commandsRaw[i];
-                var tool = JsonBody.GetString(JsonBody.TopLevelField(raw, "tool"), "tool");
-                if (string.IsNullOrWhiteSpace(tool))
-                {
-                    return ToolDispatchResult.Fail(
-                        "batch_invalid_step",
-                        $"commands[{i}] is missing a 'tool' name.");
-                }
-
-                var paramsRaw = JsonBody.GetTopLevelRawValue(raw, "params");
-                // params may be absent for no-arg tools — pass "{}" so the
-                // nested handler sees a valid (empty) object body.
-                var paramsBody = string.IsNullOrWhiteSpace(paramsRaw) || paramsRaw.Trim() == "null"
-                    ? "{}"
-                    : paramsRaw;
-
-                // Deny-list check (nesting / headless-only). These are the tools
-                // blocked for non-lifecycle reasons; RestartThenSettle tools are
-                // blocked separately below with a lifecycle-specific error.
-                if (DeniedNestedTools.Contains(tool))
-                {
-                    return ToolDispatchResult.Fail(
-                        "batch_tool_not_invokable",
-                        WithAlternative(
-                            $"commands[{i}] tool '{tool}' is not invokable inside a batch " +
-                            "(nesting / headless-only restriction). Use it as a " +
-                            "single top-level call instead.",
-                            tool));
-                }
-
-                // specs/feedback.md 2026-08-24 — a step whose terminal result is
-                // produced by the MCP server's results-file poller can never
-                // resolve inside a batch: nothing polls, so the step reports
-                // `success` with a non-terminal {"status":"started"} body and the
-                // run's outcome is unreachable. Refuse up-front rather than
-                // silently accepting a call that cannot answer.
-                if ((tool == "unity_open_mcp_editor_set_state"
-                    && JsonBody.GetString(paramsBody, "state") != "pause")
-                    || (tool == "unity_open_mcp_apply_fix" && !JsonBody.GetBool(paramsBody, "dry_run", true)))
-                    return ToolDispatchResult.Fail("batch_tool_not_invokable",
-                        $"commands[{i}] tool '{tool}' requires its top-level lifecycle/rollback runner.");
-
-                if (ServerPolledTools.Contains(tool))
-                {
-                    return ToolDispatchResult.Fail(
-                        "batch_step_requires_server_poll",
-                        WithAlternative(
-                            $"commands[{i}] tool '{tool}' is not invokable inside a batch: its " +
-                            "terminal result is produced by the MCP server polling a results file " +
-                            "under ~/.unity-open-mcp, and the batch route has no poller. The step " +
-                            "would be recorded as success carrying a non-terminal " +
-                            "{\"status\":\"started\"} body and the run's outcome would never " +
-                            "reach you. Use it as a single top-level call instead — that route " +
-                            "polls to a terminal result (and honors its timeout_ms poll budget).",
-                            tool));
-                }
-
-                // B-N9 — scene_create's safety depends on its `mode` param
-                // (additive preserves the scene stack; Single replaces it). Run
-                // this param-aware check BEFORE the lifecycle-derived reload
-                // check: scene_create is RestartThenSettle, so the reload check
-                // would otherwise refuse it wholesale even with mode:"additive",
-                // contradicting the schema and making this branch dead code.
-                // The reload check below carves scene_create out accordingly.
-                if (IsNestedSceneStackUnsafe(tool, paramsBody, out var sceneReason))
-                {
-                    return ToolDispatchResult.Fail(
-                        "batch_nested_reload_unsafe",
-                        $"commands[{i}] tool '{tool}' is not invokable inside a batch: " +
-                        $"it {sceneReason}. Pass mode:\"additive\" or use it as a " +
-                        "single top-level call instead.");
-                }
-
-                // T5.2 — deny RestartThenSettle nested steps. A domain reload
-                // or scene switch mid-batch silently aborts every later step
-                // (the settle wait can't bridge a reload). Refuse up-front with
-                // a clear error naming the offending step and why. scene_create
-                // is handled by the param-aware check above and carved out of
-                // IsNestedReloadUnsafe so an additive scene_create is accepted.
-                if (IsNestedReloadUnsafe(tool, paramsBody, out var unsafePolicy))
-                {
-                    return ToolDispatchResult.Fail(
-                        "batch_nested_reload_unsafe",
-                        WithAlternative(
-                            $"commands[{i}] tool '{tool}' has lifecycle " +
-                            $"{unsafePolicy.ToWireString()} and is not invokable inside a batch: " +
-                            "it may trigger a domain reload or scene switch that silently aborts " +
-                            "the remaining steps. Use it as a single top-level call instead.",
-                            tool));
-                }
-
-                steps.Add(new BatchStep { Tool = tool, ParamsBody = paramsBody });
+                return ToolDispatchResult.Fail(
+                    "batch_step_requires_server_poll",
+                    WithAlternative(
+                        $"commands[{index}] tool '{tool}' is not invokable inside a batch: its " +
+                        "terminal result is produced by the MCP server polling a results file " +
+                        "under ~/.unity-open-mcp, and the batch route has no poller. The step " +
+                        "would be recorded as success carrying a non-terminal " +
+                        "{\"status\":\"started\"} body and the run's outcome would never " +
+                        "reach you. Use it as a single top-level call instead — that route " +
+                        "polls to a terminal result (and honors its timeout_ms poll budget).",
+                        tool));
             }
 
-            // feedback-fable-31-07 §3 — detect a script-write followed (later in
-            // the batch) by an import/refresh that will trigger a compile
-            // mid-batch. The settle wait runs only ONCE at the batch level after
-            // all steps complete; a compile kicked off by assets_refresh after a
-            // script_write can kill the HTTP response mid-write (domain reload)
-            // before the batch envelope is serialized, producing
-            // bridge_response_unparsable. RestartThenSettle tools are already
-            // refused above, but script_write + assets_refresh is the concrete
-            // repro from the field report and is not caught by the lifecycle
-            // taxonomy (script_write is None, assets_refresh is EditorSettle).
-            // Refuse the combination up-front; the agent should run the script
-            // write as a single top-level call, let it settle, then continue.
-            var scriptWriteIndex = -1;
-            for (int i = 0; i < steps.Count; i++)
+            // B-N9 — scene_create's safety depends on its `mode` param
+            // (additive preserves the scene stack; Single replaces it). Run
+            // this param-aware check BEFORE the lifecycle-derived reload
+            // check: scene_create is RestartThenSettle, so the reload check
+            // would otherwise refuse it wholesale even with mode:"additive",
+            // contradicting the schema and making this branch dead code.
+            // The reload check below carves scene_create out accordingly.
+            if (IsNestedSceneStackUnsafe(tool, paramsBody, out var sceneReason))
             {
-                if (IsScriptWriteStep(steps[i]))
+                return ToolDispatchResult.Fail(
+                    "batch_nested_reload_unsafe",
+                    $"commands[{index}] tool '{tool}' is not invokable inside a batch: " +
+                    $"it {sceneReason}. Pass mode:\"additive\" or use it as a " +
+                    "single top-level call instead.");
+            }
+
+            // T5.2 — deny RestartThenSettle nested steps. A domain reload
+            // or scene switch mid-batch silently aborts every later step
+            // (the settle wait can't bridge a reload). Refuse up-front with
+            // a clear error naming the offending step and why. scene_create
+            // is handled by the param-aware check above and carved out of
+            // IsNestedReloadUnsafe so an additive scene_create is accepted.
+            if (IsNestedReloadUnsafe(tool, paramsBody, out var unsafePolicy))
+            {
+                return ToolDispatchResult.Fail(
+                    "batch_nested_reload_unsafe",
+                    WithAlternative(
+                        $"commands[{index}] tool '{tool}' has lifecycle " +
+                        $"{unsafePolicy.ToWireString()} and is not invokable inside a batch: " +
+                        "it may trigger a domain reload or scene switch that silently aborts " +
+                        "the remaining steps. Use it as a single top-level call instead.",
+                        tool));
+            }
+
+            return null;
+        }
+
+        // Cross-step rules over the already-parsed plan. Each step carries its
+        // position in the request's `commands` array, so messages stay exact
+        // even when the plan omits a step (an unknown tool is never planned).
+        //
+        // feedback-fable-31-07 §3 — detect a script-write followed (later in
+        // the batch) by an import/refresh that will trigger a compile
+        // mid-batch. The settle wait runs only ONCE at the batch level after
+        // all steps complete; a compile kicked off by assets_refresh after a
+        // script_write can kill the HTTP response mid-write (domain reload)
+        // before the batch envelope is serialized, producing
+        // bridge_response_unparsable. RestartThenSettle tools are already
+        // refused per step, but script_write + assets_refresh is the concrete
+        // repro from the field report and is not caught by the lifecycle
+        // taxonomy (script_write is None, assets_refresh is EditorSettle).
+        // Preflight currently refuses every nested script_write outright as
+        // well; this rule stays as the precise explanation of the combination
+        // and as the guard should that blanket refusal ever be narrowed.
+        private static ToolDispatchResult ValidateSequence(IReadOnlyList<BatchStep> steps)
+        {
+            int scriptWrite = -1;
+            for (int s = 0; s < steps.Count; s++)
+            {
+                if (IsScriptWriteStep(steps[s]))
                 {
-                    scriptWriteIndex = i;
+                    scriptWrite = s;
                     break;
                 }
             }
-            if (scriptWriteIndex >= 0)
+            if (scriptWrite < 0) return null;
+            for (int s = scriptWrite + 1; s < steps.Count; s++)
             {
-                for (int j = scriptWriteIndex + 1; j < steps.Count; j++)
-                {
-                    if (IsImportTriggerStep(steps[j]))
-                    {
-                        return ToolDispatchResult.Fail(
-                            "batch_nested_reload_unsafe",
-                            $"commands[{scriptWriteIndex}] writes a script and commands[{j}] " +
-                            $"('{steps[j].Tool}') would trigger a compile mid-batch, which can " +
-                            "kill the HTTP response mid-write via a domain reload before the " +
-                            "batch result is sent. Write the script as a single top-level call, " +
-                            "let it settle, then run the remaining steps in a separate batch.");
-                    }
-                }
+                if (!IsImportTriggerStep(steps[s])) continue;
+                return ToolDispatchResult.Fail(
+                    "batch_nested_reload_unsafe",
+                    $"commands[{steps[scriptWrite].Index}] writes a script and commands[{steps[s].Index}] " +
+                    $"('{steps[s].Tool}') would trigger a compile mid-batch, which can " +
+                    "kill the HTTP response mid-write via a domain reload before the " +
+                    "batch result is sent. Write the script as a single top-level call, " +
+                    "let it settle, then run the remaining steps in a separate batch.");
             }
-
             return null;
         }
 
@@ -392,20 +362,30 @@ namespace UnityOpenMcpBridge.MetaTools
                 return ToolDispatchResult.Fail("missing_parameter", "'commands' must be a non-empty array.");
             int limit = System.Math.Max(1, System.Math.Min(HardMaxCommands, BridgeProjectSettings.BatchExecuteMaxCommands));
             if (commands.Count > limit)
-                return ToolDispatchResult.Fail("batch_too_many_commands", $"Batch has {commands.Count} commands; the limit is {limit}.");
+                return ToolDispatchResult.Fail(
+                    "batch_too_many_commands",
+                    $"Batch has {commands.Count} commands; the limit is {limit} " +
+                    "(configurable via .unity-open-mcp/settings.json 'batchExecuteMaxCommands', " +
+                    $"hard max {HardMaxCommands}). Split the batch or raise the limit.");
             var errors = new List<string>();
             if (!envelopeValidated) BatchSchemaValidator.ValidateRequest(body, BridgeBatchSchemas.ByTool["unity_open_mcp_batch_execute"], errors);
             string errorCode = errors.Count == 0 ? null : "batch_invalid_step";
+            // One pass: every command is parsed once, and the same params value
+            // feeds the per-step rules, the schema check and the dispatch plan.
             for (int i = 0; i < commands.Count; i++)
             {
                 var raw = commands[i];
                 var tool = JsonBody.GetString(JsonBody.TopLevelField(raw, "tool"), "tool");
+                // Absent params means an empty argument object. An explicit
+                // `params: null` is kept as-is: the published schema types params
+                // as an object, so the schema check below rejects it exactly as
+                // the MCP server and the transport-boundary validation do.
                 var args = JsonBody.GetTopLevelRawValue(raw, "params") ?? "{}";
-                var structure = ValidateStructure("{\"commands\":[" + raw + "]}");
-                if (structure != null)
+                var stepRefusal = ValidateStep(i, tool, args);
+                if (stepRefusal != null)
                 {
-                    errorCode = errorCode ?? structure.ErrorCode;
-                    errors.Add(structure.ErrorMessage.Replace("commands[0]", "commands[" + i + "]"));
+                    errorCode = errorCode ?? stepRefusal.ErrorCode;
+                    errors.Add(stepRefusal.ErrorMessage);
                 }
                 foreach (var key in JsonBody.GetObjectKeys(raw) ?? new List<string>())
                     if (key != "tool" && key != "params")
@@ -444,16 +424,16 @@ namespace UnityOpenMcpBridge.MetaTools
                 }
                 bool stepMutating = tool != "unity_open_mcp_batch_execute" && EffectiveToolContract.IsMutating(tool, args);
                 isMutating |= stepMutating;
-                plan.Steps.Add(new BatchStep { Tool = tool, ParamsBody = args, IsMutating = stepMutating });
+                plan.Steps.Add(new BatchStep { Index = i, Tool = tool, ParamsBody = args, IsMutating = stepMutating });
             }
             plan.IsMutating = isMutating;
-            var combination = ValidateStructure(body);
-            if (combination != null && combination.ErrorMessage.Contains("writes a script"))
+            var sequenceRefusal = ValidateSequence(plan.Steps);
+            if (sequenceRefusal != null)
             {
-                errorCode = errorCode ?? combination.ErrorCode;
-                errors.Add(combination.ErrorMessage);
+                errorCode = errorCode ?? sequenceRefusal.ErrorCode;
+                errors.Add(sequenceRefusal.ErrorMessage);
             }
-            if (errors.Count == 0) return combination;
+            if (errors.Count == 0) return null;
             return ToolDispatchResult.Fail(errorCode ?? "batch_invalid_step", string.Join("\n", errors));
         }
 
@@ -692,6 +672,11 @@ namespace UnityOpenMcpBridge.MetaTools
 
         internal struct BatchStep
         {
+            // Position in the request's `commands` array. Equals the plan
+            // position whenever the plan is executed (any refused step refuses
+            // the whole batch); it differs only in refusal messages, where an
+            // unknown tool was left out of the plan.
+            public int Index;
             public string Tool;
             public string ParamsBody;
             // Resolved once during preflight so the dispatch loop does not
