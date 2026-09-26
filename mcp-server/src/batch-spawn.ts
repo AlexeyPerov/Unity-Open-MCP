@@ -526,12 +526,15 @@ export interface BatchSpawnOptions {
 }
 
 export class BatchSpawn implements Router {
-  private unityPath: string;
-  private unityPathSource: "env" | "discovered" | "none";
+  private unityPath = "";
+  private unityPathSource: "env" | "discovered" | "none" = "none";
   private projectPath: string;
   private timeoutMs: number;
   private readonly discoveryRoots?: string[];
-  private readonly resolutionError?: Extract<UnityPathResolution, { ok: false }>;
+  private resolutionError?: Extract<UnityPathResolution, { ok: false }>;
+  // Project editor version the cached executable was resolved for; undefined
+  // until the first resolution. See refreshUnityPath.
+  private resolvedForVersion?: string | null;
 
   constructor(options: BatchSpawnOptions = {}) {
     this.discoveryRoots = options.discoveryRoots;
@@ -543,28 +546,7 @@ export class BatchSpawn implements Router {
     // Resolve the project path before the editor executable: ProjectVersion.txt
     // is authoritative even when the bridge has not started and no lock exists.
     this.projectPath = requestedProjectPath || lock?.projectPath || "";
-    const projectVersion = readProjectUnityVersion(this.projectPath);
-    const preferredVersion = projectVersion ?? lock?.unityVersion ?? null;
-    const allowVersionMismatch =
-      process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH === "1";
-    const resolution = resolveUnityPathForProject(
-      preferredVersion,
-      this.discoveryRoots,
-      allowVersionMismatch,
-    );
-    if (resolution.ok) {
-      this.unityPath = resolution.value.path;
-      this.unityPathSource = resolution.value.source;
-      if (resolution.value.source === "discovered") {
-        console.error(
-          `[unity-open-mcp] Unity path auto-discovered: ${resolution.value.path} (version ${resolution.value.version}). Set UNITY_PATH to override.`,
-        );
-      }
-    } else {
-      this.unityPath = "";
-      this.unityPathSource = "none";
-      this.resolutionError = resolution;
-    }
+    this.refreshUnityPath();
 
     // Parse the timeout env override with a finiteness/positivity guard:
     // a non-numeric value (e.g. "abc") parses to NaN, and setTimeout(fn, NaN)
@@ -668,6 +650,7 @@ export class BatchSpawn implements Router {
         detail: { error: { code: "editor_instance_locked", message }, agentNextSteps: editorLockedNextSteps(toolName, diagnosis) } });
     }
 
+    this.refreshUnityPath();
     const pathError = await this.validateUnityPath();
     if (pathError) return pathError;
 
@@ -749,6 +732,44 @@ export class BatchSpawn implements Router {
       ],
       isError: hasError,
     };
+  }
+
+  // Select the editor for the project's CURRENT version. ProjectVersion.txt is
+  // cheap to read, so it is re-read before every spawn: a project upgraded
+  // while the server runs must not open with the previously chosen editor
+  // (a wrong-version open can rewrite package and project metadata). The
+  // install scan reruns only when that version changed or the previous
+  // resolution failed, so installing the missing exact editor (or fixing
+  // UNITY_PATH) takes effect without a server restart.
+  private refreshUnityPath(): void {
+    const preferredVersion =
+      readProjectUnityVersion(this.projectPath) ??
+      (this.projectPath ? readInstanceLock(this.projectPath)?.unityVersion : undefined) ??
+      null;
+    if (!this.resolutionError && this.resolvedForVersion === preferredVersion) return;
+
+    const allowVersionMismatch =
+      process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH === "1";
+    const resolution = resolveUnityPathForProject(
+      preferredVersion,
+      this.discoveryRoots,
+      allowVersionMismatch,
+    );
+    this.resolvedForVersion = preferredVersion;
+    if (resolution.ok) {
+      this.unityPath = resolution.value.path;
+      this.unityPathSource = resolution.value.source;
+      this.resolutionError = undefined;
+      if (resolution.value.source === "discovered") {
+        console.error(
+          `[unity-open-mcp] Unity path auto-discovered: ${resolution.value.path} (version ${resolution.value.version}). Set UNITY_PATH to override.`,
+        );
+      }
+    } else {
+      this.unityPath = "";
+      this.unityPathSource = "none";
+      this.resolutionError = resolution;
+    }
   }
 
   private async validateUnityPath(): Promise<CallToolResult | null> {

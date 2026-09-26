@@ -130,10 +130,13 @@ Headless batch is for fallback and automation:
 - `UNITY_PROJECT_PATH` is required. Before every spawn, the server reads the
   exact editor version from `ProjectSettings/ProjectVersion.txt` and selects
   only that installed version. A missing exact install fails closed without
-  opening the project. `UNITY_PATH` may pin an executable, but a recognizable
-  mismatched Hub path is refused too. The explicit escape hatch
-  `UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1` restores mismatch fallback for an
-  intentional upgrade or compatibility test.
+  opening the project. Installed editors are rescanned when the project version
+  changes or the previous lookup failed, so a project upgrade or a newly
+  installed exact editor takes effect without restarting the server.
+  `UNITY_PATH` may pin an executable, but a recognizable mismatched Hub path is
+  refused too, including after the project moves to another version. The
+  explicit escape hatch `UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1` restores
+  mismatch fallback for an intentional upgrade or compatibility test.
 
 `unity_senses_run_tests` has no MCP batch route. For Unity's own headless test
 runner, omit `-quit`; the runner exits itself after writing results. Unity test

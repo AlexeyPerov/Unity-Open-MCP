@@ -7,6 +7,7 @@ import { join, dirname } from "node:path";
 import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, extractOffendingPackages, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator, diagnoseEditorLock, editorLockedMessage, editorLockedNextSteps } from "./batch-spawn.js";
 import { lockPath } from "./instance-discovery.js";
 import { setUnityProcessScannerForTest } from "./running-unity.js";
+import { VERIFY_JSON_BEGIN, VERIFY_JSON_END } from "./constants.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 function parseBody(result: CallToolResult): Record<string, unknown> {
@@ -582,6 +583,95 @@ test("batch spawn refuses to open a project when its exact Unity version is unav
     if (savedOptIn === undefined) delete process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH;
     else process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH = savedOptIn;
   }
+});
+
+// The project's editor version is re-read before every spawn, not cached at
+// server start. Each fake install prints a marker report, so a successful
+// route exposes the spawned executable as _diagnostics.command.
+function writeProjectVersion(project: string, version: string): void {
+  mkdirSync(join(project, "ProjectSettings"), { recursive: true });
+  writeFileSync(join(project, "ProjectSettings", "ProjectVersion.txt"), `m_EditorVersion: ${version}\n`);
+}
+
+function fakeReportingInstall(hub: string, version: string): string {
+  const exe = process.platform === "darwin"
+    ? join(hub, version, "Unity.app", "Contents", "MacOS", "Unity")
+    : join(hub, version, "Editor", "Unity");
+  mkdirSync(dirname(exe), { recursive: true });
+  writeFileSync(exe, `#!/bin/sh\necho '${VERIFY_JSON_BEGIN}{"status":"compile_passed","errorCount":0}${VERIFY_JSON_END}'\nexit 0\n`);
+  chmodSync(exe, 0o755);
+  return exe;
+}
+
+async function withVersionFixture(run: (hub: string, project: string) => Promise<void>): Promise<void> {
+  const root = mkdtempSync(join(tmpdir(), "batch-version-refresh-"));
+  const savedPath = process.env.UNITY_PATH;
+  const savedOptIn = process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH;
+  delete process.env.UNITY_PATH;
+  delete process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH;
+  const restore = setUnityProcessScannerForTest({ scan: () => [] });
+  try {
+    await run(join(root, "hub"), join(root, "project"));
+  } finally {
+    restore();
+    if (savedPath === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = savedPath;
+    if (savedOptIn === undefined) delete process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH;
+    else process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH = savedOptIn;
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function spawnedCommand(body: Record<string, unknown>): string | undefined {
+  return (body._diagnostics as { command?: string } | undefined)?.command;
+}
+
+test("batch spawn opens a project upgraded mid-session with its new exact editor", { skip: process.platform === "win32" }, async () => {
+  await withVersionFixture(async (hub, project) => {
+    writeProjectVersion(project, "6000.0.10f1");
+    const oldExe = fakeReportingInstall(hub, "6000.0.10f1");
+    const newExe = fakeReportingInstall(hub, "6000.0.20f1");
+    const batch = new BatchSpawn({ discoveryRoots: [hub], projectPath: project });
+
+    const first = parseBody(await batch.route("unity_open_mcp_compile_check", {}));
+    assert.equal(spawnedCommand(first), oldExe);
+
+    writeProjectVersion(project, "6000.0.20f1");
+    const second = parseBody(await batch.route("unity_open_mcp_compile_check", {}));
+    assert.equal(second.error, undefined);
+    assert.equal(spawnedCommand(second), newExe, "the upgraded project must not open with the cached editor");
+  });
+});
+
+test("batch spawn picks up the exact editor installed after a unity_version_not_installed refusal", { skip: process.platform === "win32" }, async () => {
+  await withVersionFixture(async (hub, project) => {
+    writeProjectVersion(project, "6000.0.10f1");
+    fakeReportingInstall(hub, "6000.0.50f1");
+    const batch = new BatchSpawn({ discoveryRoots: [hub], projectPath: project });
+
+    const refused = parseBody(await batch.route("unity_open_mcp_compile_check", {}));
+    assert.equal((refused.error as { code: string }).code, "unity_version_not_installed");
+
+    const exactExe = fakeReportingInstall(hub, "6000.0.10f1");
+    const recovered = parseBody(await batch.route("unity_open_mcp_compile_check", {}));
+    assert.equal(recovered.error, undefined);
+    assert.equal(spawnedCommand(recovered), exactExe);
+  });
+});
+
+test("a UNITY_PATH pin is checked against the project's current version on every spawn", { skip: process.platform === "win32" }, async () => {
+  await withVersionFixture(async (hub, project) => {
+    writeProjectVersion(project, "6000.0.10f1");
+    process.env.UNITY_PATH = fakeReportingInstall(hub, "6000.0.10f1");
+    const batch = new BatchSpawn({ discoveryRoots: [hub], projectPath: project });
+
+    const pinned = parseBody(await batch.route("unity_open_mcp_compile_check", {}));
+    assert.equal(spawnedCommand(pinned), process.env.UNITY_PATH);
+
+    writeProjectVersion(project, "6000.0.20f1");
+    const mismatched = parseBody(await batch.route("unity_open_mcp_compile_check", {}));
+    assert.equal((mismatched.error as { code: string }).code, "unity_version_mismatch");
+  });
 });
 
 test("compile_check with a live Editor open surfaces editor_instance_locked, not batch_spawn_failed", async () => {
