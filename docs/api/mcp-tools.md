@@ -752,7 +752,11 @@ Unambiguous historical aliases remain declared with `deprecated: true` and
 `X-Unity-Open-MCP-Deprecations`). Canonical keys map to existing handler keys
 through schema-owned `x-wire-key` metadata. Mixing aliases for one selector is
 rejected, as are multiple host selectors or a component ID alongside a type
-selector that would otherwise be ignored. Unknown keys, invalid types, enums and bounds fail before dispatch
+selector that would otherwise be ignored. Host selectors are `instance_id`,
+`game_object_path` (plus its deprecated aliases) and `name`; a tool whose
+`name` is a payload instead publishes its selector set as
+`x-gameobject-selectors` — `gameobject_modify` renames through `name` and
+selects by name through `name_target`. Unknown keys, invalid types, enums and bounds fail before dispatch
 with `invalid_arguments`; a missing required argument may be reported by the
 MCP entrypoint as `missing_required_argument`. Batch preflight validates every
 nested command before step zero. Arbitrary patch values remain opaque.

@@ -3155,7 +3155,7 @@
     }
   },
   "unity_open_mcp_gameobject_modify": {
-    "description": "Modify one or more GameObject fields in a single call: name, tag, layer, active, and transform (position, rotation, scale). Only provided fields are touched; omitted fields are preserved. Undo-recorded. Mutating: runs the full gate path; `paths_hint` is the scene path that contains the target. Use local_space=true to interpret transform values in the parent's local space (matches Inspector). Address the target by instance_id > path > name.\n\nThree-surface form (RFC 7396 JSON Merge Patch, additive): beyond the legacy flat fields you may pass gameObjectDiffs (root-target patches grouped in one object), pathPatchesPerGameObject ({childPath: diffs} applied to descendants of the target), and jsonPatchesPerGameObject ({componentTypeName: {field: value}} applied to the target's components via reflection, reusing object_modify's value shape). Apply order is jsonPatches → pathPatches → gameObjectDiffs/flat.",
+    "description": "Modify one or more GameObject fields in a single call: name, tag, layer, active, and transform (position, rotation, scale). Only provided fields are touched; omitted fields are preserved. Undo-recorded. Mutating: runs the full gate path; `paths_hint` is the scene path that contains the target. Use local_space=true to interpret transform values in the parent's local space (matches Inspector). Address the target by one of instance_id, game_object_path, or name_target; `name` is the new name, not a selector.\n\nThree-surface form (RFC 7396 JSON Merge Patch, additive): beyond the legacy flat fields you may pass gameObjectDiffs (root-target patches grouped in one object), pathPatchesPerGameObject ({childPath: diffs} applied to descendants of the target), and jsonPatchesPerGameObject ({componentTypeName: {field: value}} applied to the target's components via reflection, reusing object_modify's value shape). Apply order is jsonPatches → pathPatches → gameObjectDiffs/flat.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -3196,6 +3196,11 @@
             }
           },
           "type": "object"
+        },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name_target.",
+          "type": "string",
+          "x-wire-key": "path"
         },
         "gate": {
           "default": "enforce",
@@ -3241,9 +3246,9 @@
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "pathPatchesPerGameObject": {
@@ -3307,22 +3312,24 @@
           "description": "New tag. Must be a defined tag (use editor_get_tags from Plan 5 to enumerate). Omit to leave unchanged.",
           "type": "string"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
         "paths_hint"
       ],
-      "type": "object"
+      "type": "object",
+      "x-gameobject-selectors": [
+        "instance_id",
+        "game_object_path",
+        "path",
+        "target_path",
+        "name_target"
+      ]
     }
   },
   "unity_open_mcp_gameobject_set_parent": {

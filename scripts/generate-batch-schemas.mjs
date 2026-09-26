@@ -33,7 +33,7 @@ const { ALL_TOOLS } = await import(
 function constraints(schema) {
   const result = {};
   for (const [key, value] of Object.entries(schema)) {
-    if (["type", "required", "enum", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "minItems", "maxItems", "minLength", "maxLength", "pattern", "additionalProperties", "x-wire-key", "x-alias-for"].includes(key)) result[key] = value;
+    if (["type", "required", "enum", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "minItems", "maxItems", "minLength", "maxLength", "pattern", "additionalProperties", "x-wire-key", "x-alias-for", "x-gameobject-selectors"].includes(key)) result[key] = value;
     else if (key === "properties") result[key] = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, constraints(v)]));
     else if (key === "items") result[key] = constraints(value);
     else if (["anyOf", "oneOf", "allOf"].includes(key)) result[key] = value.map(constraints);

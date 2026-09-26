@@ -63,11 +63,12 @@ namespace UnityOpenMcpBridge
             if (type == "object" || Raw(schema, "properties") != null)
             {
                 var properties = Raw(schema, "properties") ?? "{}";
-                if (Raw(schema, "x-project-command") != "true" && Raw(properties, "game_object_path") != null)
+                var selectorKeys = GameObjectSelectors(schema, properties);
+                if (selectorKeys != null)
                 {
                     var selectors = new List<string>();
-                    foreach (var selector in new[] { "instance_id", "game_object_path", "path", "target_path", "name" })
-                        if (Raw(properties, selector) != null && Supplied(value, selector)) selectors.Add(selector);
+                    foreach (var selector in selectorKeys)
+                        if (Supplied(value, selector)) selectors.Add(selector);
                     if (selectors.Count > 1) errors.Add(path + ": supply only one GameObject selector (prefer game_object_path); ignored keys: " + string.Join(", ", selectors));
                     if (Supplied(value, "component_instance_id") && (Supplied(value, "component_type") || Supplied(value, "type_name")))
                         errors.Add(path + ": component_instance_id and component_type are alternatives");
@@ -107,6 +108,25 @@ namespace UnityOpenMcpBridge
                 if (double.TryParse(Raw(schema, "exclusiveMaximum"), NumberStyles.Float, CultureInfo.InvariantCulture, out var high) && numeric >= high)
                     errors.Add(path + " violates exclusiveMaximum");
             }
+        }
+
+        // Mirrors gameObjectSelectors in mcp-server/src/tool-contract.ts: a tool
+        // whose `name` is a payload (gameobject_modify's new name) publishes its
+        // selector set as x-gameobject-selectors; every other GameObject host
+        // uses the default set.
+        private static readonly string[] DefaultGameObjectSelectors =
+            { "instance_id", "game_object_path", "path", "target_path", "name" };
+
+        private static IEnumerable<string> GameObjectSelectors(string schema, string properties)
+        {
+            var declared = JsonBody.GetStringArray(
+                JsonBody.TopLevelField(schema, "x-gameobject-selectors"), "x-gameobject-selectors");
+            if (declared != null) return declared;
+            if (Raw(schema, "x-project-command") == "true" || Raw(properties, "game_object_path") == null) return null;
+            var present = new List<string>();
+            foreach (var selector in DefaultGameObjectSelectors)
+                if (Raw(properties, selector) != null) present.Add(selector);
+            return present;
         }
 
         private static bool Supplied(string body, string key)

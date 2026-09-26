@@ -19,7 +19,8 @@ export const gameobjectModify = makeTool(
     "transform (position, rotation, scale). Only provided fields are touched; omitted fields are " +
     "preserved. Undo-recorded. Mutating: runs the full gate path; `paths_hint` is the scene path " +
     "that contains the target. Use local_space=true to interpret transform values in the parent's " +
-    "local space (matches Inspector). Address the target by instance_id > path > name.\n\n" +
+    "local space (matches Inspector). Address the target by one of instance_id, game_object_path, or " +
+    "name_target; `name` is the new name, not a selector.\n\n" +
     "Three-surface form (RFC 7396 JSON Merge Patch, additive): beyond the legacy flat fields you " +
     "may pass gameObjectDiffs (root-target patches grouped in one object), " +
     "pathPatchesPerGameObject ({childPath: diffs} applied to descendants of the target), and " +

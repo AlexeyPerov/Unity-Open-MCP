@@ -11,6 +11,9 @@ For stale sources, activate `typed-editor`, call `recompile_scripts`, then re-re
 `capabilities` and `bridge_status` accept `project_path` for a different project.
 
 On `editor_reloading`, retry after `retryAfterMs`; do not start another Unity.
+Disk-backed reads (`list_assets`, `read_asset`, `search_assets`,
+`find_references`, `dependencies`, `read_compile_errors`) keep answering during
+a compile or reload.
 `compile_check` is headless-only. It captures its own log and classifies compiler,
 project-load, and spawn failures. `compile_indeterminate` means exit 0 lacked
 sufficient completion evidence; never infer success from exit 0 alone. A

@@ -80,6 +80,22 @@ const ASSET_PATH_TOOLS = new Set([
   "unity_open_mcp_scene_get_data",
 ]);
 
+// GameObject host selectors for the "supply only one selector" rule. `name`
+// selects by name unless the tool uses it as a payload; such tools name their
+// by-name selector here and publish their full set as `x-gameobject-selectors`,
+// which the bridge's BatchSchemaValidator reads from the generated schema.
+const DEFAULT_GAMEOBJECT_SELECTORS = ["instance_id", "game_object_path", "path", "target_path", "name"];
+const NAME_SELECTOR_OVERRIDES: Record<string, string> = {
+  // `name` is the new name; the target is resolved by name_target.
+  unity_open_mcp_gameobject_modify: "name_target",
+};
+
+/** Selector keys the one-selector rule applies to; null when the schema has no GameObject host. */
+function gameObjectSelectors(schema: Schema): string[] | null {
+  if (Array.isArray(schema["x-gameobject-selectors"])) return schema["x-gameobject-selectors"];
+  if (schema["x-project-command"] || !schema.properties?.game_object_path) return null;
+  return DEFAULT_GAMEOBJECT_SELECTORS.filter(k => schema.properties[k]);
+}
 
 /** Locator names are explicit in the published contract; aliases retain their wire key. */
 export function canonicalSchema(name: string, input: Schema): Tool["inputSchema"] {
@@ -114,7 +130,12 @@ export function canonicalSchema(name: string, input: Schema): Tool["inputSchema"
     }
   }
   if (props.prefab_path) for (const clause of schema.allOf ?? []) if (clause.anyOf?.some((b: Schema) => b.required?.includes("asset_path"))) clause.anyOf.push({ required: ["prefab_path"] });
-  if (props.game_object_path) props.game_object_path.description = "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.";
+  if (props.game_object_path) {
+    const nameSelector = NAME_SELECTOR_OVERRIDES[name] ?? "name";
+    if (nameSelector !== "name")
+      schema["x-gameobject-selectors"] = DEFAULT_GAMEOBJECT_SELECTORS.map(k => k === "name" ? nameSelector : k).filter(k => props[k]);
+    props.game_object_path.description = `GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or ${nameSelector}.`;
+  }
   if (props.component_type) props.component_type.description = "Component type (full name preferred); alternative to component_instance_id.";
   return schema as Tool["inputSchema"];
 }
@@ -131,9 +152,10 @@ export function validateSchema(value: any, schema: Schema, path = "args"): strin
   if (schema.enum && !schema.enum.includes(value)) errors.push(`${path} must be one of ${schema.enum.join(", ")}`);
   if (value && typeof value === "object" && !Array.isArray(value)) {
     for (const key of schema.required ?? []) if (value[key] === undefined) errors.push(`${path}.${key} is required`);
-    if (!schema["x-project-command"] && schema.properties?.game_object_path) {
+    const selectorKeys = gameObjectSelectors(schema);
+    if (selectorKeys) {
       const supplied = (k: string) => value[k] !== undefined && value[k] !== null && value[k] !== "" && value[k] !== 0 && value[k] !== "0";
-      const selectors = ["instance_id", "game_object_path", "path", "target_path", "name"].filter(k => schema.properties[k] && supplied(k));
+      const selectors = selectorKeys.filter(supplied);
       if (selectors.length > 1) errors.push(`${path}: supply only one GameObject selector (prefer game_object_path); ignored keys: ${selectors.join(", ")}`);
       if (supplied("component_instance_id") && ["component_type", "type_name"].some(supplied)) errors.push(`${path}: component_instance_id and component_type are alternatives`);
     }

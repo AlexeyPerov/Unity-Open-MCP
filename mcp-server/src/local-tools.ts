@@ -26,15 +26,27 @@ export function isLocalTool(name: string): boolean {
 }
 
 /**
- * Tools that must never wait out a reloading Editor before dispatch: local
- * tools, offline disk reads, and the project-command catalog probe, whose own
- * handler reports `catalog_unavailable` when the bridge is away.
+ * Tools whose router handler has a disk-backed path that answers without the
+ * live bridge (docs/api/routing-lifecycle.md#offline-coverage; the local
+ * `read_compile_errors` is covered by LOCAL_TOOL_NAMES). A compiling or
+ * reloading Editor is exactly when these fall back to disk, so they must
+ * reach their handler instead of the reload probe.
  */
-const RELOAD_PROBE_EXEMPT: ReadonlySet<string> = new Set([
+export const OFFLINE_CAPABLE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "unity_open_mcp_list_assets",
-  "unity_open_mcp_project_commands",
+  "unity_open_mcp_read_asset",
+  "unity_open_mcp_search_assets",
+  "unity_open_mcp_find_references",
+  "unity_open_mcp_dependencies",
 ]);
 
+/**
+ * Tools that must never wait out a reloading Editor before dispatch: local
+ * tools, offline-capable reads, and the project-command catalog probe, whose
+ * own handler reports `catalog_unavailable` when the bridge is away.
+ */
 export function skipsReloadProbe(name: string): boolean {
-  return isLocalTool(name) || RELOAD_PROBE_EXEMPT.has(name);
+  return isLocalTool(name)
+    || OFFLINE_CAPABLE_TOOL_NAMES.has(name)
+    || name === "unity_open_mcp_project_commands";
 }

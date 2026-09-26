@@ -4588,6 +4588,39 @@ test("fresh reloading lock causes one bounded live re-probe and never calls batc
   } finally { rmSync(path, { force: true }); await rm(root, { recursive: true, force: true }); }
 });
 
+test("compiling/reloading lock still serves offline-capable reads from disk", async () => {
+  await withTmp("reload-offline-", async (tmp) => {
+    await setupProject(tmp);
+    const path = lockPath(tmp);
+    mkdirSync(dirname(path), { recursive: true });
+    try {
+      for (const state of ["compiling", "reloading"]) {
+        writeFileSync(path, JSON.stringify({ pid: process.pid, projectPath: tmp, port: 27999,
+          state, heartbeatAt: new Date().toISOString() }));
+        const live = makeFakeLive({ available: false });
+        let probes = 0;
+        live.isLiveAvailable = async () => { probes++; return false; };
+        const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+        const reads: Array<[string, Record<string, unknown>]> = [
+          ["unity_open_mcp_list_assets", {}],
+          ["unity_open_mcp_find_references", { guid: "0000000000000000000000000000aaaa" }],
+          ["unity_open_mcp_dependencies", { asset_path: "Assets/Prefabs/Player.prefab" }],
+          ["unity_open_mcp_read_asset", { asset_path: "Assets/Prefabs/Player.prefab" }],
+        ];
+        for (const [tool, args] of reads) {
+          const result = await router.route(tool, args);
+          assert.notEqual(errorCode(result), "editor_reloading", `${state}: ${tool}`);
+        }
+        assert.equal(live.calls.length, 0, `${state}: no live dispatch`);
+        // A live-only tool is still refused by the probe under the same lock.
+        const refused = await router.route("unity_open_mcp_gameobject_find", { game_object_path: "Player" });
+        assert.equal(errorCode(refused), "editor_reloading", state);
+        assert.ok(probes > 0);
+      }
+    } finally { rmSync(path, { force: true }); }
+  });
+});
+
 test("core project selectors use the selected project's endpoint instead of the configured project", async () => {
   const { createServer } = await import("node:http");
   const root = await mkdtemp(join(tmpdir(), "selected-project-"));

@@ -58,6 +58,22 @@ test("null property values remain valid; shadowed selectors are rejected", () =>
   assert.match(validateSchema({ ...args, component_instance_id: 42 }, schema).join(), /alternatives/);
 });
 
+test("gameobject_modify renames through name; name_target is its by-name selector", () => {
+  const schema = tool("gameobject_modify").inputSchema;
+  const base = { paths_hint: ["Assets/Scenes/Main.unity"] };
+  assert.deepEqual(validateSchema({ ...base, game_object_path: "Root/Player", name: "Hero" }, schema), []);
+  assert.deepEqual(validateSchema({ ...base, instance_id: 42, name: "Hero" }, schema), []);
+  assert.deepEqual(validateSchema({ ...base, name_target: "Player", name: "Hero" }, schema), []);
+  assert.match(validateSchema({ ...base, game_object_path: "Root/Player", name_target: "Player" }, schema).join(),
+    /only one GameObject selector.*game_object_path, name_target/);
+  const wire = wireArguments({ ...base, game_object_path: "Root/Player", name: "Hero" }, schema);
+  assert.equal(wire.path, "Root/Player");
+  assert.equal(wire.name, "Hero");
+  // Every other GameObject host keeps `name` as a selector.
+  const host = { ...base, game_object_path: "Root/Player", name: "Player", component_type: "UnityEngine.BoxCollider" };
+  assert.match(validateSchema(host, tool("component_add").inputSchema).join(), /only one GameObject selector.*game_object_path, name/);
+});
+
 test("registry forbids unknown keys and every alias names an existing canonical property", () => {
   for (const t of ALL_TOOLS) {
     assert.match(validateSchema({ __unknown_locator: "x" }, t.inputSchema).join(), /__unknown_locator is unknown/, t.name);

@@ -73,6 +73,33 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void GameObjectModify_NameIsPayload_NameTargetIsSelector()
+        {
+            var schema = BridgeBatchSchemas.ByTool["unity_open_mcp_gameobject_modify"];
+            var errors = new List<string>();
+            BatchSchemaValidator.ValidateRequest(
+                "{\"path\":\"Root/Player\",\"name\":\"Hero\",\"paths_hint\":[\"Assets/Main.unity\"]}", schema, errors);
+            Assert.IsEmpty(errors, string.Join("; ", errors));
+
+            errors.Clear();
+            BatchSchemaValidator.ValidateRequest(
+                "{\"path\":\"Root/Player\",\"name_target\":\"Player\",\"paths_hint\":[\"Assets/Main.unity\"]}", schema, errors);
+            StringAssert.Contains("only one GameObject selector", string.Join("; ", errors));
+
+            // Nested batch steps use the same generated schema.
+            var result = BatchExecuteTool.Preflight(
+                "{\"commands\":[{\"tool\":\"unity_open_mcp_gameobject_modify\",\"params\":{\"path\":\"Root/Player\",\"name\":\"Hero\"}}]," +
+                "\"paths_hint\":[\"Assets/Main.unity\"]}", out _);
+            Assert.IsNull(result, result?.ErrorMessage);
+
+            // Other GameObject hosts keep `name` as a selector.
+            errors.Clear();
+            BatchSchemaValidator.ValidateRequest("{\"path\":\"A\",\"name\":\"B\"}",
+                BridgeBatchSchemas.ByTool["unity_open_mcp_gameobject_find"], errors);
+            StringAssert.Contains("only one GameObject selector", string.Join("; ", errors));
+        }
+
+        [Test]
         public void OneOfRequiredOnlyBranches_SelectExactlyOneLocator()
         {
             var schema = BridgeBatchSchemas.ByTool["unity_open_mcp_find_references"];
