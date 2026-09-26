@@ -461,9 +461,14 @@ CompilationPipeline generation whose source content still matches is authoritati
 unchanged content does not invalidate a confirmed compile. Editing source does.
 `compile_failed` outranks `assembly_stale`: a failed compile keeps reporting its
 diagnostics until the next compile finishes, with `sourceMatches: false` when the
-sources changed in between. The fingerprint covers `.cs`, `.asmdef` and `.asmref`
-files only; project-settings and package-manifest edits start their own compile
-and never flip a clean generation to `assembly_stale` on their own.
+sources changed in between. `errorSource` names where `errors` came from:
+normally `CompilationPipeline`; `Editor.log` when Unity reports a failed compile
+the bridge never observed (for example the Editor-startup compile, which runs
+before the bridge loads), in which case the log's compiler diagnostics become
+`errors` instead of `historicalLogErrors`. The fingerprint covers `.cs`,
+`.asmdef` and `.asmref` files only; project-settings and package-manifest edits
+start their own compile and never flip a clean generation to `assembly_stale` on
+their own.
 Right after a domain reload the bridge recomputes that fingerprint in the
 background; until the pass completes it reports `indeterminate` — never
 `assembly_stale` — and the server falls back to its log and mtime heuristics

@@ -5,8 +5,10 @@
 `read_compile_errors` prefers a bounded live CompilationPipeline snapshot, falling
 back to logs if unavailable. `currently_compiling` means wait; `assembly_stale`
 means source changed after the last completed compile; `compile_failed` reports
-current diagnostics. A confirmed `no_errors_found` with `sourceMatches:true`
-outranks `historicalLogErrors`. Inspect generation and before/after assembly mtimes.
+current diagnostics (`errorSource: "Editor.log"` when the failing compile ran
+before the bridge loaded, e.g. at Editor startup). A confirmed `no_errors_found`
+with `sourceMatches:true` outranks `historicalLogErrors`. Inspect generation and
+before/after assembly mtimes.
 For stale sources, activate `typed-editor`, call `recompile_scripts`, then re-read.
 `capabilities` and `bridge_status` accept `project_path` for a different project.
 

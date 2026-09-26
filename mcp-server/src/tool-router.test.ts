@@ -4567,6 +4567,52 @@ test("live compile truth supersedes historical log errors and preserves later so
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+// The Editor-startup compile runs before the bridge domain loads: Unity reports
+// the failure, but only Editor.log carries its diagnostics.
+test("live compile_failed without pipeline diagnostics promotes the Editor.log errors", async () => {
+  const root = await mkdtemp(join(tmpdir(), "compile-unobserved-"));
+  try {
+    await mkdir(join(root, "Logs"));
+    const logPath = join(root, "Logs/Editor.log");
+    await writeFile(logPath, "Assets/Broken.cs(3,5): error CS1002: ; expected\n");
+    const live = makeFakeLive();
+    let errors: unknown[] = [];
+    live.readCompileState = async () => ({ status: "compile_failed", generation: 0, sourceMatches: false,
+      errors, beforeAssemblyMtimeMs: 0, afterAssemblyMtimeMs: 0 });
+    const router = new ToolRouter(live, makeFakeBatch(), root, makeFakeEventStream(), new ToolSessionState(), undefined, undefined, join(root, "missing.log"));
+    const read = async () => JSON.parse(
+      ((await router.route("unity_open_mcp_read_compile_errors", {})).content[0] as { text: string }).text);
+
+    let body = await read();
+    assert.equal(body.status, "compile_failed");
+    assert.equal(body.unhealthy, true);
+    assert.equal(body._source, "live");
+    assert.equal(body.errorCount, 1);
+    assert.equal(body.errorSource, "Editor.log");
+    assert.equal(body.errors[0].file, "Assets/Broken.cs");
+    assert.equal(body.errors[0].code, "CS1002");
+    assert.deepEqual(body.historicalLogErrors, []);
+    assert.match(body.headline, /Editor\.log/);
+
+    // An observed failure keeps its own diagnostics; the log stays historical.
+    errors = [{ file: "Assets/Other.cs", line: 1, column: 1, code: "CS0103", message: "missing name" }];
+    body = await read();
+    assert.equal(body.errorSource, "CompilationPipeline");
+    assert.equal(body.errorCount, 1);
+    assert.equal(body.errors[0].file, "Assets/Other.cs");
+    assert.equal(body.historicalLogErrors.length, 1);
+
+    // No diagnostics anywhere: still failed, and the headline says how to get them.
+    errors = [];
+    await writeFile(logPath, "Refreshing native plugins\n");
+    body = await read();
+    assert.equal(body.status, "compile_failed");
+    assert.equal(body.errorCount, 0);
+    assert.equal(body.errorSource, "Editor.log");
+    assert.match(body.headline, /recompile/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("fresh reloading lock causes one bounded live re-probe and never calls batch", async () => {
   const root = await mkdtemp(join(tmpdir(), "reload-route-"));
   const path = lockPath(root);

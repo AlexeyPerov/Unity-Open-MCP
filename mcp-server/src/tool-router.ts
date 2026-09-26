@@ -1150,19 +1150,33 @@ export class ToolRouter implements Router {
     const compile = await live.readCompileState?.();
     if (compile && compile.status !== "indeterminate") {
       const historical = summarizeProjectHealth(tail.content);
-      const errors = Array.isArray(compile.errors) ? compile.errors : [];
-      const currentErrors = compile.status === "compile_failed" ? errors : [];
+      const failed = compile.status === "compile_failed";
+      const pipelineErrors = failed && Array.isArray(compile.errors) ? compile.errors : [];
+      // Unity can report a failed compile the bridge never observed (it ran
+      // before the bridge domain loaded, e.g. the Editor-startup compile), so
+      // the pipeline holds no diagnostics for it. Editor.log does: promote its
+      // errors instead of answering "failed" with nothing to fix.
+      const fromLog = failed && pipelineErrors.length === 0;
+      const currentErrors = fromLog ? historical.compilerErrors : pipelineErrors;
       return sourceResult({
         ...compile, errorCount: currentErrors.length, errors: currentErrors,
-        unhealthy: compile.status === "compile_failed",
+        errorSource: fromLog ? "Editor.log" : "CompilationPipeline",
+        unhealthy: failed,
         staleAssembly: compile.status === "assembly_stale",
         headline: compile.status === "no_errors_found" ? "Current compile is clean; source content matches the completed generation."
           : compile.status === "currently_compiling" ? "Compilation is active; wait for completion."
           : compile.status === "assembly_stale" ? "Source content changed after the last compile; recompile before trusting assemblies."
-          : "Current compilation failed. Fix the compiler diagnostics and recompile.",
+          : !fromLog ? "Current compilation failed. Fix the compiler diagnostics and recompile."
+          : currentErrors.length > 0
+            ? "Current compilation failed in a compile the bridge did not observe (e.g. at Editor " +
+              `startup); errors are the ${currentErrors.length} compiler diagnostic(s) from Editor.log. ` +
+              "Fix them and recompile."
+            : "Current compilation failed in a compile the bridge did not observe (e.g. at Editor " +
+              "startup), and the Editor.log tail holds no compiler diagnostics. Raise tail_bytes or " +
+              `recompile (${toolHintReference("unity_open_mcp_recompile_scripts")}) to capture them.`,
         compileSource: "CompilationPipeline", logPath, logSource: resolvedLog.reason,
         logAuthorship: parseLogAuthorship(tail.content),
-        historicalLogErrors: historical.compilerErrors,
+        historicalLogErrors: fromLog ? [] : historical.compilerErrors,
         historicalLogIssues: historical.issues,
         logReadError: tail.error ?? null,
       }, "live");
