@@ -1925,7 +1925,10 @@ export class ToolRouter implements Router {
         return fail("command_schema_changed", "Describe the command again before invoking its changed contract.");
       const errors = validateSchema(args.args ?? {}, command.inputSchema);
       if (errors.length) return fail("invalid_arguments", errors.join("; "));
-      const result = await live.route("unity_open_mcp_project_commands", { ...args, args: args.args ?? {}, schema_version: command.schemaVersion }, command.lifecycle);
+      // Deprecated parameter aliases are published like built-in aliases.
+      const notes: string[] = [];
+      const wire = wireArguments(args.args ?? {}, command.inputSchema, notes);
+      const result = await live.route("unity_open_mcp_project_commands", { ...args, args: wire, schema_version: command.schemaVersion }, command.lifecycle);
       // Reload/transport failures have no bridge envelope; retain the exact catalog identity.
       result.content = result.content.map(item => {
         if (item.type !== "text") return item;
@@ -1936,6 +1939,7 @@ export class ToolRouter implements Router {
         } catch { /* Preserve non-JSON transport diagnostics. */ }
         return item;
       });
+      if (notes.length) result.content.push({ type: "text", text: JSON.stringify({ deprecations: [...new Set(notes)] }) });
       return injectRouteMeta(result, { route: "live" });
     }
     const allowed = args.action === "describe" ? ["action", "id"] : ["action", "query", "tags", "group", "package", "offset", "limit"];

@@ -88,9 +88,12 @@ flags enums, multidimensional and jagged arrays, and other CLR types are rejecte
 at registration. There is no fallback schema pretending these values are strings.
 
 `ProjectCommandParameter` adds descriptions, numeric Minimum/Maximum for
-int/float/double, JSON-value strings in Examples, and DeprecatedAliases metadata.
-`System.ComponentModel.Description` is also supported. Alias annotations do not
-permit alternate argument keys in this release. Defaults and enum values are
+int/float/double, JSON-value strings in Examples, and DeprecatedAliases.
+`System.ComponentModel.Description` is also supported. Each deprecated alias is
+published as its own property with the parameter's value contract (no default),
+`deprecated: true` and `x-alias-for: "<parameter>"`, like built-in tool aliases.
+A required parameter is satisfied by its name or any one alias. Alias names must
+be unique among the command's parameters and aliases. Defaults and enum values are
 serialized deterministically using invariant culture.
 
 `ProjectCommand` inherits IsMutating, Gate, Lifecycle, ReadOnlyHint,
@@ -123,8 +126,10 @@ not enqueue Unity work. Plain `GET /tools` retains its lightweight `tools` and
 
 The server fetches a fresh description and validates unknown, missing, wrong-type,
 array, enum and range arguments before sending a POST. The bridge repeats strict
-validation and CLR range checks before scheduling any command. Parameter aliases
-remain informational. Defaults come from the C# signature; nullable required
+validation and CLR range checks before scheduling any command. A deprecated
+parameter alias binds to its parameter; supplying it together with the parameter
+or another alias of it is `invalid_arguments`. Synchronous MCP responses add a
+`deprecations` note. Defaults come from the C# signature; nullable required
 parameters must still be present. Transport options belong outside `args`.
 Project parameters do not inherit built-in GameObject selector conventions.
 

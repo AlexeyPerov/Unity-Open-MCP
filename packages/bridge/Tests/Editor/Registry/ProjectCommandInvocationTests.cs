@@ -23,6 +23,9 @@ namespace UnityOpenMcpBridge.Tests
         public static string BadOutput() { calls++; return "{broken"; }
         public static string Throws() { calls++; throw new InvalidOperationException("after write"); }
         public static string Single(float value) { calls++; return "{}"; }
+        public static string Aliased([ProjectCommandParameter(Minimum = 1, Maximum = 5, DeprecatedAliases = new[] { "old_value", "legacy_value" })] int value,
+            [ProjectCommandParameter(DeprecatedAliases = new[] { "old_label" })] string label = "none")
+        { calls++; return "{\"value\":" + value + ",\"label\":\"" + label + "\"}"; }
         private static ProjectCommandCatalog.Entry Register(string method = "Typed", bool mutating = false,
             LifecyclePolicy lifecycle = LifecyclePolicy.None, string[] paths = null, bool async = false)
         {
@@ -80,6 +83,27 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual("invalid_arguments", ProjectCommandInvocation.Execute(Body(Valid.Replace("\"counts\"", "\"unknown\""))).ErrorCode);
             Register("Single");
             Assert.AreEqual("invalid_arguments", ProjectCommandInvocation.Execute(Body("{\"value\":1e100}")).ErrorCode);
+        }
+        [Test] public void DeprecatedParameterAliasesBindToTheirCanonicalParameter()
+        {
+            Register("Aliased");
+            var aliased = ProjectCommandInvocation.Execute(Body("{\"old_value\":3,\"old_label\":\"x\"}"));
+            Assert.IsTrue(aliased.Success, aliased.ErrorMessage);
+            StringAssert.Contains("\"value\":3", aliased.Output);
+            StringAssert.Contains("\"label\":\"x\"", aliased.Output);
+            var canonical = ProjectCommandInvocation.Execute(Body("{\"value\":4}"));
+            Assert.IsTrue(canonical.Success, canonical.ErrorMessage);
+            StringAssert.Contains("\"value\":4", canonical.Output);
+            StringAssert.Contains("\"label\":\"none\"", canonical.Output);
+            Assert.AreEqual(2, calls);
+            var mixed = ProjectCommandInvocation.Execute(Body("{\"value\":3,\"old_value\":4}"));
+            Assert.AreEqual("invalid_arguments", mixed.ErrorCode);
+            StringAssert.Contains("args.old_value conflicts", mixed.ErrorMessage);
+            // Two aliases of one parameter, a missing required parameter and an
+            // alias outside the canonical range all fail before execution.
+            foreach (var args in new[] { "{\"old_value\":1,\"legacy_value\":2}", "{\"old_label\":\"x\"}", "{\"old_value\":9}" })
+                Assert.AreEqual("invalid_arguments", ProjectCommandInvocation.Execute(Body(args)).ErrorCode, args);
+            Assert.AreEqual(2, calls);
         }
         [Test] public void ReadOnlyUsesSharedGateEnvelopeWithoutScopeOrCheckpoint()
         {

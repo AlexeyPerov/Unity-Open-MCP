@@ -19,12 +19,16 @@ namespace UnityOpenMcpBridge
             var parameters = method.GetParameters().Where(p => p.ParameterType != typeof(ProjectCommandContext)).ToArray();
             var names = new System.Collections.Generic.HashSet<string>(parameters.Select(p => p.Name), StringComparer.Ordinal);
             var sb = new StringBuilder("{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\",\"x-project-command\":true,\"additionalProperties\":false,\"properties\":{");
+            var required = new System.Collections.Generic.List<string>();
+            var alternatives = new System.Collections.Generic.List<string>();
             foreach (var p in parameters)
             {
                 if (p != parameters[0]) sb.Append(',');
                 sb.Append(BridgeJson.EscapeString(p.Name)).Append(':');
                 var schema = TypeSchema(p.ParameterType);
                 sb.Append("{\"allOf\":[").Append(schema).Append(']');
+                var range = "";
+                var aliases = Array.Empty<string>();
                 var attr = p.GetCustomAttribute<ProjectCommandParameterAttribute>();
                 var description = attr?.Description ?? p.GetCustomAttribute<DescriptionAttribute>()?.Description;
                 if (description != null) sb.Append(",\"description\":").Append(BridgeJson.EscapeString(description));
@@ -42,8 +46,9 @@ namespace UnityOpenMcpBridge
                         throw new ArgumentException("Numeric ranges require int, float or double: " + p.Name);
                     if (double.IsInfinity(attr.Minimum) || double.IsInfinity(attr.Maximum) || attr.Minimum > attr.Maximum)
                         throw new ArgumentException("Invalid numeric range: " + p.Name);
-                    if (!double.IsNaN(attr.Minimum)) sb.Append(",\"minimum\":").Append(Value(attr.Minimum));
-                    if (!double.IsNaN(attr.Maximum)) sb.Append(",\"maximum\":").Append(Value(attr.Maximum));
+                    if (!double.IsNaN(attr.Minimum)) range += ",\"minimum\":" + Value(attr.Minimum);
+                    if (!double.IsNaN(attr.Maximum)) range += ",\"maximum\":" + Value(attr.Maximum);
+                    sb.Append(range);
                     if (p.HasDefaultValue && p.DefaultValue != null && (numeric == typeof(int) || numeric == typeof(float) || numeric == typeof(double)))
                     {
                         var value = Convert.ToDouble(p.DefaultValue, CultureInfo.InvariantCulture);
@@ -58,12 +63,22 @@ namespace UnityOpenMcpBridge
                     }
                     foreach (var alias in attr.DeprecatedAliases)
                         if (string.IsNullOrWhiteSpace(alias) || !names.Add(alias)) throw new ArgumentException("Duplicate or empty parameter alias: " + alias);
-                    sb.Append(",\"x-deprecatedAliases\":").Append(Strings(attr.DeprecatedAliases.OrderBy(x => x, StringComparer.Ordinal)));
+                    aliases = attr.DeprecatedAliases.OrderBy(x => x, StringComparer.Ordinal).ToArray();
                 }
                 sb.Append('}');
+                // Aliases use the built-in alias vocabulary, so both validators accept
+                // them, refuse mixing them with the canonical key, and wire them to it.
+                foreach (var alias in aliases)
+                    sb.Append(',').Append(BridgeJson.EscapeString(alias)).Append(":{\"allOf\":[").Append(schema).Append(']').Append(range)
+                        .Append(",\"deprecated\":true,\"x-alias-for\":").Append(BridgeJson.EscapeString(p.Name))
+                        .Append(",\"description\":").Append(BridgeJson.EscapeString("Deprecated alias; use " + p.Name + ".")).Append('}');
+                if (p.HasDefaultValue) continue;
+                if (aliases.Length == 0) required.Add(p.Name);
+                else alternatives.Add("{\"anyOf\":[" + string.Join(",", new[] { p.Name }.Concat(aliases).Select(k => "{\"required\":[" + BridgeJson.EscapeString(k) + "]}")) + "]}");
             }
-            sb.Append("},\"required\":").Append(Strings(parameters.Where(p => !p.HasDefaultValue).Select(p => p.Name))).Append('}');
-            return sb.ToString();
+            sb.Append("},\"required\":").Append(Strings(required));
+            if (alternatives.Count > 0) sb.Append(",\"allOf\":[").Append(string.Join(",", alternatives)).Append(']');
+            return sb.Append('}').ToString();
         }
 
         internal static string TypeSchema(Type type)

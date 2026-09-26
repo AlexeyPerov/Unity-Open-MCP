@@ -64,6 +64,8 @@ namespace UnityOpenMcpBridge
                 BatchSchemaValidator.Validate(args, entry.Schema, "args", errors);
             }
             if (errors.Count > 0) return ToolDispatchResult.Fail("invalid_arguments", string.Join("; ", errors));
+            // Validation refused mixing an alias with its parameter; bind aliases by canonical name.
+            args = BatchSchemaValidator.WireArguments(args, entry.Schema);
             try
             {
                 values = entry.Method.GetParameters().Select(p =>

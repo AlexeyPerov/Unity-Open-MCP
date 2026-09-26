@@ -59,7 +59,7 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsTrue(BridgeJson.IsCompleteJson(e.Schema));
             Assert.AreEqual(e.Schema, Entry().Schema);
             var properties = JsonBody.GetRawValue(e.Schema, "properties");
-            CollectionAssert.AreEquivalent(typeof(ProjectCommandCatalogTests).GetMethod("Contract").GetParameters().Select(p => p.Name), JsonBody.GetObjectKeys(properties));
+            CollectionAssert.AreEquivalent(typeof(ProjectCommandCatalogTests).GetMethod("Contract").GetParameters().Select(p => p.Name).Append("oldCount"), JsonBody.GetObjectKeys(properties));
             var required = JsonBody.GetStringArray(e.Schema, "required");
             Assert.AreEqual(16, required.Length);
             CollectionAssert.Contains(required, "nullable");
@@ -69,7 +69,8 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("\"default\":null", e.Schema);
             StringAssert.Contains("\"minimum\":1", e.Schema);
             StringAssert.Contains("\"examples\":[2]", e.Schema);
-            StringAssert.Contains("oldCount", e.Schema);
+            // A deprecated alias keeps the canonical value contract without its default.
+            StringAssert.Contains("\"oldCount\":{\"allOf\":[" + ProjectCommandSchema.TypeSchema(typeof(int)) + "],\"minimum\":1,\"maximum\":4,\"deprecated\":true,\"x-alias-for\":\"bounded\"", e.Schema);
             foreach (var type in new[] { typeof(string), typeof(bool), typeof(int), typeof(long), typeof(float), typeof(double), typeof(Choice), typeof(int?) })
             {
                 Assert.IsTrue(BridgeJson.IsCompleteJson(ProjectCommandSchema.TypeSchema(type)));

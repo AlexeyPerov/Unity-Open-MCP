@@ -89,6 +89,32 @@ test("invoke validates a fresh schema before POST and pins the contract and life
   assert.equal(dispatched.length, 1);
 });
 
+test("invoke accepts deprecated parameter aliases, wires them to the parameter and refuses mixing", async () => {
+  const dispatched: Record<string, unknown>[] = [];
+  const int = { type: "integer", minimum: -2147483648, maximum: 2147483647 };
+  // Shape published by the bridge for `int value` with DeprecatedAliases = { "old_value" }.
+  const inputSchema = { type: "object", "x-project-command": true, additionalProperties: false, required: [],
+    allOf: [{ anyOf: [{ required: ["value"] }, { required: ["old_value"] }] }], properties: {
+      value: { allOf: [int], minimum: 1, maximum: 3 },
+      old_value: { allOf: [int], minimum: 1, maximum: 3, deprecated: true, "x-alias-for": "value", description: "Deprecated alias; use value." },
+    } };
+  const live = { projectCommands: async () => ({ command: { id: "project.demo.x", available: true, invocationSupported: true,
+      schemaVersion: "v1", lifecycle: "none", inputSchema } }),
+    route: async (_tool: string, body: Record<string, unknown>) => { dispatched.push(body); return { content: [{ type: "text", text: "{}" }] }; },
+  } as unknown as LiveClient;
+  const router = new ToolRouter(live, {} as BatchSpawn, "", {} as BridgeEventStream, new ToolSessionState());
+  const invoke = (args: Record<string, unknown>) => router.route(name, { action: "invoke", command_id: "project.demo.x", args });
+  const result = await invoke({ old_value: 2 });
+  assert.notEqual(result.isError, true);
+  assert.deepEqual(dispatched[0].args, { value: 2 });
+  assert.deepEqual(result.content.map(c => c.type === "text" && JSON.parse(c.text).deprecations).filter(Boolean), [["old_value is deprecated; use value."]]);
+  const mixed = await invoke({ value: 2, old_value: 2 });
+  assert.equal(mixed.isError, true);
+  assert.match(mixed.content[0].type === "text" ? mixed.content[0].text : "", /args\.old_value conflicts/);
+  for (const args of [{}, { old_value: 4 }]) assert.equal((await invoke(args)).isError, true);
+  assert.equal(dispatched.length, 1);
+});
+
 test("catalog lifecycle gives empty invocation responses the built-in reload outcome", async () => {
   const live = new LiveClient(1, new PingCache());
   const shape = (live as unknown as { shapeToolResult: (name: string, response: Response, lifecycle: string) => Promise<any> }).shapeToolResult.bind(live);
