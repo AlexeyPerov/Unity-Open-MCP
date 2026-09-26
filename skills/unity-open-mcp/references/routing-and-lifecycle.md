@@ -43,7 +43,9 @@ Snippets import `Object = UnityEngine.Object` automatically unless the caller su
 Use it only when an operation has an explicit job adapter; declarations alone do
 not enable a job. `wait` observes for at most 30 seconds without owning execution.
 A lost connection is not proof of failure: `orphaned` requires operation-specific
-evidence before any retry. `cancel_requested` is not cancellation confirmation.
+evidence before any retry. A `running` job with lifecycle `disconnected` is still
+being observed through a busy or unreachable Editor; keep waiting.
+`cancel_requested` is not cancellation confirmation.
 Terminal records and idempotency keys survive for 30 minutes in the same server
 session, but not across a server restart. Keep routing and agent metadata stable.
 

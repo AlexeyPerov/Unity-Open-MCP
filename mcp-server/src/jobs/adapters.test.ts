@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setImmediate as tick } from "node:timers/promises";
-import type { LiveClient } from "../live-client.js";
+import { ProjectJobHttpError, type LiveClient } from "../live-client.js";
 import { JobManager } from "./job-manager.js";
 import { projectCommandOperation, testRunOperation } from "./adapters.js";
 const owner = { project: "/project", agent: "test" };
@@ -62,6 +62,72 @@ test("project job that never reaches a terminal state is cancelled once and orph
   const next = manager.start(owner, "project.test.async", { args: { other: true } }, "next");
   await manager.wait(owner, next.job_id, 2000);
   assert.notEqual(manager.status(owner, next.job_id).state, "queued");
+});
+
+test("project job keeps polling through failed status polls and retains the bridge's terminal result", async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  let starts = 0, polls = 0;
+  const terminal = { gate: { checkpointId: "cp", delta: { newErrors: 0 } } };
+  const live = { projectCommands: async () => catalog, projectCommandJob: async (args: any) => {
+    if (args.action === "start") { starts++; return { job_id: args.job_id, state: "running", phase: "executing" }; }
+    polls++;
+    // A main thread blocked past the bridge's dispatch timeout answers 500, then no connection at all.
+    if (polls === 1) throw new ProjectJobHttpError(500);
+    if (polls === 2) throw new TypeError("fetch failed");
+    return polls === 3 ? { job_id: args.job_id, state: "running", phase: "settling" } : { job_id: args.job_id, state: "succeeded", phase: "succeeded", result: terminal };
+  } } as unknown as LiveClient;
+  manager.register("project.test.async", projectCommandOperation("project.test.async", true, () => live, { pollIntervalMs: 5 }));
+  const job = manager.start(owner, "project.test.async", {}, "busy-main-thread");
+  const done = await manager.wait(owner, job.job_id, 2000);
+  assert.equal(done.state, "succeeded"); assert.deepEqual(done.result, terminal);
+  assert.equal(starts, 1); assert.equal(polls, 4);
+  const lifecycle = done.events.filter(e => e.kind === "lifecycle").map(e => e.detail.split(":")[0]);
+  assert.deepEqual(lifecycle, ["connected", "disconnected", "connected"]);
+  assert.equal(done.lifecycle.state, "connected");
+});
+
+test("cancel lost to a busy bridge is not resent; later status polls observe its acknowledgement", async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  let cancels = 0, statusPolls = 0;
+  const live = { projectCommands: async () => catalog, projectCommandJob: async (args: any) => {
+    if (args.action === "cancel") { cancels++; throw new ProjectJobHttpError(500); }
+    if (args.action === "status") statusPolls++;
+    return { job_id: args.job_id, state: statusPolls ? "cancelled" : "running", phase: "waiting for safe boundary", result: statusPolls ? {} : null };
+  } } as unknown as LiveClient;
+  manager.register("project.test.async", projectCommandOperation("project.test.async", true, () => live, { pollIntervalMs: 5 }));
+  const job = manager.start(owner, "project.test.async", {}, "cancel-busy");
+  await tick();
+  assert.equal(manager.cancel(owner, job.job_id).state, "cancel_requested");
+  const done = await manager.wait(owner, job.job_id, 2000);
+  assert.equal(done.state, "cancelled");
+  assert.equal(cancels, 1); assert.equal(statusPolls, 1);
+});
+
+test("project job is orphaned only after the bridge stays unreachable, and at once on an HTTP 4xx", async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  let polls = 0;
+  const unreachable = { projectCommands: async () => catalog, projectCommandJob: async (args: any) => {
+    if (args.action === "start") return { job_id: args.job_id, state: "running", phase: "executing" };
+    polls++; throw new ProjectJobHttpError(503);
+  } } as unknown as LiveClient;
+  manager.register("project.test.async", projectCommandOperation("project.test.async", true, () => unreachable, { pollIntervalMs: 5, unreachableMs: 60 }));
+  const job = manager.start(owner, "project.test.async", {}, "unreachable");
+  const done = await manager.wait(owner, job.job_id, 2000);
+  assert.equal(done.state, "orphaned"); assert.ok(polls > 1);
+  assert.match(done.lifecycle.evidence ?? "", /no job poll for 60 ms/);
+  await tick();
+  assert.ok(manager.status(owner, job.job_id).events.some(e => e.kind === "adapter_outcome" && e.detail.startsWith("job_status_unavailable")));
+
+  let refused = 0;
+  const unauthorized = { projectCommands: async () => catalog, projectCommandJob: async (args: any) => {
+    if (args.action === "start") return { job_id: args.job_id, state: "running", phase: "executing" };
+    refused++; throw new ProjectJobHttpError(401);
+  } } as unknown as LiveClient;
+  manager.register("project.test.async", projectCommandOperation("project.test.async", true, () => unauthorized, { pollIntervalMs: 5 }), true);
+  const next = manager.start(owner, "project.test.async", {}, "unauthorized");
+  const lost = await manager.wait(owner, next.job_id, 2000);
+  assert.equal(lost.state, "orphaned"); assert.equal(lost.error?.code, "job_outcome_unknown");
+  assert.equal(refused, 1);
 });
 
 test("bridge preflight rejection is a known failure with its gate envelope", async t => {

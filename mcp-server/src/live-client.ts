@@ -269,6 +269,12 @@ function buildOfflineHint(projectPath: string | undefined): string {
   return `${base} (lock not readable — Unity may not be running).`;
 }
 
+/** `/project-command-jobs` answered without a job snapshot; `status` is its non-OK HTTP status. */
+export class ProjectJobHttpError extends Error {
+  readonly status: number;
+  constructor(status: number) { super(`Project job transport HTTP ${status}`); this.status = status; }
+}
+
 export class LiveClient implements Router {
   private baseUrl: string;
   private pingCache: PingCache;
@@ -1875,7 +1881,7 @@ export class LiveClient implements Router {
     const response = await this.fetchWithTimeout("/project-command-jobs", {
       method: "POST", body: JSON.stringify(args), headers: { "Content-Type": "application/json" },
     }, 10_000);
-    if (!response.ok) throw new Error(`Project job transport HTTP ${response.status}`);
+    if (!response.ok) throw new ProjectJobHttpError(response.status);
     return await response.json() as Record<string, any>;
   }
 

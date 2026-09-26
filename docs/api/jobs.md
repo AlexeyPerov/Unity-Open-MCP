@@ -64,10 +64,15 @@ they cannot contaminate its checkpoint/validation interval. Operator edits and
 other Editor plugins remain outside this scheduling guarantee.
 
 Only settled EditMode starts and `None` (read-only) / `EditorSettle` (mutating)
-lifecycles are supported. Project-command execution is domain-local: a reload or
-transport loss becomes `orphaned`, never an automatic restart. The bridge retains
-at most 256 records for 30 minutes after completion; the MCP session owns
-observation and idempotency. See [authoring](project-commands.md#asynchronous-authoring).
+lifecycles are supported. Project-command execution is domain-local: a reload
+that loses the bridge's job record becomes `orphaned`, never an automatic restart.
+A busy or briefly unreachable Editor is not lost ownership: a failed status poll
+(connection error, timeout or HTTP 5xx) is retried with backoff, with lifecycle `disconnected`
+until the bridge answers again (`connected`). A cancel request is sent once; later
+polls show whether it was acknowledged. The job becomes `orphaned` when the bridge
+answers no poll for 5 minutes or reports no terminal state within 30 minutes of
+start. The bridge retains at most 256 records for 30 minutes after completion; the
+MCP session owns observation and idempotency. See [authoring](project-commands.md#asynchronous-authoring).
 
 ## Calls
 

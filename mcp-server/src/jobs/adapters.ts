@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import type { LiveClient } from "../live-client.js";
+import { ProjectJobHttpError, type LiveClient } from "../live-client.js";
 import { validateSchema } from "../tool-contract.js";
 import { runTests } from "../tools/run-tests.js";
 import { JobManagerError, type JobOperation, type JobOwner } from "./job-manager.js";
@@ -39,11 +39,14 @@ export function testRunOperation(client: ClientFor): JobOperation {
 
 /** Bound the bridge status poll so a hung async command cannot own the project queue forever. */
 export const PROJECT_JOB_DEFAULT_DEADLINE_MS = 30 * 60_000;
-export interface ProjectJobPollOptions { deadlineMs?: number; pollIntervalMs?: number }
+/** How long the bridge may leave status polls unanswered before the job's outcome counts as unknown. */
+export const PROJECT_JOB_DEFAULT_UNREACHABLE_MS = 5 * 60_000;
+export interface ProjectJobPollOptions { deadlineMs?: number; pollIntervalMs?: number; unreachableMs?: number }
 
 export function projectCommandOperation(id: string, cancellable: boolean, client: ClientFor, poll: ProjectJobPollOptions = {}): JobOperation {
   const deadlineMs = poll.deadlineMs ?? PROJECT_JOB_DEFAULT_DEADLINE_MS;
   const pollIntervalMs = poll.pollIntervalMs ?? 500;
+  const unreachableMs = poll.unreachableMs ?? PROJECT_JOB_DEFAULT_UNREACHABLE_MS;
   return {
     mutating: true, cancellable,
     validate(args) {
@@ -79,21 +82,45 @@ export function projectCommandOperation(id: string, cancellable: boolean, client
         if (response.state === "succeeded") return { state: "succeeded", result: response.result };
         if (response.state === "cancelled") return { state: "cancelled", result: response.result };
         if (response.state === "failed") return { state: "failed", error: { code: "command_failed", message: "See terminal gate/command result." }, result: response.result };
-        if (Date.now() - startedAt >= deadlineMs) {
-          // The bridge never reported a terminal state. Ask it to stop when the
-          // contract allows, then release this job's execution slot as orphaned:
-          // the remote outcome is unknown, so a blind retry is not safe.
-          if (cancellable && !cancelSent) {
-            cancelSent = true;
-            try { await live.projectCommandJob({ action: "cancel", job_id: context.jobId }); } catch { /* best effort */ }
+        // A poll only observes work the bridge keeps running. A main thread busy
+        // past the bridge's dispatch timeout (an import, synchronous project code)
+        // answers HTTP 500 or not at all, so an unanswered poll is retried with
+        // backoff. A cancel is not resent: it may still be queued, and the status
+        // polls after it show whether it was acknowledged.
+        const answeredAt = Date.now();
+        let failures = 0;
+        while (true) {
+          if (Date.now() - startedAt >= deadlineMs) {
+            // The bridge never reported a terminal state. Ask it to stop when the
+            // contract allows, then release this job's execution slot as orphaned:
+            // the remote outcome is unknown, so a blind retry is not safe.
+            if (cancellable && !cancelSent) {
+              cancelSent = true;
+              try { await live.projectCommandJob({ action: "cancel", job_id: context.jobId }); } catch { /* best effort */ }
+            }
+            context.lifecycle("disconnected", `Bridge job reported no terminal state within ${deadlineMs} ms; outcome unknown.`, false);
+            return { state: "failed", error: { code: "job_deadline_exceeded", message: `No terminal state within ${deadlineMs} ms.` }, result: response };
           }
-          context.lifecycle("disconnected", `Bridge job reported no terminal state within ${deadlineMs} ms; outcome unknown.`, false);
-          return { state: "failed", error: { code: "job_deadline_exceeded", message: `No terminal state within ${deadlineMs} ms.` }, result: response };
+          if (failures && Date.now() - answeredAt >= unreachableMs) {
+            context.lifecycle("disconnected", `Bridge answered no job poll for ${unreachableMs} ms; outcome unknown.`, false);
+            return { state: "failed", error: { code: "job_status_unavailable", message: `No job status within ${unreachableMs} ms.` }, result: response };
+          }
+          await delay(pollIntervalMs * 2 ** Math.min(failures, 3));
+          const action = context.signal.aborted && !cancelSent ? "cancel" : "status";
+          if (action === "cancel") cancelSent = true;
+          try {
+            response = await live.projectCommandJob({ action, job_id: context.jobId });
+            break;
+          } catch (error) {
+            // A 4xx is the bridge refusing the transport itself; retrying cannot help.
+            if (error instanceof ProjectJobHttpError && error.status < 500) throw error;
+            if (failures++ === 0) {
+              // Ownership was confirmed by the last answer; the next answer reconfirms it.
+              ownershipConfirmed = false;
+              context.lifecycle("disconnected", `Job poll failed (${String(error).slice(0, 200)}); retrying while the bridge owns job ${context.jobId}.`, true);
+            }
+          }
         }
-        await delay(pollIntervalMs);
-        const action = context.signal.aborted && !cancelSent ? "cancel" : "status";
-        response = await live.projectCommandJob({ action, job_id: context.jobId });
-        if (action === "cancel") cancelSent = true;
       }
     },
   };
