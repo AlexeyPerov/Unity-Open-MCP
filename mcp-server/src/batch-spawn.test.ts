@@ -878,10 +878,11 @@ test("execute_menu batch-fallback lock error names execute_menu, not a canned co
 });
 
 // ---------------------------------------------------------------------------
-// feedback 2026-08-15 recurrence (compile_check) — exit 0 + no markers is a
-// LIKELY SUCCESS (the async finalize path did not run), not a spawn failure.
-// The distinct markers_missing code keeps agents (and MCP hosts keying on
-// isError / error.code) from reading a healthy compile as batch_spawn_failed.
+// feedback 2026-08-15 recurrence — exit 0 + no markers is neither success nor a
+// spawn failure. compile_check needs secondary evidence (compile_indeterminate
+// otherwise); every other operation gets the distinct markers_missing code, so
+// agents (and MCP hosts keying on isError / error.code) do not read it as
+// batch_spawn_failed.
 // ---------------------------------------------------------------------------
 test("compile_check exit 0 without markers and without assembly evidence is compile_indeterminate", async () => {
   const savedPath = process.env.UNITY_PATH;
@@ -913,6 +914,55 @@ test("compile_check exit 0 without markers and without assembly evidence is comp
       assert.equal(error.code, "compile_indeterminate");
       assert.match(error.message, /secondary evidence cannot certify/);
       assert.match(error.message, /Compilation succeeded/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  } finally {
+    restore();
+    if (savedPath === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = savedPath;
+  }
+});
+
+test("non-compile exit 0 without markers is markers_missing and points at the captured output tail", async () => {
+  const savedPath = process.env.UNITY_PATH;
+  delete process.env.UNITY_PATH;
+  const restore = setUnityProcessScannerForTest({ scan: () => [] });
+  try {
+    const tmp = mkdtempSync(join(tmpdir(), "batch-nomarkers-"));
+    try {
+      const installDir = join(tmp, "6000.0.0f1");
+      const exeRel = process.platform === "win32"
+        ? ["Editor", "Unity.exe"]
+        : ["Unity.app", "Contents", "MacOS", "Unity"];
+      const exe = join(installDir, ...exeRel);
+      mkdirSync(dirname(exe), { recursive: true });
+      if (process.platform === "win32") {
+        writeFileSync(exe, "fake");
+      } else {
+        writeFileSync(exe, "#!/bin/sh\necho 'Exiting batchmode successfully now!'\nexit 0\n");
+        chmodSync(exe, 0o755);
+      }
+
+      const batch = new BatchSpawn({ discoveryRoots: [tmp], projectPath: tmp });
+      const result = await batch.route("unity_open_mcp_scan_all", {});
+      if (process.platform === "win32") return; // same win32 caveat as above
+      const body = parseBody(result);
+      const error = body.error as Record<string, string>;
+      assert.equal(error.code, "markers_missing");
+      assert.ok(
+        error.message.endsWith("Last output: Exiting batchmode successfully now!"),
+        "message should end with this run's captured output tail",
+      );
+      const steps = body.agentNextSteps as string[];
+      assert.ok(steps.some((s) => s.includes("'Last output' tail")), "agentNextSteps should point at the output tail");
+      assert.ok(steps.some((s) => s.includes("post-state")), "agentNextSteps should warn before repeating a mutation");
+      // The run never reaches Editor.log (-logFile -), and scan_all is not a
+      // compile, so neither a compile verdict nor read_compile_errors applies.
+      assert.ok(
+        ![error.message, ...steps].some((s) => /read_compile_errors|compile likely succeeded/.test(s)),
+        "markers_missing must not claim a compile result or send the agent to read_compile_errors",
+      );
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -1048,9 +1098,23 @@ test("compile_check surfaces project_load_failed when the batch tail matches the
         Array.isArray(body.agentNextSteps) && body.agentNextSteps.length > 0,
         "project_load_failed should carry a non-empty agentNextSteps array",
       );
+      // The run logs only to its captured output (-logFile -), so the notice
+      // must be in the returned tail and the guidance must point there — not
+      // at read_compile_errors, whose Editor.log never saw this run.
       assert.ok(
-        (body.agentNextSteps as string[]).some((s) => s.includes("read_compile_errors")),
-        "agentNextSteps should mention read_compile_errors",
+        error.message.endsWith(
+          "Last output: [Package Manager] Project has invalid dependencies:\n" +
+            "[Package Manager] com.unity.modules.physicscore2d is not a valid package.",
+        ),
+        "message should end with the output tail carrying the Package Manager notice",
+      );
+      assert.ok(
+        (body.agentNextSteps as string[]).some((s) => s.includes("'Last output' tail")),
+        "agentNextSteps should point at the captured output tail",
+      );
+      assert.ok(
+        ![error.message, ...(body.agentNextSteps as string[])].some((s) => s.includes("read_compile_errors")),
+        "neither the message nor agentNextSteps may send the agent to read_compile_errors",
       );
       assert.ok(
         (body.agentNextSteps as string[]).some((s) => s.includes("manifest")),

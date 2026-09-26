@@ -191,9 +191,10 @@ pointed at a top-level call it cannot make.
 | `compile_indeterminate` | `compile_check` exited 0 without a report and secondary evidence cannot certify compilation. | Inspect its captured log tail and assembly evidence; exit 0 alone is not success. |
 | `batch_aborted` | Unity exited nonzero before a report with no recognized compiler/package/spawn cause. | Inspect the captured output tail. |
 | `compile_failed` | The child emitted compiler diagnostics before its report. | Fix those diagnostics, then retry. |
+| `project_load_failed` | Headless Unity stopped at package/project resolution before its entry point; no compile ran. | Read the Package Manager notice at the end of the captured output tail (the error also names offending packages), fix `Packages/manifest.json`, then retry. |
 | `editor_reloading` | A fresh instance lock identifies a live compiling/reloading Editor. | Retry after `retryAfterMs`; the router makes one bounded live re-probe and never launches headless Unity. Local tools and the [offline-coverage](#offline-coverage) reads are exempt. |
 | `batch_in_progress` | Another headless operation in this MCP server owns the project. | Wait for it to finish. |
-| `markers_missing` | A non-compile batch operation exited 0 without its report. | Inspect its post-state before repeating a mutation. |
+| `markers_missing` | A non-compile batch operation exited 0 without its report. | Inspect the captured output tail and the operation's post-state before repeating a mutation. |
 | `batch_spawn_failed` | Headless Unity produced no classifiable result (non-zero exit, no markers). | Inspect compile errors, package state, project lock, and path. |
 | `batch_step_requires_server_poll` | A `batch_execute` step's terminal result is produced by the server polling a results file, which the batch route does not do (today: `unity_senses_run_tests`). | Call the tool as a single top-level call. The message also names a reachable `execute_csharp` / `invoke_method` equivalent for clients that cannot see the tool. |
 | `scene_dirty` | A disruptive mutation was refused because a loaded scene has unsaved work, including unsaved additive scenes. | Save/discard first or deliberately opt into the documented risk. |
@@ -344,11 +345,13 @@ reloads) to catch fd growth before the Editor hangs; escalate to
 
 Headless runs capture Unity output with `-logFile -`, preserving the live Editor's
 log. Compiler, package/project-load, spawn, and unknown pre-report failures have
-distinct codes and an actionable output tail. Exit-0 `compile_check` without JSON
-markers succeeds only when its own log confirms completion, assemblies advanced
-during that child run, and the disk staleness check is clear; otherwise it returns
-`compile_indeterminate`. Process discovery also blocks a spawn during cold Safe Mode
-before a bridge lock exists. Editor recovery remains PID-specific.
+distinct codes and an actionable output tail. That tail is the run's only log:
+the child never writes `Editor.log`, so `read_compile_errors` cannot show it.
+Exit-0 `compile_check` without JSON markers succeeds only when its own log
+confirms completion, assemblies advanced during that child run, and the disk
+staleness check is clear; otherwise it returns `compile_indeterminate`. Process
+discovery also blocks a spawn during cold Safe Mode before a bridge lock exists.
+Editor recovery remains PID-specific.
 
 Live compile verification records generation and before/after assembly timestamps.
 A completed generation with matching input content can legitimately retain DLL

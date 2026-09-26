@@ -991,8 +991,10 @@ export class BatchSpawn implements Router {
             // ran, so no markers were emitted — the generic "did not contain
             // JSON markers" error would mask the real root cause (an
             // unresolvable Packages/manifest.json dependency). Name the
-            // offending package(s) and point at read_compile_errors, which
-            // surfaces the Package Manager notice without a headless spawn.
+            // offending package(s) and point at the captured output tail:
+            // Unity prints the Package Manager notice as its last lines before
+            // exiting, and with -logFile - this run never reaches Editor.log,
+            // so read_compile_errors would show an unrelated log instead.
             const offending = extractOffendingPackages(combined);
             const pkgPart = offending.length > 0
               ? ` Offending package(s): ${offending.join(", ")}.`
@@ -1001,12 +1003,12 @@ export class BatchSpawn implements Router {
               "project_load_failed",
               `Batch Unity exited at package/project resolution (exit ${exitCode}) ` +
                 `without running the batch entry point, so no compile took place. ` +
-                `The project failed to load — this is NOT a C# compile error.${pkgPart} Last output: ${tail} ` +
-                `Check Packages/manifest.json for unresolvable dependencies and call ` +
-                `unity_open_mcp_read_compile_errors to see the Package Manager notice.`,
+                `The project failed to load — this is NOT a C# compile error.${pkgPart} ` +
+                `Check Packages/manifest.json for unresolvable dependencies; the ` +
+                `Package Manager notice is at the end of this run's output. Last output: ${tail}`,
               [
                 `Batch Unity failed to load the project (exit ${exitCode}) before reaching the batch entry point — this is a package-resolution / project-load failure, not a compile failure.${pkgPart}`,
-                "Call unity_open_mcp_read_compile_errors to read the Package Manager notice offline (no headless spawn).",
+                "Read the Package Manager notice at the end of the error message's 'Last output' tail — it is this run's own Unity log; the headless run does not write Editor.log.",
                 "Inspect Packages/manifest.json and Packages/packages-lock.json for packages that cannot be resolved by the current Unity version.",
                 "Do not retry compile_check blindly — the same project-load failure will recur until the manifest is fixed.",
               ],
@@ -1045,14 +1047,14 @@ export class BatchSpawn implements Router {
           if (exitCode === 0) {
             reject(new BatchClassificationError(
               "markers_missing",
-              `Batch output did not contain JSON markers. Exit code: 0.` +
-                (tail ? ` Last output: ${tail}` : "") +
-                ` Unity exited cleanly but emitted no markers after '${toolName}' ` +
-                "(the async finalize path did not run) — the compile likely " +
-                "succeeded. Call unity_open_mcp_read_compile_errors to confirm.",
+              `Batch output did not contain JSON markers. Exit code: 0. ` +
+                `Unity exited cleanly but '${toolName}' emitted no report, so ` +
+                "its outcome is unknown." +
+                (tail ? ` Last output: ${tail}` : ""),
               [
-                `The ${toolName} batch Unity exited cleanly (exit 0) but emitted no JSON markers — the async finalize path did not run. This is usually a healthy compile with a missing report, not a spawn failure.`,
-                "Call unity_open_mcp_read_compile_errors to confirm errorCount is 0 before treating the compile as passed.",
+                `The ${toolName} batch Unity exited cleanly (exit 0) but emitted no JSON report — the operation's outcome is unknown; this is not a spawn failure.`,
+                "Inspect the error message's 'Last output' tail — it is this run's own Unity log; the headless run does not write Editor.log.",
+                `If ${toolName} changes the project, inspect its post-state before repeating it.`,
               ],
             ));
             return;

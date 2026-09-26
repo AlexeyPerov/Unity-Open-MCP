@@ -133,6 +133,8 @@ Use `**unity_open_mcp_compile_check**` only for a deliberate "does this build cl
 
 If Unity can't be found, batch tools return `unity_not_discovered`; only offline reads + `read_compile_errors` still work.
 
+A headless failure before its report (`compile_failed`, `project_load_failed`, `compile_indeterminate`, `markers_missing`, `batch_aborted`) ends its message with `Last output: …` — the run's own Unity log. Read the diagnosis there (a package-resolution failure prints the Package Manager notice as its last lines); `read_compile_errors` cannot see a batch run.
+
 > **In-Editor progress.** The Unity Open MCP bridge window's **Activity** tab has a **Batch runs** section — a read-only view of in-Editor batch runs (live progress: pending / running / done / failed; per-entry tool name, args summary, pass/fail, error text). It observes batch state; it does not start batches. Useful when an operator wants to watch a batch run from inside Unity.
 
 ---
@@ -156,5 +158,5 @@ After editing `packages/` source, before tests:
    Compare mtime to your last edit; do not run tests until DLL mtime > edit mtime.
 
 > **Stale-DLL trap:** if tests fail identically to before your fix, suspect the DLL never recompiled before concluding the fix is wrong. Two further pitfalls when the DLL mtime refuses to advance:
-> - **Distrust `read_compile_errors` after a `compile_check` / batch attempt.** The headless batch spawn *overwrites* `~/Library/Logs/Unity/Editor.log`, so a subsequent `read_compile_errors` reads the batch process's log, not the live editor's — a "no errors" result there proves nothing about the live build. Cross-check by reading the log's content (does it mention the live PID / `BeeDriver`?) before trusting it.
+> - **`read_compile_errors` never shows a `compile_check` / batch run.** The headless run logs only to its captured output (returned as the error's `Last output` tail), not to `Editor.log` — so a subsequent `read_compile_errors` reads the live editor's or a previous session's log, and a "no errors" result there proves nothing about the batch run. Diagnose a batch failure from that tail.
 > - **Stale DLL + `isCompiling:false` can be a crash, not a no-op.** If `RequestScriptCompilation` returns success but the `Library/ScriptAssemblies/*.dll` mtime never advances *and* `read_compile_errors` is clean, do **not** conclude "incremental no-op" — grep the live editor log for `Unhandled exception during build` / `Bee.BeeDriver` / `NotSupportedException` / `file descriptor`. A Bee build-backend crash (fd/socket exhaustion) aborts before emitting the DLL and leaves the editor idle with a stale DLL; it needs an editor restart to clear the broken state. `editor_status` does not distinguish "completed-ok" from "crashed."
