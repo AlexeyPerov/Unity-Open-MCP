@@ -92,6 +92,7 @@ function makeFakeLive(opts: {
 function makeFakeBatch(opts: {
   batchTools?: Set<string>;
   result?: CallToolResult;
+  headless?: boolean;
 } = {}): BatchSpawn & { calls: LiveCall[] } {
   const calls: LiveCall[] = [];
   const batchTools = opts.batchTools ?? new Set(["unity_open_mcp_scan_all"]);
@@ -105,6 +106,9 @@ function makeFakeBatch(opts: {
     calls,
     isBatchTool(tool: string) {
       return batchTools.has(tool);
+    },
+    headlessAvailable() {
+      return opts.headless ?? true;
     },
     async route(tool: string, args: Record<string, unknown>) {
       calls.push({ tool, args });
@@ -4766,6 +4770,55 @@ test("project_path probe reports the other project's auto-activation without tou
   }
 });
 
+test("discovery reports always-batch tools by headless editor availability, not the live inventory", async () => {
+  type Row = { name: string; available: boolean | null };
+  // A connected bridge never lists the always-batch tools.
+  const bridgeTools = new Set(["unity_open_mcp_validate_edit", "unity_open_mcp_scan_paths"]);
+  const discover = async (router: ToolRouter, args: Record<string, unknown>) =>
+    parseBody(await router.route("unity_open_mcp_capabilities", args)).tools as Row[];
+
+  const ready = makeRouter(makeFakeLive({ bridgeTools }), makeFakeBatch({ headless: true }), "/proj", makeFakeEventStream());
+  assert.equal((await discover(ready, { tool_name: "unity_open_mcp_compile_check" }))[0].available, true);
+  const scans = await discover(ready, { available: true, query: "scan", page_size: 100 });
+  assert.ok(scans.some(t => t.name === "unity_open_mcp_scan_all"));
+  const verify = (await discover(ready, { route: "batch", page_size: 100 })).map(t => t.name).sort();
+  assert.deepEqual(verify, ["unity_open_mcp_baseline_create", "unity_open_mcp_compile_check", "unity_open_mcp_regression_check", "unity_open_mcp_scan_all"]);
+  assert.ok((await discover(ready, { route: "batch", page_size: 100 })).every(t => t.available === true));
+
+  // activate_for's schemas carry the same answer.
+  const session = new ToolSessionState();
+  session.deactivate("gate-and-verify");
+  const activating = makeRouter(makeFakeLive({ bridgeTools }), makeFakeBatch({ headless: true }), "/proj", makeFakeEventStream(), session);
+  const activated = parseBody(await activating.route("unity_open_mcp_manage_tools", { action: "activate_for", tags: ["verify"] }));
+  assert.equal((activated.tools as Row[]).find(t => t.name === "unity_open_mcp_scan_all")?.available, true);
+
+  const missing = makeRouter(makeFakeLive({ bridgeTools }), makeFakeBatch({ headless: false }), "/proj", makeFakeEventStream());
+  assert.equal((await discover(missing, { tool_name: "unity_open_mcp_compile_check" }))[0].available, false);
+});
+
+test("project_path probe reports headless availability for the probed project's editor", async () => {
+  const root = await mkdtemp(join(tmpdir(), "probed-headless-"));
+  const savedPath = process.env.UNITY_PATH;
+  const savedOptIn = process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH;
+  delete process.env.UNITY_PATH;
+  delete process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH;
+  try {
+    for (const dir of ["Assets", "Packages", "ProjectSettings"]) await mkdir(join(root, dir));
+    // No editor is installed for this version, so the probed project cannot
+    // spawn headless even though the configured project can.
+    await writeFile(join(root, "ProjectSettings", "ProjectVersion.txt"), "m_EditorVersion: 1.0.0f1\n");
+    const router = makeRouter(makeFakeLive({ available: false }), makeFakeBatch({ headless: true }), "/unrelated/project", makeFakeEventStream());
+    const result = await router.route("unity_open_mcp_capabilities", { project_path: root, tool_name: "unity_open_mcp_compile_check" });
+    assert.equal(result.isError, false);
+    assert.equal((parseBody(result).tools as Array<{ available: boolean | null }>)[0].available, false);
+  } finally {
+    if (savedPath === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = savedPath;
+    if (savedOptIn === undefined) delete process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH;
+    else process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH = savedOptIn;
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("route: stable invoke reaches activated tools without a list refresh", async () => {
   const live = makeFakeLive({ available: true });

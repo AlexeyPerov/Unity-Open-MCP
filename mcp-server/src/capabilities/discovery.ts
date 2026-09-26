@@ -29,15 +29,23 @@ export function exampleFor(schema: any): Record<string, unknown> {
   return Object.fromEntries([...keys].filter(k => !schema.properties?.[k]?.deprecated).map(k => [k, exampleValue(schema.properties?.[k] ?? {}, k)]));
 }
 
-export function discoverTools(tools: Tool[], batch: ReadonlySet<string>, session: ToolSessionState, inventory: ReadonlySet<string> | undefined, args: Record<string, any>) {
+/**
+ * `inventory` is the live bridge's compiled tool set (undefined when unknown).
+ * Always-batch tools are never in it, so their availability is `headless`
+ * instead (BatchSpawn.headlessAvailable; undefined when not probed).
+ */
+export function discoverTools(tools: Tool[], batch: ReadonlySet<string>, session: ToolSessionState, inventory: ReadonlySet<string> | undefined, args: Record<string, any>, headless?: boolean) {
   const visible = new Set(filterVisibleTools(tools, session).map(t => t.name));
   const built = buildCapabilities({ tools, batchToolNames: batch, rules: [], fixes: [], availableBridgeTools: inventory }, { kind: "tools", includePlanned: false });
   const rows = (built.tools ?? []).map(t => {
     const local = isLocalTool(t.name);
+    const routePolicy = local ? "local" : ALWAYS_BATCH_TOOLS.has(t.name) ? "batch" : t.routePolicy;
     const tags = INTENT_TAGS.filter(tag => t.group && tag.groups.includes(t.group)).map(tag => tag.tag);
-    return { ...t, routePolicy: local ? "local" : ALWAYS_BATCH_TOOLS.has(t.name) ? "batch" : t.routePolicy,
+    return { ...t, routePolicy,
       mutating: !!t.inputSchema.properties?.gate || POTENTIALLY_MUTATING_LOCAL.has(t.name),
-      active: visible.has(t.name), available: local || t.routePolicy === "offline" || t.routePolicy === "offline-first" ? true : inventory ? inventory.has(t.name) : null,
+      active: visible.has(t.name),
+      available: local || t.routePolicy === "offline" || t.routePolicy === "offline-first" ? true
+        : routePolicy === "batch" ? headless ?? null : inventory ? inventory.has(t.name) : null,
       tags, example: exampleFor(t.inputSchema) };
   }).filter(t => (!args.tool_name || t.name === args.tool_name)
     && (!args.query || `${t.name} ${t.description}`.toLowerCase().includes(String(args.query).toLowerCase()))

@@ -659,6 +659,21 @@ test("batch spawn picks up the exact editor installed after a unity_version_not_
   });
 });
 
+test("headlessAvailable follows the spawn's editor resolution without spawning", { skip: process.platform === "win32" }, async () => {
+  await withVersionFixture(async (hub, project) => {
+    writeProjectVersion(project, "6000.0.10f1");
+    fakeReportingInstall(hub, "6000.0.50f1");
+    const batch = new BatchSpawn({ discoveryRoots: [hub], projectPath: project });
+    assert.equal(batch.headlessAvailable(), false, "no exact editor for the project version");
+
+    fakeReportingInstall(hub, "6000.0.10f1");
+    assert.equal(batch.headlessAvailable(), true, "a newly installed exact editor is picked up");
+
+    writeProjectVersion(project, "6000.0.20f1");
+    assert.equal(batch.headlessAvailable(), false, "a project upgrade is re-read");
+  });
+});
+
 test("a UNITY_PATH pin is checked against the project's current version on every spawn", { skip: process.platform === "win32" }, async () => {
   await withVersionFixture(async (hub, project) => {
     writeProjectVersion(project, "6000.0.10f1");

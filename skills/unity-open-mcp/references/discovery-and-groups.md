@@ -1,6 +1,6 @@
 # Discovery and groups
 
-Use `capabilities(tool_name: "unity_open_mcp_component_modify")` for one full schema, example and lifecycle contract. Browse with `query`, `group`, `tag`, `available`, `active`, `route`, or `mutating`, plus `page_size` and `cursor`. Availability is null when the live inventory is unknown.
+Use `capabilities(tool_name: "unity_open_mcp_component_modify")` for one full schema, example and lifecycle contract. Browse with `query`, `group`, `tag`, `available`, `active`, `route`, or `mutating`, plus `page_size` and `cursor`. Availability is null when the live inventory is unknown; batch-route tools instead report whether an editor for the project's Unity version resolves for a headless spawn.
 
 Use `manage_tools(action: "activate_for", intent: "…")`; its `tools` list contains schemas for newly activated tools. If your client ignores list changes, use `manage_tools(action: "invoke", tool_name: "…", arguments: {...})`. This uses the target tool’s normal route and protections; recovery calls do not belong in a live batch.
 

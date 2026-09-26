@@ -576,6 +576,17 @@ export class BatchSpawn implements Router {
     return this.projectPath;
   }
 
+  // Whether a headless spawn has a project and an editor to open it with — the
+  // availability discovery reports for always-batch tools, which the live
+  // bridge never lists. Shares the spawn's resolution cache (refreshUnityPath),
+  // so installs are rescanned only when the project version changed or the
+  // last resolution failed. A live Editor holding the project lock is runtime
+  // state, not availability, and is refused at spawn time.
+  headlessAvailable(): boolean {
+    this.refreshUnityPath();
+    return this.projectPath !== "" && this.unityPath !== "";
+  }
+
   async route(
     toolName: string,
     args: Record<string, unknown>,

@@ -102,6 +102,20 @@ test("availability, activation, route and tag filters remain independent", () =>
   assert.deepEqual(after.tools.map(t => t.name), [name]);
 });
 
+test("always-batch availability comes from the headless editor, not the live inventory", () => {
+  const session = new ToolSessionState();
+  const inventory = new Set(["unity_open_mcp_component_get"]);
+  const batchRows = (headless?: boolean) => discoverTools(ALL_TOOLS, new Set(), session, inventory, { route: "batch", page_size: 100 }, headless).tools;
+  assert.equal(batchRows(true).length, 4);
+  assert.ok(batchRows(true).every(t => t.available === true));
+  assert.ok(batchRows(false).every(t => t.available === false));
+  assert.ok(batchRows(undefined).every(t => t.available === null), "not probed is unknown");
+  const scans = discoverTools(ALL_TOOLS, new Set(), session, inventory, { available: true, query: "scan_all" }, true);
+  assert.deepEqual(scans.tools.map(t => t.name), ["unity_open_mcp_scan_all"]);
+  // Live tools still answer from the inventory.
+  assert.equal(discoverTools(ALL_TOOLS, new Set(), session, inventory, { tool_name: "unity_open_mcp_component_get" }, false).tools[0].available, true);
+});
+
 test("jobs discovery remains available locally and reports potential mutation", () => {
   const result = discoverTools(ALL_TOOLS, new Set(), new ToolSessionState(), undefined, {
     tool_name: "unity_open_mcp_jobs",

@@ -193,6 +193,9 @@ For browsing, combine `query` (case-insensitive name/description substring),
 tool name and default to 20 per page; use `page_size` and `pagination.next_cursor`.
 `available: null` means the live inventory is unknown, and does not match either
 boolean filter. Local/offline-capable routes stay available without an Editor.
+Batch-route tools are never in the live inventory; they are available when a
+headless spawn can resolve an editor for the project's Unity version, whether or
+not a bridge is connected.
 Route policies describe possible routing, not a promise that a running Editor
 will permit a headless call. `mutating` is potential mutability: read-only
 arguments can narrow the actual execution contract.

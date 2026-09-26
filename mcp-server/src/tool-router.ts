@@ -14,7 +14,6 @@ import { confirmBridgeReleaseTag, resolveLatestVersion, type BridgeTagConfirmati
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import { LiveClient } from "./live-client.js";
-import type { BatchSpawn } from "./batch-spawn.js";
 import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline, dependenciesOffline } from "./offline.js";
@@ -121,7 +120,7 @@ const defaultHubBackend: HubControlBackend = {
   getInstallPath: () => getInstallPath(),
   setInstallPath: (path) => setInstallPath(path),
 };
-import { BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS } from "./batch-spawn.js";
+import { BatchSpawn, BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS } from "./batch-spawn.js";
 import { filterVisibleTools, type ToolSessionState } from "./tool-session-state.js";
 import {
   readProfileAndDetail,
@@ -883,12 +882,12 @@ export class ToolRouter implements Router {
    * auto-activation against the probed project's inventory, so the probe
    * reports that project's view, but only the copy changes — this session's
    * active groups and tools/list stay put, and no list_changed is wired. The
-   * probe tools are local-only and never spawn Unity, so the batch router is
-   * just a constructor argument here.
+   * probe tools are local-only and never spawn Unity; the probe's own batch
+   * router only answers headless availability for that project's editor.
    */
   private projectProbeRouter(projectPath: string): ToolRouter {
     const live = new LiveClient(resolvePort(projectPath), new PingCache(), resolveAuthToken(projectPath), projectPath);
-    return new ToolRouter(live, this.batch, projectPath, this.eventStream, this.sessionState.clone());
+    return new ToolRouter(live, new BatchSpawn({ projectPath }), projectPath, this.eventStream, this.sessionState.clone());
   }
 
   /**
@@ -1613,7 +1612,7 @@ export class ToolRouter implements Router {
     if (["tool_name", "query", "group", "tag", "available", "active", "route", "mutating"].some(k => args[k] !== undefined)) {
       if (args.kind !== undefined && args.kind !== "tools") return localError("invalid_arguments", "Tool discovery filters require kind: tools (or omit kind).");
       const inventory = await this.fetchInventoryAndReconcile(live);
-      const found = discoverTools(ALL_TOOLS, BATCH_TOOL_NAMES, this.sessionState, inventory?.tools, args);
+      const found = discoverTools(ALL_TOOLS, BATCH_TOOL_NAMES, this.sessionState, inventory?.tools, args, this.batch.headlessAvailable());
       return sourceResult(found, "local", !!found.error);
     }
     const kind =
@@ -2124,7 +2123,7 @@ export class ToolRouter implements Router {
         intent: rec,
         groups,
         activated,
-        tools: compactDiscoverySchema(discoverTools(ALL_TOOLS, BATCH_TOOL_NAMES, this.sessionState, inventory?.tools, { groups: this.sessionState.activeGroups().filter(g => !groupsBeforeInventory.has(g)), profile: "full", page_size: 1000 }).tools),
+        tools: compactDiscoverySchema(discoverTools(ALL_TOOLS, BATCH_TOOL_NAMES, this.sessionState, inventory?.tools, { groups: this.sessionState.activeGroups().filter(g => !groupsBeforeInventory.has(g)), profile: "full", page_size: 1000 }, this.batch.headlessAvailable()).tools),
         skipped,
         unavailable,
         activeGroups: this.sessionState.activeGroups(),
