@@ -70,6 +70,61 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void UpgradePreview_IsARead_OnlyApplyKeepsTheReloadContract()
+        {
+            const string tool = "unity_open_mcp_upgrade";
+            foreach (var body in new[] { "{}", "{\"dry_run\":true}" })
+            {
+                var preview = EffectiveToolContract.Resolve(tool, body);
+                Assert.IsFalse(preview.IsMutating, body);
+                Assert.IsFalse(preview.ConflictsWithJob, body);
+                Assert.AreEqual(LifecyclePolicy.None, preview.Lifecycle, body);
+                Assert.IsFalse(SceneDirtyGuard.AppliesTo(tool, body), body);
+            }
+            const string apply = "{\"dry_run\":false}";
+            var applied = EffectiveToolContract.Resolve(tool, apply);
+            Assert.IsTrue(applied.IsMutating);
+            Assert.IsTrue(applied.ConflictsWithJob);
+            Assert.AreEqual(LifecyclePolicy.RestartThenSettle, applied.Lifecycle);
+            Assert.IsTrue(SceneDirtyGuard.AppliesTo(tool, apply));
+
+            // Nested, a preview is a read step; the apply still needs its top-level reload wait.
+            Assert.IsNull(BatchExecuteTool.Preflight(UpgradeBatch("{\"target_version\":\"9.9.9\"}"), out var mutating));
+            Assert.IsFalse(mutating);
+            Assert.AreEqual("batch_nested_reload_unsafe",
+                BatchExecuteTool.Preflight(UpgradeBatch("{\"target_version\":\"9.9.9\",\"dry_run\":false}"), out _).ErrorCode);
+        }
+
+        [Test]
+        public void UpgradePreview_DirtyScene_ReturnsTheReportInsteadOfSceneDirty()
+        {
+            // Same scratch-scene choice as SceneDirtyGuardTests: an unsaved dirty
+            // scene, which the demo's auto-save cannot save away.
+            var active = SceneManager.GetActiveScene();
+            bool reuse = string.IsNullOrEmpty(active.path);
+            bool wasDirty = active.isDirty;
+            var scratch = reuse ? active : EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+            try
+            {
+                EditorSceneManager.MarkSceneDirty(scratch);
+                var result = Dispatch("unity_open_mcp_upgrade",
+                    "{\"target_version\":\"9.9.9\",\"update_home_configs\":false}");
+                Assert.IsTrue(result.Mutation.Success, result.Mutation.ErrorCode + ": " + result.Mutation.ErrorMessage);
+                StringAssert.Contains("\"phase\":\"preview\"", result.Mutation.Output);
+                Assert.IsTrue(result.EffectiveReadOnly);
+                Assert.AreEqual("read_only", result.SkippedReason);
+                Assert.IsTrue(scratch.isDirty);
+            }
+            finally
+            {
+                if (!reuse) EditorSceneManager.CloseScene(scratch, true);
+                else if (!wasDirty)
+                    typeof(EditorSceneManager).GetMethod("ClearSceneDirtiness", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static)
+                        .Invoke(null, new object[] { scratch });
+            }
+        }
+
+        [Test]
         public void ReadOnlyAssertion_KnownDisruptionKeepsProtection()
         {
             Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_execute_csharp",
@@ -240,6 +295,9 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("\"outcome\":\"skipped\"", json);
             StringAssert.Contains("\"skippedReason\":\"mutation_failed\"", json);
         }
+
+        private static string UpgradeBatch(string args) =>
+            "{\"commands\":[{\"tool\":\"unity_open_mcp_upgrade\",\"params\":" + args + "}]}";
 
         private static GateDispatchResult Dispatch(string tool, string body) => (GateDispatchResult)
             typeof(BridgeHttpServer).GetMethod("DispatchWithGateCore", BindingFlags.NonPublic | BindingFlags.Static)

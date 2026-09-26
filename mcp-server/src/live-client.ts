@@ -51,7 +51,7 @@ import {
   buildCompileVerifyAnnotation,
   type CompileVerifySnapshot,
 } from "./compile-verify.js";
-import { lifecycleFor } from "./capabilities/lifecycle.js";
+import { lifecycleForCall } from "./capabilities/lifecycle.js";
 // M23 Plan 3 — per-process agent identity (sent as X-Agent-Id so the bridge's
 // fair round-robin queue can schedule across agents).
 import { PROCESS_AGENT_ID } from "./agent-identity.js";
@@ -627,7 +627,7 @@ export class LiveClient implements Router {
     // warning that told the agent to "force a rebuild" after `return 42;`.
     // The set below is the subset of compile-reload tools whose PURPOSE is to
     // trigger or observe a recompile; see `shouldAnnotateCompileVerify`.
-    const isCompileReload = lifecycleFor(toolName).class === "compile-reload";
+    const isCompileReload = lifecycleForCall(toolName, args).class === "compile-reload";
     const annotate = isCompileReload && shouldAnnotateCompileVerify(toolName);
     const before = annotate ? await this.captureCompileSnapshot() : null;
 
@@ -984,7 +984,7 @@ export class LiveClient implements Router {
       });
     }
 
-    const result = await this.shapeToolResult(toolName, res, commandLifecycle);
+    const result = await this.shapeToolResult(toolName, res, commandLifecycle, args);
     // Surface the clamp ONLY when the caller explicitly requested a timeout
     // above the cap (feedback N1). When timeout_ms is absent the server default
     // (60s) is silently clamped to the cap — there is no caller expectation to
@@ -1023,6 +1023,7 @@ export class LiveClient implements Router {
     toolName: string,
     res: Response,
     commandLifecycle?: string,
+    args: Record<string, unknown> = {},
   ): Promise<CallToolResult> {
     // The bridge returns TWO response shapes from /tools/*:
     //   1. A MUTATION envelope: { mutation: { success, ... }, gate: {...} }
@@ -1225,7 +1226,7 @@ export class LiveClient implements Router {
     // 2026-07-03-c contract) — that path keeps bridge_response_unparsable.
     if (parsed == null) {
       const isEmptyLikeReload = rawText.trim().length === 0;
-      if (isEmptyLikeReload && (commandLifecycle === "restart_then_settle" || lifecycleFor(toolName).class === "compile-reload")) {
+      if (isEmptyLikeReload && (commandLifecycle === "restart_then_settle" || lifecycleForCall(toolName, args).class === "compile-reload")) {
         return {
           content: [
             {

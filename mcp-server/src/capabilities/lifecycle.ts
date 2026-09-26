@@ -377,6 +377,16 @@ export function lifecycleFor(toolName: string): ToolLifecycle {
   return TOOL_LIFECYCLE[toolName] ?? { class: "none" };
 }
 
+/**
+ * The lifecycle of one call. Mirrors the bridge's request-level contract: an
+ * upgrade preview (`dry_run` defaults true) reads pins without writing or
+ * reloading, so only the apply carries the tool's declared class.
+ */
+export function lifecycleForCall(toolName: string, args: Record<string, unknown>): ToolLifecycle {
+  if (toolName === "unity_open_mcp_upgrade" && args.dry_run !== false) return { class: "none" };
+  return lifecycleFor(toolName);
+}
+
 // ---------------------------------------------------------------------------
 // Taxonomy documentation table (agent-facing, clean of internal IDs).
 // ---------------------------------------------------------------------------

@@ -55,6 +55,13 @@ namespace UnityOpenMcpBridge
             && !JsonBody.GetBool(JsonBody.TopLevelField(body, "setup_roslyn"), "setup_roslyn")
             && !DisruptiveSnippet.IsMatch(JsonBody.GetString(JsonBody.TopLevelField(body, "code"), "code") ?? "");
 
+        // An upgrade preview (dry_run defaults true) only reads the pins it
+        // would rewrite; the apply alone writes configs and schedules the UPM
+        // re-pin that can reload the domain.
+        private static bool IsUpgradePreview(string tool, string body) =>
+            tool == "unity_open_mcp_upgrade"
+            && JsonBody.GetBool(JsonBody.TopLevelField(body, "dry_run"), "dry_run", true);
+
         internal static bool IsMutating(string tool, string body)
         {
             if (tool == ProjectCommandInvocation.ToolName)
@@ -63,6 +70,7 @@ namespace UnityOpenMcpBridge
             if (tool == "unity_open_mcp_execute_menu" && ExecuteMenuTool.IsReadOnlyMenu(
                 JsonBody.GetString(JsonBody.TopLevelField(body, "menu_path"), "menu_path"))) return false;
             if (tool == "unity_open_mcp_apply_fix" && JsonBody.GetBool(JsonBody.TopLevelField(body, "dry_run"), "dry_run", true)) return false;
+            if (IsUpgradePreview(tool, body)) return false;
             if (tool == "unity_open_mcp_batch_execute")
                 return BatchExecuteTool.Preflight(body, out var mutating) != null || mutating;
             return BridgeToolClassification.MutatingTools.Contains(tool)
@@ -113,6 +121,7 @@ namespace UnityOpenMcpBridge
             if (tool == "unity_open_mcp_execute_menu" && ExecuteMenuTool.IsNonDisruptiveReadOnlyMenu(
                 JsonBody.GetString(JsonBody.TopLevelField(body, "menu_path"), "menu_path"))) return LifecyclePolicy.None;
             if (tool == "unity_open_mcp_batch_execute" && !IsMutating(tool, body)) return LifecyclePolicy.None;
+            if (IsUpgradePreview(tool, body)) return LifecyclePolicy.None;
             return ToolLifecycle.Resolve(tool);
         }
     }

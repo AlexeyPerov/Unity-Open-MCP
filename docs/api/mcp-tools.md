@@ -594,6 +594,12 @@ and returns before a possible domain reload. Embedded and `file:` bridge install
 never have their packages replaced; their selected config/prose updates remain
 available. Restart MCP clients after apply so they reload their configuration.
 
+The preview is a read: it answers with unsaved scenes open and while an
+asynchronous project command runs, skips the reload wait, and may run as a
+`batch_execute` step. Only the apply has the `restart_then_settle` lifecycle:
+save open scenes first (it is refused with `scene_dirty` otherwise), and it is
+refused with `job_busy` during a project job and inside a batch.
+
 ### `unity_open_mcp_execute_csharp`
 
 The snippet is compiled into its **own** assembly (`UnityOpenMcpSnippet`), so it

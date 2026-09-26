@@ -5,6 +5,7 @@ import {
   TOOL_LIFECYCLE,
   LIFECYCLE_TAXONOMY,
   lifecycleFor,
+  lifecycleForCall,
   buildLifecycle,
   type LifecycleClass,
 } from "./lifecycle.js";
@@ -81,6 +82,15 @@ test("lifecycleFor: compile-reload tools — script/asmdef/package/menu/compile_
       `${name} should be compile-reload`,
     );
   }
+});
+
+test("lifecycleForCall: an upgrade preview is none; the apply keeps compile-reload", () => {
+  assert.equal(lifecycleForCall("unity_open_mcp_upgrade", {}).class, "none");
+  assert.equal(lifecycleForCall("unity_open_mcp_upgrade", { dry_run: true }).class, "none");
+  assert.equal(lifecycleForCall("unity_open_mcp_upgrade", { dry_run: false }).class, "compile-reload");
+  // Other tools resolve exactly as lifecycleFor, whatever their arguments.
+  assert.equal(lifecycleForCall("unity_open_mcp_package_add", { dry_run: true }).class, "compile-reload");
+  assert.equal(lifecycleForCall("unity_open_mcp_apply_fix", { dry_run: true }).class, "scene-dirty");
 });
 
 test("lifecycleFor: compile_check note carries the editor_instance_locked constraint", () => {

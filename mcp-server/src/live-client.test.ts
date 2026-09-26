@@ -1598,6 +1598,53 @@ test("empty body on NON-compile-reload tool still surfaces as bridge_response_un
   }
 });
 
+test("empty body on an upgrade preview is unparsable; only the apply can have triggered a reload", async () => {
+  // An upgrade preview writes nothing and schedules no UPM re-pin, so an empty
+  // body is not the reload signature and a retry is safe. The apply keeps the
+  // declared compile-reload class.
+  const s = makeSandbox();
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      res.end("");
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    for (const args of [{ target_version: "1.2.3" }, { target_version: "1.2.3", dry_run: true }]) {
+      const preview = await client.route("unity_open_mcp_upgrade", args);
+      assert.equal(preview.isError, true, JSON.stringify(args));
+      const body = JSON.parse((preview.content[0] as { text: string }).text);
+      assert.equal(body.error.code, "bridge_response_unparsable");
+    }
+    const apply = await client.route("unity_open_mcp_upgrade", { target_version: "1.2.3", dry_run: false });
+    assert.equal(apply.isError, false);
+    assert.equal(JSON.parse((apply.content[0] as { text: string }).text).status, "triggered_reload");
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
 test("whitespace-only body on compile-reload tool still counts as triggered_reload", async () => {
   // A torn-down socket can deliver a stray newline or whitespace before the
   // connection drops. The reload detector must treat whitespace-only as empty
