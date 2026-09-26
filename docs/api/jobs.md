@@ -116,6 +116,9 @@ call. Jobs from separate MCP processes are not shared.
 Idempotency keys are scoped to that owner. Identical target and arguments return
 the original job, including terminal/orphaned jobs; different arguments return
 `idempotency_conflict`. Keys are required for mutations and may be used for reads.
+A project-command start with a known key is answered from that record without
+reading the command catalog, so the retry works while the Editor reloads or after
+a reload changed the command's declaration; only a new key needs the catalog.
 Validation and key reservation precede scheduling, so concurrent retries cannot
 start the same mutation twice.
 

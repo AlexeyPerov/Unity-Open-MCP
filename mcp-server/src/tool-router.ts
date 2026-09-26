@@ -742,11 +742,14 @@ export class ToolRouter implements Router {
         ? jobOwner.agent === PROCESS_AGENT_ID ? this.live : this.live.forAgent(jobOwner.agent)
         : new LiveClient(jobOwner.port, new PingCache(), resolveAuthToken(this.projectPath, jobOwner.port), this.projectPath, jobOwner.agent, jobOwner.port);
       if (args.action === "start" && typeof args.tool_or_command === "string") {
-        const name = args.tool_or_command;
+        const name = args.tool_or_command, key = args.idempotency_key;
         if (name === "unity_senses_run_tests") {
           if (!this.jobs.hasOperation(name)) this.jobs.register(name, testRunOperation(clientFor));
-        } else if (name.startsWith("project.")) {
-          // Re-read the catalog on every start: a domain reload can change the
+        } else if (name.startsWith("project.") && !(typeof key === "string" && this.jobs.hasKey(owner, key))) {
+          // A retry whose key already names a job gets that job (or
+          // idempotency_conflict) from start() without the catalog, which may
+          // be unreachable mid-reload or declare a contract changed since.
+          // Re-read the catalog on every new start: a domain reload can change the
           // command's async/cancellable declaration, and an adapter frozen at
           // first registration would refuse the job for the rest of the session.
           const catalog = await clientFor(owner).projectCommands({ action: "describe", id: name });

@@ -88,6 +88,11 @@ export class JobManager {
     this.cleanupTimer.unref();
   }
   hasOperation(name: string): boolean { return this.operations.has(name); }
+  /** Whether an owner's idempotency key already names a retained job, whose retried start needs no adapter resolution. */
+  hasKey(owner: JobOwner, key: string): boolean {
+    this.cleanup();
+    return this.keys.has(this.scopedKey(owner, key));
+  }
   operation(name: string): JobOperation | undefined { return this.operations.get(name); }
   /** `replace` swaps an adapter whose bridge-side contract changed; jobs already running keep the operation they started with. */
   register(name: string, operation: JobOperation, replace = false): void {
@@ -126,6 +131,7 @@ export class JobManager {
     }
   }
   private snapshot(entry: Entry): JobSnapshot { return structuredClone(entry.view); }
+  private scopedKey(owner: JobOwner, key: string): string { return JSON.stringify([owner.project, owner.port ?? null, owner.agent, key]); }
   private find(owner: JobOwner, id: string): Entry {
     this.cleanup();
     const entry = this.entries.get(id);
@@ -138,7 +144,7 @@ export class JobManager {
     this.cleanup();
     const safeArgs = this.copy(args);
     const fingerprint = canonical({ name, args: safeArgs });
-    const scopedKey = key === undefined ? undefined : JSON.stringify([owner.project, owner.port ?? null, owner.agent, key]);
+    const scopedKey = key === undefined ? undefined : this.scopedKey(owner, key);
     const existing = scopedKey === undefined ? undefined : this.keys.get(scopedKey);
     if (existing) {
       const entry = this.entries.get(existing)!;
