@@ -164,11 +164,17 @@
         <span>
           <strong>Commit-safe config</strong> —
           <small>
-            this Unity project sits at
-            <code>{state.mcpPlan.detectedUnitySubpath}/</code> inside
-            <code>{state.mcpPlan.detectedWorkspaceRoot}</code>. Write the entry
-            at the repository root with no machine path, so the whole team can
-            share one committed file.
+            {#if state.mcpClient === "unity-ai"}
+              Unity AI keeps its config inside this Unity project, so the entry
+              resolves the project from the folder the Editor starts the server
+              in, with no machine path.
+            {:else}
+              this Unity project sits at
+              <code>{state.mcpPlan.detectedUnitySubpath}/</code> inside
+              <code>{state.mcpPlan.detectedWorkspaceRoot}</code>. Write the entry
+              at the repository root with no machine path, so the whole team can
+              share one committed file.
+            {/if}
           </small>
         </span>
       </label>

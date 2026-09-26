@@ -818,23 +818,25 @@ pub(crate) fn effective_placement(params: &McpConfigParams) -> Option<PortablePl
 }
 
 /// Folder the client config file lives under. A portable monorepo write puts
-/// it at the workspace root (where the AI client is opened); Unity AI keeps
-/// its config inside the Unity project, so it never moves.
+/// it at the workspace root (where the AI client is opened).
 fn config_root_for(params: &McpConfigParams, scope: ClientScope) -> String {
-    if matches!(params.client, McpClientId::UnityAi) {
-        return params.project_path.clone();
-    }
     match portable_placement(params, scope) {
         Some(_) => workspace_root_for(params),
         None => params.project_path.clone(),
     }
 }
 
-/// The folder the AI client is opened on: the explicit workspace when the
-/// caller set one, else the detected repository root above the Unity project,
-/// else the Unity project itself. Falling back to detection lets a caller ask
-/// for a portable write with nothing but `portable: true`.
+/// The folder the AI client is opened on, and spawns the server in: the
+/// explicit workspace when the caller set one, else the detected repository
+/// root above the Unity project, else the Unity project itself. Falling back
+/// to detection lets a caller ask for a portable write with nothing but
+/// `portable: true`. Unity AI runs inside the Editor with its config in the
+/// Unity project, so its workspace is always that project, and a portable
+/// entry carries no `--unity-subpath`.
 fn workspace_root_for(params: &McpConfigParams) -> String {
+    if matches!(params.client, McpClientId::UnityAi) {
+        return params.project_path.clone();
+    }
     let workspace = params.workspace_path.trim();
     if !workspace.is_empty() {
         return workspace.to_string();
@@ -3759,6 +3761,32 @@ mod tests {
         );
         assert!(plan.portable);
         assert!(!plan.proposed_json.unwrap().contains(&workspace.to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn portable_unity_ai_resolves_from_the_unity_project_even_in_a_monorepo() {
+        // Unity AI's config lives inside the Unity project and the Editor
+        // spawns the server there, so a repository-root subpath would resolve
+        // `<repo>/Client/Client`. Covers both the detected repository root
+        // (what the wizard sends) and an explicit workspace.
+        let (_tmp, workspace, project) = monorepo_tree();
+        let home = tempfile::tempdir().unwrap();
+        for explicit_workspace in [false, true] {
+            let mut params = portable_params(McpClientId::UnityAi, &workspace, &project);
+            if !explicit_workspace {
+                params.workspace_path = String::new();
+            }
+            let plan = plan_mcp_config_at(&params, home.path()).unwrap();
+            assert_eq!(
+                plan.target_path.as_deref(),
+                Some(project.join("UserSettings").join("mcp.json").to_string_lossy().as_ref())
+            );
+            assert!(plan.portable);
+            let proposed: Value = serde_json::from_str(&plan.proposed_json.unwrap()).unwrap();
+            let entry = &proposed["mcpServers"][MCP_SERVER_KEY];
+            assert_eq!(entry["args"], json!(["-y", NPM_PACKAGE, "--project-from-cwd"]));
+            assert!(entry["env"].as_object().unwrap().is_empty());
+        }
     }
 
     #[test]
