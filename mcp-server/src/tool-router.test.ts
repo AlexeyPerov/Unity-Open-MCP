@@ -4657,6 +4657,69 @@ test("core project selectors use the selected project's endpoint instead of the 
   }
 });
 
+test("project_path probe reports the other project's auto-activation without touching the session's groups", async () => {
+  const { createServer } = await import("node:http");
+  const root = await mkdtemp(join(tmpdir(), "probed-project-"));
+  // The probed project compiles Shader Graph but not VFX Graph; the configured
+  // project is the other way round.
+  const server = createServer((req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify(req.url === "/ping" ? { connected: true, compiling: false, projectPath: root }
+      : { tools: ["unity_open_mcp_shader_graph_create"], groups: [] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as { port: number };
+  const path = lockPath(root);
+  try {
+    for (const dir of ["Assets", "Packages", "ProjectSettings"]) await mkdir(join(root, dir));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: process.pid, port: address.port, projectPath: root,
+      state: "idle", heartbeatAt: new Date().toISOString(), authToken: "probed-token" }));
+    const session = new ToolSessionState();
+    session.activateAuto("vfx");
+    const before = session.activeGroups();
+    let notifyCount = 0;
+    const router = makeRouter(
+      makeFakeLive({ bridgeTools: new Set(["unity_open_mcp_vfx_list"]) }),
+      makeFakeBatch(),
+      "/unrelated/project",
+      makeFakeEventStream(),
+      session,
+      () => { notifyCount++; },
+    );
+    const probeTool = async (toolName: string) => {
+      const result = await router.route("unity_open_mcp_capabilities", { project_path: root, tool_name: toolName });
+      assert.equal(result.isError, false);
+      return (parseBody(result).tools as Array<{ active: boolean; available: boolean | null }>)[0];
+    };
+
+    // The probe answers from the probed project's inventory and auto-activation.
+    const graph = await probeTool("unity_open_mcp_shader_graph_create");
+    assert.equal(graph.available, true);
+    assert.equal(graph.active, true);
+    const vfx = await probeTool("unity_open_mcp_vfx_list");
+    assert.equal(vfx.available, false);
+    assert.equal(vfx.active, false);
+    // The catalog path reconciles too.
+    assert.equal((await router.route("unity_open_mcp_capabilities", { project_path: root })).isError, false);
+
+    // The configured session and its tools/list are untouched.
+    assert.deepEqual(session.activeGroups(), before);
+    assert.equal(session.activationSource("vfx"), "auto");
+    assert.equal(session.isGroupActive("shadergraph"), false);
+    assert.equal(notifyCount, 0);
+    // A normal call afterwards has nothing to re-reconcile.
+    const own = parseBody(await router.route("unity_open_mcp_capabilities", { tool_name: "unity_open_mcp_vfx_list" }));
+    assert.equal((own.tools as Array<{ active: boolean }>)[0].active, true);
+    assert.equal(notifyCount, 0);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    rmSync(path, { force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 
 test("route: stable invoke reaches activated tools without a list refresh", async () => {
   const live = makeFakeLive({ available: true });

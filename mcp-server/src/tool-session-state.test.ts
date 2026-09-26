@@ -228,6 +228,25 @@ test("reset restores every default group to source 'default'", () => {
   assert.equal(s.activationSource("shadergraph"), null);
 });
 
+test("clone copies groups and sources, and later changes stay on their own side", () => {
+  const s = new ToolSessionState();
+  s.activateAuto("vfx");
+  s.deactivate("gate-and-verify");
+  const copy = s.clone();
+  assert.deepEqual(copy.activeGroups(), s.activeGroups());
+  assert.equal(copy.activationSource("vfx"), "auto");
+  assert.equal(copy.activationSource("gate-and-verify"), "suppressed");
+
+  copy.reconcileAutoActivation(new Set(["shadergraph"]));
+  copy.activate("navigation");
+  assert.equal(s.isGroupActive("vfx"), true);
+  assert.equal(s.isGroupActive("shadergraph"), false);
+  assert.equal(s.isGroupActive("navigation"), false);
+  s.activate("probuilder");
+  assert.equal(copy.isGroupActive("probuilder"), false);
+  assert.equal(copy.isGroupActive("shadergraph"), true);
+});
+
 test("activeGroups is sorted and stable", () => {
   const s = new ToolSessionState();
   s.activate("navigation");

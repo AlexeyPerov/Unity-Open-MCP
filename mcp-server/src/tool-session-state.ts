@@ -144,6 +144,19 @@ export class ToolSessionState {
     for (const id of DEFAULT_ENABLED_GROUPS) this.source.set(id, "default");
   }
 
+  /**
+   * Independent copy of the whole store. A read-only probe of another project
+   * routes against a copy, so auto-activation reconciled from that project's
+   * compiled inventory never leaks into this session.
+   */
+  clone(): ToolSessionState {
+    const copy = new ToolSessionState();
+    copy.active = new Set(this.active);
+    copy.source = new Map(this.source);
+    copy.fdSamples = this.fdSamples.slice();
+    return copy;
+  }
+
   /** Snapshot of currently-active group ids. */
   activeGroups(): string[] {
     return Array.from(this.active).sort();

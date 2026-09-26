@@ -871,12 +871,24 @@ export class ToolRouter implements Router {
       const selected = resolveProjectPath({ flagPath: args.project_path }).absolute;
       if (!validateUnityProjectRoot(selected).valid)
         return sourceResult({ error: { code: "invalid_project_path", message: "project_path must contain Assets, Packages, and ProjectSettings." } }, "local", true);
-      const live = new LiveClient(resolvePort(selected), new PingCache(), resolveAuthToken(selected), selected);
-      const router = new ToolRouter(live, this.batch, selected, this.eventStream, this.sessionState);
       const { project_path: _selected, ...rest } = args;
-      return router.routeCore(live, toolName, rest);
+      return this.projectProbeRouter(selected).route(toolName, rest);
     }
     return this.routeCore(this.live, toolName, args);
+  }
+
+  /**
+   * Router for a read-only probe of another project: its own port/auth
+   * discovery and a throwaway copy of this session. Discovery still reconciles
+   * auto-activation against the probed project's inventory, so the probe
+   * reports that project's view, but only the copy changes — this session's
+   * active groups and tools/list stay put, and no list_changed is wired. The
+   * probe tools are local-only and never spawn Unity, so the batch router is
+   * just a constructor argument here.
+   */
+  private projectProbeRouter(projectPath: string): ToolRouter {
+    const live = new LiveClient(resolvePort(projectPath), new PingCache(), resolveAuthToken(projectPath), projectPath);
+    return new ToolRouter(live, this.batch, projectPath, this.eventStream, this.sessionState.clone());
   }
 
   /**

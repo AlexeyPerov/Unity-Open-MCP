@@ -116,7 +116,9 @@ The response is the authoritative current catalog. Public documentation uses
 
 `capabilities` and `bridge_status` accept an optional `project_path` naming a Unity
 project root. It overrides the configured project for that read-only call, including
-port/auth discovery, without changing subsequent calls.
+port/auth discovery, without changing subsequent calls. Tool availability and
+auto-activated groups in the response reflect that project, while the session's
+active tool groups (and `tools/list`) stay unchanged.
 
 `capabilities` honors the same `profile` / `page_size` / `cursor` contract as the
 heavy read tools, because the unfolded catalog is ~500 KB on one line (per-tool
