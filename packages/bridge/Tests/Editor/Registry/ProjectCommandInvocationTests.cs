@@ -1,7 +1,10 @@
 using System;
+using System.Collections;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using NUnit.Framework;
+using UnityEngine.TestTools;
 using UnityOpenMcpBridge.MetaTools;
 
 namespace UnityOpenMcpBridge.Tests
@@ -13,6 +16,9 @@ namespace UnityOpenMcpBridge.Tests
         public static string Typed(string required, int[] counts, long id, Choice choice, double precision = 1, int? optional = null)
         { calls++; return "{\"calls\":" + calls + ",\"id\":\"" + id + "\",\"count\":" + counts.Length + "}"; }
         public static System.Threading.Tasks.Task<string> AsyncEmpty(ProjectCommandContext context) => System.Threading.Tasks.Task.FromResult("{}");
+        private static TaskCompletionSource<string> held;
+        private static Func<bool> testRunActive;
+        public static Task<string> AsyncHeld(ProjectCommandContext context) => held.Task;
         public static string Empty() { calls++; return "{}"; }
         public static string BadOutput() { calls++; return "{broken"; }
         public static string Throws() { calls++; throw new InvalidOperationException("after write"); }
@@ -184,6 +190,49 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(BridgeDenyList.EvaluateProjectCommand("project.tests.invoke", new[] { "^project\\.tests\\." }, false).Allowed);
             Assert.IsTrue(BridgeDenyList.EvaluateProjectCommand("project.tests.invoke", new[] { ".*" }, true).Allowed);
         }
+        [UnityTest] public IEnumerator RunningJobRefusesEditorStateWritesOnEveryRouteButNotReads()
+        {
+            if (BridgeToolRegistry.Count == 0) BridgeToolRegistry.Scan();
+            // A run started through the bridge's own test tool would refuse the start as editor_busy.
+            testRunActive = ProjectCommandJobs.TestRunActive;
+            ProjectCommandJobs.TestRunActive = null;
+            held = new TaskCompletionSource<string>();
+            Register("AsyncHeld", async: true);
+            var id = Guid.NewGuid().ToString();
+            string Job(string action) => ProjectCommandJobs.Handle("{\"action\":\"" + action + "\",\"job_id\":\"" + id + "\""
+                + (action == "start" ? ",\"invocation\":" + Body() : "") + "}", "tests");
+            StringAssert.Contains("\"state\":\"running\"", Job("start"));
+            for (int frame = 0; frame < 600 && !Job("status").Contains("\"phase\":\"executing\""); frame++) yield return null;
+            StringAssert.Contains("\"phase\":\"executing\"", Job("status"));
+
+            const string pause = "{\"state\":\"pause\"}";
+            const string pauseBatch = "{\"commands\":[{\"tool\":\"unity_open_mcp_editor_set_state\",\"params\":" + pause + "}]}";
+            Assert.AreEqual("job_busy", Direct("unity_open_mcp_editor_set_state", pause).ErrorCode);
+            Assert.AreEqual("job_busy", Gated("unity_open_mcp_editor_set_state", pause).Mutation.ErrorCode);
+            Assert.AreEqual("job_busy", Gated("unity_open_mcp_batch_execute", pauseBatch).Mutation.ErrorCode);
+            Assert.AreEqual("job_busy", Gated("unity_open_mcp_gameobject_create", "{\"name\":\"__MCPTest_JobBusy\"}").Mutation.ErrorCode);
+            Assert.IsTrue(Direct("unity_open_mcp_selection_get", "{}").Success);
+            Assert.IsTrue(Gated("unity_open_mcp_editor_status", "{}").Mutation.Success);
+            Assert.IsTrue(Gated("unity_open_mcp_batch_execute", "{\"commands\":[{\"tool\":\"unity_open_mcp_selection_get\",\"params\":{}}]}").Mutation.Success);
+            StringAssert.Contains("not_cancellable", Job("cancel"));
+
+            held.SetResult("{}");
+            for (int frame = 0; frame < 600 && ProjectCommandJobs.Active; frame++) yield return null;
+            StringAssert.Contains("\"state\":\"succeeded\"", Job("status"));
+            Assert.IsTrue(Direct("unity_open_mcp_editor_set_state", pause).Success);
+        }
+        [UnityTearDown] public IEnumerator ReleaseHeldJob()
+        {
+            held?.TrySetResult("{}");
+            for (int frame = 0; frame < 600 && ProjectCommandJobs.Active; frame++) yield return null;
+            if (held != null) ProjectCommandJobs.TestRunActive = testRunActive;
+            held = null;
+        }
+        private static ToolDispatchResult Direct(string tool, string body)
+            => BridgeHttpServer.DispatchDirectResponse(tool, body, EffectiveToolContract.Resolve(tool, body));
+        private static GateDispatchResult Gated(string tool, string body) => (GateDispatchResult)typeof(BridgeHttpServer)
+            .GetMethod("DispatchWithGateCore", BindingFlags.NonPublic | BindingFlags.Static)
+            .Invoke(null, new object[] { tool, body, "off", null });
         private static GateDispatchResult Dispatch(string body) => (GateDispatchResult)typeof(BridgeHttpServer)
             .GetMethod("DispatchWithGateCore", BindingFlags.NonPublic | BindingFlags.Static)
             .Invoke(null, new object[] { ProjectCommandInvocation.ToolName, body, BridgeRequestBody.ExtractGateMode(body), ProjectCommandInvocation.ScopedPaths(body) });

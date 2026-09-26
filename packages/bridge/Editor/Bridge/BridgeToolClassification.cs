@@ -11,7 +11,9 @@ namespace UnityOpenMcpBridge
     //   - DirectResponseTools:  gate-free tools that return their JSON directly,
     //                            skipping the checkpoint/validate/delta envelope
     //                            (read-only tools, or editor-state mutators that
-    //                            write no assets the gate can validate).
+    //                            write no assets the gate can validate; the
+    //                            ones a project job refuses are listed in
+    //                            JobConflictingTools).
     //   - MutatingTools:        tools that run the full gate path and require a
     //                            non-empty paths_hint.
     //
@@ -390,6 +392,27 @@ namespace UnityOpenMcpBridge
             // pipeline probes GraphicsSettings. Neither writes a project asset.
             "unity_open_mcp_settings_get_time",
             "unity_open_mcp_settings_get_render_pipeline"
+        };
+
+        // Gate-free direct-response tools that still rewrite Editor state an
+        // asynchronous project command depends on, so a running job refuses
+        // them with job_busy exactly like gated mutations: a play transition
+        // reloads the domain that owns the job, undo/redo rewrites its work
+        // before the terminal validation, and selection, prefs and console
+        // writes change the inputs and diagnostics the command reads.
+        // console_log and the profiler tools stay allowed: they add output or
+        // record the Editor without changing what the command sees.
+        internal static readonly HashSet<string> JobConflictingTools = new()
+        {
+            "unity_open_mcp_console_clear",
+            "unity_open_mcp_editor_set_state",
+            "unity_open_mcp_selection_set",
+            "unity_open_mcp_editor_undo",
+            "unity_open_mcp_editor_redo",
+            "unity_open_mcp_playerprefs_set",
+            "unity_open_mcp_playerprefs_delete",
+            "unity_open_mcp_editorprefs_set",
+            "unity_open_mcp_editorprefs_delete",
         };
 
         internal static readonly HashSet<string> MutatingTools = new()

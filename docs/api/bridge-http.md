@@ -203,6 +203,8 @@ project-command `invocation` envelope; status/cancel carry that id. The bridge
 checks the same declaration, parameter schema, scope, deny rules, and gate default
 as synchronous invocation. It returns immediately, then runs the command on the
 Editor context. Checkpoint and terminal validation share the normal gate policy.
-Only one project job executes at a time; other bridge mutations and test starts
-are refused while it owns the Editor scope. Job records are owned by `X-Agent-Id`
-and lost on domain reload, which the MCP adapter reports as an unknown outcome.
+Only one project job executes at a time; other bridge mutations, gate-free
+Editor-state writes (play mode, undo/redo, selection, prefs, console clear) and
+test starts are refused with `job_busy` while it owns the Editor scope. Job
+records are owned by `X-Agent-Id` and lost on domain reload, which the MCP
+adapter reports as an unknown outcome.

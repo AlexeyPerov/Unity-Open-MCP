@@ -60,8 +60,12 @@ bounded steps. `ProjectCommandContext.ReportPhase` supplies phase-only progress;
 The job remains `cancel_requested` until acknowledged; completion may win the
 race. Commands without `Cancellable = true` reject cancellation. Other bridge
 mutations and test starts are refused with `job_busy` during a project job, so
-they cannot contaminate its checkpoint/validation interval. Operator edits and
-other Editor plugins remain outside this scheduling guarantee.
+they cannot contaminate its checkpoint/validation interval. This includes the
+gate-free Editor-state writes, alone or as `batch_execute` steps: play-mode
+changes, undo/redo, selection changes, PlayerPrefs/EditorPrefs writes and console
+clears. Reads, console logging, profiler recording and the job's own status/cancel
+calls stay available. Operator edits and other Editor plugins remain outside this
+scheduling guarantee.
 
 Only settled EditMode starts and `None` (read-only) / `EditorSettle` (mutating)
 lifecycles are supported. Project-command execution is domain-local: a reload

@@ -889,20 +889,23 @@ namespace UnityOpenMcpBridge
                 return;
             }
 
-            if (DirectResponseTools.Contains(toolName))
-            {
-                HandleDirectResponseTool(context, toolName, BridgeBatchSchemas.ByTool.TryGetValue(toolName, out var directSchema) ? BatchSchemaValidator.WireArguments(body, directSchema) : body, timeoutMs);
-                return;
-            }
-
             var gateMode = BridgeRequestBody.ExtractGateMode(body);
             var sw = Stopwatch.StartNew();
             // Resolved once per request: preflight, effective mutation and
-            // lifecycle, request-derived scope and envelope identity travel
-            // with the dispatch, so the gate runner and the batch step loop
-            // never re-parse the body and no tool needs a name check here.
+            // lifecycle, job conflicts, request-derived scope and envelope
+            // identity travel with the dispatch, so the gate runner and the
+            // batch step loop never re-parse the body and no tool needs a name
+            // check here. Direct-response tools carry it too: their main-thread
+            // dispatch applies the same project-job guard as the gate path.
             var contract = EffectiveToolContract.Resolve(toolName, body,
                 envelopeValidated: BridgeBatchSchemas.ByTool.ContainsKey(toolName));
+
+            if (DirectResponseTools.Contains(toolName))
+            {
+                HandleDirectResponseTool(context, toolName, BridgeBatchSchemas.ByTool.TryGetValue(toolName, out var directSchema) ? BatchSchemaValidator.WireArguments(body, directSchema) : body, timeoutMs, contract);
+                return;
+            }
+
             string FailureEnvelope(string json, string code, string message)
                 => contract.WrapFailure(json, code, message, gateMode, sw.ElapsedMilliseconds);
 
@@ -1273,8 +1276,8 @@ namespace UnityOpenMcpBridge
         {
             // Direct and test callers arrive without the HTTP handler's contract.
             contract ??= EffectiveToolContract.Resolve(toolName, body);
-            if (ProjectCommandJobs.Active && contract.IsMutating)
-                return GatePolicy.Skipped(ToolDispatchResult.Fail("job_busy", "An asynchronous project command owns the Editor mutation scope."), "request_rejected");
+            var busy = ProjectCommandJobs.Refuse(contract);
+            if (busy != null) return GatePolicy.Skipped(busy, "request_rejected");
             if (contract.Refusal != null) return GatePolicy.Skipped(contract.Refusal, "request_rejected");
             if (contract.BatchPlan != null)
                 return BatchExecuteGateRunner.Execute(body, gateMode, pathsHint, contract.BatchPlan);
@@ -1621,7 +1624,13 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        private static void HandleDirectResponseTool(HttpListenerContext context, string toolName, string body, int timeoutMs)
+        // The direct-response counterpart of DispatchWithGatePlanned's guard:
+        // gate-free Editor-state writes are refused while a project job runs.
+        internal static ToolDispatchResult DispatchDirectResponse(string toolName, string body, ToolRequestContract contract)
+            => ProjectCommandJobs.Refuse(contract) ?? DispatchTool(toolName, body);
+
+        private static void HandleDirectResponseTool(HttpListenerContext context, string toolName, string body, int timeoutMs,
+            ToolRequestContract contract)
         {
             // M22 T22.1.3 — direct-response tools bypass the gate envelope, so
             // capture happens inside the main-thread callback (alongside
@@ -1636,7 +1645,7 @@ namespace UnityOpenMcpBridge
                 {
                     int captureStart = LogEntriesReader.StartCapture();
                     ToolDispatchResult r;
-                    try { r = DispatchTool(toolName, body); }
+                    try { r = DispatchDirectResponse(toolName, body, contract); }
                     finally { capturedLogs = LogEntriesReader.StopCapture(captureStart); }
                     return r;
                 }, timeoutMs);

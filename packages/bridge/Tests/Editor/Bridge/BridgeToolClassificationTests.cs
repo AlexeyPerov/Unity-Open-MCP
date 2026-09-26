@@ -243,6 +243,22 @@ namespace UnityOpenMcpBridge.Tests
             }
         }
 
+        // A running project job refuses every mutation through IsMutating; the
+        // extra set only names gate-free tools, and the contract derives the
+        // refusal from it, never from the tool name at the call site.
+        [Test]
+        public static void JobConflictingTools_AreGateFreeEditorStateWrites()
+        {
+            foreach (var t in BridgeToolClassification.JobConflictingTools)
+            {
+                Assert.IsTrue(BridgeToolClassification.DirectResponseTools.Contains(t), $"{t} must be a direct-response tool.");
+                Assert.IsFalse(BridgeToolClassification.MutatingTools.Contains(t), $"{t} is already refused as a mutation.");
+                Assert.IsTrue(EffectiveToolContract.Resolve(t, "{}").ConflictsWithJob, t);
+            }
+            foreach (var t in new[] { "unity_open_mcp_console_log", "unity_open_mcp_selection_get", "unity_open_mcp_editor_undo_history", "unity_open_mcp_profiler_start", "unity_open_mcp_playerprefs_get" })
+                Assert.IsFalse(EffectiveToolContract.Resolve(t, "{}").ConflictsWithJob, $"{t} does not change what a running job sees.");
+        }
+
         [Test]
         public static void TagManagerMutators_AreMutating()
         {

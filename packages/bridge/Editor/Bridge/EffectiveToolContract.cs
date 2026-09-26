@@ -19,6 +19,12 @@ namespace UnityOpenMcpBridge
         internal string[] ScopedPaths;
         /// <summary>Preflight output the batch gate runner reuses; null for every other tool.</summary>
         internal BatchExecuteTool.BatchPlan BatchPlan;
+        /// <summary>Refused with <c>job_busy</c> while an asynchronous project command runs: every
+        /// mutation, plus the gate-free Editor-state writes in <c>JobConflictingTools</c> whether
+        /// called directly or as a batch step.</summary>
+        internal bool ConflictsWithJob => IsMutating
+            || BridgeToolClassification.JobConflictingTools.Contains(ToolName)
+            || BatchPlan != null && BatchPlan.Steps.Exists(step => BridgeToolClassification.JobConflictingTools.Contains(step.Tool));
         /// <summary>Dispatch that reuses this contract's preflight output (bound arguments); null means
         /// the plain <c>DispatchTool(toolName, body)</c> path.</summary>
         internal Func<ToolDispatchResult> Invoke;

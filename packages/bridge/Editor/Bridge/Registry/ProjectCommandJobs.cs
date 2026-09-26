@@ -38,6 +38,13 @@ namespace UnityOpenMcpBridge
         }
         internal static Func<bool> TestRunActive;
         internal static bool Active => entries.Values.Any(e => e.Result == null);
+        // Every bridge tool dispatch asks here on the main thread, just before
+        // the tool runs: job records are main-thread state, and a start can
+        // land between the HTTP handler and that frame. The job itself never
+        // dispatches through a tool route, so it is never refused by its own guard.
+        internal static ToolDispatchResult Refuse(ToolRequestContract contract) => Active && contract.ConflictsWithJob
+            ? ToolDispatchResult.Fail("job_busy", "An asynchronous project command owns the Editor mutation scope.")
+            : null;
         internal static string Handle(string body, string owner)
         {
             if (!BridgeJson.IsValidJsonObject(body)) return Error("invalid_arguments", "JSON object required.");
