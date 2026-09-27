@@ -175,7 +175,9 @@ marked `[BridgeReadOnlyMenu]` verifier menu handlers, and all-read batches skip
 the gate even when the caller supplies `paths_hint`. Read-only snippets and
 non-disruptive menus also skip dirty-scene checks and settle waits. The annotation
 is a caller/author assertion, not a sandbox: known disruptive snippet calls keep
-the conservative lifecycle; indirect calls cannot be proven safe.
+the conservative lifecycle; indirect calls cannot be proven safe. Because the
+assertion is unverifiable, a running project job refuses every `execute_csharp`
+call with `job_busy`, `read_only` or not.
 
 `batch_execute` preflights every nested command using generated MCP schema
 constraints and live tool/lifecycle availability before any dispatch. All-read
@@ -223,7 +225,8 @@ checks the same declaration, parameter schema, scope, deny rules, and gate defau
 as synchronous invocation. It returns immediately, then runs the command on the
 Editor context. Checkpoint and terminal validation share the normal gate policy.
 Only one project job executes at a time; other bridge mutations, gate-free
-Editor-state writes (play mode, undo/redo, selection, prefs, console clear) and
-test starts are refused with `job_busy` while it owns the Editor scope. Job
+Editor-state writes (play mode, undo/redo, selection, prefs, console clear),
+`execute_csharp` snippets (including `read_only: true`) and test starts are
+refused with `job_busy` while it owns the Editor scope. Job
 records are owned by `X-Agent-Id` and lost on domain reload, which the MCP
 adapter reports as an unknown outcome.

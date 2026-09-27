@@ -297,6 +297,7 @@ bridge is down and the log is stale, start the Editor from the Hub and use
 - `job_busy`: another project command owns the mutation interval. Read its status
   and wait for terminal validation before starting a mutation or native test run,
   or changing Editor state (play mode, undo/redo, selection, prefs, console clear).
+  `execute_csharp` waits too, even with `read_only: true`.
 - `not_cancellable`: execution is unchanged. Observe the existing job; cancellation
   is supported only by explicitly cooperative project commands.
 - A wait times out: keep the id and call status/wait with the same project, port

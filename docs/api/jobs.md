@@ -63,8 +63,9 @@ mutations and test starts are refused with `job_busy` during a project job, so
 they cannot contaminate its checkpoint/validation interval. This includes the
 gate-free Editor-state writes, alone or as `batch_execute` steps: play-mode
 changes, undo/redo, selection changes, PlayerPrefs/EditorPrefs writes and console
-clears. Reads, console logging, profiler recording and the job's own status/cancel
-calls stay available. Operator edits and other Editor plugins remain outside this
+clears. `execute_csharp` is refused even with `read_only: true`, because the
+bridge cannot verify that a snippet writes nothing. Reads, console logging,
+profiler recording and the job's own status/cancel calls stay available. Operator edits and other Editor plugins remain outside this
 scheduling guarantee.
 
 Only settled EditMode starts and `None` (read-only) / `EditorSettle` (mutating)

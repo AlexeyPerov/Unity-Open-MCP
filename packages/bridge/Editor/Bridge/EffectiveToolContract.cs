@@ -21,10 +21,17 @@ namespace UnityOpenMcpBridge
         internal BatchExecuteTool.BatchPlan BatchPlan;
         /// <summary>Refused with <c>job_busy</c> while an asynchronous project command runs: every
         /// mutation, plus the gate-free Editor-state writes and test starts in <c>JobConflictingTools</c>
-        /// whether called directly or as a batch step.</summary>
+        /// and the self-asserted <c>read_only</c> tools, whether called directly or as a batch step.</summary>
         internal bool ConflictsWithJob => IsMutating
-            || BridgeToolClassification.JobConflictingTools.Contains(ToolName)
-            || BatchPlan != null && BatchPlan.Steps.Exists(step => BridgeToolClassification.JobConflictingTools.Contains(step.Tool));
+            || ConflictsWithJobByName(ToolName)
+            || BatchPlan != null && BatchPlan.Steps.Exists(step => ConflictsWithJobByName(step.Tool));
+
+        // A caller's read_only flag waives scope and the gate, but the bridge
+        // cannot verify that arbitrary code writes nothing, so it never admits
+        // such a call into a running job's checkpoint/validation interval.
+        private static bool ConflictsWithJobByName(string tool) =>
+            BridgeToolClassification.JobConflictingTools.Contains(tool)
+            || BridgeToolClassification.ExposesReadOnlyParam(tool);
         /// <summary>Dispatch that reuses this contract's preflight output (bound arguments); null means
         /// the plain <c>DispatchTool(toolName, body)</c> path.</summary>
         internal Func<ToolDispatchResult> Invoke;

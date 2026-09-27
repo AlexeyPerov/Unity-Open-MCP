@@ -559,7 +559,9 @@ namespace UnityOpenMcpBridge
         // Tools that expose an ad-hoc `read_only` body field (parsed via
         // JsonBody.GetBool), used by the dispatcher to (a) waive the paths_hint
         // requirement when read_only:true and (b) advertise the read_only exit
-        // in the paths_hint error envelope. execute_csharp is NOT a
+        // in the paths_hint error envelope. The flag is an unverifiable caller
+        // assertion, so a running project job still refuses these tools with
+        // job_busy (ToolRequestContract.ConflictsWithJob). execute_csharp is NOT a
         // [BridgeTool]-registered tool (it is dispatched by the hand-written
         // switch in BridgeHttpServer), so this cannot be derived from the
         // registry's ParameterInfo metadata — this set IS the source of truth.

@@ -288,6 +288,20 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual("execution_error", reached.ErrorCode);
             StringAssert.Contains("Invalid 'run_id'", reached.ErrorMessage);
         }
+        // read_only waives scope and the gate, but the bridge cannot verify a snippet writes nothing,
+        // so a running job refuses even a pure read directly and as a batch step.
+        [UnityTest] public IEnumerator RunningJobRefusesSelfAssertedReadOnlySnippetsOnEveryRoute()
+        {
+            yield return StartHeldJob();
+            const string snippet = "{\"read_only\":true,\"code\":\"return 42;\"}";
+            const string snippetBatch = "{\"commands\":[{\"tool\":\"unity_open_mcp_execute_csharp\",\"params\":" + snippet + "}]}";
+            var refused = Gated("unity_open_mcp_execute_csharp", snippet);
+            Assert.AreEqual("job_busy", refused.Mutation.ErrorCode, refused.Mutation.ErrorMessage);
+            Assert.IsNull(refused.CheckpointId);
+            Assert.AreEqual("job_busy", Gated("unity_open_mcp_batch_execute", snippetBatch).Mutation.ErrorCode);
+
+            yield return FinishHeldJob();
+        }
         private static string heldJobId;
         // Starts AsyncHeld as a project job and waits until it owns the Editor scope.
         private static IEnumerator StartHeldJob()

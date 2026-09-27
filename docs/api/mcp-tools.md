@@ -197,6 +197,8 @@ scene-switch, and play-transition calls retain lifecycle and mutation-scope
 protection. This is a caller assertion, not a sandbox or proof of purity:
 indirect calls cannot be proven safe. The deny heuristic still applies; use
 `read_only` only for inspection without writes or disruptive transitions.
+While an asynchronous project command runs, every snippet, `read_only` or not,
+is refused with `job_busy`.
 
 Verifier menu handlers can explicitly declare `[BridgeReadOnlyMenu]` alongside
 `[MenuItem("exact/menu/path")]`. The exact registered path then needs no fake

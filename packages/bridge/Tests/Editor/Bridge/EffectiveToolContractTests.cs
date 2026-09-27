@@ -69,6 +69,25 @@ namespace UnityOpenMcpBridge.Tests
             }
         }
 
+        // read_only keeps its scope/gate/settle waiver, but the assertion is
+        // unverifiable, so every snippet conflicts with a running project job.
+        [Test]
+        public void ReadOnlySnippet_WaivesTheGateButStillConflictsWithAProjectJob()
+        {
+            const string tool = "unity_open_mcp_execute_csharp";
+            const string snippet = "{\"read_only\":true,\"code\":\"UnityEditor.EditorPrefs.SetInt(\\\"k\\\", 1); return 42;\"}";
+            var read = EffectiveToolContract.Resolve(tool, snippet);
+            Assert.IsFalse(read.IsMutating);
+            Assert.AreEqual(LifecyclePolicy.None, read.Lifecycle);
+            Assert.IsTrue(read.ConflictsWithJob);
+
+            var batch = EffectiveToolContract.Resolve("unity_open_mcp_batch_execute",
+                "{\"commands\":[{\"tool\":\"" + tool + "\",\"params\":" + snippet + "}]}");
+            Assert.IsNull(batch.Refusal, batch.Refusal?.ErrorMessage);
+            Assert.IsFalse(batch.IsMutating);
+            Assert.IsTrue(batch.ConflictsWithJob);
+        }
+
         [Test]
         public void UpgradePreview_IsARead_OnlyApplyKeepsTheReloadContract()
         {
