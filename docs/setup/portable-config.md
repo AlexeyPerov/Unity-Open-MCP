@@ -97,7 +97,7 @@ per-machine fallback, not the team default.
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@1.2.3"],
+      "args": ["-y", "unity-open-mcp@1.3.0"],
       "env": { "UNITY_PROJECT_PATH": "${workspaceFolder}/Client" }
     }
   }
@@ -115,7 +115,7 @@ Drop `/Client` for Layout A.
       "command": "npx",
       "args": [
         "-y",
-        "unity-open-mcp@1.2.3",
+        "unity-open-mcp@1.3.0",
         "--project-from-cwd",
         "--unity-subpath",
         "Client"
@@ -136,7 +136,7 @@ Drop the last two arguments for Layout A.
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@1.2.3", "--project-from-cwd", "--unity-subpath", "Client"],
+      "command": ["npx", "-y", "unity-open-mcp@1.3.0", "--project-from-cwd", "--unity-subpath", "Client"],
       "enabled": true,
       "environment": {}
     }
@@ -223,7 +223,7 @@ becomes portable and vice versa, and sibling MCP servers are preserved.
 From the repository root:
 
 ```bash
-npx -y unity-open-mcp@1.2.3 ping --project-from-cwd --unity-subpath Client
+npx -y unity-open-mcp@1.3.0 ping --project-from-cwd --unity-subpath Client
 ```
 
 The startup line shows which input won and which absolute path was resolved. A

@@ -78,7 +78,7 @@ Rider, Unity AI, ZooCode и Antigravity:
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@1.2.3"],
+      "args": ["-y", "unity-open-mcp@1.3.0"],
       "env": {
         "UNITY_PROJECT_PATH": "/absolute/path/to/project"
       }
@@ -95,7 +95,7 @@ Rider, Unity AI, ZooCode и Antigravity:
     "unity-open-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@1.2.3"],
+      "args": ["-y", "unity-open-mcp@1.3.0"],
       "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
   }
@@ -110,7 +110,7 @@ Rider, Unity AI, ZooCode и Antigravity:
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@1.2.3"],
+      "command": ["npx", "-y", "unity-open-mcp@1.3.0"],
       "enabled": true,
       "environment": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
@@ -127,7 +127,7 @@ Rider, Unity AI, ZooCode и Antigravity:
       "unity-open-mcp": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "unity-open-mcp@1.2.3"],
+        "args": ["-y", "unity-open-mcp@1.3.0"],
         "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
       }
     }
@@ -141,7 +141,7 @@ Rider, Unity AI, ZooCode и Antigravity:
 [mcp_servers.unity-open-mcp]
 enabled = true
 command = "npx"
-args = ["-y", "unity-open-mcp@1.2.3"]
+args = ["-y", "unity-open-mcp@1.3.0"]
 
 [mcp_servers.unity-open-mcp.env]
 UNITY_PROJECT_PATH = "/absolute/path/to/project"
@@ -152,7 +152,7 @@ UNITY_PROJECT_PATH = "/absolute/path/to/project"
 ```sh
 claude mcp add unity-open-mcp \
   --env UNITY_PROJECT_PATH=/absolute/path/to/project \
-  -- npx -y unity-open-mcp@1.2.3
+  -- npx -y unity-open-mcp@1.3.0
 ```
 
 Если сервер уже зарегистрирован, удалите и добавьте его заново, когда нужно

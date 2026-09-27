@@ -39,7 +39,7 @@ namespace UnityOpenMcpBridge.Config
         /// server aligned with the bridge / verify packages. Kept in sync
         /// by <c>scripts/sync-version.mjs</c>.
         /// </summary>
-        public const string NpmPackage = "unity-open-mcp@1.2.3";
+        public const string NpmPackage = "unity-open-mcp@1.3.0";
 
         // --- environment variable names -----------------------------------
 

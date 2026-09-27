@@ -93,7 +93,7 @@ my-game/                    <- 在这里打开 AI 客户端，配置也放这里
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@1.2.3"],
+      "args": ["-y", "unity-open-mcp@1.3.0"],
       "env": { "UNITY_PROJECT_PATH": "${workspaceFolder}/Client" }
     }
   }
@@ -111,7 +111,7 @@ my-game/                    <- 在这里打开 AI 客户端，配置也放这里
       "command": "npx",
       "args": [
         "-y",
-        "unity-open-mcp@1.2.3",
+        "unity-open-mcp@1.3.0",
         "--project-from-cwd",
         "--unity-subpath",
         "Client"
@@ -132,7 +132,7 @@ my-game/                    <- 在这里打开 AI 客户端，配置也放这里
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@1.2.3", "--project-from-cwd", "--unity-subpath", "Client"],
+      "command": ["npx", "-y", "unity-open-mcp@1.3.0", "--project-from-cwd", "--unity-subpath", "Client"],
       "enabled": true,
       "environment": {}
     }
@@ -211,7 +211,7 @@ npx -y unity-open-mcp@latest setup \
 在仓库根目录执行：
 
 ```bash
-npx -y unity-open-mcp@1.2.3 ping --project-from-cwd --unity-subpath Client
+npx -y unity-open-mcp@1.3.0 ping --project-from-cwd --unity-subpath Client
 ```
 
 启动行会显示哪个输入生效、解析出的绝对路径是什么。桥还没运行时返回非零退出码

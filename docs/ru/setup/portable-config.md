@@ -100,7 +100,7 @@ my-game/                    <- здесь открыт AI-клиент, здес
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@1.2.3"],
+      "args": ["-y", "unity-open-mcp@1.3.0"],
       "env": { "UNITY_PROJECT_PATH": "${workspaceFolder}/Client" }
     }
   }
@@ -118,7 +118,7 @@ my-game/                    <- здесь открыт AI-клиент, здес
       "command": "npx",
       "args": [
         "-y",
-        "unity-open-mcp@1.2.3",
+        "unity-open-mcp@1.3.0",
         "--project-from-cwd",
         "--unity-subpath",
         "Client"
@@ -139,7 +139,7 @@ my-game/                    <- здесь открыт AI-клиент, здес
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@1.2.3", "--project-from-cwd", "--unity-subpath", "Client"],
+      "command": ["npx", "-y", "unity-open-mcp@1.3.0", "--project-from-cwd", "--unity-subpath", "Client"],
       "enabled": true,
       "environment": {}
     }
@@ -226,7 +226,7 @@ npx -y unity-open-mcp@latest setup \
 Из корня репозитория:
 
 ```bash
-npx -y unity-open-mcp@1.2.3 ping --project-from-cwd --unity-subpath Client
+npx -y unity-open-mcp@1.3.0 ping --project-from-cwd --unity-subpath Client
 ```
 
 Строка при старте показывает, какой вход победил и какой абсолютный путь
