@@ -10,7 +10,8 @@ before the bridge loaded, e.g. at Editor startup). A confirmed `no_errors_found`
 with `sourceMatches:true` outranks `historicalLogErrors`. Inspect generation and
 before/after assembly mtimes.
 For stale sources, activate `typed-editor`, call `recompile_scripts`, then re-read.
-`capabilities` and `bridge_status` accept `project_path` for a different project.
+`capabilities` and `bridge_status` accept `project_path` for a different project
+(also via `manage_tools` invoke); omit `_meta.port` on that call.
 
 On `editor_reloading`, retry after `retryAfterMs`; do not start another Unity.
 Disk-backed reads (`list_assets`, `read_asset`, `search_assets`,

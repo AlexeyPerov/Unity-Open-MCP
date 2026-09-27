@@ -118,7 +118,11 @@ The response is the authoritative current catalog. Public documentation uses
 project root. It overrides the configured project for that read-only call, including
 port/auth discovery, without changing subsequent calls. Tool availability and
 auto-activated groups in the response reflect that project, while the session's
-active tool groups (and `tools/list`) stay unchanged.
+active tool groups (and `tools/list`) stay unchanged. The override applies the same
+way when the tool is reached through `manage_tools(action: "invoke")`. Because
+`project_path` brings its own port discovery, it cannot be combined with a
+per-request `_meta.port` (or top-level `port`) override: that call fails with
+`invalid_arguments` instead of answering from the override bridge.
 
 `capabilities` honors the same `profile` / `page_size` / `cursor` contract as the
 heavy read tools, because the unfolded catalog is ~500 KB on one line (per-tool

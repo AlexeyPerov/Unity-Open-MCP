@@ -4709,6 +4709,58 @@ test("core project selectors use the selected project's endpoint instead of the 
   }
 });
 
+test("project_path probe is honored through manage_tools(invoke) and refused with a port override", async () => {
+  const { createServer } = await import("node:http");
+  const root = await mkdtemp(join(tmpdir(), "invoked-project-"));
+  const seen: string[] = [];
+  const server = createServer((req, res) => {
+    seen.push(req.url ?? "");
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify(req.url === "/ping" ? { connected: true, compiling: false, projectPath: root }
+      : { tools: [], groups: [] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as { port: number };
+  const path = lockPath(root);
+  try {
+    for (const dir of ["Assets", "Packages", "ProjectSettings"]) await mkdir(join(root, dir));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: process.pid, port: address.port, projectPath: root,
+      state: "idle", heartbeatAt: new Date().toISOString(), authToken: "selected-token" }));
+    const configured = makeFakeLive();
+    const router = new ToolRouter(configured, makeFakeBatch(), "/unrelated/project", makeFakeEventStream(), new ToolSessionState());
+    const invoke = (tool: string) => ({ action: "invoke", tool_name: tool, arguments: { project_path: root } });
+
+    // Invoked without a port override: the probed project answers, not the configured one.
+    const status = await router.route("unity_open_mcp_manage_tools", invoke("unity_open_mcp_bridge_status"));
+    assert.equal(status.isError, false);
+    assert.equal(parseBody(status).projectPath, root);
+    assert.deepEqual(seen, ["/ping"]);
+    assert.equal((await router.route("unity_open_mcp_manage_tools", invoke("unity_open_mcp_capabilities"))).isError, false);
+    assert.ok(seen.includes("/tools"));
+    assert.equal(configured.calls.length, 0);
+
+    // With a per-request port override, direct and invoked probes fail loudly
+    // instead of answering from the override bridge.
+    seen.length = 0;
+    const override = makeFakeLive();
+    for (const tool of ["unity_open_mcp_bridge_status", "unity_open_mcp_capabilities"]) {
+      for (const [name, args] of [[tool, { project_path: root }], ["unity_open_mcp_manage_tools", invoke(tool)]] as const) {
+        const refused = await router.routeOverride(name, args, override, { agent: "A", port: 9999 });
+        assert.equal(refused.isError, true);
+        assert.equal((parseBody(refused).error as { code: string }).code, "invalid_arguments");
+      }
+    }
+    assert.equal(override.calls.length, 0);
+    assert.deepEqual(seen, []);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    rmSync(path, { force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("project_path probe reports the other project's auto-activation without touching the session's groups", async () => {
   const { createServer } = await import("node:http");
   const root = await mkdtemp(join(tmpdir(), "probed-project-"));

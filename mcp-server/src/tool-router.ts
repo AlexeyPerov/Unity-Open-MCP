@@ -865,16 +865,27 @@ export class ToolRouter implements Router {
     args: Record<string, unknown>,
     identity: RequestIdentity = PROCESS_IDENTITY,
   ): Promise<CallToolResult> {
-    if ((toolName === "unity_open_mcp_capabilities" || toolName === "unity_open_mcp_bridge_status") && args.project_path !== undefined) {
-      if (typeof args.project_path !== "string" || !args.project_path.trim())
-        return sourceResult({ error: { code: "invalid_project_path", message: "project_path must name a Unity project root." } }, "local", true);
-      const selected = resolveProjectPath({ flagPath: args.project_path }).absolute;
-      if (!validateUnityProjectRoot(selected).valid)
-        return sourceResult({ error: { code: "invalid_project_path", message: "project_path must contain Assets, Packages, and ProjectSettings." } }, "local", true);
-      const { project_path: _selected, ...rest } = args;
-      return this.projectProbeRouter(selected).route(toolName, rest, identity);
-    }
     return this.routeCore(this.live, toolName, args, identity);
+  }
+
+  /**
+   * `capabilities` / `bridge_status` with an explicit project_path, from any
+   * entry point (direct, manage_tools invoke, port override). The probe router
+   * gets the arguments without project_path, so it dispatches normally. A
+   * per-request port override is refused rather than dropped or mixed in:
+   * project_path brings its own port/auth discovery, and pinging the override
+   * port would present another bridge's answer as the probed project's.
+   */
+  private async routeProjectProbe(toolName: string, args: Record<string, unknown>, identity: RequestIdentity): Promise<CallToolResult> {
+    if (typeof args.project_path !== "string" || !args.project_path.trim())
+      return localError("invalid_project_path", "project_path must name a Unity project root.");
+    if (identity.port !== undefined)
+      return localError("invalid_arguments", "project_path discovers that project's own bridge port; drop the _meta.port (or port) override for this call.");
+    const selected = resolveProjectPath({ flagPath: args.project_path }).absolute;
+    if (!validateUnityProjectRoot(selected).valid)
+      return localError("invalid_project_path", "project_path must contain Assets, Packages, and ProjectSettings.");
+    const { project_path: _selected, ...rest } = args;
+    return this.projectProbeRouter(selected).route(toolName, rest, identity);
   }
 
   /**
@@ -914,6 +925,10 @@ export class ToolRouter implements Router {
     args: Record<string, unknown>,
     identity: RequestIdentity,
   ): Promise<CallToolResult> {
+    // Every entry point funnels through here, so an explicit project_path is
+    // retargeted before validation and wiring wherever the call came from.
+    if ((toolName === "unity_open_mcp_capabilities" || toolName === "unity_open_mcp_bridge_status") && args.project_path !== undefined)
+      return this.routeProjectProbe(toolName, args, identity);
     const definition = ALL_TOOLS.find(t => t.name === toolName);
     if (definition) {
       const errors = validateSchema(args, definition.inputSchema);
