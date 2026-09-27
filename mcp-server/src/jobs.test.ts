@@ -7,6 +7,7 @@ import type { LiveClient } from "./live-client.js";
 import type { BatchSpawn } from "./batch-spawn.js";
 import type { BridgeEventStream } from "./event-stream.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { RequestIdentity } from "./agent-identity.js";
 const body = (result: CallToolResult) => JSON.parse((result.content[0] as { text: string }).text);
 const name = "unity_open_mcp_jobs";
 test("always-visible local jobs work without bridge, reject arbitrary tools, and isolate routed identities", async t => {
@@ -61,4 +62,26 @@ test("a retried project start returns its job without the catalog, which is desc
   assert.equal(body(await start({ args: {} }, "new")).error.code, "job_operation_unsupported");
   catalog = { error: { code: "catalog_unavailable", message: "Retry after compilation/reload settles." } };
   assert.equal(body(await start({ args: {} }, "new")).error.code, "catalog_unavailable");
+});
+
+test("a job started directly is found through manage_tools(invoke) with the same routing metadata", async t => {
+  const router = new ToolRouter({} as LiveClient, {} as BatchSpawn, "/project", {} as BridgeEventStream, new ToolSessionState());
+  t.after(() => router.jobs.close());
+  router.jobs.register("fixture", { mutating: true, cancellable: false, validate() {}, async run() { return { state: "succeeded", result: 1 }; } });
+  // Mirrors the stdio handler: a port override takes the override route.
+  const call = (tool: string, args: Record<string, unknown>, identity: RequestIdentity) => identity.port === undefined
+    ? router.route(tool, args, identity)
+    : router.routeOverride(tool, args, {} as LiveClient, identity);
+  const invoke = (args: Record<string, unknown>, identity: RequestIdentity) =>
+    call("unity_open_mcp_manage_tools", { action: "invoke", tool_name: name, arguments: args }, identity);
+  const start = { action: "start", tool_or_command: "fixture", idempotency_key: "k" };
+  for (const [owner, other] of [[{ agent: "A" }, { agent: "B" }], [{ agent: "A", port: 9999 }, { agent: "B", port: 9999 }]] as RequestIdentity[][]) {
+    const job = body(await call(name, start, owner));
+    assert.equal(body(await invoke({ action: "status", job_id: job.job_id }, owner)).job_id, job.job_id);
+    assert.deepEqual(body(await invoke({ action: "list" }, owner)).jobs.map((j: { job_id: string }) => j.job_id), [job.job_id]);
+    assert.equal(body(await invoke(start, owner)).job_id, job.job_id, "an idempotent retry through invoke returns the same job");
+    assert.equal(body(await invoke({ action: "status", job_id: job.job_id }, other)).error.code, "job_not_found");
+    assert.deepEqual(body(await invoke({ action: "list" }, other)).jobs, []);
+    assert.notEqual(body(await invoke(start, other)).job_id, job.job_id, "another agent's key names its own job");
+  }
 });

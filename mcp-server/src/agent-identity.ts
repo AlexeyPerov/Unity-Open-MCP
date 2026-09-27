@@ -35,6 +35,17 @@ import { randomBytes } from "node:crypto";
  */
 export const PROCESS_AGENT_ID = `agent-${process.pid}-${randomBytes(3).toString("hex")}`;
 
+/**
+ * Who made a call and which bridge port it pinned for that call alone: the key
+ * session-owned jobs are filed under. `port` is the per-request override only,
+ * never the default client's env pin. The router threads it through every entry
+ * point (direct call, `manage_tools` invoke, port override).
+ */
+export interface RequestIdentity { agent: string; port?: number }
+
+/** Identity of a call that carries no routing metadata. */
+export const PROCESS_IDENTITY: RequestIdentity = { agent: PROCESS_AGENT_ID };
+
 /** Minimum/maximum valid TCP port for an override. */
 export const MIN_PORT = 1;
 export const MAX_PORT = 65535;

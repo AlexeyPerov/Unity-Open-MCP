@@ -115,7 +115,9 @@ tool arguments' `_meta.agentId` (default: MCP process identity). Every action ch
 ownership. These are trusted local routing identities, not authentication
 credentials; clients sharing a process must use distinct agent ids consistently.
 Port overrides have separate namespaces; use the same routing metadata on every
-call. Jobs from separate MCP processes are not shared.
+call. A call made through `manage_tools(action: "invoke")` is owned by the
+`manage_tools` call's routing metadata, exactly like a direct call. Jobs from
+separate MCP processes are not shared.
 
 Idempotency keys are scoped to that owner. Identical target and arguments return
 the original job, including terminal/orphaned jobs; different arguments return

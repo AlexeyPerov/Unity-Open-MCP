@@ -36,7 +36,7 @@ import {
   bridgeBaseUrl,
 } from "./constants.js";
 // M23 Plan 3 — per-request routing (port override + agent identity).
-import { extractRouting } from "./agent-identity.js";
+import { extractRouting, type RequestIdentity } from "./agent-identity.js";
 import { BridgeEventStream } from "./event-stream.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { readPackageVersion } from "./package-version.js";
@@ -235,11 +235,13 @@ export function createServer(
           });
         }
       }
-      // Job identity is per request, even when the bridge port is unchanged.
-      if (name === "unity_open_mcp_jobs") return router.routeJobs(routedArgs, { agent: routing.agentId, port: routing.portOverride });
+      // Job ownership is per request, even when the bridge port is unchanged:
+      // the identity travels with the call through every route, including a
+      // tool reached via manage_tools(action: invoke).
+      const identity: RequestIdentity = { agent: routing.agentId, port: routing.portOverride };
       // No port override → default router (the common single-bridge case).
       if (routing.portOverride === undefined) {
-        return router.route(name, routedArgs);
+        return router.route(name, routedArgs, identity);
       }
       // Port override → build a transient LiveClient aimed at the override
       // port. The override bypasses shared session state: it is a fresh client
@@ -265,7 +267,7 @@ export function createServer(
         // a no-op for this transient client (no lock re-resolution).
         routing.portOverride,
       );
-      return router.routeOverride(name, routedArgs, overrideLive);
+      return router.routeOverride(name, routedArgs, overrideLive, identity);
     },
   );
 

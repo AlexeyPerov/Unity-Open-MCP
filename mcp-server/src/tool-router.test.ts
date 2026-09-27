@@ -2775,6 +2775,7 @@ test("routeOverride: dispatches through the override LiveClient, not the default
     "unity_open_mcp_ping",
     {},
     overrideLive as unknown as LiveClient,
+    { agent: "override-agent", port: 9999 },
   );
 
   // The override client was used, not the default.
@@ -2795,6 +2796,7 @@ test("routeOverride: find_references uses the override client for the live hop",
     "unity_open_mcp_find_references",
     { asset_path: "Assets/a.prefab" },
     overrideLive as unknown as LiveClient,
+    { agent: "override-agent", port: 9999 },
   );
 
   assert.equal((overrideLive as unknown as { calls: LiveCall[] }).calls.length, 1);

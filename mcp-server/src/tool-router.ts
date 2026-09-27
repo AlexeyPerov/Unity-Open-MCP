@@ -1,7 +1,7 @@
 import { testRunOperation, projectCommandOperation } from "./jobs/adapters.js";
 import { JobManager, JobManagerError, type JobOwner } from "./jobs/job-manager.js";
 import { handleJobs } from "./jobs/handler.js";
-import { PROCESS_AGENT_ID } from "./agent-identity.js";
+import { PROCESS_AGENT_ID, PROCESS_IDENTITY, type RequestIdentity } from "./agent-identity.js";
 import { buildEditorSearch } from "./editor-search.js";
 import { withSchemaDefaults } from "./schema-defaults.js";
 import { validateSchema, wireArguments } from "./tool-contract.js";
@@ -725,17 +725,20 @@ function bridgeStatusRecoveryHint(
   return null;
 }
 
+/** Named-tool route: the call's live client, its arguments, and its request identity. */
+type RouteHandler = (live: LiveClient, args: Record<string, unknown>, identity: RequestIdentity) => Promise<CallToolResult>;
+
 export class ToolRouter implements Router {
   private jobManager?: JobManager;
   get jobs(): JobManager { return this.jobManager ??= new JobManager(); }
   closeJobs(): void { this.jobManager?.close(); }
 
-  async routeJobs(args: Record<string, unknown>, identity?: { agent: string; port?: number }): Promise<CallToolResult> {
+  async routeJobs(args: Record<string, unknown>, identity: RequestIdentity = PROCESS_IDENTITY): Promise<CallToolResult> {
     const definition = ALL_TOOLS.find(t => t.name === "unity_open_mcp_jobs")!;
     const errors = validateSchema(args, definition.inputSchema);
     if (errors.length) return localError("invalid_arguments", errors.join("; "));
-    const owner: JobOwner = { project: this.projectPath || "default", agent: identity?.agent ?? PROCESS_AGENT_ID,
-      ...(identity?.port === undefined ? {} : { port: identity.port }) };
+    const owner: JobOwner = { project: this.projectPath || "default", agent: identity.agent,
+      ...(identity.port === undefined ? {} : { port: identity.port }) };
     try {
       const clientFor = (jobOwner: JobOwner) => jobOwner.port === undefined
         ? jobOwner.agent === PROCESS_AGENT_ID ? this.live : this.live.forAgent(jobOwner.agent)
@@ -785,11 +788,11 @@ export class ToolRouter implements Router {
    * reached via a predicate (isCompressible) are handled below the lookup — the
    * map covers only exact-name dispatch.
    */
-  private routeHandlers?: Map<string, (live: LiveClient, args: Record<string, unknown>) => Promise<CallToolResult>>;
+  private routeHandlers?: Map<string, RouteHandler>;
 
-  private getRouteHandlers(): Map<string, (live: LiveClient, args: Record<string, unknown>) => Promise<CallToolResult>> {
+  private getRouteHandlers(): Map<string, RouteHandler> {
     if (this.routeHandlers) return this.routeHandlers;
-    const handlers: Map<string, (live: LiveClient, args: Record<string, unknown>) => Promise<CallToolResult>> = new Map([
+    const handlers: Map<string, RouteHandler> = new Map([
       // Disk reads and live compiler evidence with an offline log fallback.
       ["unity_open_mcp_list_assets", (_l, a) => this.routeListAssets(a)],
       ["unity_open_mcp_read_compile_errors", (l, a) => this.routeReadCompileErrors(a, l)],
@@ -798,19 +801,16 @@ export class ToolRouter implements Router {
       ["unity_open_mcp_capabilities", (l, a) => this.routeCapabilities(a, l)],
       ["unity_open_mcp_list_rules", (_l, a) => this.routeListRules(a)],
       ["unity_open_mcp_generate_skill", (_l, a) => this.routeGenerateSkill(a)],
-      ["unity_open_mcp_manage_tools", (l, a) => this.routeManageTools(a, l)],
+      ["unity_open_mcp_manage_tools", (l, a, id) => this.routeManageTools(a, l, id)],
       ["unity_open_mcp_project_commands", (l, a) => this.routeProjectCommands(a, l)],
       // Live tool whose release lookups (npm latest, GitHub tag) run HERE so
       // the Editor main thread never blocks on the network.
       ["unity_open_mcp_upgrade", (l, a) => this.routeUpgrade(a, l)],
-      // Reached via manage_tools(action: invoke) or a port-override route. The
-      // owner must match what server.ts derives for a direct call: the
-      // request's agent id, plus the port ONLY when this is a per-request
-      // override client (the default client's env pin is not an override).
-      ["unity_open_mcp_jobs", (l, a) => this.routeJobs(a, {
-        agent: l.agentIdentity,
-        ...(l === this.live ? {} : { port: l.pinnedPort }),
-      })],
+      // The owner is the request identity (agent id + per-request port
+      // override), never the live client's: the default client always sends
+      // the process agent id, whatever _meta.agentId the call carried. Direct,
+      // manage_tools(invoke) and port-override calls therefore share one owner.
+      ["unity_open_mcp_jobs", (_l, a, id) => this.routeJobs(a, id)],
       ["unity_open_mcp_bridge_status", (l, a) => this.routeBridgeStatus(a, l)],
       // M31 Plan 3 — Editor fd-exhaustion operator surfaces. restart_editor
       // is the reactive kill half (acts AFTER the Editor is hung);
@@ -863,6 +863,7 @@ export class ToolRouter implements Router {
   async route(
     toolName: string,
     args: Record<string, unknown>,
+    identity: RequestIdentity = PROCESS_IDENTITY,
   ): Promise<CallToolResult> {
     if ((toolName === "unity_open_mcp_capabilities" || toolName === "unity_open_mcp_bridge_status") && args.project_path !== undefined) {
       if (typeof args.project_path !== "string" || !args.project_path.trim())
@@ -871,9 +872,9 @@ export class ToolRouter implements Router {
       if (!validateUnityProjectRoot(selected).valid)
         return sourceResult({ error: { code: "invalid_project_path", message: "project_path must contain Assets, Packages, and ProjectSettings." } }, "local", true);
       const { project_path: _selected, ...rest } = args;
-      return this.projectProbeRouter(selected).route(toolName, rest);
+      return this.projectProbeRouter(selected).route(toolName, rest, identity);
     }
-    return this.routeCore(this.live, toolName, args);
+    return this.routeCore(this.live, toolName, args, identity);
   }
 
   /**
@@ -895,21 +896,23 @@ export class ToolRouter implements Router {
    * per-request `_meta.port` override targets a different bridge instance than
    * the default. The override client bypasses shared session state (it is a
    * fresh LiveClient aimed at the override port); all other routing logic is
-   * identical to {@link route}. When `overrideLive` is null the default client
-   * is used (identical to {@link route}).
+   * identical to {@link route}. `identity` carries the override port and the
+   * request's agent id.
    */
   async routeOverride(
     toolName: string,
     args: Record<string, unknown>,
     overrideLive: LiveClient,
+    identity: RequestIdentity,
   ): Promise<CallToolResult> {
-    return this.routeCore(overrideLive, toolName, args);
+    return this.routeCore(overrideLive, toolName, args, identity);
   }
 
   private async routeCore(
     live: LiveClient,
     toolName: string,
     args: Record<string, unknown>,
+    identity: RequestIdentity,
   ): Promise<CallToolResult> {
     const definition = ALL_TOOLS.find(t => t.name === toolName);
     if (definition) {
@@ -926,18 +929,18 @@ export class ToolRouter implements Router {
         });
       }
       // Recursive dispatch only after validation; alias notes are attached to the normal result.
-      return this.routeValidated(live, toolName, wire, notes);
+      return this.routeValidated(live, toolName, wire, notes, identity);
     }
-    return this.routeValidated(live, toolName, args, []);
+    return this.routeValidated(live, toolName, args, [], identity);
   }
 
-  private async routeValidated(live: LiveClient, toolName: string, args: Record<string, unknown>, notes: string[]): Promise<CallToolResult> {
-    const result = await this.routeUnchecked(live, toolName, args);
+  private async routeValidated(live: LiveClient, toolName: string, args: Record<string, unknown>, notes: string[], identity: RequestIdentity): Promise<CallToolResult> {
+    const result = await this.routeUnchecked(live, toolName, args, identity);
     if (notes.length) result.content.push({ type: "text", text: JSON.stringify({ deprecations: [...new Set(notes)] }) });
     return result;
   }
 
-  private async routeUnchecked(live: LiveClient, toolName: string, args: Record<string, unknown>): Promise<CallToolResult> {
+  private async routeUnchecked(live: LiveClient, toolName: string, args: Record<string, unknown>, identity: RequestIdentity): Promise<CallToolResult> {
     const localProbe = skipsReloadProbe(toolName);
     if (!localProbe && this.projectPath && classifyInstance(readInstanceLock(this.projectPath)) === "reloading") {
       // One bounded re-probe. No headless fallback can acquire this Editor's project.
@@ -953,7 +956,7 @@ export class ToolRouter implements Router {
     // header comment.
     const handler = this.getRouteHandlers().get(toolName);
     if (handler) {
-      return handler(live, args);
+      return handler(live, args, identity);
     }
 
     // Compact drill-down reads: offline-first for text-serialized assets, fall
@@ -1758,6 +1761,7 @@ export class ToolRouter implements Router {
   private async routeManageTools(
     args: Record<string, unknown>,
     live: LiveClient,
+    identity: RequestIdentity,
   ): Promise<CallToolResult> {
     const action = typeof args.action === "string" ? args.action : "";
     const group = typeof args.group === "string" ? args.group.trim() : "";
@@ -1775,7 +1779,7 @@ export class ToolRouter implements Router {
       const result = await this.routeCore(live, "unity_open_mcp_execute_csharp", {
         code: `UnityEditor.Search.SearchService.ShowWindow(UnityEditor.Search.SearchService.CreateContext(${JSON.stringify(query)})); return ${JSON.stringify(query)};`,
         read_only: true,
-      });
+      }, identity);
       result.content.push({ type: "text", text: JSON.stringify({ query, opened: !result.isError }) });
       return result;
     }
@@ -1783,7 +1787,7 @@ export class ToolRouter implements Router {
       const name = typeof args.tool_name === "string" ? args.tool_name : "";
       if (name === "unity_open_mcp_manage_tools" || !filterVisibleTools(ALL_TOOLS, this.sessionState).some(t => t.name === name))
         return this.manageToolsError("tool_not_active", "Activate the target group first; recursive manage_tools invocation is forbidden.");
-      return this.routeCore(live, name, withSchemaDefaults(ALL_TOOLS.find(t => t.name === name)!, (args.arguments ?? {}) as Record<string, unknown>));
+      return this.routeCore(live, name, withSchemaDefaults(ALL_TOOLS.find(t => t.name === name)!, (args.arguments ?? {}) as Record<string, unknown>), identity);
     }
     if (action === "list_groups") {
       return this.manageToolsListGroups(live);

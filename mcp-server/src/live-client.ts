@@ -349,11 +349,6 @@ export class LiveClient implements Router {
   /** Memoized outcome of the bridge-vs-server project-path comparison. */
   private projectMatch: { reported: string; same: boolean } | null = null;
 
-  /** Agent identity this client sends as X-Agent-Id (job ownership key). */
-  get agentIdentity(): string { return this.agentId; }
-  /** Authoritative port this client was pinned to (env or per-request override), if any. */
-  get pinnedPort(): number | undefined { return this.envPort; }
-
   constructor(
     port: number,
     pingCache: PingCache,
