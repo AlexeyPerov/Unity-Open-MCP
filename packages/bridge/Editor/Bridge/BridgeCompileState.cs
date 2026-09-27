@@ -31,11 +31,13 @@ namespace UnityOpenMcpBridge
         // stat and hashing need no Unity API) refreshes the cache at most every
         // RevalidateIntervalSeconds; the main thread only captures the root
         // list and reads the last completed value. Started() computes
-        // synchronously so a compile generation records its exact inputs.
+        // synchronously so a compile generation records its exact inputs;
+        // Hashes keeps that main-thread pass to a stat of every input plus a
+        // read of the files that changed since the previous pass.
         private const double RevalidateIntervalSeconds = 2.0;
         private static readonly object CacheLock = new object();
+        private static readonly SourceHashes Hashes = new SourceHashes(File.ReadAllBytes);
         private static string _cachedFingerprint;
-        private static string _cachedSignature;
         private static double _cachedAtEditorTime = double.NegativeInfinity;
         private static Task _refresh;
 
@@ -53,33 +55,50 @@ namespace UnityOpenMcpBridge
             EditorUpdateOnce.Schedule(() => Sources(force: false));
         }
 
-        internal static string Fingerprint(string[] paths)
+        // Content hash per input file, keyed by the length + mtime it was read
+        // under: any content write changes mtime, so a pass rereads only the
+        // files whose stat moved and still yields the value a fresh hash of
+        // every file would. The stat is taken before the read, so a write that
+        // races the read leaves a stale key and the next pass rereads the file.
+        // In memory only: a reload empties it, and the warm pass scheduled by
+        // the static constructor refills it off the main thread, well before
+        // the next edit starts a compile.
+        internal sealed class SourceHashes
         {
-            using var hash = SHA256.Create();
-            var text = new StringBuilder();
-            foreach (var path in paths.Distinct().OrderBy(p => p, StringComparer.Ordinal))
-            {
-                text.Append(path).Append(':');
-                text.Append(Convert.ToBase64String(hash.ComputeHash(File.ReadAllBytes(path)))).Append('\n');
-            }
-            return Convert.ToBase64String(hash.ComputeHash(Encoding.UTF8.GetBytes(text.ToString())));
-        }
+            private readonly Func<string, byte[]> _read;
+            private readonly object _lock = new object();
+            private Dictionary<string, (long Length, long Ticks, string Hash)> _byPath =
+                new Dictionary<string, (long Length, long Ticks, string Hash)>(StringComparer.Ordinal);
 
-        // Membership + size + mtime of the input set. Cheap (no file reads);
-        // any content write changes mtime, so a stable signature means the
-        // cached content fingerprint is still valid.
-        internal static string StatSignature(string[] paths)
-        {
-            using var hash = SHA256.Create();
-            var text = new StringBuilder();
-            foreach (var path in paths.Distinct().OrderBy(p => p, StringComparer.Ordinal))
+            internal SourceHashes(Func<string, byte[]> read)
             {
-                var info = new FileInfo(path);
-                text.Append(path).Append(':')
-                    .Append(info.Exists ? info.Length : -1).Append(':')
-                    .Append(info.Exists ? info.LastWriteTimeUtc.Ticks : 0).Append('\n');
+                _read = read;
             }
-            return Convert.ToBase64String(hash.ComputeHash(Encoding.UTF8.GetBytes(text.ToString())));
+
+            // Throws when an input cannot be read (a missing file included);
+            // unreadable inputs can never certify a clean compile.
+            internal string Fingerprint(string[] paths)
+            {
+                Dictionary<string, (long Length, long Ticks, string Hash)> previous;
+                lock (_lock) previous = _byPath;
+                var next = new Dictionary<string, (long Length, long Ticks, string Hash)>(StringComparer.Ordinal);
+                using var hash = SHA256.Create();
+                var text = new StringBuilder();
+                foreach (var path in paths.Distinct().OrderBy(p => p, StringComparer.Ordinal))
+                {
+                    var info = new FileInfo(path);
+                    var length = info.Exists ? info.Length : -1;
+                    var ticks = info.Exists ? info.LastWriteTimeUtc.Ticks : 0;
+                    if (!previous.TryGetValue(path, out var entry) || entry.Length != length || entry.Ticks != ticks)
+                        entry = (length, ticks, Convert.ToBase64String(hash.ComputeHash(_read(path))));
+                    next[path] = entry;
+                    text.Append(path).Append(':').Append(entry.Hash).Append('\n');
+                }
+                // Started() and a background pass may overlap; each publishes a
+                // complete map, and either one is a valid base for the next pass.
+                lock (_lock) _byPath = next;
+                return Convert.ToBase64String(hash.ComputeHash(Encoding.UTF8.GetBytes(text.ToString())));
+            }
         }
 
         // Main-thread only (Unity APIs): the pipeline's own source list plus the
@@ -123,18 +142,9 @@ namespace UnityOpenMcpBridge
             return files.Where(IsSource).ToArray();
         }
 
-        private static string Compute(Roots roots, out string signature)
-        {
-            var files = SourceFiles(roots);
-            signature = StatSignature(files);
-            lock (CacheLock)
-            {
-                if (_cachedFingerprint != null && signature == _cachedSignature) return _cachedFingerprint;
-            }
-            return Fingerprint(files);
-        }
+        private static string Compute(Roots roots) => Hashes.Fingerprint(SourceFiles(roots));
 
-        private static void Store(string fingerprint, string signature, double capturedAt)
+        private static void Store(string fingerprint, double capturedAt)
         {
             lock (CacheLock)
             {
@@ -142,7 +152,6 @@ namespace UnityOpenMcpBridge
                 // is newer; never let the background result overwrite it.
                 if (capturedAt < _cachedAtEditorTime) return;
                 _cachedFingerprint = fingerprint;
-                _cachedSignature = signature;
                 _cachedAtEditorTime = capturedAt;
             }
         }
@@ -160,8 +169,8 @@ namespace UnityOpenMcpBridge
                 var now = EditorApplication.timeSinceStartup;
                 if (force)
                 {
-                    var fingerprint = Compute(CaptureRoots(), out var signature);
-                    Store(fingerprint, signature, now);
+                    var fingerprint = Compute(CaptureRoots());
+                    Store(fingerprint, now);
                     return fingerprint;
                 }
 
@@ -182,12 +191,12 @@ namespace UnityOpenMcpBridge
                 {
                     try
                     {
-                        var fingerprint = Compute(roots, out var signature);
-                        Store(fingerprint, signature, now);
+                        var fingerprint = Compute(roots);
+                        Store(fingerprint, now);
                     }
                     catch
                     {
-                        Store(null, null, now); // unreadable inputs can never certify a clean compile
+                        Store(null, now); // unreadable inputs can never certify a clean compile
                     }
                 });
                 // Until a pass completes, nothing certifies a clean compile —
@@ -196,7 +205,7 @@ namespace UnityOpenMcpBridge
             }
             catch
             {
-                Store(null, null, EditorApplication.timeSinceStartup);
+                Store(null, EditorApplication.timeSinceStartup);
                 return null;
             }
         }
