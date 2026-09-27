@@ -297,7 +297,11 @@ bridge is down and the log is stale, start the Editor from the Hub and use
 - `job_busy`: another project command owns the mutation interval. Read its status
   and wait for terminal validation before starting a mutation or native test run,
   or changing Editor state (play mode, undo/redo, selection, prefs, console clear).
-  `execute_csharp` waits too, even with `read_only: true`.
+  `execute_csharp` waits too, even with `read_only: true`. The error carries
+  `job` (`jobId`, `commandId`, `state`, `phase`; batches add `conflictingSteps`)
+  and `agentNextSteps`. Only the agent that started the job can observe that id
+  through `unity_open_mcp_jobs`; use typed reads meanwhile and retry once after
+  the job is terminal instead of retrying in a loop.
 - `not_cancellable`: execution is unchanged. Observe the existing job; cancellation
   is supported only by explicitly cooperative project commands.
 - A wait times out: keep the id and call status/wait with the same project, port

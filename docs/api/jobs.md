@@ -64,7 +64,10 @@ they cannot contaminate its checkpoint/validation interval. This includes the
 gate-free Editor-state writes, alone or as `batch_execute` steps: play-mode
 changes, undo/redo, selection changes, PlayerPrefs/EditorPrefs writes and console
 clears. `execute_csharp` is refused even with `read_only: true`, because the
-bridge cannot verify that a snippet writes nothing. Reads, console logging,
+bridge cannot verify that a snippet writes nothing. The `job_busy` error names the
+running job (`error.job.jobId`, `commandId`, `state`, `phase`) and carries
+`agentNextSteps`: the starting agent can `wait` on that id, other agents get
+`job_not_found` for it. Reads, console logging,
 profiler recording and the job's own status/cancel calls stay available. Operator edits and other Editor plugins remain outside this
 scheduling guarantee.
 

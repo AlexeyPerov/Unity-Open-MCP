@@ -90,7 +90,7 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_editorprefs_delete", 149 },
             { "unity_open_mcp_editorprefs_get", 191 },
             { "unity_open_mcp_editorprefs_set", 231 },
-            { "unity_open_mcp_execute_csharp", 1225 },
+            { "unity_open_mcp_execute_csharp", 1258 },
             { "unity_open_mcp_execute_menu", 751 },
             { "unity_open_mcp_find_members", 363 },
             { "unity_open_mcp_find_references", 669 },

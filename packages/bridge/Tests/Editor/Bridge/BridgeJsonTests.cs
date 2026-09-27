@@ -621,5 +621,22 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(json.Contains("read-only probes"),
                 "No read-only agentNextSteps entry for tools without the flag.");
         }
+
+        [Test]
+        public static void DirectToolErrorJson_KeepsPlainShapeAndSplicesStructuredRefusals()
+        {
+            Assert.AreEqual("{\"error\":{\"code\":\"x\",\"message\":\"m\"}}",
+                BridgeJson.BuildDirectToolErrorJson(ToolDispatchResult.Fail("x", "m")));
+            var refused = ToolDispatchResult.FailWithDetail("x", "m", "{\"job\":{\"jobId\":\"j\"}}", new[] { "wait \"here\"" });
+            Assert.AreEqual("{\"error\":{\"code\":\"x\",\"message\":\"m\",\"job\":{\"jobId\":\"j\"}},\"agentNextSteps\":[\"wait \\\"here\\\"\"]}",
+                BridgeJson.BuildDirectToolErrorJson(refused));
+            // Malformed detail is dropped rather than corrupting the body.
+            Assert.AreEqual("{\"error\":{\"code\":\"x\",\"message\":\"m\"}}",
+                BridgeJson.BuildDirectToolErrorJson(ToolDispatchResult.FailWithDetail("x", "m", "{broken", null)));
+            var gate = BridgeJson.BuildGateEnvelope(GatePolicy.Skipped(refused, "request_rejected"), "off", LifecyclePolicy.None);
+            Assert.IsTrue(BridgeJson.IsCompleteJson(gate), gate);
+            StringAssert.Contains("\"error\":{\"code\":\"x\",\"message\":\"m\",\"job\":{\"jobId\":\"j\"}}", gate);
+            StringAssert.Contains("\"agentNextSteps\":[\"wait \\\"here\\\"\"]", gate);
+        }
     }
 }

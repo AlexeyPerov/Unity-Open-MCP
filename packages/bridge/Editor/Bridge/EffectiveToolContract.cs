@@ -29,9 +29,12 @@ namespace UnityOpenMcpBridge
         // A caller's read_only flag waives scope and the gate, but the bridge
         // cannot verify that arbitrary code writes nothing, so it never admits
         // such a call into a running job's checkpoint/validation interval.
-        private static bool ConflictsWithJobByName(string tool) =>
+        internal static bool ConflictsWithJobByName(string tool) =>
             BridgeToolClassification.JobConflictingTools.Contains(tool)
             || BridgeToolClassification.ExposesReadOnlyParam(tool);
+        /// <summary>The request (or one of its batch steps) passed <c>read_only: true</c> to a tool
+        /// exposing that flag. Only shapes the <c>job_busy</c> refusal wording.</summary>
+        internal bool ReadOnlyAsserted;
         /// <summary>Dispatch that reuses this contract's preflight output (bound arguments); null means
         /// the plain <c>DispatchTool(toolName, body)</c> path.</summary>
         internal Func<ToolDispatchResult> Invoke;
@@ -115,10 +118,19 @@ namespace UnityOpenMcpBridge
                     // All-read batches skip the settle wait; a refused batch never dispatches.
                     Lifecycle = refusal == null && mutating ? LifecyclePolicy.EditorSettle : LifecyclePolicy.None,
                     BatchPlan = plan,
+                    ReadOnlyAsserted = plan != null && plan.Steps.Exists(step => AssertsReadOnly(step.Tool, step.ParamsBody)),
                 };
             }
-            return new ToolRequestContract { ToolName = tool, IsMutating = IsMutating(tool, body), Lifecycle = Lifecycle(tool, body) };
+            return new ToolRequestContract
+            {
+                ToolName = tool, IsMutating = IsMutating(tool, body), Lifecycle = Lifecycle(tool, body),
+                ReadOnlyAsserted = AssertsReadOnly(tool, body),
+            };
         }
+
+        private static bool AssertsReadOnly(string tool, string body) =>
+            BridgeToolClassification.ExposesReadOnlyParam(tool)
+            && JsonBody.GetBool(JsonBody.TopLevelField(body ?? "{}", "read_only"), "read_only");
 
         internal static LifecyclePolicy Lifecycle(string tool, string body)
         {

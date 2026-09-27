@@ -156,7 +156,7 @@ namespace UnityOpenMcpBridge
 
         internal static GateDispatchResult Skipped(ToolDispatchResult mutation, string reason) =>
             new GateDispatchResult { Mutation = mutation, GateRan = false, Outcome = GateOutcome.Skipped,
-                GateFailed = false, SkippedReason = reason };
+                GateFailed = false, SkippedReason = reason, AgentNextSteps = mutation?.NextSteps };
 
         private static ToolDispatchResult InvokeMutation(Func<ToolDispatchResult> mutation)
         {

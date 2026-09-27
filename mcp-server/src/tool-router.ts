@@ -1802,6 +1802,21 @@ export class ToolRouter implements Router {
         code: `UnityEditor.Search.SearchService.ShowWindow(UnityEditor.Search.SearchService.CreateContext(${JSON.stringify(query)})); return ${JSON.stringify(query)};`,
         read_only: true,
       }, identity);
+      // The Search window opens through a read_only snippet, which a running
+      // project job refuses (the bridge cannot verify a snippet writes
+      // nothing). The handoff is optional UI, so report the query instead of
+      // surfacing the refusal as a failed search.
+      const body = result.isError ? parseResultBody(result) : null;
+      const mutation = body?.mutation as { error?: { code?: unknown; job?: unknown } | null } | undefined;
+      const refusal = mutation?.error ?? (body?.error as { code?: unknown; job?: unknown } | undefined);
+      if (refusal?.code === "job_busy") {
+        return sourceResult({
+          query, opened: false, reason: "job_busy",
+          ...(refusal.job ? { job: refusal.job } : {}),
+          message: "Unity Search cannot be opened while an asynchronous project command job runs. " +
+            "Paste the query into Unity Search manually, or retry open_ui once the job reaches a terminal state.",
+        }, "local");
+      }
       result.content.push({ type: "text", text: JSON.stringify({ query, opened: !result.isError }) });
       return result;
     }

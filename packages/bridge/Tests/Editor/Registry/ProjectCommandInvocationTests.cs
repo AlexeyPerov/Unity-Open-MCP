@@ -298,9 +298,54 @@ namespace UnityOpenMcpBridge.Tests
             var refused = Gated("unity_open_mcp_execute_csharp", snippet);
             Assert.AreEqual("job_busy", refused.Mutation.ErrorCode, refused.Mutation.ErrorMessage);
             Assert.IsNull(refused.CheckpointId);
-            Assert.AreEqual("job_busy", Gated("unity_open_mcp_batch_execute", snippetBatch).Mutation.ErrorCode);
+            StringAssert.Contains("cannot verify that a snippet writes nothing", refused.Mutation.ErrorMessage);
+            AssertActionableRefusal(BridgeJson.BuildGateEnvelope(refused, "off", LifecyclePolicy.None));
+            var batch = Gated("unity_open_mcp_batch_execute", snippetBatch);
+            Assert.AreEqual("job_busy", batch.Mutation.ErrorCode);
+            StringAssert.Contains("cannot verify that a snippet writes nothing", batch.Mutation.ErrorMessage);
+            var batchJson = BridgeJson.BuildGateEnvelope(batch, "off", LifecyclePolicy.None);
+            AssertActionableRefusal(batchJson);
+            StringAssert.Contains("\"conflictingSteps\":[{\"index\":0,\"tool\":\"unity_open_mcp_execute_csharp\"}]", batchJson);
 
             yield return FinishHeldJob();
+        }
+        // The refusal names the running job, its command and phase, and tells the caller to wait
+        // through the jobs API and read meanwhile, on the gate and direct-response routes alike.
+        // Only a self-asserted read_only call carries the unverifiable-snippet explanation.
+        [UnityTest] public IEnumerator JobBusyRefusalNamesTheRunningJobAndNextSteps()
+        {
+            yield return StartHeldJob();
+            const string pause = "{\"state\":\"pause\"}";
+            var direct = Direct("unity_open_mcp_editor_set_state", pause);
+            Assert.AreEqual("job_busy", direct.ErrorCode);
+            StringAssert.DoesNotContain("read_only", direct.ErrorMessage);
+            var directJson = BridgeJson.BuildDirectToolErrorJson(direct);
+            Assert.IsTrue(BridgeJson.IsCompleteJson(directJson), directJson);
+            AssertActionableRefusal(directJson);
+            StringAssert.StartsWith("{\"error\":{\"code\":\"job_busy\"", directJson);
+
+            var gated = Gated("unity_open_mcp_gameobject_create", "{\"name\":\"__MCPTest_JobBusy\"}");
+            StringAssert.DoesNotContain("read_only", gated.Mutation.ErrorMessage);
+            StringAssert.DoesNotContain("conflictingSteps", BridgeJson.BuildGateEnvelope(gated, "off", LifecyclePolicy.None));
+            AssertActionableRefusal(BridgeJson.BuildGateEnvelope(gated, "off", LifecyclePolicy.None));
+            // A second job start names the running job too.
+            var secondStart = ProjectCommandJobs.Handle("{\"action\":\"start\",\"job_id\":\"" + Guid.NewGuid()
+                + "\",\"invocation\":" + Body() + "}", "other");
+            StringAssert.Contains("\"job_busy\"", secondStart);
+            StringAssert.Contains(heldJobId, secondStart);
+
+            yield return FinishHeldJob();
+        }
+        private static void AssertActionableRefusal(string json)
+        {
+            Assert.IsTrue(BridgeJson.IsCompleteJson(json), json);
+            StringAssert.Contains("\"code\":\"job_busy\"", json);
+            StringAssert.Contains("\"job\":{\"jobId\":\"" + heldJobId + "\",\"commandId\":\"project.tests.invoke\",\"state\":\"running\",\"phase\":\"executing\"}", json);
+            StringAssert.Contains("\"agentNextSteps\":[", json);
+            StringAssert.Contains("unity_open_mcp_jobs", json);
+            StringAssert.Contains("job_not_found", json);
+            StringAssert.Contains("unity_open_mcp_scene_get_data", json);
+            StringAssert.Contains("never retry it in a loop", json);
         }
         private static string heldJobId;
         // Starts AsyncHeld as a project job and waits until it owns the Editor scope.

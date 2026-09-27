@@ -397,7 +397,9 @@ namespace UnityOpenMcpBridge
             {
                 sb.Append(",\"error\":{\"code\":\"").Append(EscapeStringContent(result.Mutation.ErrorCode));
                 sb.Append("\",\"message\":\"").Append(EscapeStringContent(result.Mutation.ErrorMessage ?? ""));
-                sb.Append("\"}");
+                sb.Append('"');
+                AppendErrorDetail(sb, result.Mutation.ErrorDetailJson);
+                sb.Append('}');
             }
             else
             {
@@ -898,7 +900,33 @@ namespace UnityOpenMcpBridge
         // without the gate envelope, since these bypass the checkpoint/validate flow.
         internal static string BuildDirectToolErrorJson(ToolDispatchResult result)
         {
-            return $"{{\"error\":{{\"code\":\"{EscapeStringContent(result.ErrorCode)}\",\"message\":\"{EscapeStringContent(result.ErrorMessage)}\"}}}}";
+            var sb = new StringBuilder(128);
+            sb.Append("{\"error\":{\"code\":\"").Append(EscapeStringContent(result.ErrorCode));
+            sb.Append("\",\"message\":\"").Append(EscapeStringContent(result.ErrorMessage)).Append('"');
+            AppendErrorDetail(sb, result.ErrorDetailJson);
+            sb.Append('}');
+            if (result.NextSteps != null && result.NextSteps.Length > 0)
+            {
+                sb.Append(",\"agentNextSteps\":[");
+                for (int i = 0; i < result.NextSteps.Length; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(EscapeStringContent(result.NextSteps[i])).Append('"');
+                }
+                sb.Append(']');
+            }
+            return sb.Append('}').ToString();
+        }
+
+        // Splices the members of a structured refusal's detail object into the
+        // `error` object being written (after code/message). Null, empty or
+        // non-object detail writes nothing, so the error keeps its plain shape.
+        private static void AppendErrorDetail(StringBuilder sb, string detailJson)
+        {
+            if (string.IsNullOrEmpty(detailJson) || !IsValidJsonObject(detailJson)) return;
+            var members = detailJson.Trim();
+            members = members.Substring(1, members.Length - 2).Trim();
+            if (members.Length > 0) sb.Append(',').Append(members);
         }
 
         // M13 T4.2 — agent-facing next-steps when a mutating op is refused because

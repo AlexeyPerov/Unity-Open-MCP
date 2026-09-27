@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
@@ -42,9 +43,51 @@ namespace UnityOpenMcpBridge
         // the tool runs: job records are main-thread state, and a start can
         // land between the HTTP handler and that frame. The job itself never
         // dispatches through a tool route, so it is never refused by its own guard.
-        internal static ToolDispatchResult Refuse(ToolRequestContract contract) => Active && contract.ConflictsWithJob
-            ? ToolDispatchResult.Fail("job_busy", "An asynchronous project command owns the Editor mutation scope.")
-            : null;
+        internal static ToolDispatchResult Refuse(ToolRequestContract contract)
+        {
+            if (!contract.ConflictsWithJob) return null;
+            var running = entries.Values.FirstOrDefault(e => e.Result == null);
+            return running == null ? null : BusyRefusal(running, contract);
+        }
+
+        // The refusal names the running job so its owner can wait on it through the
+        // MCP jobs API (the bridge job id is the MCP job id), and says what to do meanwhile.
+        private static ToolDispatchResult BusyRefusal(Entry job, ToolRequestContract contract)
+        {
+            var commandId = ProjectCommandInvocation.Field(job.Body, "command_id");
+            var steps = contract.BatchPlan?.Steps
+                .Where(step => step.IsMutating || ToolRequestContract.ConflictsWithJobByName(step.Tool)).ToArray();
+            var message = new StringBuilder("Refused before running: asynchronous project command job ").Append(job.Id)
+                .Append(" ('").Append(commandId).Append("', phase '").Append(job.Phase)
+                .Append("') owns the Editor mutation scope until it reaches a terminal state.");
+            if (steps != null && steps.Length > 0)
+                message.Append(" Conflicting batch steps: ")
+                    .Append(string.Join(", ", steps.Select(step => "#" + step.Index + " " + step.Tool))).Append('.');
+            if (contract.ReadOnlyAsserted)
+                message.Append(" Snippets with read_only: true are refused too: the bridge cannot verify that a snippet writes nothing, so it runs no snippet inside a job's checkpoint/validation interval.");
+            message.Append(" Wait for the job, then retry once; do not loop-retry.");
+
+            var detail = new StringBuilder("{\"job\":{\"jobId\":").Append(BridgeJson.EscapeString(job.Id))
+                .Append(",\"commandId\":").Append(BridgeJson.EscapeString(commandId))
+                .Append(",\"state\":").Append(BridgeJson.EscapeString(job.State))
+                .Append(",\"phase\":").Append(BridgeJson.EscapeString(job.Phase)).Append('}');
+            if (steps != null && steps.Length > 0)
+                detail.Append(",\"conflictingSteps\":[").Append(string.Join(",", steps.Select(step =>
+                    "{\"index\":" + step.Index + ",\"tool\":" + BridgeJson.EscapeString(step.Tool) + "}"))).Append(']');
+            detail.Append('}');
+
+            var next = new List<string>
+            {
+                "Wait for job " + job.Id + " with unity_open_mcp_jobs (action \"wait\" with job_id \"" + job.Id
+                    + "\" and a bounded timeout_ms, or action \"status\"). Only the agent that started the job can observe it; "
+                    + "any other agent gets job_not_found and should do other work before checking back.",
+                "Meanwhile use typed read tools (unity_open_mcp_scene_get_data, unity_open_mcp_read_asset, unity_open_mcp_search_assets, unity_open_mcp_component_get, unity_senses_read_console without clear); reads stay available during the job.",
+                "Retry this call once after the job is succeeded, failed, cancelled or orphaned; never retry it in a loop while the job runs.",
+            };
+            if (contract.ReadOnlyAsserted)
+                next.Insert(2, "Neither read_only: true nor wrapping the snippet in batch_execute gets execute_csharp past a running job; use a typed read tool for the probe.");
+            return ToolDispatchResult.FailWithDetail("job_busy", message.ToString(), detail.ToString(), next.ToArray());
+        }
         internal static string Handle(string body, string owner)
         {
             if (!BridgeJson.IsValidJsonObject(body)) return Error("invalid_arguments", "JSON object required.");
@@ -74,7 +117,9 @@ namespace UnityOpenMcpBridge
             if (action != "start") return Error("job_not_found", "Job record lost or expired; do not restart blindly.");
             if (BridgeToolTogglePolicy.IsDisabled(ProjectCommandInvocation.ToolName)) return Error("tool_disabled", "Project commands are disabled.");
             if (TestRunActive?.Invoke() == true) return Error("editor_busy", "A test run owns the Editor.");
-            if (Active) return Error("job_busy", "Another project command is still executing.");
+            var busy = entries.Values.FirstOrDefault(e => e.Result == null);
+            if (busy != null) return Error("job_busy", "Another project command is still executing (job " + busy.Id + ", '"
+                + ProjectCommandInvocation.Field(busy.Body, "command_id") + "', phase '" + busy.Phase + "'). Wait for it to reach a terminal state before starting another job.");
             if (entries.Count >= 256) return Error("job_capacity", "Job retention capacity reached.");
             if (EditorApplication.isCompiling || EditorApplication.isUpdating || EditorApplication.isPlayingOrWillChangePlaymode)
                 return Error("editor_busy", "Start project jobs in a settled EditMode Editor.");

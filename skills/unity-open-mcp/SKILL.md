@@ -63,4 +63,6 @@ Keep the job id and the same project/port/agent identity for `status`, `wait`,
 and arguments after a start response is lost. Cancellation is cooperative and may
 be unsupported. Treat `orphaned` as an unknown outcome; inspect operation evidence
 before retrying. Records and keys expire 30 minutes after completion and are lost
-on server restart. See [Routing and lifecycle](references/routing-and-lifecycle.md).
+on server restart. `job_busy` means a project job owns the Editor: mutations, Editor-state
+writes, test starts and every `execute_csharp` (even `read_only: true`) are refused.
+Wait on `error.job.jobId` via jobs (owner only), use typed reads meanwhile, retry once; never loop-retry. See [Routing and lifecycle](references/routing-and-lifecycle.md).

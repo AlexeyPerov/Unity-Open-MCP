@@ -4943,6 +4943,32 @@ test("route: human Search builds query without touching the Editor by default", 
   assert.equal(live.calls.at(-1)?.args.read_only, true);
 });
 
+test("route: human Search reports the query instead of failing while a project job runs", async () => {
+  const job = { jobId: "5b0e8c1e-0000-4000-8000-000000000000", commandId: "project.demo.long_write", state: "running", phase: "executing" };
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [{ type: "text", text: JSON.stringify({
+        mutation: { success: false, output: null, error: { code: "job_busy", message: "Refused before running.", job } },
+        effectiveReadOnly: true,
+        gate: { mode: "off", skipped: true, outcome: "skipped", skippedReason: "request_rejected", validation: null, delta: null },
+        agentNextSteps: ["Wait for job."],
+      }) }],
+      isError: true,
+    },
+  });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+  const result = await router.route("unity_open_mcp_manage_tools", { action: "editor_search", search_text: "Player", open_ui: true });
+  assert.equal(result.isError, false);
+  const body = parseBody(result);
+  assert.equal(body.query, 'p: "Player"');
+  assert.equal(body.opened, false);
+  assert.equal(body.reason, "job_busy");
+  assert.deepEqual(body.job, job);
+  assert.match(String(body.message), /project command job/);
+  assert.equal(live.calls.at(-1)?.tool, "unity_open_mcp_execute_csharp");
+});
+
 test("route: activated compile recovery uses its top-level route through invoke", async () => {
   const live = makeFakeLive({ available: true });
   const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());

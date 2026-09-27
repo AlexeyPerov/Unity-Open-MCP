@@ -227,6 +227,10 @@ Editor context. Checkpoint and terminal validation share the normal gate policy.
 Only one project job executes at a time; other bridge mutations, gate-free
 Editor-state writes (play mode, undo/redo, selection, prefs, console clear),
 `execute_csharp` snippets (including `read_only: true`) and test starts are
-refused with `job_busy` while it owns the Editor scope. Job
+refused with `job_busy` while it owns the Editor scope. The refusal's `error`
+object (`mutation.error` on the gate path) adds `job` with `jobId`, `commandId`,
+`state` and `phase`, plus `conflictingSteps` (`index`, `tool`) for a batch; next
+steps arrive in `agentNextSteps` (a top-level sibling of `error` on direct-response
+tools). The job id is the MCP job id. Job
 records are owned by `X-Agent-Id` and lost on domain reload, which the MCP
 adapter reports as an unknown outcome.

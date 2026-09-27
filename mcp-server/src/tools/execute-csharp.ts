@@ -69,7 +69,9 @@ export const executeCsharp = makeTool(
               "heuristic still applies (a snippet matching " +
               "AssetDatabase.DeleteAsset / EditorApplication.Exit / etc. is " +
               "still denied), and the bridge cannot statically prove the " +
-              "snippet writes nothing — only assert it does not need a scope.",
+              "snippet writes nothing — only assert it does not need a scope. " +
+              "For the same reason a snippet is refused with job_busy while an " +
+              "asynchronous project command job runs, even with read_only: true.",
           },
           ignore_scene_dirty: { ...IGNORE_SCENE_DIRTY_BASE, description: "Bypass the active-scene dirty guard. By default a disruptive op " + "(recompile / scene switch) is refused with scene_dirty when any " + "loaded scene has unsaved changes, so Unity's native save modal " + "never interrupts the flow. Set true to proceed and accept the risk " + "of a native save prompt." },
           confirm_bypass: { ...CONFIRM_BYPASS_BASE, description: "Bypass the deny heuristic for destructive patterns " + "(EditorApplication.Exit, AssetDatabase.DeleteAsset, " + "BuildPipeline.BuildPlayer, etc.). Requires gate: \"off\" as well — " + "both flags must be set. The bypass is audited." },

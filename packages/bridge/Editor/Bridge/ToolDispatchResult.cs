@@ -18,6 +18,15 @@ namespace UnityOpenMcpBridge
         // other tool. Set via the partial-batch factory below.
         public bool PartialCommit { get; private set; }
 
+        // Structured refusal context. ErrorDetailJson is a JSON object whose
+        // members are serialized inside the `error` object after code/message
+        // (gate envelope `mutation.error`, direct-response `error`); NextSteps
+        // become the gate envelope's `agentNextSteps` or a top-level
+        // `agentNextSteps` sibling of a direct-response `error`. Both stay null
+        // for every other failure, so those shapes are unchanged.
+        public string ErrorDetailJson { get; private set; }
+        public string[] NextSteps { get; private set; }
+
         public ToolDispatchResult(bool success, string output, string errorCode, string errorMessage)
         {
             Success = success;
@@ -34,6 +43,13 @@ namespace UnityOpenMcpBridge
         public static ToolDispatchResult Fail(string code, string message)
         {
             return new ToolDispatchResult(false, null, code, message);
+        }
+
+        // A refusal that tells the caller what to do instead: structured error
+        // members (a JSON object string) plus agent next steps.
+        public static ToolDispatchResult FailWithDetail(string code, string message, string errorDetailJson, string[] nextSteps)
+        {
+            return new ToolDispatchResult(false, null, code, message) { ErrorDetailJson = errorDetailJson, NextSteps = nextSteps };
         }
 
         // B25 — a failed mutation may still carry a structured output body the

@@ -216,5 +216,8 @@ returns `p: t:Prefab "Player"` and `opened: false` without contacting Unity or
 changing focus. `search_text` is a literal term; quotes, backslashes, and line
 breaks are sanitized. `asset_type` accepts a type name, not query operators.
 Only explicit `open_ui: true` opens/focuses Unity Search with that query, using
-the normal live C# route. This is a human collaboration aid; use `search_assets`
+the normal live C# route. While an asynchronous project command job runs, that
+route is refused, so `open_ui: true` returns the query with `opened: false`,
+`reason: "job_busy"` and the running `job` instead of an error; paste the query
+manually or retry after the job ends. This is a human collaboration aid; use `search_assets`
 and `find_references` for structured results. No raw YAML is returned.

@@ -27,4 +27,4 @@ returns before a possible UPM reload, so poll `bridge_status` and re-ping after
 Unity settles, then remind the operator to restart the MCP client.
 
 
-For a human Search handoff, use `manage_tools(action: "editor_search", search_text: "Player", asset_type: "Prefab")`. It returns the query without UI changes; use `open_ui: true` only when opening/focusing the Search window is explicitly wanted. Keep structured investigation on `search_assets` / `find_references`.
+For a human Search handoff, use `manage_tools(action: "editor_search", search_text: "Player", asset_type: "Prefab")`. It returns the query without UI changes; use `open_ui: true` only when opening/focusing the Search window is explicitly wanted (during a project job it returns `opened: false`, `reason: "job_busy"`; hand over the query instead). Keep structured investigation on `search_assets` / `find_references`.

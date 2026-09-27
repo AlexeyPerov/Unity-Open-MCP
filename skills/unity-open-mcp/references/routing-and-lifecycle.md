@@ -48,6 +48,11 @@ being observed through a busy or unreachable Editor; keep waiting.
 `cancel_requested` is not cancellation confirmation.
 Terminal records and idempotency keys survive for 30 minutes in the same server
 session, but not across a server restart. Keep routing and agent metadata stable.
+While a project job runs, conflicting calls return `job_busy` with `error.job`
+(`jobId`, `commandId`, `phase`) and `agentNextSteps`. `execute_csharp` is refused
+even with `read_only: true`: the bridge cannot verify a snippet writes nothing.
+The starting agent waits with that `jobId` (others get `job_not_found`); use typed
+reads meanwhile and retry once after a terminal state, never in a loop.
 
 
 For project commands, exact describe precedes invoke/start. After async start,
