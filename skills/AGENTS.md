@@ -31,6 +31,11 @@ Root skill = core agent playbook. Domain skills = one folder per domain under
   intentionally refreshing the fixture.
 - Demo-installed skill trees under client folders are fixtures — regenerate or
   refresh deliberately; do not treat them as canonical sources.
+- The Hub installs `skills/unity-open-mcp/references/` beside every copied
+  `SKILL.md`, and Hub "Clear AI Setup" removes those copies by name. When a
+  reference page is added, renamed, or removed, update
+  `SKILL_REFERENCE_FILES` in `hub/src-tauri/src/config/mcp_config.rs` (a Hub
+  unit test enforces it). Keep the folder flat.
 
 ## Verification
 

@@ -5,6 +5,7 @@ import type {
   ProjectState,
 } from "../../services/config.ts";
 import type { McpClientId } from "../../services/ai_toolkit.ts";
+import { mcpHeuristicAny } from "./diagnostics.ts";
 
 /** A tone + label pair rendered by StatusChip in the Done summary. */
 export interface ToneLabel {
@@ -37,14 +38,7 @@ export interface McpSummaryInput {
 export function mcpSummary(input: McpSummaryInput): ToneLabel {
   const h: McpConfigHeuristic | undefined = input.detection?.mcpConfigured;
   if (!h) return { tone: "muted", label: "not detected" };
-  if (
-    h.cursor ||
-    h.claudeDesktop ||
-    h.opencodeGlobal ||
-    h.opencodeProject ||
-    h.zcodeGlobal ||
-    h.zcodeProject
-  ) {
+  if (mcpHeuristicAny(h)) {
     return { tone: "ok", label: "configured" };
   }
   if (input.mcpWritten) {

@@ -4,10 +4,15 @@
 //! given project, best-effort with `.bak` backups first:
 //!
 //! - `Packages/manifest.json` — strips the bridge + verify package ids.
-//! - MCP client configs (project-scoped unconditionally; global files
-//!   only the entry whose `UNITY_PROJECT_PATH` matches this project).
-//! - Agent-skill `SKILL.md` files for the four known client-relative
-//!   skill dirs.
+//! - MCP client configs, at every path the writer can target
+//!   (`mcp_config::config_locations`): inside the Unity project
+//!   unconditionally; at the repository root a commit-safe write uses,
+//!   only the entry that resolves to this project; in global files, only
+//!   the entry whose `UNITY_PROJECT_PATH` matches this project.
+//! - The agent skill under every folder the wizard installs it in
+//!   (`mcp_config::skill_roots`): each `SKILL.md`, the template reference
+//!   pages beside it, and the `references/` and `unity-open-mcp/` folders
+//!   once they are empty.
 //!
 //! Claude Code (CLI-only) and Manual have no on-disk artifact and are
 //! reported as N/A rather than errors. Everything else that fails
@@ -23,154 +28,60 @@ use serde_json::{Map, Value};
 
 use crate::config::paths;
 use super::mcp_config::{
-    cline_settings_path, client_format, client_is_global, merge_key_path, ClientFormat,
-    ClientScope, McpClientId, MCP_SERVER_KEY,
+    client_format, config_locations, entry_targets_project, merge_key_path, skill_roots,
+    ClientFormat, ClientScope, ConfigLocation, McpClientId, MCP_SERVER_KEY, SKILL_REFERENCES_DIR,
+    SKILL_REFERENCE_FILES, SKILL_REL_PATHS,
 };
-use super::wizard::{claude_desktop_config_path, BRIDGE_PACKAGE_ID, VERIFY_PACKAGE_ID};
+use super::wizard::{BRIDGE_PACKAGE_ID, VERIFY_PACKAGE_ID};
 use crate::config::constants::PROJECT_PATH_ENV_VAR;
 
-/// Every client-relative skill path the wizard can copy. Mirrors
-/// `skills/client-paths.json` so clear runs without a toolkit root;
-/// keep this list in sync if the manifest ever grows a new target.
-/// Generated from the catalog so a new client is picked up here for free.
-const SKILL_REL_PATHS: &[&str] = &[
-    ".cursor/skills/unity-open-mcp/SKILL.md",
-    ".claude/skills/unity-open-mcp/SKILL.md",
-    ".opencode/skills/unity-open-mcp/SKILL.md",
-    ".agents/skills/unity-open-mcp/SKILL.md",
-    ".cline/skills/unity-open-mcp/SKILL.md",
-    ".gemini/skills/unity-open-mcp/SKILL.md",
-    ".kilocode/skills/unity-open-mcp/SKILL.md",
-    ".roo/skills/unity-open-mcp/SKILL.md",
-    ".agent/skills/unity-open-mcp/SKILL.md",
-    ".junie/skills/unity-open-mcp/SKILL.md",
-    ".vscode/skills/unity-open-mcp/SKILL.md",
-    ".vs/skills/unity-open-mcp/SKILL.md",
-    ".github/skills/unity-open-mcp/SKILL.md",
-];
+/// Which `unity-open-mcp` entry a clear target may remove.
+enum EntryGuard {
+    /// A config inside the Unity project: its entry is this project's.
+    Unconditional,
+    /// A global config shared across projects: only the entry whose
+    /// `UNITY_PROJECT_PATH` is this project (or that names none).
+    ProjectPath,
+    /// A config at the repository root a commit-safe write uses: only the
+    /// entry that resolves to this project from that root, so a sibling
+    /// Unity project in the same repository keeps its setup.
+    Workspace(PathBuf),
+}
 
-/// `(client, scope, target_path)` triples the clear pass visits. The
-/// `scope` carries the global-vs-project distinction so we know when
-/// the `UNITY_PROJECT_PATH` guard must apply.
+impl EntryGuard {
+    fn admits(&self, entry: &Value, project_path: &str) -> bool {
+        match self {
+            EntryGuard::Unconditional => true,
+            EntryGuard::ProjectPath => entry_matches_project(entry, project_path),
+            EntryGuard::Workspace(root) => {
+                entry_targets_project(entry, root, Path::new(project_path))
+            }
+        }
+    }
+}
+
+/// One config file the clear pass visits, with the guard that decides
+/// whether its entry belongs to this project.
 struct ClearTarget {
     client: McpClientId,
     scope: ClientScope,
     path: PathBuf,
+    guard: EntryGuard,
 }
 
-fn is_global_scope(scope: ClientScope) -> bool {
-    matches!(scope, ClientScope::Global)
-}
-
-/// Resolve every client config target the writer knows about, derived
-/// from the catalog. Cursor is special-cased (both global and project
-/// scopes are visited); every other file-backed client visits its
-/// single canonical scope. CLI-only (`ClaudeCode`) and clipboard-only
-/// (`Manual`/`Custom`) clients are intentionally absent — they have no
-/// backing file.
-fn all_client_targets(project_path: &str, home: &Path) -> Vec<ClearTarget> {
-    let project = PathBuf::from(project_path);
-    let mut out = Vec::new();
-    // Every file-backed client except Cursor (which has two scopes).
-    for client in FILE_BACKED_CLIENTS {
-        if *client == McpClientId::Cursor {
-            continue;
-        }
-        let scope = if client_is_global(*client) {
-            ClientScope::Global
-        } else {
-            ClientScope::Project
+impl From<ConfigLocation> for ClearTarget {
+    fn from(location: ConfigLocation) -> Self {
+        let guard = match (location.workspace, location.scope) {
+            (Some(root), _) => EntryGuard::Workspace(root),
+            (None, ClientScope::Global) => EntryGuard::ProjectPath,
+            (None, ClientScope::Project) => EntryGuard::Unconditional,
         };
-        if let Some(path) = resolve_clear_path(client, scope, &project, home) {
-            out.push(ClearTarget {
-                client: *client,
-                scope,
-                path,
-            });
+        Self {
+            client: location.client,
+            scope: location.scope,
+            path: location.path,
+            guard,
         }
-    }
-    // Cursor visits both scopes so a global write and a project write
-    // are both cleared in one pass.
-    if let Some(global) = resolve_clear_path(&McpClientId::Cursor, ClientScope::Global, &project, home)
-    {
-        out.push(ClearTarget {
-            client: McpClientId::Cursor,
-            scope: ClientScope::Global,
-            path: global,
-        });
-    }
-    if let Some(proj) = resolve_clear_path(&McpClientId::Cursor, ClientScope::Project, &project, home)
-    {
-        out.push(ClearTarget {
-            client: McpClientId::Cursor,
-            scope: ClientScope::Project,
-            path: proj,
-        });
-    }
-    out
-}
-
-/// Every file-backed client in the catalog. Kept as a const slice so the
-/// clear pass enumerates them without re-deriving from `McpClientId`.
-const FILE_BACKED_CLIENTS: &[McpClientId] = &[
-    McpClientId::Cursor,
-    McpClientId::ClaudeDesktop,
-    McpClientId::OpencodeGlobal,
-    McpClientId::OpencodeProject,
-    McpClientId::ZcodeGlobal,
-    McpClientId::ZcodeProject,
-    McpClientId::Cline,
-    McpClientId::Codex,
-    McpClientId::Gemini,
-    McpClientId::GithubCopilotCli,
-    McpClientId::KiloCode,
-    McpClientId::Rider,
-    McpClientId::UnityAi,
-    McpClientId::VscodeCopilot,
-    McpClientId::VsCopilot,
-    McpClientId::ZooCode,
-    McpClientId::Antigravity,
-];
-
-/// Resolve the on-disk path for a clear target. Mirrors
-/// `mcp_config::resolve_target_path` but lives here so clear runs
-/// without importing the writer's full surface. The two must stay in
-/// sync — a new client added to the writer must appear here too.
-fn resolve_clear_path(
-    client: &McpClientId,
-    scope: ClientScope,
-    project: &Path,
-    home: &Path,
-) -> Option<PathBuf> {
-    match client {
-        McpClientId::Cursor => match scope {
-            ClientScope::Global => Some(home.join(".cursor").join("mcp.json")),
-            ClientScope::Project => Some(project.join(".cursor").join("mcp.json")),
-        },
-        McpClientId::ClaudeDesktop => Some(claude_desktop_config_path(home)),
-        McpClientId::OpencodeGlobal => {
-            Some(home.join(".config").join("opencode").join("opencode.json"))
-        }
-        McpClientId::OpencodeProject => Some(project.join("opencode.json")),
-        McpClientId::ZcodeGlobal => Some(home.join(".zcode").join("cli").join("config.json")),
-        McpClientId::ZcodeProject => Some(project.join(".zcode").join("cli").join("config.json")),
-        McpClientId::Cline => Some(cline_settings_path(home)),
-        McpClientId::Codex => Some(project.join(".codex").join("config.toml")),
-        McpClientId::Gemini => Some(project.join(".gemini").join("settings.json")),
-        McpClientId::GithubCopilotCli => Some(project.join(".mcp.json")),
-        McpClientId::KiloCode => Some(project.join(".kilocode").join("mcp.json")),
-        McpClientId::Rider => Some(project.join(".junie").join("mcp").join("mcp.json")),
-        McpClientId::UnityAi => Some(project.join("UserSettings").join("mcp.json")),
-        McpClientId::VscodeCopilot => Some(project.join(".vscode").join("mcp.json")),
-        McpClientId::VsCopilot => Some(project.join(".vs").join("mcp.json")),
-        McpClientId::ZooCode => Some(project.join(".roo").join("mcp.json")),
-        McpClientId::Antigravity => Some(
-            home.join(".gemini")
-                .join("antigravity")
-                .join("mcp_config.json"),
-        ),
-        // CLI / clipboard-only clients have no file target.
-        McpClientId::ClaudeCode | McpClientId::Manual | McpClientId::Custom => None,
     }
 }
 
@@ -198,15 +109,18 @@ pub struct ClearAiSetupResult {
     pub manifest_backup_path: Option<String>,
     /// Per-client-config outcome.
     pub client_configs_cleared: Vec<ClearedClientConfig>,
-    /// Project-relative skill paths that were deleted.
+    /// Absolute paths of the `SKILL.md` files that were deleted.
     pub skills_removed: Vec<String>,
+    /// Absolute paths of the template reference files deleted from the
+    /// `references/` folders beside them.
+    pub skill_references_removed: Vec<String>,
     /// Non-fatal errors encountered (missing files are NOT errors).
     pub errors: Vec<String>,
 }
 
-/// Label for a scope, matching the wizard's "Cursor (global)" style.
-fn scope_label(client: McpClientId, scope: ClientScope) -> String {
-    let name = match client {
+/// Label for a target, matching the wizard's "Cursor (global)" style.
+fn target_label(target: &ClearTarget) -> String {
+    let name = match target.client {
         McpClientId::Cursor => "Cursor",
         McpClientId::ClaudeDesktop => "Claude Desktop",
         McpClientId::ClaudeCode => "Claude Code",
@@ -226,7 +140,11 @@ fn scope_label(client: McpClientId, scope: ClientScope) -> String {
         McpClientId::Antigravity => "Antigravity",
         McpClientId::Custom => "Custom",
     };
-    let suffix = if is_global_scope(scope) { "global" } else { "project" };
+    let suffix = match (&target.guard, target.scope) {
+        (EntryGuard::Workspace(_), _) => "repository root",
+        (_, ClientScope::Global) => "global",
+        (_, ClientScope::Project) => "project",
+    };
     format!("{name} ({suffix})")
 }
 
@@ -253,11 +171,11 @@ fn same_path(a: &str, b: &str) -> bool {
     norm(a) == norm(b)
 }
 
-/// Remove the `unity-open-mcp` leaf at `key_path` from `root` when it
-/// matches the project (global files) or unconditionally (project files).
-/// Returns `true` when a removal happened. Also prunes now-empty parent
-/// containers so a cleared project file does not leave `{"mcp":{"servers":{}}}`.
-fn remove_entry(root: &mut Value, key_path: &[&str], project_path: &str, guard: bool) -> bool {
+/// Remove the `unity-open-mcp` leaf at `key_path` from `root` when `admits`
+/// accepts it as this project's entry. Returns `true` when a removal
+/// happened; [`prune_empty_along`] then drops the emptied parents so a
+/// cleared project file does not leave `{"mcp":{"servers":{}}}`.
+fn remove_entry(root: &mut Value, key_path: &[&str], admits: impl Fn(&Value) -> bool) -> bool {
     if key_path.is_empty() {
         return false;
     }
@@ -280,10 +198,7 @@ fn remove_entry(root: &mut Value, key_path: &[&str], project_path: &str, guard: 
     let Some(obj) = current.as_object_mut() else {
         return false;
     };
-    let take = match obj.get(leaf) {
-        Some(entry) => !guard || entry_matches_project(entry, project_path),
-        None => false,
-    };
+    let take = obj.get(leaf).is_some_and(admits);
     if take {
         obj.remove(leaf);
         return true;
@@ -371,7 +286,7 @@ fn clear_client_target(
     project_path: &str,
     result: &mut ClearAiSetupResult,
 ) {
-    let label = scope_label(target.client, target.scope);
+    let label = target_label(target);
     if !target.path.exists() {
         // Nothing to clear — record the candidate so the UI can show
         // "no entry found" rather than a silent skip.
@@ -430,8 +345,9 @@ fn clear_json_target(
         }
     };
     let key_path = merge_key_path(target.client);
-    let guard = is_global_scope(target.scope);
-    let removed = remove_entry(&mut value, &key_path, project_path, guard);
+    let removed = remove_entry(&mut value, &key_path, |entry| {
+        target.guard.admits(entry, project_path)
+    });
     if !removed {
         result.client_configs_cleared.push(ClearedClientConfig {
             label: label.to_string(),
@@ -493,8 +409,7 @@ fn clear_toml_target(
             return;
         }
     };
-    let guard = is_global_scope(target.scope);
-    let removed = remove_toml_entry(&mut root, project_path, guard);
+    let removed = remove_toml_entry(&mut root, |entry| target.guard.admits(entry, project_path));
     if !removed {
         result.client_configs_cleared.push(ClearedClientConfig {
             label: label.to_string(),
@@ -540,33 +455,20 @@ fn clear_toml_target(
     });
 }
 
-/// `true` when a TOML `[mcp_servers.<name>]` entry carries an
-/// `env.UNITY_PROJECT_PATH` matching `project_path`. Absent field →
-/// treat as belonging to this project (clear it).
-fn toml_entry_matches_project(entry: &toml::Value, project_path: &str) -> bool {
-    let Some(env) = entry.get("env").and_then(|e| e.as_table()) else {
-        return true;
-    };
-    match env.get(PROJECT_PATH_ENV_VAR).and_then(|v| v.as_str()) {
-        Some(p) => same_path(p, project_path),
-        None => true,
-    }
-}
-
-/// Remove the `[mcp_servers.unity-open-mcp]` table from `root` when it
-/// matches the project (global files) or unconditionally (project files).
-/// Returns `true` when a removal happened.
-fn remove_toml_entry(root: &mut toml::value::Table, project_path: &str, guard: bool) -> bool {
+/// Remove the `[mcp_servers.unity-open-mcp]` table from `root` when `admits`
+/// accepts it (read as JSON, like every other entry). Returns `true` when a
+/// removal happened.
+fn remove_toml_entry(root: &mut toml::value::Table, admits: impl Fn(&Value) -> bool) -> bool {
     let Some(servers_val) = root.get_mut("mcp_servers") else {
         return false;
     };
     let toml::Value::Table(servers) = servers_val else {
         return false;
     };
-    let take = match servers.get(MCP_SERVER_KEY) {
-        Some(entry) => !guard || toml_entry_matches_project(entry, project_path),
-        None => false,
-    };
+    let take = servers
+        .get(MCP_SERVER_KEY)
+        .and_then(|entry| serde_json::to_value(entry).ok())
+        .is_some_and(|entry| admits(&entry));
     if take {
         servers.remove(MCP_SERVER_KEY);
         true
@@ -640,30 +542,70 @@ fn clear_manifest(project_path: &str, result: &mut ClearAiSetupResult) {
     }
 }
 
-/// Delete the four known skill files (and their now-empty
-/// `unity-open-mcp/` parent when empty).
-fn clear_skills(project_path: &str, result: &mut ClearAiSetupResult) {
-    let project = Path::new(project_path);
-    for rel in SKILL_REL_PATHS {
-        let skill = project.join(rel);
-        if !skill.is_file() {
-            continue;
-        }
-        if let Err(e) = fs::remove_file(&skill) {
-            result
-                .errors
-                .push(format!("skill: cannot remove {}: {e}", skill.display()));
-            continue;
-        }
-        result.skills_removed.push(rel.to_string());
-        // Best-effort cleanup of the now-empty leaf folder + the
-        // `skills/` and client dir parents. Errors here are ignored.
-        if let Some(unity_dir) = skill.parent() {
-            if unity_dir.read_dir().map(|mut d| d.next().is_none()).unwrap_or(false) {
-                let _ = fs::remove_dir(unity_dir);
+/// Delete the skill the wizard installed under every folder it installs the
+/// skill in for this project: each known `SKILL.md`, the template reference
+/// files beside it, then the `references/` and `unity-open-mcp/` folders
+/// when nothing else is left in them. Any other file there (a `SKILL.md.bak`,
+/// the user's own notes) is kept, and so is the folder holding it. The
+/// references go even when `SKILL.md` is already gone, so a half-removed
+/// skill is finished off. A symlinked skill or `references/` folder is not a
+/// copy the wizard made, and nothing is deleted through it.
+fn clear_skills(project_path: &str, home: &Path, result: &mut ClearAiSetupResult) {
+    for root in skill_roots(project_path, home) {
+        for rel in SKILL_REL_PATHS {
+            let skill = root.join(rel);
+            let Some(skill_dir) = skill.parent() else { continue };
+            if !is_real_dir(skill_dir) {
+                continue;
             }
+            if skill.is_file() {
+                match fs::remove_file(&skill) {
+                    Ok(()) => result.skills_removed.push(skill.to_string_lossy().into_owned()),
+                    Err(e) => result
+                        .errors
+                        .push(format!("skill: cannot remove {}: {e}", skill.display())),
+                }
+            }
+            clear_skill_references(skill_dir, result);
+            remove_dir_if_empty(skill_dir);
         }
     }
+}
+
+/// Delete the template reference files from `skill_dir/references/`, then
+/// the folder when that empties it. Only regular files named like a
+/// template page are removed.
+fn clear_skill_references(skill_dir: &Path, result: &mut ClearAiSetupResult) {
+    let references = skill_dir.join(SKILL_REFERENCES_DIR);
+    if !is_real_dir(&references) {
+        return;
+    }
+    for name in SKILL_REFERENCE_FILES {
+        let file = references.join(name);
+        if !fs::symlink_metadata(&file).is_ok_and(|m| m.is_file()) {
+            continue;
+        }
+        match fs::remove_file(&file) {
+            Ok(()) => result
+                .skill_references_removed
+                .push(file.to_string_lossy().into_owned()),
+            Err(e) => result
+                .errors
+                .push(format!("skill: cannot remove {}: {e}", file.display())),
+        }
+    }
+    remove_dir_if_empty(&references);
+}
+
+/// `true` when `path` is a directory itself, not a symlink to one.
+fn is_real_dir(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|m| m.is_dir())
+}
+
+/// Best-effort removal of a folder the clear emptied: `remove_dir` refuses
+/// a folder that still holds anything, which then stays.
+fn remove_dir_if_empty(dir: &Path) {
+    let _ = fs::remove_dir(dir);
 }
 
 /// Non-Tauri entry point; testable without spinning up the command surface.
@@ -674,10 +616,10 @@ pub fn clear_ai_setup_at(project_path: &str, home: &Path) -> ClearAiSetupResult 
         return result;
     }
     clear_manifest(project_path, &mut result);
-    for target in all_client_targets(project_path, home) {
-        clear_client_target(&target, project_path, &mut result);
+    for location in config_locations(project_path, home) {
+        clear_client_target(&ClearTarget::from(location), project_path, &mut result);
     }
-    clear_skills(project_path, &mut result);
+    clear_skills(project_path, home, &mut result);
     result
 }
 
@@ -719,7 +661,7 @@ mod tests {
             }
         });
         let key = vec!["mcpServers", MCP_SERVER_KEY];
-        let removed = remove_entry(&mut root, &key, "/p/demo", true);
+        let removed = remove_entry(&mut root, &key, |e| EntryGuard::ProjectPath.admits(e, "/p/demo"));
         assert!(removed);
         assert!(root["mcpServers"]["unity-open-mcp"].is_null());
         assert_eq!(root["mcpServers"]["other-server"]["command"], "x");
@@ -731,7 +673,7 @@ mod tests {
             "mcpServers": { "unity-open-mcp": entry("/p/other") }
         });
         let key = vec!["mcpServers", MCP_SERVER_KEY];
-        let removed = remove_entry(&mut root, &key, "/p/demo", true);
+        let removed = remove_entry(&mut root, &key, |e| EntryGuard::ProjectPath.admits(e, "/p/demo"));
         assert!(!removed);
         assert_eq!(
             root["mcpServers"]["unity-open-mcp"]["env"]["UNITY_PROJECT_PATH"],
@@ -745,7 +687,7 @@ mod tests {
             "mcp": { "servers": { "unity-open-mcp": entry("/p/other") } }
         });
         let key = vec!["mcp", "servers", MCP_SERVER_KEY];
-        let removed = remove_entry(&mut root, &key, "/p/demo", false);
+        let removed = remove_entry(&mut root, &key, |e| EntryGuard::Unconditional.admits(e, "/p/demo"));
         assert!(removed);
     }
 
@@ -761,7 +703,7 @@ mod tests {
     fn entry_without_env_marker_is_cleared() {
         let mut root = json!({ "mcpServers": { "unity-open-mcp": { "command": "x" } } });
         let key = vec!["mcpServers", MCP_SERVER_KEY];
-        assert!(remove_entry(&mut root, &key, "/p/demo", true));
+        assert!(remove_entry(&mut root, &key, |e| EntryGuard::ProjectPath.admits(e, "/p/demo")));
     }
 
     #[test]
@@ -849,5 +791,126 @@ mod tests {
                 .exists()
         );
         assert!(result.manifest_backup_path.is_some());
+    }
+
+    /// `<root>/<client dir>/skills/unity-open-mcp`, as the wizard installs it.
+    fn skill_dir(root: &Path, client_dir: &str) -> PathBuf {
+        root.join(client_dir).join("skills").join("unity-open-mcp")
+    }
+
+    /// Lay out an installed skill: `SKILL.md` plus every template reference.
+    fn install_skill(dir: &Path) {
+        fs::create_dir_all(dir.join(SKILL_REFERENCES_DIR)).unwrap();
+        fs::write(dir.join("SKILL.md"), "# skill").unwrap();
+        for name in SKILL_REFERENCE_FILES {
+            fs::write(dir.join(SKILL_REFERENCES_DIR).join(name), "# reference").unwrap();
+        }
+    }
+
+    fn file_names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort_unstable();
+        names
+    }
+
+    #[test]
+    fn clear_removes_the_skill_references_and_their_folders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let project = tmp.path().join("demo");
+        fs::create_dir_all(&home).unwrap();
+        let agents = skill_dir(&project, ".agents");
+        let claude = skill_dir(&project, ".claude");
+        install_skill(&agents);
+        install_skill(&claude);
+
+        let result = clear_ai_setup_at(project.to_str().unwrap(), &home);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert_eq!(result.skills_removed.len(), 2);
+        assert_eq!(result.skill_references_removed.len(), 2 * SKILL_REFERENCE_FILES.len());
+        assert!(result
+            .skill_references_removed
+            .contains(&agents.join(SKILL_REFERENCES_DIR).join(SKILL_REFERENCE_FILES[0]).to_string_lossy().into_owned()));
+        for dir in [&agents, &claude] {
+            assert!(!dir.exists(), "{}", dir.display());
+            // The client's own `skills/` folder is not the wizard's to remove.
+            assert!(dir.parent().unwrap().is_dir());
+        }
+    }
+
+    #[test]
+    fn clear_keeps_user_files_and_the_folders_that_hold_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let project = tmp.path().join("demo");
+        fs::create_dir_all(&home).unwrap();
+        // A note of the user's among the references.
+        let agents = skill_dir(&project, ".agents");
+        install_skill(&agents);
+        fs::write(agents.join(SKILL_REFERENCES_DIR).join("team-notes.md"), "ours").unwrap();
+        // The backup a skill overwrite leaves beside `SKILL.md`.
+        let claude = skill_dir(&project, ".claude");
+        install_skill(&claude);
+        fs::write(claude.join("SKILL.md.bak"), "customized").unwrap();
+
+        let result = clear_ai_setup_at(project.to_str().unwrap(), &home);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert_eq!(result.skill_references_removed.len(), 2 * SKILL_REFERENCE_FILES.len());
+        assert_eq!(file_names(&agents), vec![SKILL_REFERENCES_DIR]);
+        assert_eq!(file_names(&agents.join(SKILL_REFERENCES_DIR)), vec!["team-notes.md"]);
+        assert_eq!(file_names(&claude), vec!["SKILL.md.bak"]);
+    }
+
+    #[test]
+    fn clear_finishes_a_skill_whose_skill_md_is_already_gone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let project = tmp.path().join("demo");
+        fs::create_dir_all(&home).unwrap();
+        let cursor = skill_dir(&project, ".cursor");
+        install_skill(&cursor);
+        fs::remove_file(cursor.join("SKILL.md")).unwrap();
+
+        let result = clear_ai_setup_at(project.to_str().unwrap(), &home);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(result.skills_removed.is_empty());
+        assert_eq!(result.skill_references_removed.len(), SKILL_REFERENCE_FILES.len());
+        assert!(!cursor.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clear_deletes_nothing_through_a_symlinked_skill_folder() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let project = tmp.path().join("demo");
+        fs::create_dir_all(&home).unwrap();
+        // A skill folder linked to a checkout's template...
+        let template = tmp.path().join("toolkit").join("skills").join("unity-open-mcp");
+        install_skill(&template);
+        let agents = skill_dir(&project, ".agents");
+        fs::create_dir_all(agents.parent().unwrap()).unwrap();
+        symlink(&template, &agents).unwrap();
+        // ...and a real skill folder whose references are linked elsewhere.
+        let shared = tmp.path().join("shared-references");
+        fs::create_dir_all(&shared).unwrap();
+        fs::write(shared.join(SKILL_REFERENCE_FILES[0]), "shared").unwrap();
+        let claude = skill_dir(&project, ".claude");
+        fs::create_dir_all(&claude).unwrap();
+        fs::write(claude.join("SKILL.md"), "# skill").unwrap();
+        symlink(&shared, claude.join(SKILL_REFERENCES_DIR)).unwrap();
+
+        let result = clear_ai_setup_at(project.to_str().unwrap(), &home);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(result.skill_references_removed.is_empty());
+        assert_eq!(result.skills_removed, vec![claude.join("SKILL.md").to_string_lossy().into_owned()]);
+        assert_eq!(file_names(&template).len(), 2);
+        assert_eq!(file_names(&template.join(SKILL_REFERENCES_DIR)).len(), SKILL_REFERENCE_FILES.len());
+        assert!(shared.join(SKILL_REFERENCE_FILES[0]).is_file());
+        assert!(fs::symlink_metadata(claude.join(SKILL_REFERENCES_DIR)).unwrap().file_type().is_symlink());
     }
 }

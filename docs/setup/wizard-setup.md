@@ -130,7 +130,7 @@ The agent skill gives your AI client workflow guidance for the Unity MCP tools �
 - **Install template skill** — writes the template playbook (`skills/unity-open-mcp/SKILL.md`). The same workflow guidance for every project; no build required. Expand **Preview template skill** to read the content before writing.
 - **Write project skill** — produces a project-specific `SKILL.md` that merges the template playbook with this project's inventory (Unity version, installed packages, key MonoBehaviour / ScriptableObject types). Requires the built MCP server (`mcp-server/dist/index.js`).
 
-Both options write next to the MCP config the previous step wrote: normally under the Unity project, and under the repository root when a commit-safe config went there, so the client opened at the root also finds the skill. Unity AI keeps both in the Unity project.
+Both options write next to the MCP config the previous step wrote: normally under the Unity project, and under the repository root when a commit-safe config went there, so the client opened at the root also finds the skill. Unity AI keeps both in the Unity project. Setup detection and **Clear AI Setup** look in the same places, so a repository-root config and skill count as this project's setup.
 
 Both honor an explicit overwrite checkbox; existing files are backed up to `*.bak` before they are replaced. You can install the template only, write a project skill only, or both (write project skill overwrites the same path the template install writes, so confirm the overwrite).
 
@@ -155,8 +155,8 @@ step stalls on a modal, see [Dialog policy](../dialog-policy.md).
 The wizard footer has a yellow **Clear AI Setup** button (bottom-right). It removes every artifact the wizard wrote for the current project, after a confirmation prompt:
 
 - the bridge + verify entries from `Packages/manifest.json`
-- the `unity-open-mcp` entry from every known MCP client config (project-scoped configs unconditionally; global configs only the entry whose project path matches this one)
-- the copied agent-skill `SKILL.md` files
+- the `unity-open-mcp` entry from every MCP client config the wizard can write: configs inside the Unity project unconditionally; a commit-safe config at the repository root, and a global config, only when the entry points at this project
+- the installed agent skill — each `SKILL.md` and the template reference pages in its `references/` folder, then the emptied `references/` and `unity-open-mcp/` folders — including the copy beside a repository-root config, unless that root's config points at another Unity project in the same repository. Other files you added there, and the `SKILL.md.bak` an overwrite left, are kept along with the folders that hold them.
 
 A `.bak` backup is created next to each changed file. Per-target failures are reported inline rather than aborting the whole pass. This cannot be undone.
 

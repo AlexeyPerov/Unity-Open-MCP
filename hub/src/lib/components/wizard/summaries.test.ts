@@ -30,6 +30,7 @@ function detection(overrides: Partial<ProjectState> = {}): ProjectState {
       opencodeProject: false,
       zcodeGlobal: false,
       zcodeProject: false,
+      otherClients: false,
     },
     anySkillInstalled: false,
     manifestWritable: true,
@@ -47,6 +48,7 @@ const HEUR = {
   opencodeProject: false,
   zcodeGlobal: false,
   zcodeProject: false,
+  otherClients: false,
 };
 
 // ---- packagesSummary ----
@@ -100,6 +102,17 @@ test("mcpSummary: configured when heuristic flag set", () => {
       detection: detection({ mcpConfigured: { ...HEUR, cursor: true } }),
       mcpWritten: false,
       mcpClient: "cursor",
+    }),
+    { tone: "ok", label: "configured" },
+  );
+});
+
+test("mcpSummary: configured when only another client is set", () => {
+  assert.deepEqual(
+    mcpSummary({
+      detection: detection({ mcpConfigured: { ...HEUR, otherClients: true } }),
+      mcpWritten: false,
+      mcpClient: "vscode-copilot",
     }),
     { tone: "ok", label: "configured" },
   );

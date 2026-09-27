@@ -126,7 +126,7 @@ npm run build
 - **Install template skill** — 写入模板操作手册（`skills/unity-open-mcp/SKILL.md`）。适用于每个项目的同一份工作流指引；无需构建。可展开 **Preview template skill** 在写入前查看内容。
 - **Write project skill** — 生成项目专属的 `SKILL.md`，将模板操作手册与本项目的清单（Unity 版本、已安装的包、关键 MonoBehaviour / ScriptableObject 类型）合并。需要已构建的 MCP 服务器（`mcp-server/dist/index.js`）。
 
-两者都写在上一步写入的 MCP 配置旁边：通常在 Unity 项目中；当提交安全（commit-safe）配置写到仓库根目录时则写在根目录，这样在根目录打开的客户端也能找到技能。Unity AI 会把两者都保留在 Unity 项目中。
+两者都写在上一步写入的 MCP 配置旁边：通常在 Unity 项目中；当提交安全（commit-safe）配置写到仓库根目录时则写在根目录，这样在根目录打开的客户端也能找到技能。Unity AI 会把两者都保留在 Unity 项目中。安装状态检测与 **Clear AI Setup** 查看的是相同位置，因此仓库根目录中的配置和技能都算作本项目的设置。
 
 两者都遵循一个显式的覆盖勾选框；现有文件在被替换前会备份为 `*.bak`。你可以只安装模板、只写入项目技能，或两者都做（写入项目技能会覆盖模板安装写入的同一路径，因此请确认覆盖）。
 
@@ -149,8 +149,8 @@ npm run build
 向导页脚有一个黄色的 **Clear AI Setup** 按钮（右下角）。在确认提示后，它会移除向导为当前项目写入的所有产物：
 
 - `Packages/manifest.json` 中的 bridge + verify 条目
-- 每个已知 MCP 客户端配置中的 `unity-open-mcp` 条目（项目级配置无条件移除；全局配置仅移除项目路径匹配本项目的那个条目）
-- 复制的智能体技能 `SKILL.md` 文件
+- 向导可能写入的每个 MCP 客户端配置中的 `unity-open-mcp` 条目：Unity 项目内的配置无条件移除；仓库根目录中的提交安全配置以及全局配置，仅在条目指向本项目时移除
+- 已安装的智能体技能 — 每个 `SKILL.md` 及其 `references/` 文件夹中的模板参考页，随后移除已清空的 `references/` 与 `unity-open-mcp/` 文件夹 — 包括仓库根目录配置旁的副本，除非该根目录的配置指向同一仓库中的另一个 Unity 项目。你自行添加到其中的文件以及覆盖时留下的 `SKILL.md.bak` 会被保留，容纳它们的文件夹也会保留。
 
 每个被改动的文件旁都会创建 `.bak` 备份。按目标的失败会内联报告，而不会中止整个流程。此操作无法撤销。
 

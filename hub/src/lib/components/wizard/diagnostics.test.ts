@@ -28,6 +28,7 @@ function detection(overrides: Partial<ProjectState> = {}): ProjectState {
       opencodeProject: false,
       zcodeGlobal: false,
       zcodeProject: false,
+      otherClients: false,
     },
     anySkillInstalled: false,
     manifestWritable: true,
@@ -177,6 +178,7 @@ test("mcpConfiguredSummary: empty heuristic → not detected", () => {
       opencodeProject: false,
       zcodeGlobal: false,
       zcodeProject: false,
+      otherClients: false,
     }),
     "not detected",
   );
@@ -191,8 +193,26 @@ test("mcpConfiguredSummary: lists every configured client", () => {
       opencodeProject: false,
       zcodeGlobal: false,
       zcodeProject: false,
+      otherClients: false,
     }),
     "yes (Cursor, OpenCode (global))",
+  );
+});
+
+test("mcpConfiguredSummary: counts a client outside the six named flags", () => {
+  // VS Code Copilot, Gemini, Unity AI, … roll up into `otherClients` — e.g.
+  // a commit-safe `.vscode/mcp.json` at the repository root.
+  assert.equal(
+    mcpConfiguredSummary({
+      cursor: false,
+      claudeDesktop: false,
+      opencodeGlobal: false,
+      opencodeProject: false,
+      zcodeGlobal: false,
+      zcodeProject: false,
+      otherClients: true,
+    }),
+    "yes (other clients)",
   );
 });
 

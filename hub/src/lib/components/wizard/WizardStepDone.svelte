@@ -29,6 +29,7 @@
     opencodeProject: false,
     zcodeGlobal: false,
     zcodeProject: false,
+    otherClients: false,
   };
 
   // Precompute the Done-screen summaries (pure given the state bag).

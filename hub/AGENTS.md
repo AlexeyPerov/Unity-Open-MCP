@@ -36,14 +36,20 @@ per-file constant edit.** To add a client:
    update the `BUNDLED_MANIFEST` in `mcp-server/src/skill/client-paths.ts`
    (kept in sync by a unit test).
 2. **Rust writer** — add a variant to `McpClientId`
-   (`hub/src-tauri/src/config/mcp_config.rs`) and cover it in every `match`:
-   `client_format`, `client_is_global`, `resolve_target_path`,
-   `merge_key_path`, `build_entry_json`, `mcp_client_wire_key`. TOML clients
-   also need a branch in `build_codex_toml` / `read_existing_config` skip.
-3. **Rust clear + detect** — add the client to
-   `clear.rs::FILE_BACKED_CLIENTS` + `resolve_clear_path` and to
-   `wizard.rs::read_mcp_heuristic` (+ `any_skill_installed` if it ships a
-   skill folder).
+   (`hub/src-tauri/src/config/mcp_config.rs`) and to `ALL_CLIENTS`, and
+   cover it in every `match`: `client_format`, `client_is_global`,
+   `portable_strategy`, `resolve_target_path`, `merge_key_path`,
+   `build_entry_json`, `mcp_client_wire_key`. TOML clients also need a
+   branch in `build_codex_toml` / `read_existing_config` skip.
+3. **Rust clear + detect** — nothing per client. `clear.rs` and
+   `wizard.rs::read_mcp_heuristic` walk `mcp_config::config_locations`, and
+   skill detection/clear walk `mcp_config::skill_roots`; both are derived
+   from the writer (`ALL_CLIENTS` → `resolve_scope` → `config_root_for` →
+   `resolve_target_path`), so they cover the Unity project and the
+   repository root a commit-safe write uses. A new skill folder goes in
+   `mcp_config::SKILL_REL_PATHS` (a test keeps it equal to the manifest).
+   A new client reports under `other_clients` unless it gets its own
+   heuristic flag.
 4. **TS preview** — extend `McpClientId` in
    `hub/src/lib/services/ai_toolkit.ts`, `mcpClientConfigTarget`, the
    `McpClientIdWire` / `McpClientWire` unions in `config.ts`, and

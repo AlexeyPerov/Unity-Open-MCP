@@ -127,9 +127,9 @@ pub const CLIENT_PATHS_MANIFEST_REL: &str = "skills/client-paths.json";
 ///
 /// The catalog covers the Ivan-named client surface (14+ agents)
 /// plus the Open MCP originals. Adding a client is a three-step
-/// change: extend this enum, add a row to every `match` below
-/// (`client_format`, `resolve_target_path`, `merge_key_path`,
-/// `build_entry_json`), and add the skill target to
+/// change: extend this enum and [`ALL_CLIENTS`], add a row to every
+/// `match` below (`client_format`, `resolve_target_path`,
+/// `merge_key_path`, `build_entry_json`), and add the skill target to
 /// `skills/client-paths.json`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -915,6 +915,200 @@ fn detect_layout(params: &McpConfigParams) -> DetectedLayout {
     }
 }
 
+// --- Where a write can land ------------------------------------------------
+//
+// Detection (`wizard.rs`) and Clear AI Setup (`clear.rs`) must look exactly
+// where the writer can put an entry or a skill. Instead of keeping their own
+// path lists, they enumerate the writer's placements: the two inputs that move
+// a config — the Cursor scope toggle and "Commit-safe config" — are tried both
+// ways and fed through `resolve_scope`, `config_root_for` and
+// `resolve_target_path`.
+
+/// Every client in the catalog, for callers that visit each one.
+pub(crate) const ALL_CLIENTS: [McpClientId; 20] = [
+    McpClientId::Cursor,
+    McpClientId::ClaudeDesktop,
+    McpClientId::ClaudeCode,
+    McpClientId::OpencodeGlobal,
+    McpClientId::OpencodeProject,
+    McpClientId::ZcodeGlobal,
+    McpClientId::ZcodeProject,
+    McpClientId::Manual,
+    McpClientId::Cline,
+    McpClientId::Codex,
+    McpClientId::Gemini,
+    McpClientId::GithubCopilotCli,
+    McpClientId::KiloCode,
+    McpClientId::Rider,
+    McpClientId::UnityAi,
+    McpClientId::VscodeCopilot,
+    McpClientId::VsCopilot,
+    McpClientId::ZooCode,
+    McpClientId::Antigravity,
+    McpClientId::Custom,
+];
+
+/// Each distinct `(client, scope, config root)` the writer can pick for the
+/// Unity project at `project_path`. The repository root is detected once, as
+/// the plan detects it when the wizard sends no workspace path.
+fn placements(project_path: &str) -> Vec<(McpClientId, ClientScope, String)> {
+    let workspace = detect_workspace_root(Path::new(project_path), WORKSPACE_DETECT_DEPTH)
+        .map(|root| root.to_string_lossy().into_owned())
+        .unwrap_or_else(|| project_path.to_string());
+    let mut out = Vec::new();
+    for client in ALL_CLIENTS {
+        for cursor_project_scope in [false, true] {
+            for portable in [false, true] {
+                let params = McpConfigParams {
+                    project_path: project_path.to_string(),
+                    toolkit_root: String::new(),
+                    mcp_index_override: String::new(),
+                    unity_project_path: project_path.to_string(),
+                    bridge_port: String::new(),
+                    include_unity_path: false,
+                    unity_path: String::new(),
+                    client,
+                    cursor_project_scope,
+                    // An npm launch: a local checkout never goes portable.
+                    launch_mode: McpLaunchMode::Npx,
+                    workspace_path: workspace.clone(),
+                    portable,
+                };
+                // CLI and clipboard clients have no file, but their plan still
+                // reports a project-scoped config root for the skill.
+                let scope = resolve_scope(&params).unwrap_or(ClientScope::Project);
+                let placement = (client, scope, config_root_for(&params, scope));
+                if !out.contains(&placement) {
+                    out.push(placement);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// One config file the writer can target for a Unity project.
+#[derive(Debug, Clone)]
+pub(crate) struct ConfigLocation {
+    pub client: McpClientId,
+    pub scope: ClientScope,
+    pub path: PathBuf,
+    /// The repository root above the Unity project, when a commit-safe write
+    /// puts the file there. Other Unity projects in that repository can use
+    /// the same file, so only an entry that resolves to this project is ours.
+    pub workspace: Option<PathBuf>,
+}
+
+fn locations_for(
+    placements: &[(McpClientId, ClientScope, String)],
+    project_path: &str,
+    home: &Path,
+) -> Vec<ConfigLocation> {
+    placements
+        .iter()
+        .filter_map(|(client, scope, root)| {
+            let path = resolve_target_path(*client, *scope, root, home)?;
+            let workspace = (root != project_path).then(|| PathBuf::from(root));
+            Some(ConfigLocation {
+                client: *client,
+                scope: *scope,
+                path,
+                workspace,
+            })
+        })
+        .collect()
+}
+
+/// Every config file the writer can target for the Unity project at
+/// `project_path`: each file-backed client at its scope, under the Unity
+/// project and, for clients with a commit-safe form, under the repository
+/// root. Unity AI stays in the Unity project. Detection and Clear AI Setup
+/// walk this list.
+pub(crate) fn config_locations(project_path: &str, home: &Path) -> Vec<ConfigLocation> {
+    locations_for(&placements(project_path), project_path, home)
+}
+
+/// Folders the agent skill for this Unity project can sit in: every config
+/// root a plan can report, since the wizard installs the skill there. A
+/// repository root is left out while one of its configs starts the server on
+/// another Unity project — the skill there belongs to that project's setup.
+pub(crate) fn skill_roots(project_path: &str, home: &Path) -> Vec<PathBuf> {
+    let placements = placements(project_path);
+    let locations = locations_for(&placements, project_path, home);
+    let project = Path::new(project_path);
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for (_, _, root) in &placements {
+        let root = PathBuf::from(root);
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    roots.retain(|root| {
+        !locations.iter().any(|location| {
+            location.workspace.as_deref() == Some(root.as_path())
+                && read_config_entry(location.client, &location.path)
+                    .is_some_and(|entry| !entry_targets_project(&entry, root, project))
+        })
+    });
+    roots
+}
+
+/// The `unity-open-mcp` entry in `client`'s config file at `path`, as JSON (a
+/// Codex TOML table is converted). `None` when the file is missing,
+/// unreadable or malformed, or has no entry under the client's merge key.
+pub(crate) fn read_config_entry(client: McpClientId, path: &Path) -> Option<Value> {
+    let key_path = merge_key_path(client);
+    if key_path.is_empty() {
+        return None;
+    }
+    let content = fs::read_to_string(path).ok()?;
+    let root: Value = match client_format(client) {
+        ClientFormat::Toml => toml::from_str(&content).ok()?,
+        _ => serde_json::from_str(&content).ok()?,
+    };
+    get_by_path(&root, &key_path).cloned()
+}
+
+/// `true` when a `unity-open-mcp` entry in a config under `workspace` starts
+/// the server on `project`, read the way the server resolves it: an absolute
+/// `UNITY_PROJECT_PATH` or its `${workspaceFolder}` form, else
+/// `--project-from-cwd [--unity-subpath <dir>]` run in `workspace`. An entry
+/// that names no project counts as this project's, like the global-config
+/// guard in Clear AI Setup.
+pub(crate) fn entry_targets_project(entry: &Value, workspace: &Path, project: &Path) -> bool {
+    let env = entry
+        .get("env")
+        .or_else(|| entry.get("environment"))
+        .and_then(Value::as_object);
+    if let Some(value) = env
+        .and_then(|e| e.get(PROJECT_PATH_ENV_VAR))
+        .and_then(Value::as_str)
+    {
+        let resolved = match value.strip_prefix(WORKSPACE_FOLDER_VAR) {
+            Some(rest) => workspace.join(rest.trim_start_matches(['/', '\\'])),
+            None => PathBuf::from(value),
+        };
+        return resolved == project;
+    }
+    // OpenCode spells the argv as a `command` array; the others use `args`.
+    let argv: Vec<&str> = ["command", "args"]
+        .iter()
+        .filter_map(|key| entry.get(*key).and_then(Value::as_array))
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    if argv.contains(&"--project-from-cwd") {
+        let subpath = argv
+            .iter()
+            .position(|arg| *arg == "--unity-subpath")
+            .and_then(|i| argv.get(i + 1))
+            .copied()
+            .unwrap_or("");
+        return workspace.join(subpath) == project;
+    }
+    true
+}
+
 fn resolve_target_path(
     client: McpClientId,
     scope: ClientScope,
@@ -1484,6 +1678,42 @@ fn command_for(params: &McpConfigParams, resolved_index: &str, _is_cli_only: boo
 // `<toolkitRoot>/skills/client-paths.json` (see [`ClientPathsManifest`]).
 // Do not add per-client path constants here — edit the manifest.
 
+/// Every skill path in `skills/client-paths.json`, relative to a skill root,
+/// for detection and Clear AI Setup, which run without a toolkit root. A test
+/// keeps this list equal to the checked-in manifest.
+pub(crate) const SKILL_REL_PATHS: &[&str] = &[
+    ".cursor/skills/unity-open-mcp/SKILL.md",
+    ".claude/skills/unity-open-mcp/SKILL.md",
+    ".opencode/skills/unity-open-mcp/SKILL.md",
+    ".agents/skills/unity-open-mcp/SKILL.md",
+    ".cline/skills/unity-open-mcp/SKILL.md",
+    ".gemini/skills/unity-open-mcp/SKILL.md",
+    ".kilocode/skills/unity-open-mcp/SKILL.md",
+    ".roo/skills/unity-open-mcp/SKILL.md",
+    ".agent/skills/unity-open-mcp/SKILL.md",
+    ".junie/skills/unity-open-mcp/SKILL.md",
+    ".vscode/skills/unity-open-mcp/SKILL.md",
+    ".vs/skills/unity-open-mcp/SKILL.md",
+    ".github/skills/unity-open-mcp/SKILL.md",
+];
+
+/// Folder beside the template `SKILL.md`, and beside every installed copy,
+/// that holds the skill's reference pages.
+pub(crate) const SKILL_REFERENCES_DIR: &str = "references";
+
+/// Every file in the template's `references/` folder, which the skill copy
+/// and "Write project skill" install beside each `SKILL.md`. Clear AI Setup
+/// removes exactly these, since it runs without a toolkit root. A test keeps
+/// this list equal to the checked-in `skills/unity-open-mcp/references/`.
+pub(crate) const SKILL_REFERENCE_FILES: &[&str] = &[
+    "batch-and-gates.md",
+    "compile-and-safe-mode.md",
+    "discovery-and-groups.md",
+    "routing-and-lifecycle.md",
+    "senses-and-tests.md",
+    "yaml-and-offline-work.md",
+];
+
 /// In-memory mirror of `skills/client-paths.json`. The Hub and the
 /// mcp-server (`unity_open_mcp_generate_skill`) resolve identical paths
 /// from the same file, so a new client is added once in the manifest.
@@ -1805,7 +2035,7 @@ fn skill_references_match(source_skill: &Path, target_skill: &Path) -> bool {
             else { true }
         })
     }
-    tree_matches(&source_skill.parent().unwrap().join("references"), &target_skill.parent().unwrap().join("references"))
+    tree_matches(&source_skill.parent().unwrap().join(SKILL_REFERENCES_DIR), &target_skill.parent().unwrap().join(SKILL_REFERENCES_DIR))
 }
 
 // Reference paths are discovered beneath the manifest-owned skill directory.
@@ -1823,7 +2053,7 @@ fn copy_skill_references(source_skill: &Path, target_skill: &Path) -> std::io::R
         }
         Ok(())
     }
-    copy_tree(&source_skill.parent().unwrap().join("references"), &target_skill.parent().unwrap().join("references"))
+    copy_tree(&source_skill.parent().unwrap().join(SKILL_REFERENCES_DIR), &target_skill.parent().unwrap().join(SKILL_REFERENCES_DIR))
 }
 
 fn copy_skill_files_at(
@@ -2327,7 +2557,6 @@ pub(crate) fn generate_project_skill_at(
 mod tests {
     use super::*;
     use crate::config::bridge_port::compute_port;
-    use crate::config::wizard::contains_mcp_key;
     use std::fs;
     use tempfile::tempdir;
 
@@ -3135,8 +3364,8 @@ mod tests {
     #[test]
     fn mcp_path_check_uses_existing_heuristic() {
         // Sanity check: a real on-disk config file with a
-        // `unity-open-mcp` entry is detected by the same
-        // contains_mcp_key helper the heuristic uses, so the
+        // `unity-open-mcp` entry is read by the same
+        // read_config_entry helper the heuristic uses, so the
         // Done screen's MCP status stays consistent after a
         // wizard write.
         let dir = tempdir().unwrap();
@@ -3145,7 +3374,9 @@ mod tests {
             &target,
             r#"{"mcpServers":{"unity-open-mcp":{"command":"node","args":["/x"]}}}"#,
         );
-        assert!(contains_mcp_key(&target));
+        assert!(read_config_entry(McpClientId::Cursor, &target).is_some());
+        // Another client's key shape is not this client's entry.
+        assert!(read_config_entry(McpClientId::VscodeCopilot, &target).is_none());
     }
 
     #[test]
@@ -3678,30 +3909,88 @@ mod tests {
     fn mcp_client_wire_key_covers_every_variant() {
         // Every variant must resolve to a non-empty wire key so the
         // skill-copy manifest lookup never silently misses a client.
-        for client in [
-            McpClientId::Cursor,
-            McpClientId::ClaudeDesktop,
-            McpClientId::ClaudeCode,
-            McpClientId::OpencodeGlobal,
-            McpClientId::OpencodeProject,
-            McpClientId::ZcodeGlobal,
-            McpClientId::ZcodeProject,
-            McpClientId::Manual,
-            McpClientId::Cline,
-            McpClientId::Codex,
-            McpClientId::Gemini,
-            McpClientId::GithubCopilotCli,
-            McpClientId::KiloCode,
-            McpClientId::Rider,
-            McpClientId::UnityAi,
-            McpClientId::VscodeCopilot,
-            McpClientId::VsCopilot,
-            McpClientId::ZooCode,
-            McpClientId::Antigravity,
-            McpClientId::Custom,
-        ] {
+        for client in ALL_CLIENTS {
             assert!(!mcp_client_wire_key(client).is_empty());
         }
+    }
+
+    #[test]
+    fn all_clients_lists_every_variant_in_declaration_order() {
+        // This match stops compiling when a variant is added: list the new
+        // client in ALL_CLIENTS, then give it an arm here.
+        let _: fn(McpClientId) = |client| match client {
+            McpClientId::Cursor
+            | McpClientId::ClaudeDesktop
+            | McpClientId::ClaudeCode
+            | McpClientId::OpencodeGlobal
+            | McpClientId::OpencodeProject
+            | McpClientId::ZcodeGlobal
+            | McpClientId::ZcodeProject
+            | McpClientId::Manual
+            | McpClientId::Cline
+            | McpClientId::Codex
+            | McpClientId::Gemini
+            | McpClientId::GithubCopilotCli
+            | McpClientId::KiloCode
+            | McpClientId::Rider
+            | McpClientId::UnityAi
+            | McpClientId::VscodeCopilot
+            | McpClientId::VsCopilot
+            | McpClientId::ZooCode
+            | McpClientId::Antigravity
+            | McpClientId::Custom => {}
+        };
+        for (index, client) in ALL_CLIENTS.iter().enumerate() {
+            assert_eq!(*client as usize, index, "{client:?}");
+        }
+    }
+
+    #[test]
+    fn skill_rel_paths_match_the_checked_in_manifest() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("repo root");
+        let manifest = load_client_paths_manifest(&repo_root.to_string_lossy())
+            .unwrap_or_else(|e| panic!("checked-in skills/client-paths.json should parse: {e:?}"));
+        let mut from_manifest: Vec<&str> =
+            manifest.clients.values().map(|c| c.relative_path.as_str()).collect();
+        let mut listed = SKILL_REL_PATHS.to_vec();
+        from_manifest.sort_unstable();
+        listed.sort_unstable();
+        assert_eq!(listed, from_manifest);
+    }
+
+    #[test]
+    fn skill_reference_files_match_the_template_references() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("repo root");
+        let manifest = load_client_paths_manifest(&repo_root.to_string_lossy())
+            .unwrap_or_else(|e| panic!("checked-in skills/client-paths.json should parse: {e:?}"));
+        let references = repo_root
+            .join(&manifest.template_relative_path)
+            .parent()
+            .unwrap()
+            .join(SKILL_REFERENCES_DIR);
+        let mut on_disk: Vec<String> = Vec::new();
+        for entry in fs::read_dir(&references).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            // Untracked OS metadata (`.DS_Store`) is not part of the template.
+            if name.starts_with('.') {
+                continue;
+            }
+            // Clear AI Setup removes files by name from a flat folder; a
+            // nested reference would need it to prune subfolders too.
+            assert!(entry.file_type().unwrap().is_file(), "{name} is not a plain file");
+            on_disk.push(name);
+        }
+        let mut listed: Vec<String> = SKILL_REFERENCE_FILES.iter().map(|s| s.to_string()).collect();
+        on_disk.sort_unstable();
+        listed.sort_unstable();
+        assert_eq!(listed, on_disk);
     }
 
     #[test]
@@ -4040,5 +4329,310 @@ mod tests {
             Some("games/Client".to_string())
         );
         assert_eq!(relative_subpath(root, Path::new("/other")), None);
+    }
+
+    // --- detection and Clear AI Setup follow the writer --------------------
+
+    /// What the wizard sends for "Commit-safe config": portable on and no
+    /// workspace path, so the writer detects the repository root itself.
+    fn wizard_portable_params(client: McpClientId, workspace: &Path, project: &Path) -> McpConfigParams {
+        let mut params = portable_params(client, workspace, project);
+        params.workspace_path = String::new();
+        params.cursor_project_scope = true;
+        params
+    }
+
+    /// Seed the toolkit template's `references/` folder with the pages the
+    /// checked-in template ships, so Clear AI Setup recognizes the copies.
+    fn write_template_references(toolkit_root: &Path) {
+        let references = toolkit_root
+            .join("skills")
+            .join("unity-open-mcp")
+            .join(SKILL_REFERENCES_DIR);
+        for name in SKILL_REFERENCE_FILES {
+            write_text(&references.join(name), "# reference");
+        }
+    }
+
+    #[test]
+    fn detect_and_clear_visit_every_target_the_writer_picks() {
+        let home = tempdir().unwrap();
+        let (_tmp, _workspace, monorepo_project) = monorepo_tree();
+        let plain = tempdir().unwrap();
+        for project in [monorepo_project.as_path(), plain.path()] {
+            let project_str = project.to_string_lossy().into_owned();
+            let locations = config_locations(&project_str, home.path());
+            let roots = skill_roots(&project_str, home.path());
+            for client in ALL_CLIENTS {
+                for cursor_project_scope in [false, true] {
+                    for portable in [false, true] {
+                        let mut params = make_client_params(client, project);
+                        params.cursor_project_scope = cursor_project_scope;
+                        params.portable = portable;
+                        let plan = plan_mcp_config_at(&params, home.path()).unwrap();
+                        if let Some(target) = &plan.target_path {
+                            assert!(
+                                locations
+                                    .iter()
+                                    .any(|l| l.client == client && l.path == Path::new(target)),
+                                "{client:?} writes {target}, which detect/clear never visit"
+                            );
+                        }
+                        assert!(
+                            roots.contains(&PathBuf::from(&plan.config_root)),
+                            "{client:?} installs the skill under {}",
+                            plan.config_root
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn only_commit_safe_clients_gain_a_repository_root_location() {
+        let (_tmp, workspace, project) = monorepo_tree();
+        let home = tempdir().unwrap();
+        let project_str = project.to_string_lossy().into_owned();
+        let locations = config_locations(&project_str, home.path());
+        let at_root = |client: McpClientId| {
+            locations
+                .iter()
+                .any(|l| l.client == client && l.workspace.as_deref() == Some(workspace.as_path()))
+        };
+        for client in [
+            McpClientId::Cursor,
+            McpClientId::VscodeCopilot,
+            McpClientId::GithubCopilotCli,
+            McpClientId::OpencodeProject,
+            McpClientId::Gemini,
+        ] {
+            assert!(at_root(client), "{client:?}");
+        }
+        // Unity AI keeps its config in the Unity project; wrapper-only and
+        // global clients have no commit-safe form.
+        for client in [
+            McpClientId::UnityAi,
+            McpClientId::Codex,
+            McpClientId::ZcodeProject,
+            McpClientId::ClaudeDesktop,
+        ] {
+            assert!(!at_root(client), "{client:?}");
+        }
+        let unity_ai: Vec<_> = locations
+            .iter()
+            .filter(|l| l.client == McpClientId::UnityAi)
+            .collect();
+        assert_eq!(unity_ai.len(), 1);
+        assert_eq!(unity_ai[0].path, project.join("UserSettings").join("mcp.json"));
+        // The in-project and global Cursor files are still visited.
+        assert!(locations
+            .iter()
+            .any(|l| l.path == project.join(".cursor").join("mcp.json") && l.workspace.is_none()));
+        assert!(locations
+            .iter()
+            .any(|l| l.path == home.path().join(".cursor").join("mcp.json") && l.workspace.is_none()));
+        assert_eq!(
+            skill_roots(&project_str, home.path()),
+            vec![project.clone(), workspace.clone()]
+        );
+
+        // No repository above the Unity project: nothing moves.
+        let plain = tempdir().unwrap();
+        let plain_str = plain.path().to_string_lossy().into_owned();
+        assert!(config_locations(&plain_str, home.path())
+            .iter()
+            .all(|l| l.workspace.is_none()));
+        assert_eq!(skill_roots(&plain_str, home.path()), vec![plain.path().to_path_buf()]);
+    }
+
+    #[test]
+    fn entry_targets_project_reads_every_portable_form() {
+        let workspace = Path::new("/repo");
+        let client = Path::new("/repo/Client");
+        let server = Path::new("/repo/Server");
+        let interpolated = json!({ "env": { PROJECT_PATH_ENV_VAR: "${workspaceFolder}/Client" } });
+        let from_cwd = json!({
+            "args": ["-y", NPM_PACKAGE, "--project-from-cwd", "--unity-subpath", "Client"],
+            "env": {}
+        });
+        let opencode = json!({
+            "command": ["npx", "-y", NPM_PACKAGE, "--project-from-cwd", "--unity-subpath", "Client"],
+            "environment": {}
+        });
+        let absolute = json!({ "env": { PROJECT_PATH_ENV_VAR: "/repo/Client/" } });
+        for entry in [&interpolated, &from_cwd, &opencode, &absolute] {
+            assert!(entry_targets_project(entry, workspace, client), "{entry}");
+            assert!(!entry_targets_project(entry, workspace, server), "{entry}");
+        }
+        // `--project-from-cwd` alone resolves the repository root itself.
+        let root_cwd = json!({ "args": ["-y", NPM_PACKAGE, "--project-from-cwd"] });
+        assert!(!entry_targets_project(&root_cwd, workspace, client));
+        // No project marker: nothing says it belongs to another project.
+        let bare = json!({ "command": "unity-open-mcp", "args": [] });
+        assert!(entry_targets_project(&bare, workspace, client));
+    }
+
+    #[test]
+    fn detect_and_clear_follow_a_commit_safe_write_to_the_repository_root() {
+        use crate::config::clear::clear_ai_setup_at;
+        use crate::config::wizard::{any_skill_installed, read_mcp_heuristic};
+        let (_tmp, workspace, project) = monorepo_tree();
+        let home = tempdir().unwrap();
+        let toolkit = tempdir().unwrap();
+        make_fake_skill_manifest(toolkit.path());
+        write_text(
+            &toolkit.path().join("skills").join("unity-open-mcp").join("SKILL.md"),
+            "# skill",
+        );
+        write_template_references(toolkit.path());
+        // An interpolating client and a `--project-from-cwd` client.
+        let cursor = wizard_portable_params(McpClientId::Cursor, &workspace, &project);
+        let copilot = wizard_portable_params(McpClientId::GithubCopilotCli, &workspace, &project);
+        for params in [&cursor, &copilot] {
+            write_mcp_config_at(params, home.path()).unwrap();
+        }
+        let plan = plan_mcp_config_at(&cursor, home.path()).unwrap();
+        let mut skill = make_skill_params(&project, toolkit.path(), McpClientId::Cursor);
+        skill.skill_root = plan.config_root.clone();
+        copy_skill_files_at(&skill, false).unwrap();
+
+        let cursor_config = workspace.join(".cursor").join("mcp.json");
+        let copilot_config = workspace.join(".mcp.json");
+        let skill_file = workspace
+            .join(".cursor")
+            .join("skills")
+            .join("unity-open-mcp")
+            .join("SKILL.md");
+        assert!(cursor_config.is_file() && copilot_config.is_file() && skill_file.is_file());
+        let skill_dir = skill_file.parent().unwrap().to_path_buf();
+        let references: Vec<PathBuf> = SKILL_REFERENCE_FILES
+            .iter()
+            .map(|name| skill_dir.join(SKILL_REFERENCES_DIR).join(name))
+            .collect();
+        assert!(references.iter().all(|r| r.is_file()));
+        assert!(!project.join(".cursor").exists());
+
+        let detected = read_mcp_heuristic(&project, home.path());
+        assert!(detected.cursor);
+        assert!(detected.other_clients);
+        assert!(any_skill_installed(&project, Some(home.path())));
+
+        let result = clear_ai_setup_at(&project.to_string_lossy(), home.path());
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(read_config_entry(McpClientId::Cursor, &cursor_config).is_none());
+        assert!(read_config_entry(McpClientId::GithubCopilotCli, &copilot_config).is_none());
+        assert!(cursor_config.with_extension("json.bak").is_file());
+        assert!(!skill_file.exists());
+        assert_eq!(result.skills_removed, vec![skill_file.to_string_lossy().into_owned()]);
+        let mut removed_references = result.skill_references_removed.clone();
+        removed_references.sort_unstable();
+        let mut expected_references: Vec<String> =
+            references.iter().map(|r| r.to_string_lossy().into_owned()).collect();
+        expected_references.sort_unstable();
+        assert_eq!(removed_references, expected_references);
+        assert!(!skill_dir.exists());
+        assert!(workspace.join(".cursor").join("skills").is_dir());
+        assert!(result
+            .client_configs_cleared
+            .iter()
+            .any(|c| c.removed && c.label == "Cursor (repository root)"));
+
+        assert!(!read_mcp_heuristic(&project, home.path()).any());
+        assert!(!any_skill_installed(&project, Some(home.path())));
+    }
+
+    #[test]
+    fn a_project_skill_written_at_the_repository_root_is_cleared_with_its_references() {
+        use crate::config::clear::clear_ai_setup_at;
+        let (_tmp, workspace, project) = monorepo_tree();
+        let home = tempdir().unwrap();
+        let toolkit = tempdir().unwrap();
+        make_fake_skill_manifest(toolkit.path());
+        let template = toolkit.path().join("skills").join("unity-open-mcp").join("SKILL.md");
+        write_text(&template, "# template");
+        write_template_references(toolkit.path());
+        let manifest = load_client_paths_manifest(&toolkit.path().to_string_lossy()).unwrap();
+        let keys = client_keys_for_mcp_client(&manifest, McpClientId::ClaudeCode);
+        write_generated_skill(&workspace, &manifest, &keys, "# generated", Some(&template)).unwrap();
+        let skill_dir = workspace.join(".claude").join("skills").join("unity-open-mcp");
+        assert!(skill_dir.join("SKILL.md").is_file());
+        assert!(skill_dir.join(SKILL_REFERENCES_DIR).join(SKILL_REFERENCE_FILES[0]).is_file());
+
+        let result = clear_ai_setup_at(&project.to_string_lossy(), home.path());
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert_eq!(
+            result.skills_removed,
+            vec![skill_dir.join("SKILL.md").to_string_lossy().into_owned()]
+        );
+        assert_eq!(result.skill_references_removed.len(), SKILL_REFERENCE_FILES.len());
+        assert!(!skill_dir.exists());
+        assert!(workspace.join(".claude").join("skills").is_dir());
+        // The template the references were copied from is untouched.
+        assert!(toolkit
+            .path()
+            .join("skills")
+            .join("unity-open-mcp")
+            .join(SKILL_REFERENCES_DIR)
+            .join(SKILL_REFERENCE_FILES[0])
+            .is_file());
+    }
+
+    #[test]
+    fn a_commit_safe_unity_ai_config_is_found_and_cleared_in_the_unity_project() {
+        use crate::config::clear::clear_ai_setup_at;
+        use crate::config::wizard::read_mcp_heuristic;
+        let (_tmp, workspace, project) = monorepo_tree();
+        let home = tempdir().unwrap();
+        let params = wizard_portable_params(McpClientId::UnityAi, &workspace, &project);
+        write_mcp_config_at(&params, home.path()).unwrap();
+        let config = project.join("UserSettings").join("mcp.json");
+        assert!(read_config_entry(McpClientId::UnityAi, &config).is_some());
+        assert!(!workspace.join("UserSettings").exists());
+        assert!(read_mcp_heuristic(&project, home.path()).other_clients);
+
+        let result = clear_ai_setup_at(&project.to_string_lossy(), home.path());
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(read_config_entry(McpClientId::UnityAi, &config).is_none());
+        assert!(!read_mcp_heuristic(&project, home.path()).any());
+    }
+
+    #[test]
+    fn a_sibling_unity_project_leaves_the_repository_root_setup_alone() {
+        use crate::config::clear::clear_ai_setup_at;
+        use crate::config::wizard::{any_skill_installed, read_mcp_heuristic};
+        let (_tmp, workspace, client) = monorepo_tree();
+        let server = workspace.join("Server");
+        fs::create_dir_all(server.join("Assets")).unwrap();
+        let home = tempdir().unwrap();
+        let params = wizard_portable_params(McpClientId::Cursor, &workspace, &client);
+        write_mcp_config_at(&params, home.path()).unwrap();
+        let config = workspace.join(".cursor").join("mcp.json");
+        let skill_file = workspace
+            .join(".cursor")
+            .join("skills")
+            .join("unity-open-mcp")
+            .join("SKILL.md");
+        write_text(&skill_file, "# skill");
+        let reference = skill_file
+            .parent()
+            .unwrap()
+            .join(SKILL_REFERENCES_DIR)
+            .join(SKILL_REFERENCE_FILES[0]);
+        write_text(&reference, "# reference");
+
+        // The repository-root setup starts the server on Client, not Server.
+        assert!(!read_mcp_heuristic(&server, home.path()).cursor);
+        assert!(!any_skill_installed(&server, Some(home.path())));
+        let result = clear_ai_setup_at(&server.to_string_lossy(), home.path());
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(result.skills_removed.is_empty());
+        assert!(result.skill_references_removed.is_empty());
+        assert!(read_config_entry(McpClientId::Cursor, &config).is_some());
+        assert!(skill_file.is_file());
+        assert!(reference.is_file());
+
+        assert!(read_mcp_heuristic(&client, home.path()).cursor);
+        assert!(any_skill_installed(&client, Some(home.path())));
     }
 }

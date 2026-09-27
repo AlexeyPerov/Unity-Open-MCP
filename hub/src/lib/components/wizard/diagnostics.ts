@@ -43,7 +43,8 @@ export function mcpHeuristicAny(h: McpConfigHeuristic): boolean {
     h.opencodeGlobal ||
     h.opencodeProject ||
     h.zcodeGlobal ||
-    h.zcodeProject
+    h.zcodeProject ||
+    h.otherClients
   );
 }
 
@@ -164,5 +165,6 @@ export function mcpConfiguredSummary(h: McpConfigHeuristic): string {
   if (h.opencodeProject) clients.push("OpenCode (project)");
   if (h.zcodeGlobal) clients.push("ZCode (global)");
   if (h.zcodeProject) clients.push("ZCode (project)");
+  if (h.otherClients) clients.push("other clients");
   return `yes (${clients.join(", ")})`;
 }

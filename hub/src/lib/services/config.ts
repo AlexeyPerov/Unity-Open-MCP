@@ -1578,6 +1578,8 @@ export interface McpConfigHeuristic {
   opencodeProject: boolean;
   zcodeGlobal: boolean;
   zcodeProject: boolean;
+  /** Any other catalog client (VS Code Copilot, Gemini, Unity AI, …). */
+  otherClients: boolean;
 }
 
 export interface ProjectState {
@@ -1596,9 +1598,10 @@ export interface ProjectState {
   bridgeInstalled: boolean;
   verifyInstalled: boolean;
   mcpConfigured: McpConfigHeuristic;
-  /** `true` when at least one agent-skill `SKILL.md` exists under any
-   * of the four client-relative skill dirs in the project. Drives the
-   * Step 4b passing highlight + the project-row AI status. */
+  /** `true` when at least one agent-skill `SKILL.md` exists under a
+   * client skill dir in the Unity project, or in the repository root a
+   * commit-safe config uses. Drives the Step 4b passing highlight + the
+   * project-row AI status. */
   anySkillInstalled: boolean;
   /** `true` when `Packages/manifest.json` (or its parent) is writable. */
   manifestWritable: boolean;
@@ -2029,9 +2032,10 @@ export async function generateProjectSkill(
 /**
  * "Clear AI Setup" — the destructive inverse of the wizard. Strips the
  * bridge + verify package ids from `Packages/manifest.json`, removes the
- * `unity-open-mcp` entry from every known MCP client config (global files
- * only when the entry's `UNITY_PROJECT_PATH` matches this project), and
- * deletes the four agent-skill `SKILL.md` files. All mutations are
+ * `unity-open-mcp` entry from every config the wizard can write (global
+ * files and repository-root files only when the entry points at this
+ * project), and deletes the agent-skill `SKILL.md` files the wizard can
+ * install, including a repository-root copy. All mutations are
  * best-effort with `.bak` backups; per-target failures are collected into
  * `errors` rather than aborting the whole pass. Mirrors the Rust
  * `clear::{clear_ai_setup, ClearAiSetupResult, …}` types.
@@ -2054,8 +2058,10 @@ export interface ClearAiSetupResult {
   manifestBackupPath: string | null;
   /** Per-client-config outcome. */
   clientConfigsCleared: ClearedClientConfig[];
-  /** Project-relative skill paths that were deleted. */
+  /** Absolute paths of the `SKILL.md` files that were deleted. */
   skillsRemoved: string[];
+  /** Absolute paths of the template reference files deleted beside them. */
+  skillReferencesRemoved: string[];
   /** Non-fatal errors encountered (missing files are NOT errors). */
   errors: string[];
 }

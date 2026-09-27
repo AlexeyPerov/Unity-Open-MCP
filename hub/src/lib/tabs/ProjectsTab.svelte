@@ -71,6 +71,7 @@
   import { openPath, openUrl } from "@tauri-apps/plugin-opener";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import AiSetupWizard from "$lib/components/AiSetupWizard.svelte";
+  import { mcpHeuristicAny } from "$lib/components/wizard/diagnostics.ts";
   import { AI_SETUP_ENABLED, MULTI_PROJECT_TYPES_ENABLED } from "$lib/features";
   import WalkUpScanModal from "./projects/WalkUpScanModal.svelte";
   import ProjectList from "./projects/ProjectList.svelte";
@@ -508,15 +509,7 @@
     if (!d) return false;
     if (!d.isValidUnityProject || !d.meetsMinUnityVersion || !d.manifestWritable) return false;
     if (!d.bridgeInstalled || !d.verifyInstalled) return false;
-    const h = d.mcpConfigured;
-    return (
-      h.cursor ||
-      h.claudeDesktop ||
-      h.opencodeGlobal ||
-      h.opencodeProject ||
-      h.zcodeGlobal ||
-      h.zcodeProject
-    );
+    return mcpHeuristicAny(d.mcpConfigured);
   }
 
   // Refresh AI detection for every tracked Unity project. Runs lazily
