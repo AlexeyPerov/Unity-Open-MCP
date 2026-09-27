@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { EventEmitter } from "node:events";
 
-import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, extractOffendingPackages, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator, extractJson, diagnoseEditorLock, editorLockedMessage, editorLockedNextSteps, type BatchSpawnOptions } from "./batch-spawn.js";
+import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, extractOffendingPackages, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator, extractJson, diagnoseEditorLock, editorLockedMessage, editorLockedNextSteps, FAILED_RESOLUTION_TTL_MS, type BatchSpawnOptions } from "./batch-spawn.js";
 import { lockPath } from "./instance-discovery.js";
 import { setUnityProcessScannerForTest, findUnityForProject } from "./running-unity.js";
 import { VERIFY_JSON_BEGIN, VERIFY_JSON_END } from "./constants.js";
@@ -662,16 +662,75 @@ test("batch spawn picks up the exact editor installed after a unity_version_not_
 
 test("headlessAvailable follows the spawn's editor resolution without spawning", { skip: process.platform === "win32" }, async () => {
   await withVersionFixture(async (hub, project) => {
+    let clock = 0;
     writeProjectVersion(project, "6000.0.10f1");
     fakeReportingInstall(hub, "6000.0.50f1");
-    const batch = new BatchSpawn({ discoveryRoots: [hub], projectPath: project });
+    const batch = new BatchSpawn({ discoveryRoots: [hub], projectPath: project, now: () => clock });
     assert.equal(batch.headlessAvailable(), false, "no exact editor for the project version");
 
     fakeReportingInstall(hub, "6000.0.10f1");
+    clock += FAILED_RESOLUTION_TTL_MS;
     assert.equal(batch.headlessAvailable(), true, "a newly installed exact editor is picked up");
 
     writeProjectVersion(project, "6000.0.20f1");
     assert.equal(batch.headlessAvailable(), false, "a project upgrade is re-read");
+  });
+});
+
+// Discovery calls headlessAvailable on every capabilities/activate_for
+// request; a failed resolution must not rescan every Hub root each time.
+test("headlessAvailable reuses a failed resolution within the TTL, then rescans", { skip: process.platform === "win32" }, async () => {
+  await withVersionFixture(async (hub, project) => {
+    let clock = 1_000;
+    writeProjectVersion(project, "6000.0.10f1");
+    fakeReportingInstall(hub, "6000.0.50f1");
+    const batch = new BatchSpawn({ discoveryRoots: [hub], projectPath: project, now: () => clock });
+    assert.equal(batch.headlessAvailable(), false);
+
+    fakeReportingInstall(hub, "6000.0.10f1");
+    clock += FAILED_RESOLUTION_TTL_MS - 1;
+    assert.equal(batch.headlessAvailable(), false, "the cached failure is reused, so the new install is not seen yet");
+
+    clock += 1;
+    assert.equal(batch.headlessAvailable(), true, "an expired failure is rescanned");
+  });
+});
+
+test("a spawn rescans a cached failure immediately, without waiting for the TTL", { skip: process.platform === "win32" }, async () => {
+  await withVersionFixture(async (hub, project) => {
+    const clock = 1_000;
+    writeProjectVersion(project, "6000.0.10f1");
+    fakeReportingInstall(hub, "6000.0.50f1");
+    const batch = new BatchSpawn({ discoveryRoots: [hub], projectPath: project, now: () => clock });
+    assert.equal(batch.headlessAvailable(), false);
+
+    const exactExe = fakeReportingInstall(hub, "6000.0.10f1");
+    const recovered = parseBody(await batch.route("unity_open_mcp_compile_check", {}));
+    assert.equal(recovered.error, undefined);
+    assert.equal(spawnedCommand(recovered), exactExe);
+    assert.equal(batch.headlessAvailable(), true, "availability shares the spawn's fresh resolution");
+  });
+});
+
+test("an env change invalidates the cached resolution, failed or successful", { skip: process.platform === "win32" }, async () => {
+  await withVersionFixture(async (hub, project) => {
+    const clock = 1_000;
+    writeProjectVersion(project, "6000.0.10f1");
+    const otherExe = fakeReportingInstall(hub, "6000.0.50f1");
+    const batch = new BatchSpawn({ discoveryRoots: [hub], projectPath: project, now: () => clock });
+    assert.equal(batch.headlessAvailable(), false);
+
+    process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH = "1";
+    assert.equal(batch.headlessAvailable(), true, "opting in to a mismatch takes effect within the TTL");
+
+    delete process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH;
+    assert.equal(batch.headlessAvailable(), false, "withdrawing the opt-in drops the cached success");
+
+    process.env.UNITY_PATH = fakeReportingInstall(hub, "6000.0.10f1");
+    assert.equal(batch.headlessAvailable(), true, "a UNITY_PATH fix takes effect within the TTL");
+
+    process.env.UNITY_PATH = otherExe;
+    assert.equal(batch.headlessAvailable(), false, "repinning to a mismatched editor drops the cached success");
   });
 });
 

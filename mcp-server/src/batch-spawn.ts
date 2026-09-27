@@ -27,6 +27,9 @@ const OUTPUT_BEGIN = VERIFY_JSON_BEGIN;
 const OUTPUT_END = VERIFY_JSON_END;
 
 const DEFAULT_BATCH_TIMEOUT_MS = 600_000;
+// How long a FAILED editor resolution is reused by availability checks
+// before the Hub install roots are rescanned. See refreshUnityPath.
+export const FAILED_RESOLUTION_TTL_MS = 30_000;
 const activeBatchProjects = new Set<string>();
 const BATCH_IN_PROGRESS_MESSAGE = "A headless operation already owns this project. Wait for it to finish.";
 
@@ -560,6 +563,8 @@ export interface BatchSpawnOptions {
    * event sequences a real process does not produce on demand.
    */
   spawnProcess?: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
+  /** Optional clock (test hook) for the failed-resolution TTL. */
+  now?: () => number;
 }
 
 export class BatchSpawn implements Router {
@@ -569,14 +574,18 @@ export class BatchSpawn implements Router {
   private timeoutMs: number;
   private readonly discoveryRoots?: string[];
   private readonly spawnProcess: NonNullable<BatchSpawnOptions["spawnProcess"]>;
+  private readonly now: () => number;
   private resolutionError?: Extract<UnityPathResolution, { ok: false }>;
-  // Project editor version the cached executable was resolved for; undefined
-  // until the first resolution. See refreshUnityPath.
-  private resolvedForVersion?: string | null;
+  // Inputs (project version + env) the cached resolution was computed for,
+  // and when it was computed; undefined until the first resolution. See
+  // refreshUnityPath.
+  private resolutionKey?: string;
+  private resolvedAt = 0;
 
   constructor(options: BatchSpawnOptions = {}) {
     this.discoveryRoots = options.discoveryRoots;
     this.spawnProcess = options.spawnProcess ?? spawn;
+    this.now = options.now ?? Date.now;
 
     const requestedProjectPath =
       options.projectPath ?? process.env.UNITY_PROJECT_PATH ?? "";
@@ -617,10 +626,11 @@ export class BatchSpawn implements Router {
 
   // Whether a headless spawn has a project and an editor to open it with — the
   // availability discovery reports for always-batch tools, which the live
-  // bridge never lists. Shares the spawn's resolution cache (refreshUnityPath),
-  // so installs are rescanned only when the project version changed or the
-  // last resolution failed. A live Editor holding the project lock is runtime
-  // state, not availability, and is refused at spawn time.
+  // bridge never lists. Shares the spawn's resolution cache (refreshUnityPath):
+  // installs are rescanned when the project version or env changed, or when a
+  // failed resolution is older than FAILED_RESOLUTION_TTL_MS. A live Editor
+  // holding the project lock is runtime state, not availability, and is
+  // refused at spawn time.
   headlessAvailable(): boolean {
     this.refreshUnityPath();
     return this.projectPath !== "" && this.unityPath !== "";
@@ -707,7 +717,7 @@ export class BatchSpawn implements Router {
         detail: { error: { code: "editor_instance_locked", message }, agentNextSteps: editorLockedNextSteps(toolName, diagnosis) } });
     }
 
-    this.refreshUnityPath();
+    this.refreshUnityPath(true);
     const pathError = await this.validateUnityPath();
     if (pathError) return pathError;
 
@@ -795,24 +805,37 @@ export class BatchSpawn implements Router {
   // cheap to read, so it is re-read before every spawn: a project upgraded
   // while the server runs must not open with the previously chosen editor
   // (a wrong-version open can rewrite package and project metadata). The
-  // install scan reruns only when that version changed or the previous
-  // resolution failed, so installing the missing exact editor (or fixing
-  // UNITY_PATH) takes effect without a server restart.
-  private refreshUnityPath(): void {
+  // install scan (a synchronous walk of every Hub root) reruns when that
+  // version or the env inputs changed. A failed resolution is also retried,
+  // so installing the missing exact editor takes effect without a server
+  // restart: always on a spawn (retryFailure), and after
+  // FAILED_RESOLUTION_TTL_MS for availability checks, which discovery calls
+  // on every capabilities/activate_for request.
+  private refreshUnityPath(retryFailure = false): void {
     const preferredVersion =
       readProjectUnityVersion(this.projectPath) ??
       (this.projectPath ? readInstanceLock(this.projectPath)?.unityVersion : undefined) ??
       null;
-    if (!this.resolutionError && this.resolvedForVersion === preferredVersion) return;
-
     const allowVersionMismatch =
       process.env.UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH === "1";
+    const key = JSON.stringify([
+      preferredVersion,
+      process.env.UNITY_PATH ?? null,
+      process.env.UNITY_HUB ?? null,
+      allowVersionMismatch,
+    ]);
+    if (key === this.resolutionKey) {
+      if (!this.resolutionError) return;
+      if (!retryFailure && this.now() - this.resolvedAt < FAILED_RESOLUTION_TTL_MS) return;
+    }
+
     const resolution = resolveUnityPathForProject(
       preferredVersion,
       this.discoveryRoots,
       allowVersionMismatch,
     );
-    this.resolvedForVersion = preferredVersion;
+    this.resolutionKey = key;
+    this.resolvedAt = this.now();
     if (resolution.ok) {
       this.unityPath = resolution.value.path;
       this.unityPathSource = resolution.value.source;

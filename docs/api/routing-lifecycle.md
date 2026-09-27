@@ -130,9 +130,11 @@ Headless batch is for fallback and automation:
 - `UNITY_PROJECT_PATH` is required. Before every spawn, the server reads the
   exact editor version from `ProjectSettings/ProjectVersion.txt` and selects
   only that installed version. A missing exact install fails closed without
-  opening the project. Installed editors are rescanned when the project version
-  changes or the previous lookup failed, so a project upgrade or a newly
-  installed exact editor takes effect without restarting the server.
+  opening the project. Installed editors are rescanned when the project version,
+  `UNITY_PATH`, `UNITY_HUB`, or the mismatch opt-in changes, and a failed lookup
+  is retried on every spawn, so a project upgrade or a newly installed exact
+  editor takes effect without restarting the server. Discovery's headless
+  availability reuses a failed lookup for up to 30 seconds before rescanning.
   `UNITY_PATH` may pin an executable, but a recognizable mismatched Hub path is
   refused too, including after the project moves to another version. The
   explicit escape hatch `UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1` restores
