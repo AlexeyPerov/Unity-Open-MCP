@@ -21,9 +21,10 @@ namespace UnityOpenMcpBridge.TypedTools
     // which only shows the last-saved YAML).
     //
     // Mutating tools are undo-recorded where the Unity API supports it.
-    // `scene_open` runs on the RestartThenSettle lifecycle path so the active-
-    // scene dirty guard preflights it (Single-mode open can lose unsaved
-    // changes in currently-open scenes); the other mutators are EditorSettle.
+    // `scene_create` and `scene_open` run on the RestartThenSettle lifecycle
+    // path so the active-scene dirty guard preflights them (their default
+    // Single mode closes every open scene without saving; Additive mode skips
+    // the guard); the other mutators are EditorSettle.
     //
     // These tools are NOT registry-discovered: they are wired into
     // BridgeHttpServer.DispatchTool alongside the other M16 typed tools so

@@ -449,14 +449,17 @@ namespace UnityOpenMcpBridge.Tests
         // new scene tool fails loudly here, not silently at runtime.
 
         [Test]
-        public void DirtyGuard_PreflightsSceneOpen_NotOtherSceneMutators()
+        public void DirtyGuard_PreflightsSceneCreateAndOpen_NotOtherSceneMutators()
         {
-            // scene_open is RestartThenSettle: the dirty guard preflights it
-            // (Single-mode open can lose unsaved changes). The other scene
-            // mutators are EditorSettle — no dirty-scene refusal.
+            // scene_create and scene_open are RestartThenSettle: both default to
+            // Single mode, which closes every open scene without saving, so the
+            // dirty guard preflights them. (Additive mode keeps open scenes and
+            // skips the guard — pinned in SceneDirtyGuardTests.) The other scene
+            // mutators are EditorSettle / None — no dirty-scene refusal.
+            Assert.IsTrue(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_create", "{}"),
+                "scene_create must be guarded (RestartThenSettle lifecycle)");
             Assert.IsTrue(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_open", "{}"),
                 "scene_open must be guarded (RestartThenSettle lifecycle)");
-            Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_create", "{}"));
             Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_save", "{}"));
             Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_unload", "{}"));
             Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_set_active", "{}"));
@@ -479,12 +482,12 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
-        public void ToolLifecycle_SceneOpenIsRestartThenSettle_OthersEditorSettle()
+        public void ToolLifecycle_SceneCreateAndOpenAreRestartThenSettle_OthersEditorSettle()
         {
             Assert.AreEqual(LifecyclePolicy.RestartThenSettle,
-                ToolLifecycle.Resolve("unity_open_mcp_scene_open"));
-            Assert.AreEqual(LifecyclePolicy.EditorSettle,
                 ToolLifecycle.Resolve("unity_open_mcp_scene_create"));
+            Assert.AreEqual(LifecyclePolicy.RestartThenSettle,
+                ToolLifecycle.Resolve("unity_open_mcp_scene_open"));
             Assert.AreEqual(LifecyclePolicy.EditorSettle,
                 ToolLifecycle.Resolve("unity_open_mcp_scene_save"));
             Assert.AreEqual(LifecyclePolicy.EditorSettle,

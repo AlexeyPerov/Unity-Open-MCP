@@ -266,9 +266,10 @@ steps, including unknown tools, unknown keys, missing fields, invalid values,
 reload hazards, and server-polled operations. `fail_fast` defaults to
 `true`; `gate` defaults to `enforce`. Successful earlier steps are not
 automatically rolled back when a later step fails. Nested steps that resolve
-to the `restart_then_settle` lifecycle (`scene_open` Single mode, `package_add`
-/ `package_remove`, `asmdef_create` / `asmdef_modify`, `build_set_target` /
-`build_set_defines`, `settings_set_player`, `reimport_package`) are refused
+to the `restart_then_settle` lifecycle (`scene_open`, `scene_create` in Single
+mode, `package_add` / `package_remove`, `asmdef_create` / `asmdef_modify`,
+`build_set_target` / `build_set_defines`, `settings_set_player`,
+`reimport_package`) are refused
 with `batch_nested_reload_unsafe` — a domain reload or scene switch mid-batch
 would silently abort every later step. `batch_execute` itself and `compile_check`
 are also refused as nested steps.
