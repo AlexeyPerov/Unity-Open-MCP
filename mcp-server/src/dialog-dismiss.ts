@@ -442,28 +442,22 @@ export function macosDismissAppleScript(opts: DismissProbeOptions): string {
   // Unity versions); instead it classifies the window title and presses
   // Return to click the FOCUSED (default) button — which under the default /
   // auto / ignore / recover policies IS the safe choice for launch-errors and
-  // auto-graphics-api. Non-matching Editor is handled explicitly below: block
-  // it by default, or Return-click only after an explicit mismatch opt-in.
+  // auto-graphics-api. Non-matching Editor is handled by a dedicated block
+  // (nonMatchingEditorMacOsBlock) derived from the same policy table as the
+  // other platforms: blocked, Return-click on the focused Continue (opt-in
+  // forward policies only), or a named Quit/Cancel click (refusal policies).
   // Project Upgrade is detected and reported as `blocked` (never Return-clicked
   // without the explicit opt-in). The token table from buildTokenTable is
   // consulted only to decide whether the policy declines a kind entirely
   // (manual / safe-mode on a kind with no safe button → no click, not-found);
   // when it declines, the script returns not-found for that kind.
   const launchFrags = DIALOG_TITLE_FRAGMENTS.launch_errors;
-  const nonMatchFrags = DIALOG_TITLE_FRAGMENTS.non_matching_editor;
   const graphicsFrags = DIALOG_TITLE_FRAGMENTS.auto_graphics_api;
   const sceneModifiedFrags = DIALOG_TITLE_FRAGMENTS.scene_modified_externally;
   // Whether the active policy dismisses each safe kind at all. Under manual,
-  // or safe-mode on non_matching/auto_graphics (no safe button), the loop
+  // or safe-mode on auto_graphics (no safe button), the loop
   // should NOT click — return not-found so polling continues.
   const dismissesLaunch = preferenceTokensForPolicy("launch_errors", opts.policy, opts.allowProjectUpgrade) !== null;
-  const dismissesNonMatch = preferenceTokensForPolicy(
-    "non_matching_editor",
-    opts.policy,
-    opts.allowProjectUpgrade,
-    opts.allowUnsavedSceneDismiss,
-    opts.allowVersionMismatch,
-  ) !== null;
   const dismissesGraphics = preferenceTokensForPolicy("auto_graphics_api", opts.policy, opts.allowProjectUpgrade) !== null;
   // scene_modified_externally: safe to Return-click (focused button is Reload)
   // under auto/ignore/recover. unsaved_scene_changes is intentionally NOT
@@ -509,17 +503,7 @@ on run
           if (wt contains "Upgrade") and (wt contains "Project") then
             return "blocked:" & "project_upgrade"
           end if
-          -- A mismatched Editor can rewrite project/package metadata during
-          -- load. Never press the focused Continue button without opt-in.
-          if (wt contains "Non-Matching Editor") or (wt contains "Non Matching Editor") then
-            if ${(opts.allowVersionMismatch ? "true" : "false")} then
-              set frontmost to true
-              key code 36
-              return "dismissed:Focus:non_matching_editor"
-            else
-              return "blocked:" & "non_matching_editor"
-            end if
-          end if
+          ${nonMatchingEditorMacOsBlock(opts)}
           -- Unsaved scene changes: blocked unless the dedicated opt-in is set.
           if ${(opts.allowUnsavedSceneDismiss ? "false" : "true")} then
             if wt contains "Have Been Modified" or wt contains "Unsaved changes" or wt contains "Save Changes" then return "blocked:" & "unsaved_scene_changes"
@@ -528,7 +512,6 @@ on run
             ? unsavedSceneMacOsClickBlock(unsavedButtonLabels)
             : ""}
           ${launchFrags.map((f) => fragmentCheck(f, "launch_errors", dismissesLaunch)).join("\n          ")}
-          ${nonMatchFrags.map((f) => fragmentCheck(f, "non_matching_editor", dismissesNonMatch)).join("\n          ")}
           ${graphicsFrags.map((f) => fragmentCheck(f, "auto_graphics_api", dismissesGraphics)).join("\n          ")}
           ${sceneModifiedFrags.map((f) => fragmentCheck(f, "scene_modified_externally", dismissesSceneModified)).join("\n          ")}
         end repeat
@@ -540,6 +523,125 @@ on run
   end try
 end run
 `;
+}
+
+/**
+ * How a focus-driven platform (macOS AppleScript, Linux xdotool) may act on
+ * the Non-Matching Editor dialog under the active policy. Derived from the
+ * shared policy table so every platform agrees:
+ *
+ *   - `blocked`  — the policy blocks it (forward policy without the mismatch
+ *                  opt-in). Report `blocked`, never click.
+ *   - `continue` — the policy's first choice is Continue (forward policy with
+ *                  the opt-in). Pressing Return on the focused button is safe.
+ *   - `refuse`   — the policy prefers Quit/Cancel (safe-mode / cancel). The
+ *                  focused button is Continue, so Return must NOT be pressed;
+ *                  only a named-button click may act.
+ *   - `decline`  — the policy has no preference (manual). Do nothing.
+ *
+ * Pure; exported for tests.
+ */
+export function nonMatchingEditorFocusAction(
+  opts: Pick<
+    DismissProbeOptions,
+    "policy" | "allowProjectUpgrade" | "allowUnsavedSceneDismiss" | "allowVersionMismatch"
+  >,
+): "blocked" | "continue" | "refuse" | "decline" {
+  const blocked = blockedKindsForPolicy(
+    opts.policy,
+    opts.allowProjectUpgrade,
+    opts.allowUnsavedSceneDismiss,
+    opts.allowVersionMismatch,
+  ).includes("non_matching_editor");
+  if (blocked) return "blocked";
+  const tokens = preferenceTokensForPolicy(
+    "non_matching_editor",
+    opts.policy,
+    opts.allowProjectUpgrade,
+    opts.allowUnsavedSceneDismiss,
+    opts.allowVersionMismatch,
+  );
+  if (tokens === null) return "decline";
+  return tokens[0] === "continue" ? "continue" : "refuse";
+}
+
+/** Button labels the macOS named-button click tries per refusal token. */
+const NON_MATCHING_EDITOR_REFUSAL_LABELS: Readonly<Record<string, string>> = {
+  quit: "Quit",
+  cancel: "Cancel",
+  close: "Close",
+  no: "No",
+};
+
+/**
+ * AppleScript block for "Opening Project in Non-Matching Editor Installation".
+ * The action comes from the shared policy table, never from the opt-in alone:
+ *
+ *   - blocked (forward policy without the mismatch opt-in) → `blocked:`.
+ *   - forward tokens (Continue first; only reachable with the opt-in) → press
+ *     Return on the focused Continue button.
+ *   - refusal tokens (safe-mode / cancel) → click the named Quit/Cancel button;
+ *     if none is found, report `blocked:` rather than pressing Return, because
+ *     the focused button is Continue.
+ *   - no tokens (manual) → emit nothing; the window falls through to not-found.
+ */
+function nonMatchingEditorMacOsBlock(opts: DismissProbeOptions): string {
+  const titleMatch =
+    '(wt contains "Non-Matching Editor") or (wt contains "Non Matching Editor")';
+  const action = nonMatchingEditorFocusAction(opts);
+  if (action === "blocked") {
+    return `-- A mismatched Editor can rewrite project/package metadata during
+          -- load. The policy blocks it without the mismatch opt-in.
+          if ${titleMatch} then
+            return "blocked:" & "non_matching_editor"
+          end if`;
+  }
+  if (action === "decline") return "-- policy declines non_matching_editor; skip";
+  if (action === "continue") {
+    return `-- Mismatch opt-in set: press the focused Continue button.
+          if ${titleMatch} then
+            set frontmost to true
+            key code 36
+            return "dismissed:Focus:non_matching_editor"
+          end if`;
+  }
+  const tokens =
+    preferenceTokensForPolicy(
+      "non_matching_editor",
+      opts.policy,
+      opts.allowProjectUpgrade,
+      opts.allowUnsavedSceneDismiss,
+      opts.allowVersionMismatch,
+    ) ?? [];
+  const labels = [
+    ...new Set(
+      tokens
+        .map((t) => NON_MATCHING_EDITOR_REFUSAL_LABELS[t])
+        .filter((l): l is string => l !== undefined),
+    ),
+  ];
+  const clicks = labels
+    .map(
+      (label) => `
+            repeat with btn in buttons of w
+              try
+                set bt to (title of btn) as text
+              on error
+                set bt to ""
+              end try
+              if bt is "${label}" then
+                set frontmost to true
+                click btn
+                return "dismissed:${label}:non_matching_editor"
+              end if
+            end repeat`,
+    )
+    .join("");
+  return `-- Refusal policy: click the named Quit/Cancel button. Never press
+          -- Return here — the focused button is Continue.
+          if ${titleMatch} then${clicks}
+            return "blocked:" & "non_matching_editor"
+          end if`;
 }
 
 /** AppleScript block: match unsaved-scene title fragments and click a named button. */
@@ -726,6 +828,47 @@ function getUnityPidsLinux(): readonly number[] {
   }
 }
 
+/**
+ * What the Linux/X11 path does with a Unity-owned window of the given kind.
+ * xdotool can only press Return on the focused (default) button, so:
+ *
+ *   - `blocked` — report `blocked:<kind>` (policy blocks it, or it is a
+ *                 Non-Matching Editor whose policy prefers Quit/Cancel: the
+ *                 focused button there is Continue).
+ *   - `skip`    — the policy declines the kind; try the next kind.
+ *   - `focus`   — activate the window and press Return.
+ *
+ * Pure; exported for tests.
+ */
+export function linuxFocusAction(
+  kind: DialogKind,
+  opts: Pick<
+    DismissProbeOptions,
+    "policy" | "allowProjectUpgrade" | "allowUnsavedSceneDismiss" | "allowVersionMismatch"
+  >,
+): "blocked" | "skip" | "focus" {
+  if (kind === "non_matching_editor") {
+    const action = nonMatchingEditorFocusAction(opts);
+    if (action === "continue") return "focus";
+    return action === "decline" ? "skip" : "blocked";
+  }
+  const blocked = blockedKindsForPolicy(
+    opts.policy,
+    opts.allowProjectUpgrade,
+    opts.allowUnsavedSceneDismiss,
+    opts.allowVersionMismatch,
+  );
+  if (blocked.includes(kind)) return "blocked";
+  const tokens = preferenceTokensForPolicy(
+    kind,
+    opts.policy,
+    opts.allowProjectUpgrade,
+    opts.allowUnsavedSceneDismiss,
+    opts.allowVersionMismatch,
+  );
+  return tokens === null ? "skip" : "focus";
+}
+
 async function tryDismissLinuxX11(
   opts: DismissProbeOptions,
 ): Promise<DismissOutcome> {
@@ -746,15 +889,9 @@ async function tryDismissLinuxX11(
   //   - otherwise activate the window + send Return to click the focused
   //     (default) button. Under default/auto/ignore/recover the default
   //     button is the safe choice for launch_errors / auto_graphics_api.
-  //     Non-matching Editor and project upgrade are blocked without opt-in.
-  const blocked = new Set<string>(
-    blockedKindsForPolicy(
-      opts.policy,
-      opts.allowProjectUpgrade,
-      opts.allowUnsavedSceneDismiss,
-      opts.allowVersionMismatch,
-    ),
-  );
+  //     Project upgrade is blocked without opt-in. Non-matching Editor is
+  //     Return-clicked only for Continue with the mismatch opt-in, and blocked
+  //     otherwise (see linuxFocusAction).
   const kinds = Object.keys(DIALOG_TITLE_FRAGMENTS) as DialogKind[];
   // Prefer launch_errors first (the common stall), then the safe kinds, then
   // the destructive kinds last so a blocked destructive modal doesn't shadow a
@@ -799,13 +936,7 @@ async function tryDismissLinuxX11(
         return;
       }
       const kind = order[idx++];
-      const tokens = preferenceTokensForPolicy(
-        kind,
-        opts.policy,
-        opts.allowProjectUpgrade,
-        opts.allowUnsavedSceneDismiss,
-        opts.allowVersionMismatch,
-      );
+      const action = linuxFocusAction(kind, opts);
       const fragments = DIALOG_TITLE_FRAGMENTS[kind];
       // Probe this kind's fragments one at a time.
       let fIdx = 0;
@@ -834,12 +965,12 @@ async function tryDismissLinuxX11(
                 tryNextFragment();
                 return;
               }
-              if (blocked.has(kind) || tokens === null) {
+              if (action !== "focus") {
                 // Found the dialog but the policy declines. Report blocked
-                // only for genuinely blocked kinds (project_upgrade); a null-
-                // token decline (manual / safe-mode on a kind with no safe
-                // button) is reported as not-found so the loop keeps ticking.
-                if (blocked.has(kind)) {
+                // for genuinely blocked kinds; a `skip` decline (manual /
+                // safe-mode on a kind with no safe button) is reported as
+                // not-found so the loop keeps ticking.
+                if (action === "blocked") {
                   finish({
                     kind: "blocked",
                     dialog: kind,

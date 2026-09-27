@@ -18,12 +18,15 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { DialogPolicy } from "./dialog-policy.js";
 
 import {
   parseDismissOutput,
   LAUNCH_ERROR_DIALOG_TITLE_FRAGMENTS,
   WINDOWS_DISMISS_PS_SCRIPT,
   macosDismissAppleScript,
+  nonMatchingEditorFocusAction,
+  linuxFocusAction,
   DISMISS_BUTTON_LABEL,
   LINUX_XDOTOOL_MISSING_PREFIX,
   UNSUPPORTED_PLATFORM_PREFIX,
@@ -274,6 +277,115 @@ test("macosDismissAppleScript: mismatch opt-in allows non_matching_editor", () =
     allowVersionMismatch: true,
   });
   assert.ok(script.includes("dismissed:Focus:non_matching_editor"));
+  assert.ok(!script.includes('"blocked:" & "non_matching_editor"'));
+});
+
+test("macosDismissAppleScript: non_matching_editor action follows policy × mismatch opt-in", () => {
+  const gen = (policy: DialogPolicy, allowVersionMismatch: boolean) =>
+    macosDismissAppleScript({ ...DEFAULT_PROBE_OPTS, policy, allowVersionMismatch });
+  const focus = "dismissed:Focus:non_matching_editor";
+  const blocked = '"blocked:" & "non_matching_editor"';
+  for (const policy of ["auto", "ignore", "recover"] as const) {
+    const off = gen(policy, false);
+    assert.ok(off.includes(blocked), `${policy} without opt-in → blocked`);
+    assert.ok(!off.includes(focus), `${policy} without opt-in must not Return-click`);
+    const on = gen(policy, true);
+    assert.ok(on.includes(focus), `${policy} with opt-in → Return-click Continue`);
+    assert.ok(!on.includes(blocked), `${policy} with opt-in is not blocked`);
+  }
+  for (const allow of [false, true]) {
+    // cancel: fail fast — named Quit/Cancel click, never Return on Continue.
+    const cancel = gen("cancel", allow);
+    assert.ok(!cancel.includes(focus), `cancel (opt-in=${allow}) must not Return-click`);
+    assert.ok(cancel.includes('dismissed:Quit:non_matching_editor'));
+    assert.ok(cancel.includes('dismissed:Cancel:non_matching_editor'));
+    assert.ok(cancel.includes(blocked), "cancel falls back to blocked when no named button");
+    // safe-mode: Quit/Cancel as well.
+    const safe = gen("safe-mode", allow);
+    assert.ok(!safe.includes(focus), `safe-mode (opt-in=${allow}) must not Return-click`);
+    assert.ok(safe.includes('dismissed:Quit:non_matching_editor'));
+    // manual: no non_matching_editor handling at all.
+    const manual = gen("manual", allow);
+    assert.ok(!manual.includes(focus), `manual (opt-in=${allow}) never acts`);
+    assert.ok(!manual.includes("dismissed:Quit:non_matching_editor"));
+    assert.ok(!manual.includes(blocked));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// nonMatchingEditorFocusAction / linuxFocusAction — policy × mismatch opt-in
+// ---------------------------------------------------------------------------
+
+const ALL_POLICIES: readonly DialogPolicy[] = [
+  "auto",
+  "ignore",
+  "recover",
+  "safe-mode",
+  "cancel",
+  "manual",
+];
+
+test("nonMatchingEditorFocusAction: derives the action from the shared policy table", () => {
+  const expected: Record<DialogPolicy, [off: string, on: string]> = {
+    auto: ["blocked", "continue"],
+    ignore: ["blocked", "continue"],
+    recover: ["blocked", "continue"],
+    "safe-mode": ["refuse", "refuse"],
+    cancel: ["refuse", "refuse"],
+    manual: ["decline", "decline"],
+  };
+  for (const policy of ALL_POLICIES) {
+    const [off, on] = expected[policy];
+    assert.equal(
+      nonMatchingEditorFocusAction({ ...DEFAULT_PROBE_OPTS, policy, allowVersionMismatch: false }),
+      off,
+      `${policy} without opt-in`,
+    );
+    assert.equal(
+      nonMatchingEditorFocusAction({ ...DEFAULT_PROBE_OPTS, policy, allowVersionMismatch: true }),
+      on,
+      `${policy} with opt-in`,
+    );
+  }
+});
+
+test("linuxFocusAction: non_matching_editor presses Return only for Continue with opt-in", () => {
+  const expected: Record<DialogPolicy, [off: string, on: string]> = {
+    auto: ["blocked", "focus"],
+    ignore: ["blocked", "focus"],
+    recover: ["blocked", "focus"],
+    // xdotool cannot click the named Quit/Cancel button and the focused
+    // button is Continue, so refusal policies report blocked.
+    "safe-mode": ["blocked", "blocked"],
+    cancel: ["blocked", "blocked"],
+    manual: ["skip", "skip"],
+  };
+  for (const policy of ALL_POLICIES) {
+    const [off, on] = expected[policy];
+    assert.equal(
+      linuxFocusAction("non_matching_editor", { ...DEFAULT_PROBE_OPTS, policy, allowVersionMismatch: false }),
+      off,
+      `${policy} without opt-in`,
+    );
+    assert.equal(
+      linuxFocusAction("non_matching_editor", { ...DEFAULT_PROBE_OPTS, policy, allowVersionMismatch: true }),
+      on,
+      `${policy} with opt-in`,
+    );
+  }
+});
+
+test("linuxFocusAction: other kinds keep the blocked / skip / focus table", () => {
+  const opts = { ...DEFAULT_PROBE_OPTS, policy: "ignore" as const };
+  assert.equal(linuxFocusAction("launch_errors", opts), "focus");
+  assert.equal(linuxFocusAction("auto_graphics_api", opts), "focus");
+  assert.equal(linuxFocusAction("project_upgrade", opts), "blocked");
+  assert.equal(linuxFocusAction("unsaved_scene_changes", opts), "blocked");
+  assert.equal(
+    linuxFocusAction("auto_graphics_api", { ...DEFAULT_PROBE_OPTS, policy: "safe-mode" }),
+    "skip",
+  );
+  assert.equal(linuxFocusAction("launch_errors", { ...DEFAULT_PROBE_OPTS, policy: "manual" }), "skip");
 });
 
 // ---------------------------------------------------------------------------

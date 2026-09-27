@@ -76,6 +76,12 @@ policy-chosen button). macOS and Linux/X11 press the **focused** (default)
 button via `key code 36` / `Return` for most safe dialogs; **unsaved scene
 changes** uses explicit per-button selection on macOS when the opt-in is set
 (see [macOS Accessibility](#macos-accessibility-required-for-auto-dismiss)).
+**Non-Matching Editor** never gets a Return press unless the policy picks
+Continue: that is only `auto`/`ignore`/`recover` with the mismatch opt-in.
+Under `safe-mode`/`cancel`, macOS clicks the named Quit/Cancel button and
+reports the dialog as blocked if that button is not found. Linux/X11 cannot
+target a named button, so it reports the dialog as blocked for a human to
+close.
 Linux requires `xdotool` (X11 only — Wayland is unsupported).
 
 ## macOS Accessibility (required for auto-dismiss)
