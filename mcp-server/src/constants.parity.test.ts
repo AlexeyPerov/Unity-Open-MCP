@@ -13,6 +13,7 @@ import {
   VERIFY_JSON_END,
   BRIDGE_DEFAULT_TIMEOUT_MS,
   EXPECTED_BRIDGE_WIRE_CONTRACT,
+  COMPILE_STATE_HEADER,
   NPM_PACKAGE,
   ARCHIVE_URL,
   RELEASE_NOTES_URL_PREFIX,
@@ -249,6 +250,21 @@ test("bridge wire-contract revision matches the TS expectation", () => {
     String(EXPECTED_BRIDGE_WIRE_CONTRACT),
     "bridge BridgeSession.WireContract drifted from TS EXPECTED_BRIDGE_WIRE_CONTRACT — " +
       "bump both in the same change",
+  );
+});
+
+// A one-sided rename would not fail any call: the bridge would stop attaching
+// the snapshot and every qualified result would silently go back to a
+// /compile-state round trip.
+test("compile-state response header name matches the bridge", () => {
+  const root = findToolkitRoot();
+  if (!root) return; // standalone mcp-server install — nothing to compare
+  const statePath = join(root, "packages/bridge/Editor/Bridge/BridgeCompileState.cs");
+  if (!existsSync(statePath)) return;
+  assert.equal(
+    extractCsConst(readFileSync(statePath, "utf8"), "Header"),
+    COMPILE_STATE_HEADER,
+    "bridge BridgeCompileState.Header drifted from TS COMPILE_STATE_HEADER",
   );
 });
 

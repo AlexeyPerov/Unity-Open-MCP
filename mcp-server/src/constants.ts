@@ -101,6 +101,15 @@ export const BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS = 55_000;
 export const EXPECTED_BRIDGE_WIRE_CONTRACT = 2;
 
 /**
+ * Request/response header pair for the compile state that qualifies a tool
+ * result (`BridgeCompileState.Header`). Sent as `1` with a tool call, it asks
+ * the bridge to snapshot the state inside that call's own main-thread dispatch
+ * and return it (base64 UTF-8 JSON) under the same name; an older bridge
+ * ignores it, and the server then reads `/compile-state`.
+ */
+export const COMPILE_STATE_HEADER = "X-Unity-Open-MCP-Compile-State";
+
+/**
  * The npm package the MCP server is published as, pinned to the shared
  * trio version (`unity-open-mcp@X.Y.Z`) for the `npx -y` invocation.
  * Pinning (not `@latest`) keeps the MCP server aligned with the bridge /

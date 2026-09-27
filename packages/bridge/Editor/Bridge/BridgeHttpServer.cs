@@ -1073,6 +1073,8 @@ namespace UnityOpenMcpBridge
                 // main-thread dispatch and is safe here: the worker has already
                 // returned, so the late result is simply discarded.
                 var timedOut = new System.Runtime.CompilerServices.StrongBox<bool>(false);
+                var wantsCompileState = context.Request.Headers[BridgeCompileState.Header] == "1";
+                string compileState = null;
 
                 var queueTask = BridgeRequestQueue.Enqueue(agentId, toolName, isMutating, () =>
                 {
@@ -1089,6 +1091,7 @@ namespace UnityOpenMcpBridge
                         dispatchError = e;
                         throw;
                     }
+                    if (wantsCompileState) compileState = BridgeCompileState.BuildHeader();
                 });
 
                 // Apply the timeout on the worker thread (the queue has no
@@ -1166,6 +1169,11 @@ namespace UnityOpenMcpBridge
                     }
                 }
 
+                // A compile the settle wait saw moved the state past the
+                // snapshot taken after the dispatch; leave it off so the caller
+                // reads /compile-state as it stands now.
+                if (result.SettleMs > 0 || result.CompilePending) compileState = null;
+
                 // fd-exhaustion tripwire — execute_csharp responses carry an
                 // fd-pressure advisory once THIS Editor process is at ≥80% of
                 // Mono's ~1024 IOSelector ceiling, so the agent sees the wall
@@ -1182,6 +1190,7 @@ namespace UnityOpenMcpBridge
                 contract.Decorate(result, sw.ElapsedMilliseconds);
                 BridgeAuditRecorder.RecordGateRun(toolName, effectiveGateMode, result, pathsHint);
                 BridgeActivityRecorder.ApplyToolResultToActivity(activity, result, sw.ElapsedMilliseconds);
+                if (compileState != null) context.Response.Headers[BridgeCompileState.Header] = compileState;
                 BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildGateEnvelope(result, effectiveGateMode, lifecycle));
             }
             catch (AggregateException ae)

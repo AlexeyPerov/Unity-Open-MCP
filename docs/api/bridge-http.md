@@ -17,7 +17,7 @@ Subscriber lifecycle on both event endpoints: a client-supplied `subscriber`
 id persists across polls/reconnects and keeps its cursor; an id the bridge
 mints (no `subscriber` param) is retired with the request/stream so anonymous
 clients don't accumulate subscriber state.
-| `/compile-state` | `GET` | Read-only main-thread CompilationPipeline generation, source-content match, current errors, and before/after assembly mtimes. Unconfirmed generations return `indeterminate`. |
+| `/compile-state` | `GET` | Read-only main-thread CompilationPipeline generation, source-content match, current errors, and before/after assembly mtimes. Unconfirmed generations return `indeterminate`. The same snapshot can ride on a tool response instead ([Compile state on tool responses](#compile-state-on-tool-responses)). |
 | `/tools` | `GET` | Compiled-state tool inventory + group→tools map (used by capabilities / manage_tools for per-group availability). |
 | `/tools/{toolName}` | `POST` | Execute one bridge tool. |
 | `/resources` | `GET` | List bridge resources. |
@@ -137,7 +137,9 @@ the field is, by definition, older than revision 1.
 
 ### Request-scoped JSON responses
 
-Wire contract revision 2 adds `GET /compile-state` and `X-Request-Id` echoing.
+Wire contract revision 2 adds `GET /compile-state` (and its
+[tool-response header](#compile-state-on-tool-responses)) and `X-Request-Id`
+echoing.
 JSON responses are fully validated before headers are committed. Each request
 can send at most one envelope, with explicit UTF-8 content length and connection
 closure; a failed write aborts the response rather than appending another error.
@@ -149,6 +151,21 @@ over a deep hierarchy) is sent unchanged.
 Per-call console logs use Unity Console mode flags: scripting/import/compiler
 warnings retain `warning` severity, compiler errors and exceptions retain `error`,
 and ordinary managed logs remain `log`.
+
+### Compile state on tool responses
+
+A `/tools/{toolName}` request that sends `X-Unity-Open-MCP-Compile-State: 1` and
+is answered with the gate envelope (`execute_csharp` and `invoke_method`
+included) gets the `/compile-state` snapshot back in the response header of the
+same name: base64-encoded UTF-8 JSON with the same fields, except that the
+`errors` list is replaced by its `errorCount`. The bridge takes it on the main
+thread the dispatch already holds, right after the tool ran, so qualifying a
+result costs no extra request or main-thread hop. The header is left off when
+the settle wait saw a compile after the tool ran (the snapshot would predate
+it), on refusal, timeout and fault envelopes, and by bridges that predate it; a
+client then reads `GET /compile-state`. The MCP server asks for it on
+`execute_csharp` and `invoke_method`, the results it qualifies with
+`_compileState`.
 
 ### Effective read-only requests and gate outcomes
 

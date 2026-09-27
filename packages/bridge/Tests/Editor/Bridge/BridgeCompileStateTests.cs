@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 
 namespace UnityOpenMcpBridge.Tests
@@ -29,6 +31,32 @@ namespace UnityOpenMcpBridge.Tests
         public void ConsoleSeverity_UsesUnityModeFlags(int mode, string severity)
         {
             Assert.AreEqual(severity, UnityOpenMcpBridge.Console.LogEntriesReader.Classify(mode));
+        }
+
+        // The response-header form carries every /compile-state field except the
+        // error list, which folds to its count. Status and sourceMatches are left
+        // out of the comparison: a background fingerprint pass may complete
+        // between the two builds.
+        [Test]
+        public void Header_IsCompileStateJsonWithErrorsFoldedToTheirCount()
+        {
+            var full = BridgeCompileState.BuildJson();
+            var header = BridgeCompileState.BuildHeader();
+            Assert.IsNotNull(header);
+            var summary = Encoding.UTF8.GetString(Convert.FromBase64String(header));
+            Assert.IsTrue(BridgeJson.IsCompleteJson(summary), summary);
+
+            string Between(string json, string from, string to)
+            {
+                var start = json.IndexOf(from, StringComparison.Ordinal);
+                Assert.GreaterOrEqual(start, 0, json);
+                return json.Substring(start, json.IndexOf(to, start, StringComparison.Ordinal) - start);
+            }
+            StringAssert.Contains(Between(full, ",\"projectPath\":", ",\"sourceMatches\":"), summary);
+            var mtimes = Between(full, ",\"beforeAssemblyMtimeMs\":", ",\"errors\":");
+            var errorCount = Regex.Matches(full, "\\{\"file\":").Count;
+            StringAssert.EndsWith(mtimes + ",\"errorCount\":" + errorCount + "}", summary);
+            StringAssert.DoesNotContain("\"errors\"", summary);
         }
 
         [Test]

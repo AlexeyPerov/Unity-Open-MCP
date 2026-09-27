@@ -68,7 +68,9 @@ sync, tags, and release workflows.
 
 ### Compiler evidence boundary
 
-The bridge owns the live CompilationPipeline snapshot at `GET /compile-state`:
+The bridge owns the live CompilationPipeline snapshot at `GET /compile-state`
+(also returned on a tool response that asks for it, so the server qualifies an
+`execute_csharp` / `invoke_method` result without a second request):
 Editor-session generation, source-content fingerprint, compiler diagnostics, and
 before/after assembly mtimes survive domain reload via Unity SessionState. The
 MCP server owns offline log fallback, provenance labeling, bounded reload re-probes,

@@ -26,7 +26,7 @@ import {
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS } from "./constants.js";
+import { BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS, COMPILE_STATE_HEADER } from "./constants.js";
 import { PingCache } from "./ping-cache.js";
 import { LiveClient, shouldRetryPostAfterFailure } from "./live-client.js";
 import { projectHash } from "./instance-discovery.js";
@@ -2840,6 +2840,119 @@ test("2026-08-14: a merely stale assembly (no wedge) promotes staleAssembly + wa
     if (bridge) await bridge.close();
     if (prevCacheTtl === undefined) delete process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS;
     else process.env.UNITY_OPEN_MCP_STALE_ASSEMBLY_TTL_MS = prevCacheTtl;
+    disposeSandbox(s);
+  }
+});
+
+
+// ----- Compile state pushed on the tool response -----
+//
+// execute_csharp / invoke_method results are qualified with `_compileState`.
+// The call asks the bridge for it (COMPILE_STATE_HEADER: 1) and the bridge
+// returns the snapshot it took inside the call's own dispatch, so no client —
+// the default one, a per-request port-override client, or a forAgent job
+// client, all of which are built fresh per call — pays a /compile-state round
+// trip per result. An older bridge without the header is read as before.
+
+/** Idle bridge that answers tool POSTs with `{ value: 42 }`, attaching
+ *  `compileHeader()` (base64 JSON) when the call asked for it and it is set. */
+function compileStateBridge(
+  seen: { compileStateReads: number; optIns: Record<string, boolean[]> },
+  compileHeader: () => Record<string, unknown> | null,
+  compileStateBody: Record<string, unknown> = {},
+): (req: IncomingMessage, res: ServerResponse) => void {
+  return (req, res) => {
+    if (req.url === "/ping") { idleOkHandler(req, res); return; }
+    if (req.url === "/compile-state") {
+      seen.compileStateReads++;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(compileStateBody));
+      return;
+    }
+    const tool = String(req.url).replace("/tools/", "");
+    const optedIn = req.headers[COMPILE_STATE_HEADER.toLowerCase()] === "1";
+    (seen.optIns[tool] ??= []).push(optedIn);
+    const snapshot = optedIn ? compileHeader() : null;
+    if (snapshot) res.setHeader(COMPILE_STATE_HEADER, Buffer.from(JSON.stringify(snapshot), "utf8").toString("base64"));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ value: 42 }));
+  };
+}
+
+const resultBody = (result: CallToolResult): Record<string, unknown> =>
+  JSON.parse(result.content[0]?.type === "text" ? (result.content[0].text as string) : "{}") as Record<string, unknown>;
+
+test("execute_csharp / invoke_method take _compileState from the response on every client, without a /compile-state read", async () => {
+  const s = makeSandbox();
+  // Non-ASCII on purpose: the header value is base64 so any project path fits.
+  const projectPath = join(s.dir, "Проект");
+  mkdirSync(projectPath, { recursive: true });
+  const seen = { compileStateReads: 0, optIns: {} as Record<string, boolean[]> };
+  let reportedProject = projectPath;
+  const bridge = await startBridgeStub(compileStateBridge(seen, () => ({
+    status: "no_errors_found", projectPath: reportedProject, generation: 7, sourceMatches: true,
+    beforeAssemblyMtimeMs: 1000, afterAssemblyMtimeMs: 2000, errorCount: 0,
+  })));
+  try {
+    plantLock(s, STALE_DOMAIN_PROJECT, process.pid, 0, "idle", bridge.port);
+    const live = new LiveClient(bridge.port, new PingCache(), "deadbeef", projectPath);
+    // A _meta.port override client and a job client are built per call.
+    const clients = () => [
+      live,
+      new LiveClient(bridge.port, new PingCache(), "deadbeef", projectPath, "agent-override", bridge.port),
+      live.forAgent("agent-job"),
+    ];
+    for (const tool of ["unity_open_mcp_execute_csharp", "unity_open_mcp_invoke_method"]) {
+      for (const client of [...clients(), ...clients()]) {
+        const body = resultBody(await client.route(tool, { code: "return 42;", paths_hint: ["Assets/Scripts/Foo.cs"] }));
+        assert.deepEqual(body._compileState, {
+          status: "no_errors_found", generation: 7, sourceMatches: true,
+          beforeAssemblyMtimeMs: 1000, afterAssemblyMtimeMs: 2000, errorCount: 0,
+        }, tool);
+        assert.equal(body._staleDomain, undefined, "a matching completed generation certifies the result");
+      }
+      assert.deepEqual(seen.optIns[tool], [true, true, true, true, true, true], `${tool} asks for the compile state`);
+    }
+    assert.equal(seen.compileStateReads, 0, "no result costs a /compile-state round trip");
+
+    // The project check still applies to the pushed state, and a rejected
+    // snapshot is not re-read either: /compile-state would name the same project.
+    reportedProject = "/another/Project";
+    const foreign = resultBody(await live.route("unity_open_mcp_execute_csharp", { code: "return 42;", paths_hint: ["Assets/Scripts/Foo.cs"] }));
+    assert.equal(foreign._compileState, undefined, "another project's compile state never qualifies this result");
+    assert.equal(seen.compileStateReads, 0);
+
+    await live.route("unity_open_mcp_editor_status", {});
+    assert.deepEqual(seen.optIns["unity_open_mcp_editor_status"], [false], "unqualified tools do not make the bridge snapshot");
+  } finally {
+    await bridge.close();
+    disposeSandbox(s);
+  }
+});
+
+test("a bridge that attaches no compile state is read through /compile-state once per result", async () => {
+  const s = makeSandbox();
+  const projectPath = join(s.dir, "proj");
+  mkdirSync(projectPath, { recursive: true });
+  const seen = { compileStateReads: 0, optIns: {} as Record<string, boolean[]> };
+  const error = { file: "Assets/Foo.cs", line: 1, column: 1, code: "CS1002", message: "; expected" };
+  const bridge = await startBridgeStub(compileStateBridge(seen, () => null, {
+    status: "compile_failed", projectPath, generation: 3, sourceMatches: true,
+    beforeAssemblyMtimeMs: 1000, afterAssemblyMtimeMs: 2000, errors: [error, error],
+  }));
+  try {
+    plantLock(s, STALE_DOMAIN_PROJECT, process.pid, 0, "idle", bridge.port);
+    const live = new LiveClient(bridge.port, new PingCache(), "deadbeef", projectPath);
+    for (let call = 1; call <= 2; call++) {
+      const body = resultBody(await live.route("unity_open_mcp_execute_csharp", { code: "return 42;", paths_hint: ["Assets/Scripts/Foo.cs"] }));
+      assert.deepEqual(body._compileState, {
+        status: "compile_failed", generation: 3, sourceMatches: true,
+        beforeAssemblyMtimeMs: 1000, afterAssemblyMtimeMs: 2000, errorCount: 2,
+      });
+      assert.equal(seen.compileStateReads, call, "each result is qualified by a read taken after its call");
+    }
+  } finally {
+    await bridge.close();
     disposeSandbox(s);
   }
 });

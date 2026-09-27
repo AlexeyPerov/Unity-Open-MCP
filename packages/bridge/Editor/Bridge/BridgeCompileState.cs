@@ -17,6 +17,13 @@ namespace UnityOpenMcpBridge
     {
         private const string Prefix = "UnityOpenMcp.Compile.";
         private static readonly StringBuilder Errors = new StringBuilder();
+        private static int _errorCount;
+
+        // A tool call answered with the gate envelope that sends this header as
+        // "1" gets BuildHeader() back under the same name, snapshotted on the
+        // main thread its dispatch already holds, so qualifying the result costs
+        // the client no /compile-state round trip or second main-thread hop.
+        internal const string Header = "X-Unity-Open-MCP-Compile-State";
 
         // Compile inputs are the files the C# pipeline reads. Project settings
         // and the package manifest are deliberately NOT part of the set: an
@@ -26,8 +33,9 @@ namespace UnityOpenMcpBridge
         // package) must not flip every live result to "assembly_stale".
         private static readonly string[] SourceExtensions = { ".cs", ".asmdef", ".asmref" };
 
-        // /compile-state is requested after live tool calls, so nothing on the
-        // request path may walk the project. A background pass (enumeration,
+        // The compile state qualifies live tool results (/compile-state, or the
+        // Header snapshot taken inside the tool's own dispatch), so nothing on
+        // that path may walk the project. A background pass (enumeration,
         // stat and hashing need no Unity API) refreshes the cache at most every
         // RevalidateIntervalSeconds; the main thread only captures the root
         // list and reads the last completed value. Started() computes
@@ -228,6 +236,7 @@ namespace UnityOpenMcpBridge
             SessionState.SetString(Prefix + "inputs", Sources(force: true) ?? "");
             SessionState.SetString(Prefix + "before", AssemblyMtime().ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             Errors.Clear();
+            _errorCount = 0;
         }
 
         private static void AssemblyFinished(string path, CompilerMessage[] messages)
@@ -235,6 +244,7 @@ namespace UnityOpenMcpBridge
             foreach (var error in messages.Where(m => m.type == CompilerMessageType.Error))
             {
                 if (Errors.Length > 0) Errors.Append(',');
+                _errorCount++;
                 Errors.Append("{\"file\":").Append(BridgeJson.EscapeString(error.file))
                     .Append(",\"line\":").Append(error.line)
                     .Append(",\"column\":").Append(error.column)
@@ -246,12 +256,26 @@ namespace UnityOpenMcpBridge
         private static void Finished(object context)
         {
             SessionState.SetString(Prefix + "errors", "[" + Errors + "]");
+            SessionState.SetInt(Prefix + "errorCount", _errorCount);
             SessionState.SetBool(Prefix + "failed", Errors.Length > 0);
             SessionState.SetBool(Prefix + "completed", true);
             SessionState.SetString(Prefix + "after", AssemblyMtime().ToString("R", System.Globalization.CultureInfo.InvariantCulture));
         }
 
-        internal static string BuildJson()
+        internal static string BuildJson() => Build(summary: false);
+
+        // The Header form of BuildJson: errors[] folds to errorCount so the
+        // value stays small whatever the compile reported, and the JSON is
+        // base64'd UTF-8 because a header value must be ASCII and the project
+        // path need not be. Null when the snapshot cannot be taken: the response
+        // then goes without it and the client reads /compile-state.
+        internal static string BuildHeader()
+        {
+            try { return Convert.ToBase64String(Encoding.UTF8.GetBytes(Build(summary: true))); }
+            catch { return null; }
+        }
+
+        private static string Build(bool summary)
         {
             var inputs = SessionState.GetString(Prefix + "inputs", "");
             var completed = SessionState.GetBool(Prefix + "completed", false);
@@ -280,7 +304,9 @@ namespace UnityOpenMcpBridge
                 + ",\"sourceMatches\":" + (matches ? "true" : "false")
                 + ",\"beforeAssemblyMtimeMs\":" + SessionState.GetString(Prefix + "before", "0")
                 + ",\"afterAssemblyMtimeMs\":" + SessionState.GetString(Prefix + "after", "0")
-                + ",\"errors\":" + SessionState.GetString(Prefix + "errors", "[]") + "}";
+                + (summary
+                    ? ",\"errorCount\":" + SessionState.GetInt(Prefix + "errorCount", 0)
+                    : ",\"errors\":" + SessionState.GetString(Prefix + "errors", "[]")) + "}";
         }
     }
 }

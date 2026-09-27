@@ -25,6 +25,7 @@ import {
   BRIDGE_DEFAULT_TIMEOUT_MS,
   BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS,
   BRIDGE_MIN_TIMEOUT_MS,
+  COMPILE_STATE_HEADER,
   PORT_ENV_VAR,
   PROJECT_PATH_ENV_VAR,
 } from "./constants.js";
@@ -55,9 +56,6 @@ import { lifecycleForCall } from "./capabilities/lifecycle.js";
 // M23 Plan 3 — per-process agent identity (sent as X-Agent-Id so the bridge's
 // fair round-robin queue can schedule across agents).
 import { PROCESS_AGENT_ID } from "./agent-identity.js";
-
-/** Mirrors BridgeCompileState.RevalidateIntervalSeconds on the bridge. */
-const COMPILE_STATE_REUSE_MS = 2000;
 
 function canonicalProjectPath(p: string): string {
   let real = p;
@@ -341,11 +339,6 @@ export class LiveClient implements Router {
    *  the constructor used; without it a refresh would silently switch from an
    *  env-pinned port to the lock port. */
   private readonly envPort: number | undefined;
-  /** Last /compile-state body for the per-result staleness check. The bridge
-   *  revalidates its own fingerprint at most every 2 s, so re-fetching inside
-   *  that window buys nothing and doubles the request count under a burst of
-   *  read tools. Invalidated around compile-reload tools. */
-  private compileStateCache: { at: number; body: Record<string, unknown> | null } | null = null;
   /** Memoized outcome of the bridge-vs-server project-path comparison. */
   private projectMatch: { reported: string; same: boolean } | null = null;
 
@@ -420,23 +413,32 @@ export class LiveClient implements Router {
       this.refreshEndpointFromLock();
       const res = await this.fetchWithTimeout("/compile-state", { method: "GET" }, 2000);
       const body = await res.json() as Record<string, unknown>;
-      if (!res.ok || typeof body.generation !== "number" || typeof body.status !== "string") return null;
-      if (this.projectPath && !this.sameProject(body.projectPath)) return null;
-      return body;
+      return res.ok ? this.acceptCompileState(body) : null;
     } catch { return null; }
   }
 
-  /** `readCompileState` with a short reuse window (see `compileStateCache`). */
-  private async readCompileStateCached(): Promise<Record<string, unknown> | null> {
-    const cached = this.compileStateCache;
-    if (cached && Date.now() - cached.at < COMPILE_STATE_REUSE_MS) return cached.body;
-    const body = await this.readCompileState();
-    this.compileStateCache = { at: Date.now(), body };
-    return body;
+  /** The compile state that qualifies a tool result: the snapshot the bridge
+   *  took inside the call's own dispatch when the call asked for it
+   *  (COMPILE_STATE_HEADER), else a fresh read. An older bridge never attaches
+   *  one, and the bridge leaves it off once a compile ran during the call's
+   *  settle wait, so neither path can qualify a result with a state older
+   *  than the call. */
+  private async compileStateFor(res: Response): Promise<Record<string, unknown> | null> {
+    const header = res.headers.get(COMPILE_STATE_HEADER);
+    if (header !== null) {
+      try {
+        return this.acceptCompileState(JSON.parse(Buffer.from(header, "base64").toString("utf8")) as Record<string, unknown>);
+      } catch { /* malformed: read it instead */ }
+    }
+    return this.readCompileState();
   }
 
-  private invalidateCompileState(): void {
-    this.compileStateCache = null;
+  /** A well-formed compile state reported for this client's project, else null. */
+  private acceptCompileState(body: Record<string, unknown> | null): Record<string, unknown> | null {
+    if (body === null || typeof body !== "object") return null;
+    if (typeof body.generation !== "number" || typeof body.status !== "string") return null;
+    if (this.projectPath && !this.sameProject(body.projectPath)) return null;
+    return body;
   }
 
   /** The bridge reports DirectoryInfo.FullName while the server holds a
@@ -626,9 +628,7 @@ export class LiveClient implements Router {
     const annotate = isCompileReload && shouldAnnotateCompileVerify(toolName);
     const before = annotate ? await this.captureCompileSnapshot() : null;
 
-    if (isCompileReload) this.invalidateCompileState();
     const result = await this.postTool(toolName, args, true, 1, commandLifecycle);
-    if (isCompileReload) this.invalidateCompileState();
 
     if (annotate && !result.isError && before !== null) {
       return this.annotateCompileVerify(toolName, result, before, args);
@@ -951,7 +951,12 @@ export class LiveClient implements Router {
       `/tools/${toolName}`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json; charset=utf-8" },
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          // shapeToolResult qualifies these results with the compile state;
+          // the bridge snapshots it inside this call's dispatch on request.
+          ...(STALE_DOMAIN_ANNOTATION_TOOLS.has(toolName) ? { [COMPILE_STATE_HEADER]: "1" } : {}),
+        },
         body: JSON.stringify(forwardedArgs),
       },
       fetchTimeout,
@@ -1075,7 +1080,7 @@ export class LiveClient implements Router {
       parsed.error == null &&
       parsed._staleDomain === undefined
     ) {
-      const liveCompile = await this.readCompileStateCached();
+      const liveCompile = await this.compileStateFor(res);
       const staleAsm = liveCompile?.status === "no_errors_found" && liveCompile.sourceMatches === true
         ? null : liveCompile?.status === "assembly_stale"
           ? { staleAssembly: true, newerSources: [], hint: "Source content changed after the completed compile generation. Recompile before trusting this result." }
@@ -1091,7 +1096,9 @@ export class LiveClient implements Router {
           sourceMatches: liveCompile.sourceMatches,
           beforeAssemblyMtimeMs: liveCompile.beforeAssemblyMtimeMs,
           afterAssemblyMtimeMs: liveCompile.afterAssemblyMtimeMs,
-          errorCount: Array.isArray(liveCompile.errors) ? liveCompile.errors.length : 0,
+          // The header snapshot carries the count; a /compile-state read, the list.
+          errorCount: Array.isArray(liveCompile.errors) ? liveCompile.errors.length
+            : typeof liveCompile.errorCount === "number" ? liveCompile.errorCount : 0,
         };
       }
       if (staleAsm != null && staleAsm.staleAssembly) {

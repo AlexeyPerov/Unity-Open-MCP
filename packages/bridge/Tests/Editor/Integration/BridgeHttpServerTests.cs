@@ -125,6 +125,33 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.DoesNotContain("timeout", successBody);
         }
 
+        // The compile state that qualifies an execute_csharp / invoke_method
+        // result travels on the tool response when the call asks for it, so the
+        // server needs no /compile-state round trip per result.
+        [UnityTest]
+        public IEnumerator CompileStateHeader_ReturnedOnlyWhenRequested()
+        {
+            foreach (var requested in new[] { true, false })
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/tools/unity_open_mcp_execute_csharp");
+                if (requested) request.Headers.Add(BridgeCompileState.Header, "1");
+                request.Content = new StringContent("{\"code\":\"return 1;\",\"read_only\":true,\"gate\":\"off\"}", Encoding.UTF8, "application/json");
+                var pending = HttpClient.SendAsync(request);
+                while (!pending.IsCompleted) yield return null;
+                using var response = pending.Result;
+                if (!requested)
+                {
+                    Assert.IsFalse(response.Headers.Contains(BridgeCompileState.Header), "the snapshot is opt-in");
+                    continue;
+                }
+                var state = Encoding.UTF8.GetString(Convert.FromBase64String(
+                    System.Linq.Enumerable.First(response.Headers.GetValues(BridgeCompileState.Header))));
+                Assert.IsTrue(BridgeJson.IsCompleteJson(state), state);
+                StringAssert.Contains("\"generation\":", state);
+                StringAssert.Contains("\"errorCount\":", state);
+            }
+        }
+
         private static IEnumerator PostAndWait(string path, string json, Action<string> assertBody)
         {
             var content = new StringContent(json, Encoding.UTF8, "application/json");
