@@ -43,11 +43,14 @@ namespace UnityOpenMcpBridge
         // balance or its string escapes don't terminate.
         // Strict transport validation: one complete JSON value, no trailing envelope,
         // malformed number, mismatched container, or unescaped control character.
+        // Nesting depth is not limited: response depth follows the data (scene and
+        // asset hierarchies, reflective object graphs), so open containers live on
+        // an explicit stack instead of the call stack.
         internal static bool IsCompleteJson(string json)
         {
             if (string.IsNullOrEmpty(json)) return false;
             var reader = new JsonValidator(json);
-            return reader.Value(0) && reader.End();
+            return reader.Value() && reader.End();
         }
 
         private sealed class JsonValidator
@@ -80,25 +83,43 @@ namespace UnityOpenMcpBridge
                 }
                 return false;
             }
-            internal bool Value(int depth)
+            internal bool Value()
             {
-                Space();
-                if (depth > 128 || at >= text.Length) return false;
+                // Closing token of every container still open, innermost on top.
+                var open = new Stack<char>();
+                while (true)
+                {
+                    Space();
+                    if (at >= text.Length) return false;
+                    var c = text[at];
+                    if (c == '{' || c == '[')
+                    {
+                        at++;
+                        var close = c == '{' ? '}' : ']';
+                        if (!Take(close))
+                        {
+                            open.Push(close);
+                            if (close == '}' && (!String() || !Take(':'))) return false;
+                            continue;
+                        }
+                    }
+                    else if (!Scalar()) return false;
+                    // A value just ended: close every container it completes, then
+                    // expect the next member of the innermost one still open.
+                    while (true)
+                    {
+                        if (open.Count == 0) return true;
+                        if (Take(open.Peek())) { open.Pop(); continue; }
+                        if (!Take(',')) return false;
+                        if (open.Peek() == '}' && (!String() || !Take(':'))) return false;
+                        break;
+                    }
+                }
+            }
+            private bool Scalar()
+            {
                 var c = text[at];
                 if (c == '"') return String();
-                if (c == '{' || c == '[')
-                {
-                    at++;
-                    var close = c == '{' ? '}' : ']';
-                    if (Take(close)) return true;
-                    do
-                    {
-                        if (c == '{' && (!String() || !Take(':'))) return false;
-                        if (!Value(depth + 1)) return false;
-                        if (Take(close)) return true;
-                    } while (Take(','));
-                    return false;
-                }
                 foreach (var literal in new[] { "true", "false", "null" })
                 {
                     if (string.CompareOrdinal(text, at, literal, 0, literal.Length) == 0)

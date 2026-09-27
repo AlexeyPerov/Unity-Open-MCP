@@ -222,6 +222,66 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(BridgeJson.IsValidJsonObject("\"never closed"));
         }
 
+        // ---- IsCompleteJson: container grammar and nesting depth ----
+        //
+        // Every HTTP response passes IsCompleteJson before headers are sent, and
+        // a failure replaces the body with invalid_response_json. Response depth
+        // follows the data (scene_get_data / read_asset over a deep hierarchy),
+        // so a deep but valid document must pass, while a malformed one at any
+        // depth is still refused.
+
+        [TestCase("{}", true)]
+        [TestCase("[]", true)]
+        [TestCase(" [ 1 , { \"a\" : \"x\" } , [ ] ] ", true)]
+        [TestCase("{\"a\":{\"b\":[]},\"c\":[1,{\"d\":null}]}", true)]
+        [TestCase("{\"a\"}", false)]
+        [TestCase("{\"a\" 1}", false)]
+        [TestCase("{1:2}", false)]
+        [TestCase("[1 2]", false)]
+        [TestCase("[1}", false)]
+        [TestCase("{\"a\":1,,\"b\":2}", false)]
+        [TestCase("[", false)]
+        [TestCase("]", false)]
+        [TestCase(",", false)]
+        public static void IsCompleteJson_ContainerGrammar(string text, bool valid)
+        {
+            Assert.AreEqual(valid, BridgeJson.IsCompleteJson(text), text);
+        }
+
+        // Alternating object/array levels around `leaf`: {"c":[{"c":[ … ]}]}.
+        private static string Nested(int depth, string leaf = "1")
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < depth; i++) sb.Append(i % 2 == 0 ? "{\"c\":" : "[");
+            sb.Append(leaf);
+            for (int i = depth - 1; i >= 0; i--) sb.Append(i % 2 == 0 ? '}' : ']');
+            return sb.ToString();
+        }
+
+        [TestCase(129)]
+        [TestCase(200)]
+        [TestCase(500)]
+        [TestCase(100000)]
+        public static void IsCompleteJson_DeepValidNesting_ReturnsTrue(int depth)
+        {
+            Assert.IsTrue(BridgeJson.IsCompleteJson(Nested(depth)));
+        }
+
+        [TestCase(500)]
+        [TestCase(100000)]
+        public static void IsCompleteJson_DeepMalformedNesting_ReturnsFalse(int depth)
+        {
+            var valid = Nested(depth);
+            var leafEnd = valid.IndexOf('1') + 1;
+            var wrongClose = valid[leafEnd] == '}' ? ']' : '}';
+            Assert.IsFalse(BridgeJson.IsCompleteJson(valid.Substring(0, valid.Length - 1)), "truncated");
+            Assert.IsFalse(BridgeJson.IsCompleteJson(valid + "]"), "extra close");
+            Assert.IsFalse(BridgeJson.IsCompleteJson(
+                valid.Substring(0, leafEnd) + wrongClose + valid.Substring(leafEnd + 1)), "mismatched close");
+            Assert.IsFalse(BridgeJson.IsCompleteJson(Nested(depth, "1,")), "trailing comma");
+            Assert.IsFalse(BridgeJson.IsCompleteJson(Nested(depth, "\"a\nb\"")), "unescaped control character");
+        }
+
         // specs/feedback.md 2026-07-03 — main_thread_blocked envelope. When a
         // Unity modal wedges the main thread, MainThreadDispatcher raises
         // MainThreadBlockedException (distinct from TimeoutException), and the

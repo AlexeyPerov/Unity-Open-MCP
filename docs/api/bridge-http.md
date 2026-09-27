@@ -142,7 +142,9 @@ JSON responses are fully validated before headers are committed. Each request
 can send at most one envelope, with explicit UTF-8 content length and connection
 closure; a failed write aborts the response rather than appending another error.
 A late timed-out dispatch cannot send into the next request. Invalid JSON is
-replaced by HTTP 500 `invalid_response_json`.
+replaced by HTTP 500 `invalid_response_json`. Validation does not limit nesting
+depth, so a deep but valid body (for example `scene_get_data` or `read_asset`
+over a deep hierarchy) is sent unchanged.
 
 Per-call console logs use Unity Console mode flags: scripting/import/compiler
 warnings retain `warning` severity, compiler errors and exceptions retain `error`,

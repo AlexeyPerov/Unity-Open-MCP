@@ -261,6 +261,35 @@ namespace UnityOpenMcpBridge.Tests
             }
         }
 
+        // Every HTTP response passes BridgeJson.IsCompleteJson before it is sent;
+        // a failure replaces the body with invalid_response_json. Each hierarchy
+        // level adds an object and a children array, so a 100-level chain nests
+        // the verbose document ~200 deep — valid JSON that must still pass.
+        [Test]
+        public void GetData_DeepHierarchy_PassesTransportValidation()
+        {
+            var root = new GameObject("__MCPTest_SceneDataDeep_0");
+            try
+            {
+                var parent = root.transform;
+                for (int i = 1; i < 100; i++)
+                {
+                    var child = new GameObject("__MCPTest_SceneDataDeep_" + i).transform;
+                    child.SetParent(parent, false);
+                    parent = child;
+                }
+                var result = ScenesTools.GetData("{\"detail\":\"verbose\",\"depth\":100,\"max_nodes\":100000}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                StringAssert.Contains("__MCPTest_SceneDataDeep_99", result.Output);
+                Assert.IsTrue(BridgeJson.IsCompleteJson(result.Output),
+                    "a deep but valid scene_get_data body must pass response validation");
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
         [Test]
         public void GetData_MaxNodesCap_TruncatesAndReportsCount()
         {
