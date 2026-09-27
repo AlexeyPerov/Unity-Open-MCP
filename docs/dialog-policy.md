@@ -71,18 +71,48 @@ from "operator chose manual for this run").
 
 ## Cross-platform notes
 
+Every platform recognises a dialog by its window title reduced to lowercase
+letters and digits, so "Enter Safe Mode?" matches as `entersafemode`. The main
+Editor window is never treated as a dialog: its title
+(`<Project> - <Scene> - <Platform> - Unity <version>`) holds project and scene
+names, and "SAFE MODE" while the Editor runs in Safe Mode, any of which can
+contain a dialog keyword. Unsaved-scene sheets attached to the main window are
+still handled (see below).
+
 Windows performs precise per-button selection (Win32 `BM_CLICK` on the
-policy-chosen button). macOS and Linux/X11 press the **focused** (default)
-button via `key code 36` / `Return` for most safe dialogs; **unsaved scene
-changes** uses explicit per-button selection on macOS when the opt-in is set
-(see [macOS Accessibility](#macos-accessibility-required-for-auto-dismiss)).
-**Non-Matching Editor** never gets a Return press unless the policy picks
-Continue: that is only `auto`/`ignore`/`recover` with the mismatch opt-in.
-Under `safe-mode`/`cancel`, macOS clicks the named Quit/Cancel button and
-reports the dialog as blocked if that button is not found. Linux/X11 cannot
-target a named button, so it reports the dialog as blocked for a human to
-close.
-Linux requires `xdotool` (X11 only — Wayland is unsupported).
+policy-chosen button).
+
+macOS and Linux/X11 are focus-driven: pressing Return (`key code 36` /
+`xdotool key Return`) activates the dialog's **focused** (default) button, so
+Return is pressed only when the policy's first choice *is* that button. On
+macOS the window must also show a button with that label (for example Ignore
+on the Safe Mode prompt); a matching window without it, such as the
+button-less "Hold On" progress window, is left alone. On Linux the title
+returned by `xdotool getwindowname` is checked again before Return is sent.
+When the policy picks any other button:
+
+- **macOS** clicks the named button instead — the first button whose label,
+  normalized to letters and digits, equals one of the policy's choices in
+  priority order (for example Enter Safe Mode under `safe-mode`, or
+  Quit/Cancel under `cancel`). If no such button is found it reports the
+  dialog as `blocked`; it never falls back to pressing Return.
+- **Linux/X11** cannot target a named button, so it reports the dialog as
+  `blocked` for a human to close.
+
+| Dialog | Focused button | Return press (macOS and Linux) | Otherwise, macOS | Otherwise, Linux |
+| --- | --- | --- | --- | --- |
+| launch-errors | Ignore | `auto`, `ignore` | named click: Enter Safe Mode (`recover`, `safe-mode`), Quit/Cancel (`cancel`) | blocked |
+| Non-Matching Editor | Continue | `auto`/`ignore`/`recover` with the mismatch opt-in | named click: Quit/Cancel (`safe-mode`, `cancel`) | blocked |
+| Project Upgrade | Confirm | Linux only: `auto`/`ignore`/`recover` with the upgrade opt-in | always blocked, even with the opt-in | blocked |
+| Auto Graphics API | OK | `auto`, `ignore`, `recover` | named click: Quit/Cancel (`cancel`) | blocked |
+| Scene modified externally | Reload | `auto`, `ignore`, `recover` | named click: Quit/Cancel (`cancel`) | blocked |
+| Unsaved scene changes | — (not relied on) | none, even with the opt-in | named click with the opt-in | blocked |
+
+Declined cells in the policy matrix stay declined on every platform: the
+dialog is left alone and polling continues. Unsaved scene changes uses its own
+named-button selection on macOS when the opt-in is set (see
+[macOS Accessibility](#macos-accessibility-required-for-auto-dismiss)). Linux
+requires `xdotool` (X11 only — Wayland is unsupported).
 
 ## macOS Accessibility (required for auto-dismiss)
 

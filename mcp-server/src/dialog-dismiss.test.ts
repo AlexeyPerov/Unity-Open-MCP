@@ -18,19 +18,32 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { DialogPolicy } from "./dialog-policy.js";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  DIALOG_FOCUSED_BUTTON_TOKENS,
+  DIALOG_TITLE_FRAGMENTS,
+  UNITY_EDITOR_WINDOW_TITLE_MARKER,
+  normalizeDialogLabel,
+  preferenceTokensForPolicy,
+  type DialogKind,
+  type DialogPolicy,
+} from "./dialog-policy.js";
 
 import {
   parseDismissOutput,
   LAUNCH_ERROR_DIALOG_TITLE_FRAGMENTS,
   WINDOWS_DISMISS_PS_SCRIPT,
   macosDismissAppleScript,
-  nonMatchingEditorFocusAction,
+  macosDialogKindBlock,
+  macosTitleMatch,
+  MACOS_NORM_LABEL_HANDLER,
+  focusDialogAction,
   linuxFocusAction,
   DISMISS_BUTTON_LABEL,
   LINUX_XDOTOOL_MISSING_PREFIX,
   UNSUPPORTED_PLATFORM_PREFIX,
   regexEscapeForXdotool,
+  xdotoolTitlePattern,
   tryDismissDialog,
   _resetXdotoolPresenceForTests,
   readDismissConfig,
@@ -48,6 +61,15 @@ const DEFAULT_PROBE_OPTS = {
   allowUnsavedSceneDismiss: false,
   allowVersionMismatch: false,
 };
+
+const ALL_POLICIES: readonly DialogPolicy[] = [
+  "auto",
+  "ignore",
+  "recover",
+  "safe-mode",
+  "cancel",
+  "manual",
+];
 
 // ---------------------------------------------------------------------------
 // parseDismissOutput
@@ -262,6 +284,9 @@ test("macosDismissAppleScript: dismisses unsaved-scene sheets when opt-in is set
   });
   assert.ok(script.includes("sheets of w"), "must probe window sheets");
   assert.ok(script.includes("Don't Save"), "cancel policy clicks Don't Save");
+  // `st` is reserved in AppleScript (ordinal suffix, as in `1st`); using it as
+  // a loop variable makes the whole script fail to compile.
+  assert.ok(!/\bst\b/.test(script), "must not use the reserved identifier `st`");
 });
 
 test("macosDismissAppleScript: blocks non_matching_editor under default policy", () => {
@@ -285,6 +310,7 @@ test("macosDismissAppleScript: non_matching_editor action follows policy × mism
     macosDismissAppleScript({ ...DEFAULT_PROBE_OPTS, policy, allowVersionMismatch });
   const focus = "dismissed:Focus:non_matching_editor";
   const blocked = '"blocked:" & "non_matching_editor"';
+  const named = '":non_matching_editor"';
   for (const policy of ["auto", "ignore", "recover"] as const) {
     const off = gen(policy, false);
     assert.ok(off.includes(blocked), `${policy} without opt-in → blocked`);
@@ -297,55 +323,347 @@ test("macosDismissAppleScript: non_matching_editor action follows policy × mism
     // cancel: fail fast — named Quit/Cancel click, never Return on Continue.
     const cancel = gen("cancel", allow);
     assert.ok(!cancel.includes(focus), `cancel (opt-in=${allow}) must not Return-click`);
-    assert.ok(cancel.includes('dismissed:Quit:non_matching_editor'));
-    assert.ok(cancel.includes('dismissed:Cancel:non_matching_editor'));
+    assert.ok(cancel.includes('repeat with tok in {"quit", "cancel", "close", "no"}'));
+    assert.ok(cancel.includes(named));
     assert.ok(cancel.includes(blocked), "cancel falls back to blocked when no named button");
     // safe-mode: Quit/Cancel as well.
     const safe = gen("safe-mode", allow);
     assert.ok(!safe.includes(focus), `safe-mode (opt-in=${allow}) must not Return-click`);
-    assert.ok(safe.includes('dismissed:Quit:non_matching_editor'));
+    assert.ok(safe.includes('repeat with tok in {"quit", "cancel"}'));
     // manual: no non_matching_editor handling at all.
     const manual = gen("manual", allow);
     assert.ok(!manual.includes(focus), `manual (opt-in=${allow}) never acts`);
-    assert.ok(!manual.includes("dismissed:Quit:non_matching_editor"));
+    assert.ok(!manual.includes(named));
     assert.ok(!manual.includes(blocked));
   }
 });
 
 // ---------------------------------------------------------------------------
-// nonMatchingEditorFocusAction / linuxFocusAction — policy × mismatch opt-in
+// macosDialogKindBlock — script shape per policy × focus-classified kind
 // ---------------------------------------------------------------------------
 
-const ALL_POLICIES: readonly DialogPolicy[] = [
-  "auto",
-  "ignore",
-  "recover",
-  "safe-mode",
-  "cancel",
-  "manual",
+type FocusAction = ReturnType<typeof focusDialogAction>;
+
+/**
+ * Assert the macOS block for `kind` under every policy has the shape its
+ * expected action demands: `focus` presses Return; `named` clicks the policy
+ * tokens by name in priority order and falls back to `blocked:`, never
+ * pressing Return; `skip` emits nothing actionable.
+ */
+function assertMacosBlockMatrix(
+  kind: Parameters<typeof focusDialogAction>[0],
+  expected: Record<DialogPolicy, FocusAction>,
+  flags: Partial<typeof DEFAULT_PROBE_OPTS> = {},
+): void {
+  for (const policy of ALL_POLICIES) {
+    const opts = { ...DEFAULT_PROBE_OPTS, ...flags, policy };
+    const label = `${kind} under ${policy} (${JSON.stringify(flags)})`;
+    assert.equal(focusDialogAction(kind, opts), expected[policy], label);
+    const block = macosDialogKindBlock(kind, opts);
+    const focus = `return "dismissed:Focus:${kind}"`;
+    const blocked = `return "blocked:" & "${kind}"`;
+    switch (expected[policy]) {
+      case "focus":
+        assert.ok(block.includes("key code 36"), `${label}: presses Return`);
+        assert.ok(block.includes(focus), label);
+        assert.ok(!block.includes("click btn"), `${label}: no named click`);
+        break;
+      case "named": {
+        const tokens = preferenceTokensForPolicy(
+          kind,
+          policy,
+          opts.allowProjectUpgrade,
+          opts.allowUnsavedSceneDismiss,
+          opts.allowVersionMismatch,
+        );
+        assert.ok(tokens, label);
+        assert.ok(
+          block.includes(`repeat with tok in {${tokens.map((t) => `"${t}"`).join(", ")}}`),
+          `${label}: tries the policy tokens in priority order`,
+        );
+        assert.ok(block.includes("if my normLabel(bt) is (contents of tok) then"), label);
+        assert.ok(block.includes("click btn"), `${label}: clicks the named button`);
+        assert.ok(block.includes(`return "dismissed:" & bt & ":${kind}"`), label);
+        assert.ok(block.includes(blocked), `${label}: blocked when the named button is missing`);
+        assert.ok(!block.includes("key code 36"), `${label}: never presses Return`);
+        assert.ok(!block.includes(focus), label);
+        break;
+      }
+      case "blocked":
+        assert.ok(block.includes(blocked), label);
+        assert.ok(!block.includes("key code 36"), label);
+        assert.ok(!block.includes("click btn"), label);
+        break;
+      case "skip":
+        assert.equal(block, `-- policy declines ${kind}; skip`, label);
+        break;
+    }
+  }
+}
+
+test("macosDialogKindBlock: launch_errors clicks Enter Safe Mode / Quit by name, Return only for Ignore", () => {
+  assertMacosBlockMatrix("launch_errors", {
+    auto: "focus",
+    ignore: "focus",
+    // Return would press the focused Ignore, not Enter Safe Mode / Quit.
+    recover: "named",
+    "safe-mode": "named",
+    cancel: "named",
+    manual: "skip",
+  });
+  const safe = macosDialogKindBlock("launch_errors", { ...DEFAULT_PROBE_OPTS, policy: "safe-mode" });
+  assert.ok(safe.includes('repeat with tok in {"entersafemode", "safemode"}'));
+  const cancel = macosDialogKindBlock("launch_errors", { ...DEFAULT_PROBE_OPTS, policy: "cancel" });
+  assert.ok(cancel.includes('repeat with tok in {"quit", "cancel", "close", "no"}'));
+});
+
+test("macosDialogKindBlock: auto_graphics_api presses Return for OK, clicks Quit/Cancel by name under cancel", () => {
+  assertMacosBlockMatrix("auto_graphics_api", {
+    auto: "focus",
+    ignore: "focus",
+    recover: "focus",
+    "safe-mode": "skip",
+    cancel: "named",
+    manual: "skip",
+  });
+});
+
+test("macosDialogKindBlock: scene_modified_externally presses Return for Reload, clicks Quit/Cancel by name under cancel", () => {
+  assertMacosBlockMatrix("scene_modified_externally", {
+    auto: "focus",
+    ignore: "focus",
+    recover: "focus",
+    "safe-mode": "skip",
+    cancel: "named",
+    manual: "skip",
+  });
+});
+
+test("macosDialogKindBlock: non_matching_editor follows the shared action", () => {
+  const off = { allowVersionMismatch: false };
+  assertMacosBlockMatrix(
+    "non_matching_editor",
+    {
+      auto: "blocked",
+      ignore: "blocked",
+      recover: "blocked",
+      "safe-mode": "named",
+      cancel: "named",
+      manual: "skip",
+    },
+    off,
+  );
+  assertMacosBlockMatrix(
+    "non_matching_editor",
+    {
+      auto: "focus",
+      ignore: "focus",
+      recover: "focus",
+      "safe-mode": "named",
+      cancel: "named",
+      manual: "skip",
+    },
+    { allowVersionMismatch: true },
+  );
+});
+
+test("macosDismissAppleScript: cancel policy never presses Return on any dialog", () => {
+  for (const allow of [false, true]) {
+    const script = macosDismissAppleScript({
+      ...DEFAULT_PROBE_OPTS,
+      policy: "cancel",
+      allowProjectUpgrade: allow,
+      allowUnsavedSceneDismiss: allow,
+      allowVersionMismatch: allow,
+    });
+    assert.ok(!script.includes("key code 36"), `cancel (opt-ins=${allow})`);
+    for (const kind of ["launch_errors", "auto_graphics_api", "scene_modified_externally"]) {
+      assert.ok(script.includes(`return "blocked:" & "${kind}"`), `${kind} falls back to blocked`);
+    }
+  }
+});
+
+test("macosDismissAppleScript: defines the normLabel handler the named clicks call", () => {
+  const script = macosDismissAppleScript({ ...DEFAULT_PROBE_OPTS, policy: "recover" });
+  assert.ok(script.includes("my normLabel(bt)"));
+  assert.ok(script.includes("on normLabel(s)"));
+  assert.ok(script.includes("end normLabel"));
+});
+
+// Real Unity dialog titles per focus-classified kind, and main Editor window
+// titles whose normalized form contains a dialog fragment.
+const REAL_DIALOG_TITLES: readonly [string, DialogKind][] = [
+  ["Enter Safe Mode?", "launch_errors"],
+  ["Hold On", "launch_errors"],
+  ["Compiler Errors on Launch", "launch_errors"],
+  ["Opening Project in Non-Matching Editor Installation", "non_matching_editor"],
+  ["Opening Project in Non Matching Editor Installation", "non_matching_editor"],
+  ["Auto Graphics API Notice", "auto_graphics_api"],
+  ["Scene has been modified externally", "scene_modified_externally"],
+];
+const EDITOR_WINDOW_TITLES: readonly string[] = [
+  "MyGame - SAFE MODE - Unity 6.3 (6000.3.21f1) <Metal>",
+  "HoldOn - Main - macOS - Unity 6.3 (6000.3.21f1) <Metal>",
+  "Demo - SceneModifiedTest - Linux - Unity 6000.0.23f1 <Vulkan>",
+];
+const MAC_TITLE_KINDS: readonly DialogKind[] = [
+  "launch_errors",
+  "non_matching_editor",
+  "auto_graphics_api",
+  "scene_modified_externally",
 ];
 
-test("nonMatchingEditorFocusAction: derives the action from the shared policy table", () => {
-  const expected: Record<DialogPolicy, [off: string, on: string]> = {
-    auto: ["blocked", "continue"],
-    ignore: ["blocked", "continue"],
-    recover: ["blocked", "continue"],
-    "safe-mode": ["refuse", "refuse"],
-    cancel: ["refuse", "refuse"],
-    manual: ["decline", "decline"],
-  };
+test("macosTitleMatch: matches the normalized title, never the raw one", () => {
+  for (const kind of MAC_TITLE_KINDS) {
+    const cond = macosTitleMatch(kind);
+    // AppleScript `contains` ignores case but not spaces, so a raw-title match
+    // against a space-free fragment could never fire on a real title.
+    assert.ok(!cond.includes("wt contains"), `${kind}: ${cond}`);
+    assert.match(cond, /^\(wn contains "[a-z0-9]+"\)( or \(wn contains "[a-z0-9]+"\))*$/, kind);
+  }
+  for (const frag of DIALOG_TITLE_FRAGMENTS.launch_errors) {
+    assert.ok(macosTitleMatch("launch_errors").includes(`(wn contains "${frag}")`), frag);
+  }
+});
+
+test("macosDismissAppleScript: normalizes each window title and skips the main Editor window", () => {
   for (const policy of ALL_POLICIES) {
-    const [off, on] = expected[policy];
-    assert.equal(
-      nonMatchingEditorFocusAction({ ...DEFAULT_PROBE_OPTS, policy, allowVersionMismatch: false }),
-      off,
-      `${policy} without opt-in`,
+    const script = macosDismissAppleScript({ ...DEFAULT_PROBE_OPTS, policy });
+    assert.ok(script.includes("set wn to my normLabel(wt)"), policy);
+    assert.ok(
+      script.includes(`if not (wt contains "${UNITY_EDITOR_WINDOW_TITLE_MARKER}") then`),
+      policy,
     );
-    assert.equal(
-      nonMatchingEditorFocusAction({ ...DEFAULT_PROBE_OPTS, policy, allowVersionMismatch: true }),
-      on,
-      `${policy} with opt-in`,
-    );
+    for (const frag of Object.values(DIALOG_TITLE_FRAGMENTS).flat()) {
+      assert.ok(!script.includes(`wt contains "${frag}"`), `${policy}: raw match on ${frag}`);
+    }
+  }
+});
+
+test("macosDismissAppleScript: unsaved-scene sheets are scanned outside the Editor-window guard", () => {
+  const script = macosDismissAppleScript({
+    ...DEFAULT_PROBE_OPTS,
+    allowUnsavedSceneDismiss: true,
+  });
+  // The guard closes right after the last title-classified kind; the sheet
+  // scan (Unity 6 attaches the save prompt to the main Editor window) follows.
+  const guardEnd = script.indexOf(
+    "end if",
+    script.lastIndexOf('return "dismissed:Focus:scene_modified_externally"'),
+  );
+  const closeGuard = script.indexOf("end if", guardEnd + 1);
+  assert.ok(closeGuard > 0);
+  assert.ok(script.indexOf("sheets of w") > closeGuard, "sheet scan runs for the Editor window too");
+});
+
+test("macosDialogKindBlock: focus presses Return only when the focused button is present", () => {
+  for (const kind of MAC_TITLE_KINDS) {
+    const opts = { ...DEFAULT_PROBE_OPTS, allowVersionMismatch: true };
+    assert.equal(focusDialogAction(kind, opts), "focus", kind);
+    const block = macosDialogKindBlock(kind, opts);
+    const gate = `if my normLabel(bt) is "${DIALOG_FOCUSED_BUTTON_TOKENS[kind]}" then`;
+    assert.ok(block.includes("repeat with btn in buttons of w"), kind);
+    assert.ok(block.includes(gate), kind);
+    assert.ok(block.indexOf(gate) < block.indexOf("key code 36"), `${kind}: gate before Return`);
+  }
+});
+
+// Runs the generated title conditions through osascript, so the test proves
+// the AppleScript semantics (case-insensitive, not space-insensitive) rather
+// than the script's text.
+const hasOsascript =
+  process.platform === "darwin" && spawnSync("osascript", ["-e", "return 1"]).status === 0;
+
+test(
+  "macOS title matching: real dialog titles classify, main Editor window titles do not (osascript)",
+  { skip: hasOsascript ? false : "osascript unavailable" },
+  () => {
+    const classify = `
+on run argv
+  set wt to item 1 of argv
+  set wn to my normLabel(wt)
+  if wt contains "${UNITY_EDITOR_WINDOW_TITLE_MARKER}" then return "editor"
+${MAC_TITLE_KINDS.map((k) => `  if ${macosTitleMatch(k)} then return "${k}"`).join("\n")}
+  return "none"
+end run
+${MACOS_NORM_LABEL_HANDLER}`;
+    const run = (title: string): string =>
+      execFileSync("osascript", ["-e", classify, title], { encoding: "utf8" }).trim();
+    for (const [title, kind] of REAL_DIALOG_TITLES) {
+      assert.equal(run(title), kind, title);
+    }
+    for (const title of EDITOR_WINDOW_TITLES) {
+      assert.equal(run(title), "editor", title);
+    }
+    assert.equal(run("Inspector"), "none");
+  },
+);
+
+test("xdotoolTitlePattern: matches exactly the titles whose normalized form contains the fragment", () => {
+  assert.equal(
+    xdotoolTitlePattern("holdon"),
+    "[hH][^A-Za-z0-9]*[oO][^A-Za-z0-9]*[lL][^A-Za-z0-9]*[dD][^A-Za-z0-9]*[oO][^A-Za-z0-9]*[nN]",
+  );
+  const titles = [
+    ...REAL_DIALOG_TITLES.map(([t]) => t),
+    ...EDITOR_WINDOW_TITLES,
+    "Project Upgrade Required",
+    "Scene(s) Have Been Modified",
+    "Safe-Moder",
+    "Inspector",
+  ];
+  // xdotool compiles the pattern as a POSIX ERE; it uses only bracket
+  // expressions and `*`, which mean the same in a JS RegExp.
+  for (const frag of Object.values(DIALOG_TITLE_FRAGMENTS).flat()) {
+    const re = new RegExp(xdotoolTitlePattern(frag));
+    for (const title of titles) {
+      assert.equal(
+        re.test(title),
+        normalizeDialogLabel(title).includes(frag),
+        `${frag} vs ${JSON.stringify(title)}`,
+      );
+    }
+  }
+  assert.ok(new RegExp(xdotoolTitlePattern("safemode")).test("Enter Safe Mode?"));
+  assert.ok(!new RegExp(regexEscapeForXdotool("safemode")).test("Enter Safe Mode?"));
+});
+
+test("WINDOWS_DISMISS_PS_SCRIPT: skips the main Editor window before classifying", () => {
+  const skip = `if (title.IndexOf("${UNITY_EDITOR_WINDOW_TITLE_MARKER}", StringComparison.OrdinalIgnoreCase) >= 0) continue;`;
+  assert.ok(WINDOWS_DISMISS_PS_SCRIPT.includes(skip));
+  assert.ok(WINDOWS_DISMISS_PS_SCRIPT.indexOf(skip) < WINDOWS_DISMISS_PS_SCRIPT.indexOf("var norm = Norm(title);"));
+});
+
+// ---------------------------------------------------------------------------
+// focusDialogAction / linuxFocusAction — policy × opt-ins
+// ---------------------------------------------------------------------------
+
+test("focusDialogAction: named/focus split follows the kind's focused button", () => {
+  const kinds = Object.keys(DIALOG_FOCUSED_BUTTON_TOKENS) as (keyof typeof DIALOG_FOCUSED_BUTTON_TOKENS)[];
+  for (const kind of kinds) {
+    for (const policy of ALL_POLICIES) {
+      for (const allow of [false, true]) {
+        const opts = {
+          ...DEFAULT_PROBE_OPTS,
+          policy,
+          allowProjectUpgrade: allow,
+          allowUnsavedSceneDismiss: allow,
+          allowVersionMismatch: allow,
+        };
+        const action = focusDialogAction(kind, opts);
+        const tokens = preferenceTokensForPolicy(kind, policy, allow, allow, allow);
+        const label = `${kind} under ${policy} (opt-ins=${allow})`;
+        if (action === "focus") assert.equal(tokens?.[0], DIALOG_FOCUSED_BUTTON_TOKENS[kind], label);
+        if (action === "named") {
+          assert.ok(tokens && tokens.length > 0, label);
+          assert.notEqual(tokens[0], DIALOG_FOCUSED_BUTTON_TOKENS[kind], label);
+        }
+        if (action === "skip") assert.equal(tokens, null, label);
+        // Linux folds `named` into `blocked`: xdotool cannot click by name.
+        const linux = linuxFocusAction(kind, opts);
+        assert.equal(linux, action === "named" ? "blocked" : action, label);
+      }
+    }
   }
 });
 
@@ -375,17 +693,121 @@ test("linuxFocusAction: non_matching_editor presses Return only for Continue wit
   }
 });
 
-test("linuxFocusAction: other kinds keep the blocked / skip / focus table", () => {
-  const opts = { ...DEFAULT_PROBE_OPTS, policy: "ignore" as const };
-  assert.equal(linuxFocusAction("launch_errors", opts), "focus");
-  assert.equal(linuxFocusAction("auto_graphics_api", opts), "focus");
-  assert.equal(linuxFocusAction("project_upgrade", opts), "blocked");
-  assert.equal(linuxFocusAction("unsaved_scene_changes", opts), "blocked");
-  assert.equal(
-    linuxFocusAction("auto_graphics_api", { ...DEFAULT_PROBE_OPTS, policy: "safe-mode" }),
-    "skip",
+type LinuxAction = ReturnType<typeof linuxFocusAction>;
+
+function assertLinuxMatrix(
+  kind: Parameters<typeof linuxFocusAction>[0],
+  expected: Record<DialogPolicy, LinuxAction>,
+  flags: Partial<typeof DEFAULT_PROBE_OPTS> = {},
+): void {
+  for (const policy of ALL_POLICIES) {
+    assert.equal(
+      linuxFocusAction(kind, { ...DEFAULT_PROBE_OPTS, ...flags, policy }),
+      expected[policy],
+      `${kind} under ${policy} (${JSON.stringify(flags)})`,
+    );
+  }
+}
+
+test("linuxFocusAction: launch_errors presses Return only when the policy picks the focused Ignore", () => {
+  assertLinuxMatrix("launch_errors", {
+    auto: "focus",
+    ignore: "focus",
+    // Enter Safe Mode / Quit are not the focused button; Return would press
+    // Ignore instead, so report blocked for a human.
+    recover: "blocked",
+    "safe-mode": "blocked",
+    cancel: "blocked",
+    manual: "skip",
+  });
+});
+
+test("linuxFocusAction: auto_graphics_api presses Return only for the focused OK", () => {
+  assertLinuxMatrix("auto_graphics_api", {
+    auto: "focus",
+    ignore: "focus",
+    recover: "focus",
+    "safe-mode": "skip",
+    cancel: "blocked",
+    manual: "skip",
+  });
+});
+
+test("linuxFocusAction: scene_modified_externally presses Return only for the focused Reload", () => {
+  assertLinuxMatrix("scene_modified_externally", {
+    auto: "focus",
+    ignore: "focus",
+    recover: "focus",
+    "safe-mode": "skip",
+    cancel: "blocked",
+    manual: "skip",
+  });
+});
+
+test("linuxFocusAction: project_upgrade is blocked without opt-in; with it, only the focused Confirm", () => {
+  assertLinuxMatrix("project_upgrade", {
+    auto: "blocked",
+    ignore: "blocked",
+    recover: "blocked",
+    "safe-mode": "blocked",
+    cancel: "blocked",
+    manual: "skip",
+  });
+  assertLinuxMatrix(
+    "project_upgrade",
+    {
+      auto: "focus",
+      ignore: "focus",
+      recover: "focus",
+      "safe-mode": "skip",
+      cancel: "blocked",
+      manual: "skip",
+    },
+    { allowProjectUpgrade: true },
   );
-  assert.equal(linuxFocusAction("launch_errors", { ...DEFAULT_PROBE_OPTS, policy: "manual" }), "skip");
+});
+
+test("linuxFocusAction: unsaved_scene_changes never gets a Return press", () => {
+  assertLinuxMatrix("unsaved_scene_changes", {
+    auto: "blocked",
+    ignore: "blocked",
+    recover: "blocked",
+    "safe-mode": "blocked",
+    cancel: "blocked",
+    manual: "skip",
+  });
+  // No focused button is relied on for this destructive prompt, so even the
+  // opt-in cannot make a Return press select the policy's choice.
+  assertLinuxMatrix(
+    "unsaved_scene_changes",
+    {
+      auto: "blocked",
+      ignore: "blocked",
+      recover: "blocked",
+      "safe-mode": "skip",
+      cancel: "blocked",
+      manual: "skip",
+    },
+    { allowUnsavedSceneDismiss: true },
+  );
+});
+
+test("linuxFocusAction: focus implies the policy's first choice is the focused button", () => {
+  const kinds = Object.keys(DIALOG_FOCUSED_BUTTON_TOKENS) as (keyof typeof DIALOG_FOCUSED_BUTTON_TOKENS)[];
+  for (const kind of kinds) {
+    for (const policy of ALL_POLICIES) {
+      for (const allow of [false, true]) {
+        const flags = {
+          allowProjectUpgrade: allow,
+          allowUnsavedSceneDismiss: allow,
+          allowVersionMismatch: allow,
+        };
+        if (linuxFocusAction(kind, { ...DEFAULT_PROBE_OPTS, ...flags, policy }) !== "focus") continue;
+        const tokens = preferenceTokensForPolicy(kind, policy, allow, allow, allow);
+        assert.equal(tokens?.[0], DIALOG_FOCUSED_BUTTON_TOKENS[kind], `${kind} under ${policy} (opt-ins=${allow})`);
+      }
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------

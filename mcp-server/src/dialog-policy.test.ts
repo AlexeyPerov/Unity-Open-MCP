@@ -9,6 +9,8 @@ import assert from "node:assert/strict";
 
 import {
   classifyDialogTitle,
+  isUnityEditorWindowTitle,
+  titleMatchesDialogKind,
   normalizeDialogLabel,
   preferredDialogButtonLabel,
   preferredGenericButtonLabel,
@@ -84,6 +86,34 @@ test("classifyDialogTitle: matches every known kind via its real Unity title", (
   assert.equal(
     classifyDialogTitle("Scene(s) Have Been Modified"),
     "unsaved_scene_changes",
+  );
+});
+
+test("classifyDialogTitle: the main Editor window never classifies, even when its title holds a fragment", () => {
+  // The main window title embeds user-chosen names and "SAFE MODE"; after
+  // normalization each of these contains a dialog fragment.
+  for (const title of [
+    "MyGame - SampleScene - macOS - Unity 6.3 (6000.3.21f1) <Metal>",
+    "MyGame - SAFE MODE - Unity 6.3 (6000.3.21f1) <Metal>",
+    "HoldOn - Main - Windows, Mac, Linux - Unity 2022.3.10f1 <DX11>",
+    "Demo - SceneModifiedTest - Linux - Unity 6000.0.23f1 <Vulkan>",
+    "ProjectUpgradeRequired - Main - macOS - UNITY 2022.3.1f1 <Metal>",
+  ]) {
+    assert.equal(isUnityEditorWindowTitle(title), true, title);
+    assert.equal(classifyDialogTitle(title), null, title);
+  }
+  for (const title of ["Enter Safe Mode?", "Hold On", "Auto Graphics API Notice"]) {
+    assert.equal(isUnityEditorWindowTitle(title), false, title);
+  }
+});
+
+test("titleMatchesDialogKind: matches the kind's own fragments only", () => {
+  assert.equal(titleMatchesDialogKind("Enter Safe Mode?", "launch_errors"), true);
+  assert.equal(titleMatchesDialogKind("Enter Safe Mode?", "auto_graphics_api"), false);
+  assert.equal(titleMatchesDialogKind("", "launch_errors"), false);
+  assert.equal(
+    titleMatchesDialogKind("MyGame - SAFE MODE - Unity 6000.3.21f1 <Metal>", "launch_errors"),
+    false,
   );
 });
 

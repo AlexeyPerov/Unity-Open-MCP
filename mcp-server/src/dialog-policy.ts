@@ -209,22 +209,80 @@ export const DIALOG_TITLE_FRAGMENTS: Readonly<Record<DialogKind, readonly string
 };
 
 /**
+ * The normalized preference token of the button a focus-driven platform
+ * (macOS `key code 36`, Linux/X11 `xdotool key Return`) activates by pressing
+ * Return on each dialog kind — i.e. the dialog's focused/default button.
+ * These are the assumptions the macOS Return-clicks already rely on:
+ *
+ *   - launch_errors             → Ignore (the long-standing T4.5 default)
+ *   - non_matching_editor       → Continue
+ *   - project_upgrade           → Confirm
+ *   - auto_graphics_api         → OK
+ *   - scene_modified_externally → Reload
+ *   - unsaved_scene_changes     → `null`: not relied on. The prompt is
+ *                                 destructive either way, so it is only ever
+ *                                 dismissed by a named-button click.
+ *
+ * A focus-only platform may press Return only when the policy's FIRST
+ * preferred token equals this entry; otherwise Return would click a button
+ * the policy did not choose.
+ */
+export const DIALOG_FOCUSED_BUTTON_TOKENS: Readonly<Record<DialogKind, string | null>> = {
+  launch_errors: "ignore",
+  non_matching_editor: "continue",
+  project_upgrade: "confirm",
+  auto_graphics_api: "ok",
+  scene_modified_externally: "reload",
+  unsaved_scene_changes: null,
+};
+
+/**
  * Classify a Unity window title into a known dialog kind, or `null` when it
  * does not match any. Pure / case-insensitive.
  *
  * The title is normalized (alphanumeric-only, lowercased) before matching, so
  * "Enter Safe Mode?" → "entersafemode" matches the `launch_errors` fragment.
- * Kinds are checked in declaration order; the first match wins.
+ * Kinds are checked in declaration order; the first match wins. The main
+ * Editor window never classifies (see {@link isUnityEditorWindowTitle}).
  */
 export function classifyDialogTitle(title: string): DialogKind | null {
-  const norm = normalizeDialogLabel(title);
-  if (norm === "") return null;
   for (const kind of Object.keys(DIALOG_TITLE_FRAGMENTS) as DialogKind[]) {
-    for (const frag of DIALOG_TITLE_FRAGMENTS[kind]) {
-      if (norm.includes(frag)) return kind;
-    }
+    if (titleMatchesDialogKind(title, kind)) return kind;
   }
   return null;
+}
+
+/**
+ * Whether a window title belongs to a dialog of the given kind: its
+ * normalized form contains one of the kind's fragments, and it is not the
+ * main Editor window. Pure.
+ */
+export function titleMatchesDialogKind(title: string, kind: DialogKind): boolean {
+  if (isUnityEditorWindowTitle(title)) return false;
+  const norm = normalizeDialogLabel(title);
+  if (norm === "") return false;
+  return DIALOG_TITLE_FRAGMENTS[kind].some((frag) => norm.includes(frag));
+}
+
+/**
+ * Case-insensitive marker in the main Unity Editor window title. Unity
+ * 2022.3+ titles it "<Project> - <Scene> - <Platform> - Unity <version>
+ * <Graphics API>"; dialog titles are fixed strings that never contain it.
+ */
+export const UNITY_EDITOR_WINDOW_TITLE_MARKER = " - Unity ";
+
+/**
+ * Whether a window title is the main Unity Editor window. Its title embeds
+ * user-chosen project and scene names, and "SAFE MODE" while the Editor is in
+ * Safe Mode, so after normalization it can contain a dialog fragment (e.g.
+ * "safemode", "holdon", "scenemodified"). Every platform skips it before
+ * classifying, so a focus-driven platform never presses Return on the Editor
+ * itself. Pure / case-insensitive.
+ */
+export function isUnityEditorWindowTitle(title: string): boolean {
+  return title
+    .toLowerCase()
+    .includes(UNITY_EDITOR_WINDOW_TITLE_MARKER.toLowerCase());
 }
 
 /**

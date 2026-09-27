@@ -27,10 +27,13 @@ import { execFile, execFileSync } from "node:child_process";
 import { platform as nodePlatform } from "node:os";
 import {
   DIALOG_TITLE_FRAGMENTS,
+  DIALOG_FOCUSED_BUTTON_TOKENS,
   parseDialogPolicy,
   preferenceTokensForPolicy,
   genericFallbackTokens,
   blockedKindsForPolicy,
+  titleMatchesDialogKind,
+  UNITY_EDITOR_WINDOW_TITLE_MARKER,
   type DialogPolicy,
   type DialogKind,
 } from "./dialog-policy.js";
@@ -238,8 +241,9 @@ function buildTokenTable(opts: DismissProbeOptions): {
  * Strategy:
  *   1. P/Invoke `EnumWindows` to enumerate every visible top-level window
  *      owned by `Unity.exe`.
- *   2. For each, normalize the title (alphanumeric lowercase) and match it
- *      against the embedded per-kind fragment table to classify it.
+ *   2. For each, skip the main Editor window ({@link isUnityEditorWindowTitle}),
+ *      normalize the title (alphanumeric lowercase) and match it against the
+ *      embedded per-kind fragment table to classify it.
  *   3. If the kind is in the blocked list → emit `blocked:<kind>` and skip
  *      the click. If the kind's token list is null → skip (not-found).
  *   4. Walk child windows with `EnumChildWindows`, find a Button whose
@@ -305,6 +309,8 @@ namespace UnityOpenMcp.Dialogs {
         sb.Length = 0;
         GetWindowTextW(hWnd, sb, sb.Capacity);
         var title = sb.ToString();
+        // The main Editor window title embeds project/scene names; never classify it.
+        if (title.IndexOf("${UNITY_EDITOR_WINDOW_TITLE_MARKER}", StringComparison.OrdinalIgnoreCase) >= 0) continue;
         var norm = Norm(title);
         string kind = null;
         foreach (var kv in table.kinds) {
@@ -421,50 +427,37 @@ async function tryDismissWindows(
 
 /**
  * The AppleScript template used for the macOS dismiss path. Exposed as a
- * function of the token table so tests can assert the script shape without
+ * function of the probe options so tests can assert the script shape without
  * launching osascript.
  *
- * Strategy: iterate every window of the Unity process, normalize its title,
- * classify it against the table, and click the first button whose normalized
- * label contains a policy token. If the kind is blocked, emit `blocked:<kind>`
- * without clicking. If Unity is not running OR no matching button exists, the
- * script reports `not-found`. Any AppleScript exception (e.g. Accessibility
- * permission not granted) is reported as `error:<msg>`.
+ * Strategy: iterate every window of the Unity process except the main Editor
+ * window (its title contains {@link UNITY_EDITOR_WINDOW_TITLE_MARKER}),
+ * classify it by its title normalized with `normLabel` (see
+ * {@link macosTitleMatch}), and act per kind as {@link focusDialogAction}
+ * decides from the shared policy table (see {@link macosDialogKindBlock}):
+ *
+ *   - `focus`   — the policy picks the kind's focused/default button
+ *                 ({@link DIALOG_FOCUSED_BUTTON_TOKENS}): press Return, but
+ *                 only when the window shows a button with that label.
+ *   - `named`   — the policy picks another button (e.g. Enter Safe Mode, or
+ *                 Quit/Cancel under `cancel`): click the first button whose
+ *                 normalized title equals a policy token, in priority order,
+ *                 or report `blocked:<kind>` when none is found. Return is
+ *                 never pressed, because it would click the focused button.
+ *   - `blocked` — the policy blocks the kind: report `blocked:<kind>`.
+ *   - `skip`    — the policy declines the kind: no block; the window falls
+ *                 through to `not-found` so polling continues.
+ *
+ * Project Upgrade is always reported as `blocked` (never clicked), and
+ * unsaved scene changes have their own named-button block behind the opt-in.
+ * If Unity is not running or nothing matches, the script reports `not-found`.
+ * Any AppleScript exception (e.g. Accessibility permission not granted) is
+ * reported as `error:<msg>`.
  *
  * Requires the Terminal / `node` binary to have been granted Accessibility
  * permission in System Settings → Privacy & Security → Accessibility.
- *
- * The token table is JSON-escaped into the script header.
  */
 export function macosDismissAppleScript(opts: DismissProbeOptions): string {
-  // The macOS path cannot do per-button selection as precisely as the Windows
-  // path (AppleScript's named-button click works but is brittle across
-  // Unity versions); instead it classifies the window title and presses
-  // Return to click the FOCUSED (default) button — which under the default /
-  // auto / ignore / recover policies IS the safe choice for launch-errors and
-  // auto-graphics-api. Non-matching Editor is handled by a dedicated block
-  // (nonMatchingEditorMacOsBlock) derived from the same policy table as the
-  // other platforms: blocked, Return-click on the focused Continue (opt-in
-  // forward policies only), or a named Quit/Cancel click (refusal policies).
-  // Project Upgrade is detected and reported as `blocked` (never Return-clicked
-  // without the explicit opt-in). The token table from buildTokenTable is
-  // consulted only to decide whether the policy declines a kind entirely
-  // (manual / safe-mode on a kind with no safe button → no click, not-found);
-  // when it declines, the script returns not-found for that kind.
-  const launchFrags = DIALOG_TITLE_FRAGMENTS.launch_errors;
-  const graphicsFrags = DIALOG_TITLE_FRAGMENTS.auto_graphics_api;
-  const sceneModifiedFrags = DIALOG_TITLE_FRAGMENTS.scene_modified_externally;
-  // Whether the active policy dismisses each safe kind at all. Under manual,
-  // or safe-mode on auto_graphics (no safe button), the loop
-  // should NOT click — return not-found so polling continues.
-  const dismissesLaunch = preferenceTokensForPolicy("launch_errors", opts.policy, opts.allowProjectUpgrade) !== null;
-  const dismissesGraphics = preferenceTokensForPolicy("auto_graphics_api", opts.policy, opts.allowProjectUpgrade) !== null;
-  // scene_modified_externally: safe to Return-click (focused button is Reload)
-  // under auto/ignore/recover. unsaved_scene_changes is intentionally NOT
-  // Return-clicked here — it's destructive (data loss either way) and is
-  // blocked by default; even with the opt-in the per-button Windows path is
-  // the safer surface for it.
-  const dismissesSceneModified = preferenceTokensForPolicy("scene_modified_externally", opts.policy, opts.allowProjectUpgrade) !== null;
   const unsavedTokens = opts.allowUnsavedSceneDismiss
     ? preferenceTokensForPolicy(
         "unsaved_scene_changes",
@@ -484,6 +477,10 @@ export function macosDismissAppleScript(opts: DismissProbeOptions): string {
           if (t === "cancel" || t === "close" || t === "quit") return "Cancel";
           return t;
         });
+  const unsavedClick =
+    opts.allowUnsavedSceneDismiss && unsavedButtonLabels.length > 0
+      ? unsavedSceneMacOsClickBlocks(unsavedButtonLabels)
+      : { window: "", sheets: "" };
   return `
 on run
   try
@@ -498,22 +495,29 @@ on run
           on error
             set wt to ""
           end try
-          -- Project Upgrade: NEVER click without the explicit opt-in, even
-          -- though the focused button is usually Confirm. Report blocked.
-          if (wt contains "Upgrade") and (wt contains "Project") then
-            return "blocked:" & "project_upgrade"
+          -- Dialog fragments are normalized (letters and digits only), so match
+          -- them against the normalized title, never the raw one.
+          set wn to my normLabel(wt)
+          -- The main Editor window title ("<Project> - <Scene> - ... - Unity
+          -- <version>") embeds user-chosen names and "SAFE MODE"; never classify
+          -- it as a dialog. Its sheets are still scanned below.
+          if not (wt contains "${UNITY_EDITOR_WINDOW_TITLE_MARKER}") then
+            -- Project Upgrade: NEVER click without the explicit opt-in, even
+            -- though the focused button is usually Confirm. Report blocked.
+            if (wt contains "Upgrade") and (wt contains "Project") then
+              return "blocked:" & "project_upgrade"
+            end if
+            ${macosDialogKindBlock("non_matching_editor", opts)}
+            -- Unsaved scene changes: blocked unless the dedicated opt-in is set.
+            if ${(opts.allowUnsavedSceneDismiss ? "false" : "true")} then
+              if wt contains "Have Been Modified" or wt contains "Unsaved changes" or wt contains "Save Changes" then return "blocked:" & "unsaved_scene_changes"
+            end if
+            ${unsavedClick.window}
+            ${macosDialogKindBlock("launch_errors", opts)}
+            ${macosDialogKindBlock("auto_graphics_api", opts)}
+            ${macosDialogKindBlock("scene_modified_externally", opts)}
           end if
-          ${nonMatchingEditorMacOsBlock(opts)}
-          -- Unsaved scene changes: blocked unless the dedicated opt-in is set.
-          if ${(opts.allowUnsavedSceneDismiss ? "false" : "true")} then
-            if wt contains "Have Been Modified" or wt contains "Unsaved changes" or wt contains "Save Changes" then return "blocked:" & "unsaved_scene_changes"
-          end if
-          ${opts.allowUnsavedSceneDismiss && unsavedButtonLabels.length > 0
-            ? unsavedSceneMacOsClickBlock(unsavedButtonLabels)
-            : ""}
-          ${launchFrags.map((f) => fragmentCheck(f, "launch_errors", dismissesLaunch)).join("\n          ")}
-          ${graphicsFrags.map((f) => fragmentCheck(f, "auto_graphics_api", dismissesGraphics)).join("\n          ")}
-          ${sceneModifiedFrags.map((f) => fragmentCheck(f, "scene_modified_externally", dismissesSceneModified)).join("\n          ")}
+          ${unsavedClick.sheets}
         end repeat
       end tell
     end tell
@@ -522,130 +526,182 @@ on run
     return "error:" & errMsg
   end try
 end run
-`;
+
+${MACOS_NORM_LABEL_HANDLER}`;
 }
 
 /**
- * How a focus-driven platform (macOS AppleScript, Linux xdotool) may act on
- * the Non-Matching Editor dialog under the active policy. Derived from the
- * shared policy table so every platform agrees:
+ * AppleScript mirror of {@link normalizeDialogLabel}: keep ASCII letters and
+ * digits only. AppleScript string comparison (`is`, `contains`) ignores case
+ * by default, so the handler does not lowercase. Exported for tests.
+ */
+export const MACOS_NORM_LABEL_HANDLER = `
+-- Mirror of normalizeDialogLabel: keep ASCII letters and digits only.
+-- (String comparison is case-insensitive by default, so no lowercasing.)
+on normLabel(s)
+  set out to ""
+  repeat with c in (characters of s)
+    set ch to contents of c
+    set cid to id of ch
+    if (cid >= 48 and cid <= 57) or (cid >= 65 and cid <= 90) or (cid >= 97 and cid <= 122) then set out to out & ch
+  end repeat
+  return out
+end normLabel
+`;
+
+/**
+ * How a focus-driven platform (macOS AppleScript, Linux xdotool) may act on a
+ * dialog of the given kind under the active policy. Derived from the shared
+ * policy table so every platform agrees:
  *
- *   - `blocked`  — the policy blocks it (forward policy without the mismatch
- *                  opt-in). Report `blocked`, never click.
- *   - `continue` — the policy's first choice is Continue (forward policy with
- *                  the opt-in). Pressing Return on the focused button is safe.
- *   - `refuse`   — the policy prefers Quit/Cancel (safe-mode / cancel). The
- *                  focused button is Continue, so Return must NOT be pressed;
- *                  only a named-button click may act.
- *   - `decline`  — the policy has no preference (manual). Do nothing.
+ *   - `blocked` — the policy blocks the kind (e.g. Project Upgrade without its
+ *                 opt-in). Report `blocked:<kind>`, never click.
+ *   - `skip`    — the policy declines the kind (no preference tokens). Do
+ *                 nothing; try the next kind.
+ *   - `focus`   — the policy's first choice is the kind's focused button
+ *                 ({@link DIALOG_FOCUSED_BUTTON_TOKENS}): pressing Return is
+ *                 safe.
+ *   - `named`   — the policy's first choice is some other button (e.g. Enter
+ *                 Safe Mode, Quit, Cancel). Return would press the focused
+ *                 button instead, so only a named-button click may act.
  *
  * Pure; exported for tests.
  */
-export function nonMatchingEditorFocusAction(
+export function focusDialogAction(
+  kind: DialogKind,
   opts: Pick<
     DismissProbeOptions,
     "policy" | "allowProjectUpgrade" | "allowUnsavedSceneDismiss" | "allowVersionMismatch"
   >,
-): "blocked" | "continue" | "refuse" | "decline" {
+): "blocked" | "skip" | "focus" | "named" {
   const blocked = blockedKindsForPolicy(
     opts.policy,
     opts.allowProjectUpgrade,
     opts.allowUnsavedSceneDismiss,
     opts.allowVersionMismatch,
-  ).includes("non_matching_editor");
-  if (blocked) return "blocked";
+  );
+  if (blocked.includes(kind)) return "blocked";
   const tokens = preferenceTokensForPolicy(
-    "non_matching_editor",
+    kind,
     opts.policy,
     opts.allowProjectUpgrade,
     opts.allowUnsavedSceneDismiss,
     opts.allowVersionMismatch,
   );
-  if (tokens === null) return "decline";
-  return tokens[0] === "continue" ? "continue" : "refuse";
+  if (tokens === null) return "skip";
+  return tokens[0] === DIALOG_FOCUSED_BUTTON_TOKENS[kind] ? "focus" : "named";
 }
 
-/** Button labels the macOS named-button click tries per refusal token. */
-const NON_MATCHING_EDITOR_REFUSAL_LABELS: Readonly<Record<string, string>> = {
-  quit: "Quit",
-  cancel: "Cancel",
-  close: "Close",
-  no: "No",
-};
+/**
+ * AppleScript title condition per focus-classified kind, over `wn` — the
+ * window title normalized by `normLabel`. The fragments are normalized
+ * (letters and digits only), and AppleScript `contains` ignores case but not
+ * spaces or punctuation, so matching the raw title would never fire
+ * (`"Enter Safe Mode?" contains "safemode"` is false). Non-Matching Editor
+ * matches the short `nonmatchingeditor` stem so both the hyphenated and the
+ * spaced spelling qualify. Exported for tests.
+ */
+export function macosTitleMatch(kind: DialogKind): string {
+  const fragments =
+    kind === "non_matching_editor" ? ["nonmatchingeditor"] : DIALOG_TITLE_FRAGMENTS[kind];
+  return fragments.map((f) => `(wn contains "${f}")`).join(" or ");
+}
 
 /**
- * AppleScript block for "Opening Project in Non-Matching Editor Installation".
- * The action comes from the shared policy table, never from the opt-in alone:
+ * AppleScript block for one dialog kind inside the window loop (`w` / `wt`),
+ * shaped by {@link focusDialogAction}:
  *
- *   - blocked (forward policy without the mismatch opt-in) → `blocked:`.
- *   - forward tokens (Continue first; only reachable with the opt-in) → press
- *     Return on the focused Continue button.
- *   - refusal tokens (safe-mode / cancel) → click the named Quit/Cancel button;
- *     if none is found, report `blocked:` rather than pressing Return, because
- *     the focused button is Continue.
- *   - no tokens (manual) → emit nothing; the window falls through to not-found.
+ *   - `blocked` → `blocked:<kind>` when the title matches.
+ *   - `skip`    → a comment only; the window falls through.
+ *   - `focus`   → press Return on the focused button, when the window has a
+ *                 button whose normalized title equals the kind's focused
+ *                 token; otherwise fall through (no press).
+ *   - `named`   → for each policy token in priority order, click the first
+ *                 button whose normalized title equals it; if none matches,
+ *                 report `blocked:<kind>`. Never presses Return.
+ *
+ * Exact normalized equality (not substring) keeps a short token such as `no`
+ * from matching an unrelated label such as "Ignore".
+ *
+ * Pure; exported for tests.
  */
-function nonMatchingEditorMacOsBlock(opts: DismissProbeOptions): string {
-  const titleMatch =
-    '(wt contains "Non-Matching Editor") or (wt contains "Non Matching Editor")';
-  const action = nonMatchingEditorFocusAction(opts);
-  if (action === "blocked") {
-    return `-- A mismatched Editor can rewrite project/package metadata during
-          -- load. The policy blocks it without the mismatch opt-in.
+export function macosDialogKindBlock(
+  kind: DialogKind,
+  opts: Pick<
+    DismissProbeOptions,
+    "policy" | "allowProjectUpgrade" | "allowUnsavedSceneDismiss" | "allowVersionMismatch"
+  >,
+): string {
+  const titleMatch = macosTitleMatch(kind);
+  switch (focusDialogAction(kind, opts)) {
+    case "skip":
+      return `-- policy declines ${kind}; skip`;
+    case "blocked":
+      return `-- policy blocks ${kind}
           if ${titleMatch} then
-            return "blocked:" & "non_matching_editor"
+            return "blocked:" & "${kind}"
           end if`;
-  }
-  if (action === "decline") return "-- policy declines non_matching_editor; skip";
-  if (action === "continue") {
-    return `-- Mismatch opt-in set: press the focused Continue button.
+    case "focus": {
+      const focusedToken = DIALOG_FOCUSED_BUTTON_TOKENS[kind];
+      return `-- policy picks the focused button on ${kind}: press Return, but only
+          -- when the window shows that button, so Return lands on a real dialog
           if ${titleMatch} then
-            set frontmost to true
-            key code 36
-            return "dismissed:Focus:non_matching_editor"
-          end if`;
-  }
-  const tokens =
-    preferenceTokensForPolicy(
-      "non_matching_editor",
-      opts.policy,
-      opts.allowProjectUpgrade,
-      opts.allowUnsavedSceneDismiss,
-      opts.allowVersionMismatch,
-    ) ?? [];
-  const labels = [
-    ...new Set(
-      tokens
-        .map((t) => NON_MATCHING_EDITOR_REFUSAL_LABELS[t])
-        .filter((l): l is string => l !== undefined),
-    ),
-  ];
-  const clicks = labels
-    .map(
-      (label) => `
             repeat with btn in buttons of w
               try
                 set bt to (title of btn) as text
               on error
                 set bt to ""
               end try
-              if bt is "${label}" then
+              if my normLabel(bt) is "${focusedToken}" then
                 set frontmost to true
-                click btn
-                return "dismissed:${label}:non_matching_editor"
+                key code 36
+                return "dismissed:Focus:${kind}"
               end if
-            end repeat`,
-    )
-    .join("");
-  return `-- Refusal policy: click the named Quit/Cancel button. Never press
-          -- Return here — the focused button is Continue.
-          if ${titleMatch} then${clicks}
-            return "blocked:" & "non_matching_editor"
+            end repeat
           end if`;
+    }
+    case "named": {
+      const tokens =
+        preferenceTokensForPolicy(
+          kind,
+          opts.policy,
+          opts.allowProjectUpgrade,
+          opts.allowUnsavedSceneDismiss,
+          opts.allowVersionMismatch,
+        ) ?? [];
+      const tokenList = tokens.map((t) => `"${t}"`).join(", ");
+      return `-- policy picks a non-focused button on ${kind}: click it by name,
+          -- never press Return (that would click the focused button)
+          if ${titleMatch} then
+            repeat with tok in {${tokenList}}
+              repeat with btn in buttons of w
+                try
+                  set bt to (title of btn) as text
+                on error
+                  set bt to ""
+                end try
+                if my normLabel(bt) is (contents of tok) then
+                  set frontmost to true
+                  click btn
+                  return "dismissed:" & bt & ":${kind}"
+                end if
+              end repeat
+            end repeat
+            return "blocked:" & "${kind}"
+          end if`;
+    }
+  }
 }
 
-/** AppleScript block: match unsaved-scene title fragments and click a named button. */
-function unsavedSceneMacOsClickBlock(buttonLabels: readonly string[]): string {
+/**
+ * AppleScript blocks that match the unsaved-scene prompt and click a named
+ * button: `window` checks the dialog window's own title (skipped for the main
+ * Editor window), `sheets` checks the sheets of any window (Unity 6 attaches
+ * the prompt to the main Editor window).
+ */
+function unsavedSceneMacOsClickBlocks(
+  buttonLabels: readonly string[],
+): { window: string; sheets: string } {
   const textFrags = [
     "Have Been Modified",
     "Unsaved changes",
@@ -656,9 +712,9 @@ function unsavedSceneMacOsClickBlock(buttonLabels: readonly string[]): string {
   const titleMatch = (varName: string) =>
     textFrags.map((f) => `${varName} contains "${f}"`).join(" or ");
   const staticTextScan = (container: string, flagVar: string) => `
-            repeat with st in static texts of ${container}
+            repeat with stx in static texts of ${container}
               try
-                set tx to (value of st) as text
+                set tx to (value of stx) as text
               on error
                 set tx to ""
               end try
@@ -685,11 +741,13 @@ function unsavedSceneMacOsClickBlock(buttonLabels: readonly string[]): string {
             end repeat`,
       )
       .join("");
-  return `
-          -- Top-level window title (some Unity versions).
-          if (${titleMatch("wt")}) then
-            ${clickButtons("w")}
-          end if
+  return {
+    window: `
+            -- Top-level window title (some Unity versions).
+            if (${titleMatch("wt")}) then
+              ${clickButtons("w")}
+            end if`,
+    sheets: `
           -- Unity 6 save prompt is usually a sheet on the main Editor window.
           try
             repeat with s in sheets of w
@@ -705,31 +763,8 @@ function unsavedSceneMacOsClickBlock(buttonLabels: readonly string[]): string {
                 ${clickButtons("s")}
               end if
             end repeat
-          end try`;
-}
-
-/**
- * Build the per-fragment AppleScript check block. When the policy dismisses
- * the kind, the block activates the window + presses Return and returns the
- * dismissed token; when the policy declines the kind (null tokens), the block
- * is omitted entirely (the loop falls through to the next fragment).
- *
- * AppleScript `contains` is case-insensitive by default, so the lowercased
- * fragment matches Unity's mixed-case titles ("Enter Safe Mode?" contains
- * "entersafemode" → false, BUT "safemode" matches; the fragment list is built
- * to have at least one case-insensitive hit per title).
- */
-function fragmentCheck(
-  fragment: string,
-  kind: DialogKind,
-  dismisses: boolean,
-): string {
-  if (!dismisses) return `-- policy declines ${kind}; skip`;
-  return `if wt contains "${fragment}" then
-            set frontmost to true
-            key code 36
-            return "dismissed:Focus:${kind}"
-          end if`;
+          end try`,
+  };
 }
 
 async function tryDismissMacOS(
@@ -808,6 +843,27 @@ export function regexEscapeForXdotool(s: string): string {
 }
 
 /**
+ * The `xdotool search --name` pattern for a normalized title fragment.
+ * Fragments are letters and digits only ("entersafemode"), while real titles
+ * carry spaces and punctuation ("Enter Safe Mode?"), so the pattern allows any
+ * run of non-alphanumerics between consecutive characters and spells each
+ * letter in both cases. That is the regex form of "the normalized title
+ * contains the fragment" and does not depend on xdotool's case handling.
+ * Any other character is escaped literally.
+ */
+export function xdotoolTitlePattern(fragment: string): string {
+  return [...fragment]
+    .map((ch) =>
+      /[a-z]/i.test(ch)
+        ? `[${ch.toLowerCase()}${ch.toUpperCase()}]`
+        : /[0-9]/.test(ch)
+          ? ch
+          : regexEscapeForXdotool(ch),
+    )
+    .join("[^A-Za-z0-9]*");
+}
+
+/**
  * Look up currently-running Unity Editor PIDs on the local box. Used by the
  * Linux/X11 path to scope the title-fragment match to Unity processes only.
  * Returns an empty array on any failure. Pure / idempotent / never throws.
@@ -829,14 +885,11 @@ function getUnityPidsLinux(): readonly number[] {
 }
 
 /**
- * What the Linux/X11 path does with a Unity-owned window of the given kind.
- * xdotool can only press Return on the focused (default) button, so:
- *
- *   - `blocked` — report `blocked:<kind>` (policy blocks it, or it is a
- *                 Non-Matching Editor whose policy prefers Quit/Cancel: the
- *                 focused button there is Continue).
- *   - `skip`    — the policy declines the kind; try the next kind.
- *   - `focus`   — activate the window and press Return.
+ * What the Linux/X11 path does with a Unity-owned window of the given kind:
+ * {@link focusDialogAction} with `named` folded into `blocked`, because
+ * xdotool can only press Return on the focused (default) button — it cannot
+ * click a named one (e.g. `cancel` on the Safe Mode prompt, whose focused
+ * button is Ignore, is reported as blocked for a human).
  *
  * Pure; exported for tests.
  */
@@ -847,26 +900,8 @@ export function linuxFocusAction(
     "policy" | "allowProjectUpgrade" | "allowUnsavedSceneDismiss" | "allowVersionMismatch"
   >,
 ): "blocked" | "skip" | "focus" {
-  if (kind === "non_matching_editor") {
-    const action = nonMatchingEditorFocusAction(opts);
-    if (action === "continue") return "focus";
-    return action === "decline" ? "skip" : "blocked";
-  }
-  const blocked = blockedKindsForPolicy(
-    opts.policy,
-    opts.allowProjectUpgrade,
-    opts.allowUnsavedSceneDismiss,
-    opts.allowVersionMismatch,
-  );
-  if (blocked.includes(kind)) return "blocked";
-  const tokens = preferenceTokensForPolicy(
-    kind,
-    opts.policy,
-    opts.allowProjectUpgrade,
-    opts.allowUnsavedSceneDismiss,
-    opts.allowVersionMismatch,
-  );
-  return tokens === null ? "skip" : "focus";
+  const action = focusDialogAction(kind, opts);
+  return action === "named" ? "blocked" : action;
 }
 
 async function tryDismissLinuxX11(
@@ -886,12 +921,11 @@ async function tryDismissLinuxX11(
   // first kind whose xdotool search surfaces a Unity-owned window.
   //   - blocked kinds (project_upgrade without opt-in) → report blocked.
   //   - decline kinds (tokens === null) → skip (treat as not-found).
-  //   - otherwise activate the window + send Return to click the focused
-  //     (default) button. Under default/auto/ignore/recover the default
-  //     button is the safe choice for launch_errors / auto_graphics_api.
-  //     Project upgrade is blocked without opt-in. Non-matching Editor is
-  //     Return-clicked only for Continue with the mismatch opt-in, and blocked
-  //     otherwise (see linuxFocusAction).
+  //   - policy picks the kind's focused button → activate the window + send
+  //     Return to click it.
+  //   - policy picks any other button → blocked: xdotool cannot click a
+  //     named button, and Return would press the focused one instead (see
+  //     linuxFocusAction / DIALOG_FOCUSED_BUTTON_TOKENS).
   const kinds = Object.keys(DIALOG_TITLE_FRAGMENTS) as DialogKind[];
   // Prefer launch_errors first (the common stall), then the safe kinds, then
   // the destructive kinds last so a blocked destructive modal doesn't shadow a
@@ -949,7 +983,7 @@ async function tryDismissLinuxX11(
         const fragment = fragments[fIdx++];
         const child = execFile(
           "xdotool",
-          ["search", "--name", regexEscapeForXdotool(fragment)],
+          ["search", "--name", xdotoolTitlePattern(fragment)],
           { timeout: XDOTOOL_PROBE_TIMEOUT_MS },
           (err, stdout) => {
             activeChild = null;
@@ -960,7 +994,12 @@ async function tryDismissLinuxX11(
               return;
             }
             const candidateIds = stdout.trim().split(/\s+/).filter(Boolean);
-            findUnityOwnedWindow(candidateIds, unityPids, (winId) => {
+            // Re-check the title in Node: it must still classify as this
+            // kind and must not be the main Editor window, whose title can
+            // contain a fragment (a scene name, or "SAFE MODE").
+            const acceptTitle = (title: string): boolean =>
+              titleMatchesDialogKind(title, kind);
+            findUnityOwnedWindow(candidateIds, unityPids, acceptTitle, (winId) => {
               if (!winId) {
                 tryNextFragment();
                 return;
@@ -971,10 +1010,18 @@ async function tryDismissLinuxX11(
                 // safe-mode on a kind with no safe button) is reported as
                 // not-found so the loop keeps ticking.
                 if (action === "blocked") {
+                  const policyBlocks = blockedKindsForPolicy(
+                    opts.policy,
+                    opts.allowProjectUpgrade,
+                    opts.allowUnsavedSceneDismiss,
+                    opts.allowVersionMismatch,
+                  ).includes(kind);
                   finish({
                     kind: "blocked",
                     dialog: kind,
-                    message: `Policy '${opts.policy}' declines to dismiss ${kind} dialog`,
+                    message: policyBlocks
+                      ? `Policy '${opts.policy}' declines to dismiss ${kind} dialog`
+                      : `Policy '${opts.policy}' selects a button other than the focused one on the ${kind} dialog; xdotool can only press Return on the focused button, so it needs a human`,
                   });
                   return;
                 }
@@ -1034,8 +1081,9 @@ async function tryDismissLinuxX11(
 
 /**
  * Walk `candidateIds` and call `done(winId)` with the first window owned by
- * a Unity PID, or `done(undefined)` if none match. Sequential — the list is
- * small and parallelism buys nothing meaningful.
+ * a Unity PID whose title (`xdotool getwindowname`) passes `acceptTitle`, or
+ * `done(undefined)` if none match. Sequential — the list is small and
+ * parallelism buys nothing meaningful.
  *
  * `stop` (optional) is polled before each probe and recursion step: once the
  * outer probe has settled, the walk must not spawn further getwindowpid
@@ -1044,6 +1092,7 @@ async function tryDismissLinuxX11(
 function findUnityOwnedWindow(
   candidateIds: string[],
   unityPids: ReadonlySet<number>,
+  acceptTitle: (title: string) => boolean,
   done: (winId: string | undefined) => void,
   stop?: () => boolean,
 ): void {
@@ -1068,13 +1117,37 @@ function findUnityOwnedWindow(
         }
         const pid = parseInt(stdout.trim(), 10);
         if (Number.isFinite(pid) && unityPids.has(pid)) {
-          done(winId);
+          checkTitle(winId);
           return;
         }
         next();
       },
     );
     // SIGKILL escalation for a wedged getwindowpid probe.
+    const disarmWatchdog = armSigkillEscalation(
+      child,
+      LINUX_PROBE_TIMEOUT_MS,
+      () => stop?.() ?? false,
+    );
+  };
+  const checkTitle = (winId: string): void => {
+    if (stop?.()) return;
+    const child = execFile(
+      "xdotool",
+      ["getwindowname", winId],
+      { timeout: LINUX_PROBE_TIMEOUT_MS },
+      (err, stdout) => {
+        disarmWatchdog();
+        if (stop?.()) return;
+        // An unreadable title is not evidence of a dialog: skip the window.
+        if (!err && acceptTitle(stdout.replace(/\r?\n$/, ""))) {
+          done(winId);
+          return;
+        }
+        next();
+      },
+    );
+    // SIGKILL escalation for a wedged getwindowname probe.
     const disarmWatchdog = armSigkillEscalation(
       child,
       LINUX_PROBE_TIMEOUT_MS,
