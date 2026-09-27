@@ -1070,11 +1070,12 @@ pub(crate) fn read_config_entry(client: McpClientId, path: &Path) -> Option<Valu
 }
 
 /// `true` when a `unity-open-mcp` entry in a config under `workspace` starts
-/// the server on `project`, read the way the server resolves it: an absolute
-/// `UNITY_PROJECT_PATH` or its `${workspaceFolder}` form, else
-/// `--project-from-cwd [--unity-subpath <dir>]` run in `workspace`. An entry
-/// that names no project counts as this project's, like the global-config
-/// guard in Clear AI Setup.
+/// the server on `project`, read the way the server resolves it: a
+/// `UNITY_PROJECT_PATH` (absolute, relative to `workspace`, or its
+/// `${workspaceFolder}` form), else `--project-from-cwd` run in `workspace`
+/// with the last `--unity-subpath <dir>` / `--unity-subpath=<dir>`. Paths
+/// compare through [`same_path`]. An entry that names no project counts as
+/// this project's, like the global-config guard in Clear AI Setup.
 pub(crate) fn entry_targets_project(entry: &Value, workspace: &Path, project: &Path) -> bool {
     let env = entry
         .get("env")
@@ -1084,11 +1085,13 @@ pub(crate) fn entry_targets_project(entry: &Value, workspace: &Path, project: &P
         .and_then(|e| e.get(PROJECT_PATH_ENV_VAR))
         .and_then(Value::as_str)
     {
+        // `join` keeps an absolute value as is, like the server resolving a
+        // relative one against its working directory.
         let resolved = match value.strip_prefix(WORKSPACE_FOLDER_VAR) {
             Some(rest) => workspace.join(rest.trim_start_matches(['/', '\\'])),
-            None => PathBuf::from(value),
+            None => workspace.join(value),
         };
-        return resolved == project;
+        return same_path(&resolved.to_string_lossy(), &project.to_string_lossy());
     }
     // OpenCode spells the argv as a `command` array; the others use `args`.
     let argv: Vec<&str> = ["command", "args"]
@@ -1098,15 +1101,52 @@ pub(crate) fn entry_targets_project(entry: &Value, workspace: &Path, project: &P
         .filter_map(Value::as_str)
         .collect();
     if argv.contains(&"--project-from-cwd") {
-        let subpath = argv
-            .iter()
-            .position(|arg| *arg == "--unity-subpath")
-            .and_then(|i| argv.get(i + 1))
-            .copied()
-            .unwrap_or("");
-        return workspace.join(subpath) == project;
+        // Both spellings the server accepts; the last one wins, as there.
+        let mut subpath = "";
+        let mut args = argv.iter();
+        while let Some(arg) = args.next() {
+            if *arg == "--unity-subpath" {
+                subpath = args.next().copied().unwrap_or(subpath);
+            } else if let Some(inline) = arg.strip_prefix("--unity-subpath=") {
+                subpath = inline;
+            }
+        }
+        let resolved = workspace.join(subpath);
+        return same_path(&resolved.to_string_lossy(), &project.to_string_lossy());
     }
     true
+}
+
+/// Path equality for project paths read from client configs: separators
+/// fold to `/`, repeated and trailing separators and `.` segments drop, and
+/// `..` pops the segment before it. Lexical only — nothing touches the
+/// disk, so a missing folder still compares. Case folds on Windows and
+/// macOS, whose default filesystems ignore case.
+pub(crate) fn same_path(a: &str, b: &str) -> bool {
+    fn norm(path: &str) -> String {
+        let path = path.replace('\\', "/");
+        let rooted = path.starts_with('/');
+        let mut segments: Vec<&str> = Vec::new();
+        for segment in path.split('/') {
+            match segment {
+                "" | "." => {}
+                ".." if segments.last().is_some_and(|last| *last != "..") => {
+                    segments.pop();
+                }
+                // `..` above the root stays at the root.
+                ".." if rooted => {}
+                _ => segments.push(segment),
+            }
+        }
+        let joined = segments.join("/");
+        let joined = if rooted { format!("/{joined}") } else { joined };
+        if cfg!(any(windows, target_os = "macos")) {
+            joined.to_lowercase()
+        } else {
+            joined
+        }
+    }
+    norm(a) == norm(b)
 }
 
 fn resolve_target_path(
@@ -4471,6 +4511,76 @@ mod tests {
         // No project marker: nothing says it belongs to another project.
         let bare = json!({ "command": "unity-open-mcp", "args": [] });
         assert!(entry_targets_project(&bare, workspace, client));
+    }
+
+    #[test]
+    fn entry_targets_project_reads_inline_subpath_and_loose_path_spellings() {
+        let workspace = Path::new("/repo");
+        let client = Path::new("/repo/Client");
+        let server = Path::new("/repo/Server");
+        let inline = json!({ "args": ["--project-from-cwd", "--unity-subpath=Client"] });
+        let inline_opencode =
+            json!({ "command": ["npx", "--project-from-cwd", "--unity-subpath=Client/"] });
+        // The last `--unity-subpath` wins, whichever spelling it uses.
+        let last_inline = json!({
+            "args": ["--project-from-cwd", "--unity-subpath", "Server", "--unity-subpath=Client"]
+        });
+        let last_split = json!({
+            "args": ["--project-from-cwd", "--unity-subpath=Server", "--unity-subpath", "Client"]
+        });
+        let dotted =
+            json!({ "args": ["--project-from-cwd", "--unity-subpath", "./Server/../Client"] });
+        let backslash = json!({ "env": { PROJECT_PATH_ENV_VAR: "${workspaceFolder}\\Client" } });
+        let trailing = json!({ "env": { PROJECT_PATH_ENV_VAR: "${workspaceFolder}/Client/" } });
+        let backslash_trailing =
+            json!({ "env": { PROJECT_PATH_ENV_VAR: "${workspaceFolder}\\Client\\" } });
+        let relative = json!({ "env": { PROJECT_PATH_ENV_VAR: "Client" } });
+        let absolute_dotted = json!({ "env": { PROJECT_PATH_ENV_VAR: "/repo//./Client/" } });
+        for entry in [
+            &inline,
+            &inline_opencode,
+            &last_inline,
+            &last_split,
+            &dotted,
+            &backslash,
+            &trailing,
+            &backslash_trailing,
+            &relative,
+            &absolute_dotted,
+        ] {
+            assert!(entry_targets_project(entry, workspace, client), "{entry}");
+            assert!(!entry_targets_project(entry, workspace, server), "{entry}");
+        }
+        // A trailing separator on the project side compares equal too.
+        assert!(entry_targets_project(&inline, workspace, Path::new("/repo/Client/")));
+    }
+
+    #[test]
+    fn same_path_ignores_separator_noise_but_not_other_folders() {
+        assert!(same_path("/repo/Client", "/repo/Client/"));
+        assert!(same_path("/repo/Client", "/repo//Client"));
+        assert!(same_path("/repo/Client", "/repo/./Client"));
+        assert!(same_path("/repo/Client", "/repo/Server/../Client"));
+        assert!(same_path("C:\\repo\\Client\\", "C:/repo/Client"));
+        assert!(same_path("/", "/.."));
+        assert!(!same_path("/repo/Client", "/repo/Server"));
+        assert!(!same_path("/repo/Client", "/repo/Client/Sub"));
+        assert!(!same_path("/repo/Client", "repo/Client"));
+        assert!(!same_path("../Client", "Client"));
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test]
+    fn same_path_ignores_case_where_the_filesystem_does() {
+        assert!(same_path("/Repo/client", "/repo/Client"));
+        let entry = json!({ "env": { PROJECT_PATH_ENV_VAR: "${workspaceFolder}/client" } });
+        assert!(entry_targets_project(&entry, Path::new("/Repo"), Path::new("/repo/Client")));
+    }
+
+    #[cfg(not(any(windows, target_os = "macos")))]
+    #[test]
+    fn same_path_keeps_case_where_the_filesystem_does() {
+        assert!(!same_path("/Repo/client", "/repo/Client"));
     }
 
     #[test]

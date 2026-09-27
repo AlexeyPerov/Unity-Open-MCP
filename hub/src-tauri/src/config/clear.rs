@@ -28,7 +28,7 @@ use serde_json::{Map, Value};
 
 use crate::config::paths;
 use super::mcp_config::{
-    client_format, config_locations, entry_targets_project, merge_key_path, skill_roots,
+    client_format, config_locations, entry_targets_project, merge_key_path, same_path, skill_roots,
     ClientFormat, ClientScope, ConfigLocation, McpClientId, MCP_SERVER_KEY, SKILL_REFERENCES_DIR,
     SKILL_REFERENCE_FILES, SKILL_REL_PATHS,
 };
@@ -161,14 +161,6 @@ fn entry_matches_project(entry: &Value, project_path: &str) -> bool {
         Some(p) => same_path(p, project_path),
         None => true,
     }
-}
-
-/// Path equality tolerant of trailing slashes / redundant separators.
-fn same_path(a: &str, b: &str) -> bool {
-    fn norm(p: &str) -> String {
-        p.trim_end_matches('/').trim_end_matches('\\').to_string()
-    }
-    norm(a) == norm(b)
 }
 
 /// Remove the `unity-open-mcp` leaf at `key_path` from `root` when `admits`
@@ -679,6 +671,38 @@ mod tests {
             root["mcpServers"]["unity-open-mcp"]["env"]["UNITY_PROJECT_PATH"],
             "/p/other"
         );
+    }
+
+    #[test]
+    fn remove_entry_global_guard_ignores_separator_noise() {
+        let mut root = json!({
+            "mcpServers": { "unity-open-mcp": entry("/p/./demo//") }
+        });
+        let key = vec!["mcpServers", MCP_SERVER_KEY];
+        assert!(remove_entry(&mut root, &key, |e| EntryGuard::ProjectPath.admits(e, "/p/demo")));
+    }
+
+    #[test]
+    fn remove_entry_workspace_guard_reads_an_inline_subpath() {
+        let inline = |subpath: &str| {
+            json!({
+                "mcpServers": { "unity-open-mcp": {
+                    "command": "npx",
+                    "args": [
+                        "-y",
+                        "unity-open-mcp",
+                        "--project-from-cwd",
+                        format!("--unity-subpath={subpath}")
+                    ]
+                } }
+            })
+        };
+        let key = vec!["mcpServers", MCP_SERVER_KEY];
+        let guard = EntryGuard::Workspace(PathBuf::from("/repo"));
+        let mut ours = inline("Client");
+        assert!(remove_entry(&mut ours, &key, |e| guard.admits(e, "/repo/Client")));
+        let mut sibling = inline("Server");
+        assert!(!remove_entry(&mut sibling, &key, |e| guard.admits(e, "/repo/Client")));
     }
 
     #[test]
