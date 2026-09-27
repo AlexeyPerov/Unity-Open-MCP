@@ -28,6 +28,7 @@ const OUTPUT_END = VERIFY_JSON_END;
 
 const DEFAULT_BATCH_TIMEOUT_MS = 600_000;
 const activeBatchProjects = new Set<string>();
+const BATCH_IN_PROGRESS_MESSAGE = "A headless operation already owns this project. Wait for it to finish.";
 
 const VERIFY_TOOL_TO_OPERATION: Record<string, string> = {
   unity_open_mcp_scan_all: "scan_all",
@@ -618,6 +619,13 @@ export class BatchSpawn implements Router {
     // the lock's PID is alive, return the same editor_instance_locked error the
     // post-spawn classifier would produce, without the failed spawn and without
     // the log rotation.
+    // This server's own headless child for the project is a -batchmode Unity
+    // with a matching -projectPath, so the lock/process checks below would
+    // misreport it as a live Editor. The lease is authoritative for it.
+    if (this.projectPath && activeBatchProjects.has(this.projectPath)) {
+      return makeErrorResult({ code: "batch_in_progress", message: BATCH_IN_PROGRESS_MESSAGE });
+    }
+
     if (this.projectPath) {
       try {
         const lock = readInstanceLock(this.projectPath);
@@ -873,14 +881,16 @@ export class BatchSpawn implements Router {
         toolArgs,
       );
 
-      // Re-check after asynchronous executable discovery, immediately before spawn.
+      // Re-check after asynchronous executable discovery, immediately before
+      // spawn. Lease first: a concurrent call may have spawned our own child
+      // meanwhile, and that child must not read as a live Editor.
+      if (activeBatchProjects.has(this.projectPath)) {
+        reject(new BatchClassificationError("batch_in_progress", BATCH_IN_PROGRESS_MESSAGE));
+        return;
+      }
       const owner = readInstanceLock(this.projectPath);
       if ((owner && isPidAlive(owner.pid)) || findUnityForProject(this.projectPath)) {
         reject(new BatchClassificationError("editor_instance_locked", "A live Editor owns this project; no headless spawn was attempted."));
-        return;
-      }
-      if (activeBatchProjects.has(this.projectPath)) {
-        reject(new BatchClassificationError("batch_in_progress", "A headless operation already owns this project. Wait for it to finish."));
         return;
       }
       console.error(`[unity-open-mcp] Batch spawn: ${this.unityPath} ${unityArgs.join(" ")}`);

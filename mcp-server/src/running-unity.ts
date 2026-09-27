@@ -31,6 +31,7 @@
 import { execFileSync } from "node:child_process";
 import { basename, sep } from "node:path";
 import { normalizePath } from "./instance-discovery.js";
+import { isSupervisedBatchChildPid } from "./child-supervision.js";
 
 /** Supported `process.platform` values for the scanner. */
 export type UnityScanPlatform = "win32" | "darwin" | "linux";
@@ -421,6 +422,10 @@ export function setUnityProcessScannerForTest(
  * scan simply returns null and the caller falls back to its pre-feature
  * behavior. Documented in tests.
  *
+ * Skips headless batch children this server spawned and still supervises
+ * (see `child-supervision.ts`): they carry the same `-projectPath` but are
+ * tracked by the batch lease, not by Editor-ownership diagnostics.
+ *
  * Never throws: any scanner failure (ps missing, PowerShell slow, parse
  * error) returns null. A failed scan must not mask the underlying offline
  * state.
@@ -440,6 +445,9 @@ export function findUnityForProject(
     return null;
   }
   for (const proc of found) {
+    // Our own headless child is not an Editor the user owns; the batch lease
+    // accounts for it (and restart_editor must never pick it).
+    if (isSupervisedBatchChildPid(proc.pid)) continue;
     if (proc.projectPath !== null && normalizePath(proc.projectPath) === target) {
       return { pid: proc.pid };
     }

@@ -7,7 +7,7 @@ import { EventEmitter } from "node:events";
 
 import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, extractOffendingPackages, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator, diagnoseEditorLock, editorLockedMessage, editorLockedNextSteps, type BatchSpawnOptions } from "./batch-spawn.js";
 import { lockPath } from "./instance-discovery.js";
-import { setUnityProcessScannerForTest } from "./running-unity.js";
+import { setUnityProcessScannerForTest, findUnityForProject } from "./running-unity.js";
 import { VERIFY_JSON_BEGIN, VERIFY_JSON_END } from "./constants.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
@@ -1430,6 +1430,93 @@ test("a child that fails with only 'error' releases the lease once; a running ch
     await spawned(3);
     children[2].emit("error", enoent());
     assert.equal(await code(after), "unity_spawn_refused");
+  } finally {
+    restore();
+    if (savedPath === undefined) delete process.env.UNITY_PATH; else process.env.UNITY_PATH = savedPath;
+    if (savedTimeout === undefined) delete process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS; else process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS = savedTimeout;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a held lease reports batch_in_progress even though the scan sees this server's own batch child", async () => {
+  const root = mkdtempSync(join(tmpdir(), "batch-own-child-"));
+  const savedPath = process.env.UNITY_PATH;
+  const savedTimeout = process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS;
+  const children: EventEmitter[] = [];
+  // The OS scan reports our own headless child: -batchmode with this -projectPath.
+  const restore = setUnityProcessScannerForTest({
+    scan: () => (children.length > 0 ? [{ pid: 4242, projectPath: root }] : []),
+  });
+  try {
+    process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS = "2000";
+    process.env.UNITY_PATH = join(root, "Unity");
+    writeFileSync(process.env.UNITY_PATH, "");
+    const spawnProcess = (() => {
+      const child = Object.assign(new EventEmitter(), { pid: 4242, stdout: null, stderr: null, kill: () => true });
+      children.push(child);
+      return child;
+    }) as unknown as NonNullable<BatchSpawnOptions["spawnProcess"]>;
+    const batch = new BatchSpawn({ projectPath: root, spawnProcess });
+
+    const running = batch.route("unity_open_mcp_compile_check", {});
+    const deadline = Date.now() + 5_000;
+    while (children.length < 1) {
+      assert.ok(Date.now() < deadline, "the first call never spawned");
+      await new Promise(r => setImmediate(r));
+    }
+
+    const second = parseBody(await batch.route("unity_open_mcp_scan_all", {}));
+    const error = second.error as { code: string; message: string };
+    assert.equal(error.code, "batch_in_progress");
+    assert.doesNotMatch(error.message, /Editor/);
+    assert.equal(second.agentNextSteps, undefined, "no locked-Editor recovery steps for our own child");
+    // Editor-ownership diagnostics (lock diagnosis, restart_editor, status) skip our child.
+    assert.equal(findUnityForProject(root), null);
+    assert.equal(diagnoseEditorLock(root).variant, "no_editor_found");
+
+    children[0].emit("close", 0);
+    await running;
+    // Once it is no longer ours, the same process is reported again.
+    assert.deepEqual(findUnityForProject(root), { pid: 4242 });
+  } finally {
+    restore();
+    if (savedPath === undefined) delete process.env.UNITY_PATH; else process.env.UNITY_PATH = savedPath;
+    if (savedTimeout === undefined) delete process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS; else process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS = savedTimeout;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the pre-spawn re-check consults the lease before the process scan", async () => {
+  const root = mkdtempSync(join(tmpdir(), "batch-recheck-order-"));
+  const savedPath = process.env.UNITY_PATH;
+  const savedTimeout = process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS;
+  const children: EventEmitter[] = [];
+  // After the first spawn the scan reports a Unity pid that differs from the
+  // spawned child's (e.g. UNITY_PATH is a launcher), so only the lease can
+  // tell the racing second call that the project is ours.
+  const restore = setUnityProcessScannerForTest({
+    scan: () => (children.length > 0 ? [{ pid: 5555, projectPath: root }] : []),
+  });
+  try {
+    process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS = "2000";
+    process.env.UNITY_PATH = join(root, "Unity");
+    writeFileSync(process.env.UNITY_PATH, "");
+    const spawnProcess = (() => {
+      const child = Object.assign(new EventEmitter(), { pid: 4242, stdout: null, stderr: null, kill: () => true });
+      children.push(child);
+      return child;
+    }) as unknown as NonNullable<BatchSpawnOptions["spawnProcess"]>;
+    const batch = new BatchSpawn({ projectPath: root, spawnProcess });
+
+    // Both calls pass the early checks before either spawns; the loser meets
+    // the lease inside the spawn path.
+    const first = batch.route("unity_open_mcp_compile_check", {});
+    const second = batch.route("unity_open_mcp_scan_all", {});
+    const loser = parseBody(await second);
+    assert.equal((loser.error as { code: string }).code, "batch_in_progress");
+    assert.equal(children.length, 1, "only one child may be spawned");
+    children[0].emit("close", 0);
+    await first;
   } finally {
     restore();
     if (savedPath === undefined) delete process.env.UNITY_PATH; else process.env.UNITY_PATH = savedPath;

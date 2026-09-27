@@ -49,6 +49,18 @@ export function trackBatchChild(child: ChildProcess): void {
   child.on("error", retire);
 }
 
+/**
+ * True when `pid` belongs to a live batch child this process spawned. The
+ * Unity process scan uses it so the server's own headless run is never
+ * mistaken for a user's Editor (lock diagnosis, restart_editor, status).
+ */
+export function isSupervisedBatchChildPid(pid: number): boolean {
+  for (const child of activeChildren) {
+    if (child.pid === pid) return true;
+  }
+  return false;
+}
+
 /** Number of currently tracked (live) batch children. Test/observability. */
 export function supervisedChildCount(): number {
   return activeChildren.size;
