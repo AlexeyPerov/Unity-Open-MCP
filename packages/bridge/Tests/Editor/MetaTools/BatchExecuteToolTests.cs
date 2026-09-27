@@ -73,6 +73,32 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void ExplicitNullForOptionalTypedArgumentReadsAsOmitted()
+        {
+            // Mirrors tool-contract.ts: clients serialize absent optionals as
+            // null. A required key, an untyped patch value and a type that
+            // lists "null" keep the value as sent.
+            const string schema = "{\"type\":\"object\",\"required\":[\"name\"],\"properties\":{\"name\":{\"type\":\"string\"},\"parent_path\":{\"type\":\"string\"},\"value\":{},\"count\":{\"type\":[\"integer\",\"null\"]}},\"additionalProperties\":false}";
+            var errors = new List<string>();
+            BatchSchemaValidator.ValidateRequest("{\"name\":\"Foo\",\"parent_path\":null,\"value\":null,\"count\":null}", schema, errors);
+            Assert.IsEmpty(errors, string.Join("; ", errors));
+
+            errors.Clear();
+            BatchSchemaValidator.ValidateRequest("{\"name\":null}", schema, errors);
+            StringAssert.Contains("args.name must be string", string.Join("; ", errors));
+
+            // The waived null never reaches the tool; kept nulls do.
+            Assert.AreEqual("{\"name\":\"Foo\",\"value\":null,\"count\":null}",
+                BatchSchemaValidator.WireArguments("{\"name\":\"Foo\",\"parent_path\":null,\"value\":null,\"count\":null}", schema));
+
+            // A generated tool schema: a null selector alias neither conflicts nor counts as supplied.
+            var component = BridgeBatchSchemas.ByTool["unity_open_mcp_component_get"];
+            errors.Clear();
+            BatchSchemaValidator.ValidateRequest("{\"game_object_path\":\"Root/Child\",\"path\":null,\"component_type\":\"UnityEngine.Transform\"}", component, errors);
+            Assert.IsEmpty(errors, string.Join("; ", errors));
+        }
+
+        [Test]
         public void GameObjectModify_NameIsPayload_NameTargetIsSelector()
         {
             var schema = BridgeBatchSchemas.ByTool["unity_open_mcp_gameobject_modify"];

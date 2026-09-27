@@ -1632,3 +1632,29 @@ test("extractJson returns the raw slice when nothing parses and null without a c
   assert.equal(extractJson(`${VERIFY_JSON_BEGIN}\n{"a":1}\n`), null);
   assert.equal(extractJson("no markers at all"), null);
 });
+
+test("a headless -batchmode Unity from another process reports batch_in_progress, not editor_instance_locked", async () => {
+  // A second MCP server's compile_check (or a CI run) has the project open.
+  // The process scan sees a -batchmode Unity with our -projectPath; it is a
+  // batch run like our own lease, not a live Editor whose lock diagnosis
+  // would send the agent to "close the Editor".
+  const savedPath = process.env.UNITY_PATH;
+  delete process.env.UNITY_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "batch-foreign-"));
+  const restore = setUnityProcessScannerForTest({
+    scan: () => [{ pid: 777, projectPath: tmp, batchMode: true }],
+  });
+  try {
+    const batch = new BatchSpawn({ discoveryRoots: [tmp], projectPath: tmp });
+    const body = parseBody(await batch.route("unity_open_mcp_compile_check", {}));
+    const error = body.error as Record<string, string>;
+    assert.equal(error.code, "batch_in_progress");
+    assert.ok(error.message.includes("777"), "names the foreign headless pid");
+    assert.ok(!error.message.includes("Editor owns"), "must not read as a live Editor");
+  } finally {
+    restore();
+    rmSync(tmp, { recursive: true, force: true });
+    if (savedPath === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = savedPath;
+  }
+});

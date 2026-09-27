@@ -105,7 +105,14 @@ export function projectCommandOperation(id: string, cancellable: boolean, client
             context.lifecycle("disconnected", `Bridge answered no job poll for ${unreachableMs} ms; outcome unknown.`, false);
             return { state: "failed", error: { code: "job_status_unavailable", message: `No job status within ${unreachableMs} ms.` }, result: response };
           }
-          await delay(pollIntervalMs * 2 ** Math.min(failures, 3));
+          // The backoff yields to a cancel request: an abort while sleeping
+          // ends the sleep so the cancel goes out now, not after the backoff.
+          // Once the cancel has been sent the signal stays aborted, so the
+          // remaining status polls sleep without it.
+          try {
+            await delay(pollIntervalMs * 2 ** Math.min(failures, 3), undefined,
+              cancelSent ? undefined : { signal: context.signal });
+          } catch { /* aborted: forward the cancel below */ }
           const action = context.signal.aborted && !cancelSent ? "cancel" : "status";
           if (action === "cancel") cancelSent = true;
           try {

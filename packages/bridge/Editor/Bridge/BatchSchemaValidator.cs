@@ -13,6 +13,7 @@ namespace UnityOpenMcpBridge
         internal static void Validate(string value, string schema, string path, List<string> errors, bool root = false)
         {
             if (schema == null) return;
+            if (value != null && value.TrimStart().StartsWith("{")) value = WithoutNullOmitted(value, schema);
             foreach (var combinator in new[] { "anyOf", "oneOf", "allOf" })
             {
                 var branches = Raw(schema, combinator);
@@ -135,6 +136,39 @@ namespace UnityOpenMcpBridge
             return raw != null && raw != "null" && raw != "0" && raw != "\"0\"" && raw != "\"\"";
         }
 
+        // Mirrors isNullOmitted in mcp-server/src/tool-contract.ts: an explicit
+        // null for an OPTIONAL property whose schema declares a non-null type
+        // reads as omitted (clients serialize absent optionals that way, and
+        // the tool readers treat null as absent). A required property, an
+        // untyped patch value and a type that lists "null" keep the value.
+        private static bool IsNullOmitted(string properties, IList<string> required, string key, string raw)
+        {
+            if (raw == null || raw.Trim() != "null" || required.Contains(key)) return false;
+            var property = Raw(properties, key);
+            if (property == null) return false;
+            var type = Raw(property, "type");
+            if (type == null) return false;
+            if (type.StartsWith("[")) return !JsonBody.GetArrayRawValues(type).Contains("\"null\"");
+            return Str(property, "type") != "null";
+        }
+
+        // `value` without its null-omitted properties; unchanged when none.
+        private static string WithoutNullOmitted(string value, string schema)
+        {
+            var properties = Raw(schema, "properties");
+            if (properties == null) return value;
+            var required = JsonBody.GetStringArray(JsonBody.TopLevelField(schema, "required"), "required") ?? Array.Empty<string>();
+            var fields = new List<string>();
+            bool changed = false;
+            foreach (var key in JsonBody.GetObjectKeys(value) ?? new List<string>())
+            {
+                var raw = Raw(value, key);
+                if (IsNullOmitted(properties, required, key, raw)) { changed = true; continue; }
+                fields.Add(BridgeJson.EscapeString(key) + ":" + raw);
+            }
+            return changed ? "{" + string.Join(",", fields) + "}" : value;
+        }
+
         internal static void ValidateRequest(string body, string schema, List<string> errors)
         {
             if (!BridgeJson.IsValidJsonObject(body)) { errors.Add("args must be valid JSON"); return; }
@@ -179,6 +213,9 @@ namespace UnityOpenMcpBridge
             if (value.TrimStart().StartsWith("[") && Raw(schema, "items") != null)
                 return "[" + string.Join(",", JsonBody.GetArrayRawValues(value).ConvertAll(v => WireArguments(v, Raw(schema, "items")))) + "]";
             if (properties == null || !value.TrimStart().StartsWith("{")) return value;
+            // Null-omitted properties never reach the tool: validation waived
+            // them, and the tool readers would treat them as absent anyway.
+            value = WithoutNullOmitted(value, schema);
             var fields = new List<string>();
             foreach (var key in JsonBody.GetObjectKeys(value) ?? new List<string>())
             {

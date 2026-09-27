@@ -488,6 +488,10 @@ test("macosDismissAppleScript: defines the normLabel handler the named clicks ca
   assert.ok(script.includes("my normLabel(bt)"));
   assert.ok(script.includes("on normLabel(s)"));
   assert.ok(script.includes("end normLabel"));
+  // `id of` returns a LIST for a multi-code-point character (decomposed
+  // accent, emoji); a numeric comparison on it raises and would abort the
+  // whole probe, so the handler must check the class first.
+  assert.ok(script.includes("if class of cid is integer then"), "guards non-integer character ids");
 });
 
 // Real Unity dialog titles per focus-classified kind, and main Editor window

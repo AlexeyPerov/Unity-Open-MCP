@@ -372,3 +372,45 @@ test("findUnityForProject: known false negative — Unity without -projectPath",
     restore();
   }
 });
+
+// ----- headless (-batchmode) processes -----
+
+import { findHeadlessUnityForProject, isBatchModeCommandLine } from "./running-unity.js";
+
+test("isBatchModeCommandLine / parsePsOutput: a -batchmode Unity is marked headless", () => {
+  assert.ok(isBatchModeCommandLine("/Applications/Unity/Hub/Editor/6000.0.1f1/Unity.app/Contents/MacOS/Unity -batchmode -projectPath /p"));
+  assert.ok(isBatchModeCommandLine("C:\\Unity\\Editor\\Unity.exe -projectPath C:\\p -batchMode -quit"));
+  assert.ok(!isBatchModeCommandLine("/Applications/Unity/Hub/Editor/6000.0.1f1/Unity.app/Contents/MacOS/Unity -projectPath /p"));
+  assert.ok(!isBatchModeCommandLine("/x/Unity -projectPath /p -batchmodeX"));
+  const found = parsePsOutput([
+    "42 /Applications/Unity/Hub/Editor/6000.0.1f1/Unity.app/Contents/MacOS/Unity -projectPath /Users/me/MyGame -batchmode",
+    "43 /Applications/Unity/Hub/Editor/6000.0.1f1/Unity.app/Contents/MacOS/Unity -projectPath /Users/me/MyGame",
+  ].join("\n"));
+  assert.deepEqual(found.map((p) => [p.pid, p.batchMode]), [[42, true], [43, false]]);
+});
+
+test("findUnityForProject skips a headless -batchmode Unity; findHeadlessUnityForProject reports it", () => {
+  // A second MCP server's compile_check (or a CI run) has the project open.
+  // It is not an Editor to diagnose, restart or read as Safe Mode, but the
+  // batch route must know the project is taken.
+  const restore = setUnityProcessScannerForTest(
+    makeFakeScanner([{ pid: 777, projectPath: "/Users/me/MyGame", batchMode: true }]),
+  );
+  try {
+    assert.equal(findUnityForProject("/Users/me/MyGame"), null);
+    assert.deepEqual(findHeadlessUnityForProject("/Users/me/MyGame"), { pid: 777 });
+    assert.equal(findHeadlessUnityForProject("/Users/me/Other"), null);
+  } finally {
+    restore();
+  }
+  // The interactive Editor wins for findUnityForProject and is invisible to the headless probe.
+  const restoreEditor = setUnityProcessScannerForTest(
+    makeFakeScanner([{ pid: 778, projectPath: "/Users/me/MyGame" }]),
+  );
+  try {
+    assert.deepEqual(findUnityForProject("/Users/me/MyGame"), { pid: 778 });
+    assert.equal(findHeadlessUnityForProject("/Users/me/MyGame"), null);
+  } finally {
+    restoreEditor();
+  }
+});

@@ -204,3 +204,21 @@ for (const changed of [
   const job = manager.start(owner, "project.test.async", {}, "invalid");
   assert.equal((await manager.wait(owner, job.job_id, 2000)).state, "failed");
 });
+
+test("project job forwards a cancel while sleeping between polls, not after the backoff", async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  let cancels = 0;
+  const live = { projectCommands: async () => catalog, projectCommandJob: async (args: any) => {
+    if (args.action === "cancel") { cancels++; return { job_id: args.job_id, state: "cancelled", phase: "cancelled", result: { gate: null } }; }
+    return { job_id: args.job_id, state: "running", phase: "preparing" };
+  } } as unknown as LiveClient;
+  // A 1.2 s poll interval: without an abortable sleep the cancel would only
+  // go out after the first backoff, well past the bounded wait below.
+  manager.register("project.test.async", projectCommandOperation("project.test.async", true, () => live, { pollIntervalMs: 1200 }));
+  const job = manager.start(owner, "project.test.async", {}, "same");
+  await tick();
+  assert.equal(manager.cancel(owner, job.job_id).state, "cancel_requested");
+  const done = await manager.wait(owner, job.job_id, 600);
+  assert.equal(done.state, "cancelled");
+  assert.equal(cancels, 1);
+});

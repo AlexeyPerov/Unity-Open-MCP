@@ -198,7 +198,11 @@ and `skippedReason`. `request_rejected`, `gate_off`, `no_scope`, `read_only`, an
 
 Requests for shipped tools are validated against the generated MCP schemas
 before dispatch. Unknown keys, selector conflicts, invalid types, bounds and
-enums return HTTP 400 with `invalid_arguments`. Dispatcher-owned transport
+enums return HTTP 400 with `invalid_arguments`. An explicit `null` for an
+optional argument whose schema declares a non-null type is read as omitted
+(clients often serialize absent optionals that way); a required argument, an
+untyped patch value and a type that lists `null` keep the value as sent.
+Dispatcher-owned transport
 fields remain valid at the outer request boundary; nested batch commands keep
 their stricter scope/lifecycle preflight.
 

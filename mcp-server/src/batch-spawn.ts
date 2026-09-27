@@ -18,7 +18,7 @@ import {
   normalizePath,
   type InstanceLock,
 } from "./instance-discovery.js";
-import { findUnityForProject } from "./running-unity.js";
+import { findHeadlessUnityForProject, findUnityForProject } from "./running-unity.js";
 import { makeErrorResult } from "./results.js";
 import { VERIFY_JSON_BEGIN, VERIFY_JSON_END } from "./constants.js";
 
@@ -73,6 +73,17 @@ export function activeHeadlessRun(
 }
 
 const BATCH_IN_PROGRESS_MESSAGE = "A headless operation already owns this project. Wait for it to finish.";
+
+// A -batchmode Unity another process has open on the project (a second MCP
+// server's compile_check, a CI run). It is a headless run like our own lease,
+// not an Editor to diagnose, so it gets the same code with its pid.
+function foreignHeadlessMessage(pid: number): string {
+  return (
+    `A headless Unity from another process (pid ${pid}) has this project open — ` +
+    "a batch run from a second MCP server or CI, not an interactive Editor. " +
+    "Unity allows one instance per project; wait for it to exit, then retry."
+  );
+}
 
 const VERIFY_TOOL_TO_OPERATION: Record<string, string> = {
   unity_open_mcp_scan_all: "scan_all",
@@ -749,6 +760,13 @@ export class BatchSpawn implements Router {
       }
     }
 
+    // A headless Unity another process started is a batch run too, not an
+    // Editor whose lock diagnosis applies.
+    const foreign = this.projectPath ? findHeadlessUnityForProject(this.projectPath) : null;
+    if (foreign) {
+      return makeErrorResult({ code: "batch_in_progress", message: foreignHeadlessMessage(foreign.pid) });
+    }
+
     // Cold Safe Mode/boot can own the project before a bridge lock exists.
     const running = this.projectPath ? findUnityForProject(this.projectPath) : null;
     if (running) {
@@ -982,6 +1000,11 @@ export class BatchSpawn implements Router {
       const projectKey = leaseKey(this.projectPath);
       if (activeBatchProjects.has(projectKey)) {
         reject(new BatchClassificationError("batch_in_progress", BATCH_IN_PROGRESS_MESSAGE));
+        return;
+      }
+      const foreignHeadless = findHeadlessUnityForProject(this.projectPath);
+      if (foreignHeadless) {
+        reject(new BatchClassificationError("batch_in_progress", foreignHeadlessMessage(foreignHeadless.pid)));
         return;
       }
       const owner = readInstanceLock(this.projectPath);

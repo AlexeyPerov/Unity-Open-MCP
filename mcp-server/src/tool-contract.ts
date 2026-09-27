@@ -140,8 +140,32 @@ export function canonicalSchema(name: string, input: Schema): Tool["inputSchema"
   return schema as Tool["inputSchema"];
 }
 
+/**
+ * An explicit `null` for an OPTIONAL property whose schema declares a
+ * non-null type is read as "omitted": MCP clients routinely serialize an
+ * absent optional argument as null, and the bridge's own readers treat such a
+ * value as absent. A required property, a property without a declared type
+ * (opaque patch values such as component_modify's `value`) and a type that
+ * lists `null` keep the value as sent.
+ */
+function isNullOmitted(schema: Schema, key: string, value: unknown): boolean {
+  if (value !== null) return false;
+  if ((schema.required ?? []).includes(key)) return false;
+  const type = schema.properties?.[key]?.type;
+  if (!type) return false;
+  return !(Array.isArray(type) ? type : [type]).includes("null");
+}
+
+/** `value` without its null-omitted properties; the input object is not mutated. */
+function withoutNullOmitted(value: Record<string, unknown>, schema: Schema): Record<string, unknown> {
+  if (!schema.properties) return value;
+  const kept = Object.entries(value).filter(([key, v]) => !isNullOmitted(schema, key, v));
+  return kept.length === Object.keys(value).length ? value : Object.fromEntries(kept);
+}
+
 /** Validate before dispatch, including nested records; arbitrary value payloads stay opaque. */
 export function validateSchema(value: any, schema: Schema, path = "args"): string[] {
+  if (value && typeof value === "object" && !Array.isArray(value)) value = withoutNullOmitted(value, schema);
   const errors: string[] = [];
   for (const op of ["anyOf", "oneOf", "allOf"]) if (schema[op]) {
     const n = schema[op].filter((s: Schema) => validateSchema(value, s, path).length === 0).length;
@@ -184,7 +208,9 @@ export function wireArguments(value: any, schema: Schema, notes: string[] = []):
   if (Array.isArray(value)) return value.map(v => wireArguments(v, schema.items ?? {}, notes));
   if (!value || typeof value !== "object" || !schema.properties) return value;
   const out: Record<string, unknown> = {};
-  for (const [key, v] of Object.entries(value)) {
+  // Null-omitted properties never reach the wire: the bridge validates the
+  // same schema and would otherwise refuse the null the server just waived.
+  for (const [key, v] of Object.entries(withoutNullOmitted(value, schema))) {
     const p = schema.properties[key] ?? {};
     const canonical = p["x-alias-for"];
     if (canonical) notes.push(`${key} is deprecated; use ${canonical}.`);

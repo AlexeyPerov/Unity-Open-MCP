@@ -180,8 +180,12 @@ list is available via `validate_edit` / `scan_paths` on the touched paths.
 
 `gate.delta` is `null` — never a zeroed object — when no delta was computed.
 Three paths land there, with different outcome tokens: a **checkpoint failure**
-or a **mutation failure** reports `gate.outcome: "failed"` with
-`mutation.success: false` (the MCP result is `isError: true` via the mutation),
+reports `gate.outcome: "failed"` with `mutation.success: false`; a **mutation
+failure** (the tool returned `success: false` or threw before validation)
+reports `gate.outcome: "skipped"` with `gate.skippedReason: "mutation_failed"`
+and `mutation.success: false` — the gate did not run, so its outcome carries no
+verdict and `isError: true` comes from the mutation alone (branch on
+`mutation.success`, never on `gate.outcome === "failed"`, to detect it);
 and a **validate-scan failure** (the scan threw, or a verify rule threw on
 either side of the delta) reports `gate.outcome: "validate_scan_failed"` — the
 mutation committed, and the MCP result is still flagged `isError: true`. When a
@@ -666,6 +670,13 @@ usually still running and completes. Confirm with `editor_status` or an asset
 probe; a blind retry of an authoring menu can double-write assets. The timeout
 envelope's `agentNextSteps` says exactly this.
 
+A menu that does not run answers with one of two codes: `menu_not_found` (no
+item is registered at that path — fix the path) or `menu_disabled` (the item
+exists but its validate function rejected the current Editor state, for
+example nothing is selected — change the selection or state, not the path).
+On an Editor whose menu registry cannot be queried the two fold into
+`menu_not_found` with a message saying "does not exist, or it is disabled".
+
 `paths_hint` is required for a mutating menu path **even with `gate: "off"`** —
 it is the declared mutation scope recorded in the audit trail, not only the
 gate's validation scope, and there is no whole-project fallback (read-only menu
@@ -783,7 +794,10 @@ selector that would otherwise be ignored. Host selectors are `instance_id`,
 `name` is a payload instead publishes its selector set as
 `x-gameobject-selectors` — `gameobject_modify` renames through `name` and
 selects by name through `name_target`. Unknown keys, invalid types, enums and bounds fail before dispatch
-with `invalid_arguments`; a missing required argument may be reported by the
+with `invalid_arguments`; an explicit `null` for an optional argument with a
+declared non-null type is treated as omitted and never forwarded (a required
+argument, an untyped patch value, or a type listing `null` keeps the value);
+a missing required argument may be reported by the
 MCP entrypoint as `missing_required_argument`. Batch preflight validates every
 nested command before step zero. Arbitrary patch values remain opaque.
 

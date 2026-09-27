@@ -543,7 +543,12 @@ on normLabel(s)
   repeat with c in (characters of s)
     set ch to contents of c
     set cid to id of ch
-    if (cid >= 48 and cid <= 57) or (cid >= 65 and cid <= 90) or (cid >= 97 and cid <= 122) then set out to out & ch
+    -- "id of" yields a LIST for a character made of several code points
+    -- (decomposed accents, emoji); comparing a list numerically would raise
+    -- and abort the whole probe, so such characters are simply dropped.
+    if class of cid is integer then
+      if (cid >= 48 and cid <= 57) or (cid >= 65 and cid <= 90) or (cid >= 97 and cid <= 122) then set out to out & ch
+    end if
   end repeat
   return out
 end normLabel

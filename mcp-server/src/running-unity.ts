@@ -42,6 +42,16 @@ export interface RunningUnity {
   /** Normalized `-projectPath` argument, or null when it could not be parsed
    *  (Unity opened without `-projectPath`, e.g. via the Hub's "Open Editor"). */
   projectPath: string | null;
+  /** `true` when the command line carries `-batchmode`: a headless run (a
+   *  compile_check / verify spawn from this or another MCP server, a CI run),
+   *  never the interactive Editor a user owns. Optional so hand-built scanner
+   *  fixtures keep working. */
+  batchMode?: boolean;
+}
+
+/** `true` when the command line runs Unity headless (`-batchmode`, any case). */
+export function isBatchModeCommandLine(commandLine: string): boolean {
+  return /(^|\s)-batchmode(\s|$)/i.test(commandLine);
 }
 
 /**
@@ -284,6 +294,7 @@ export function parsePsOutput(stdout: string): RunningUnity[] {
     out.push({
       pid,
       projectPath: projectPath !== null ? normalizePath(projectPath) : null,
+      batchMode: isBatchModeCommandLine(rest),
     });
   }
   return out;
@@ -316,6 +327,7 @@ export function parsePowerShellLines(stdout: string): RunningUnity[] {
       pid,
       projectPath:
         projectPath !== null ? normalizePath(projectPath) : null,
+      batchMode: rest.length > 0 && rest !== "null" && isBatchModeCommandLine(rest),
     });
   }
   return out;
@@ -448,6 +460,39 @@ export function findUnityForProject(
     // Our own headless child is not an Editor the user owns; the batch lease
     // accounts for it (and restart_editor must never pick it).
     if (isSupervisedBatchChildPid(proc.pid)) continue;
+    // Neither is a -batchmode Unity another process started (a second MCP
+    // server's compile_check, a CI run): it is never in Safe Mode, must never
+    // be killed by restart_editor, and batch-spawn reports it separately
+    // (findHeadlessUnityForProject).
+    if (proc.batchMode) continue;
+    if (proc.projectPath !== null && normalizePath(proc.projectPath) === target) {
+      return { pid: proc.pid };
+    }
+  }
+  return null;
+}
+
+/**
+ * A headless (`-batchmode`) Unity that ANOTHER process has open on
+ * `projectPath`: a compile_check / verify spawn from a second MCP server, or a
+ * CI run. This server's own supervised child is excluded (the batch lease
+ * accounts for it), and the interactive Editor is `findUnityForProject`'s
+ * business. Never throws; null when no such process is found.
+ */
+export function findHeadlessUnityForProject(
+  projectPath: string | null | undefined,
+): { pid: number } | null {
+  if (!projectPath) return null;
+  const target = normalizePath(projectPath);
+  if (target.length === 0) return null;
+  let found: RunningUnity[] = [];
+  try {
+    found = getUnityProcessScanner().scan();
+  } catch {
+    return null;
+  }
+  for (const proc of found) {
+    if (!proc.batchMode || isSupervisedBatchChildPid(proc.pid)) continue;
     if (proc.projectPath !== null && normalizePath(proc.projectPath) === target) {
       return { pid: proc.pid };
     }

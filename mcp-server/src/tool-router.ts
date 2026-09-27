@@ -806,9 +806,14 @@ export class ToolRouter implements Router {
     const owner: JobOwner = { project: this.projectPath || "default", agent: identity.agent,
       ...(identity.port === undefined ? {} : { port: identity.port }) };
     try {
+      // A port override names a bridge, not a project: bind the job client to
+      // the Editor whose lock claims that port (its bearer token and its lock
+      // diagnostics), exactly like a direct override call. resolveAuthToken
+      // yields no token for an explicit port, and the default project's lock
+      // would describe the wrong Editor.
       const clientFor = (jobOwner: JobOwner) => jobOwner.port === undefined
         ? jobOwner.agent === PROCESS_AGENT_ID ? this.live : this.live.forAgent(jobOwner.agent)
-        : new LiveClient(jobOwner.port, new PingCache(), resolveAuthToken(this.projectPath, jobOwner.port), this.projectPath, jobOwner.agent, jobOwner.port);
+        : LiveClient.forPortOverride(jobOwner.port, this.projectPath, jobOwner.agent);
       if (args.action === "start" && typeof args.tool_or_command === "string") {
         const name = args.tool_or_command, key = args.idempotency_key;
         if (name === "unity_senses_run_tests") {
@@ -965,7 +970,33 @@ export class ToolRouter implements Router {
    */
   private projectProbeRouter(projectPath: string): ToolRouter {
     const live = new LiveClient(resolvePort(projectPath), new PingCache(), resolveAuthToken(projectPath), projectPath);
-    return new ToolRouter(live, new BatchSpawn({ projectPath }), projectPath, this.eventStream, this.sessionState.clone());
+    return new ToolRouter(live, this.projectProbeBatch(projectPath), projectPath, this.eventStream, this.sessionState.clone());
+  }
+
+  // Batch routers of probed projects, keyed by project path and bounded to
+  // the most recently probed few. Constructing a BatchSpawn walks every Hub
+  // install root synchronously; a polled probe must not pay that on every
+  // call, and the router keeps its own editor-resolution cache (revalidated
+  // when the project version or the env inputs change).
+  private static readonly PROBE_BATCH_CACHE_SIZE = 8;
+  private readonly probeBatchByProject = new Map<string, BatchSpawn>();
+
+  private projectProbeBatch(projectPath: string): BatchSpawn {
+    const cached = this.probeBatchByProject.get(projectPath);
+    if (cached) {
+      // Re-insert so the map keeps insertion order as recency order.
+      this.probeBatchByProject.delete(projectPath);
+      this.probeBatchByProject.set(projectPath, cached);
+      return cached;
+    }
+    const batch = new BatchSpawn({ projectPath });
+    this.probeBatchByProject.set(projectPath, batch);
+    while (this.probeBatchByProject.size > ToolRouter.PROBE_BATCH_CACHE_SIZE) {
+      const oldest = this.probeBatchByProject.keys().next().value;
+      if (oldest === undefined) break;
+      this.probeBatchByProject.delete(oldest);
+    }
+    return batch;
   }
 
   /**

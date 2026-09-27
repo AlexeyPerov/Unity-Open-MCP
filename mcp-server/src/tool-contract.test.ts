@@ -136,3 +136,33 @@ test("verify filters enumerate implemented rules, excluding planned entries", ()
     assert.ok(!p.items.enum.includes("offline_integrity"), t.name);
   }
 });
+
+test("validateSchema treats an explicit null for an optional typed argument as omitted", () => {
+  // MCP clients routinely serialize an absent optional as null; the bridge's
+  // readers treat that as absent, so the server must not refuse it.
+  const schema = {
+    type: "object",
+    required: ["name"],
+    properties: {
+      name: { type: "string" },
+      parent_path: { type: "string" },
+      // An untyped patch value keeps its null (object references are cleared with null).
+      value: {},
+      count: { type: ["integer", "null"] },
+    },
+    additionalProperties: false,
+  };
+  assert.deepEqual(validateSchema({ name: "Foo", parent_path: null }, schema), []);
+  assert.deepEqual(validateSchema({ name: "Foo", value: null, count: null }, schema), []);
+  // A required argument is not waived by null.
+  assert.ok(validateSchema({ name: null }, schema).some(e => e.includes("args.name must be string")));
+  // The waived null never reaches the wire; kept nulls do.
+  assert.deepEqual(wireArguments({ name: "Foo", parent_path: null, value: null, count: null }, schema),
+    { name: "Foo", value: null, count: null });
+});
+
+test("validateSchema: a waived null does not count as a supplied selector or alias", () => {
+  const schema = ALL_TOOLS.find(t => t.name === "unity_open_mcp_component_get")!.inputSchema;
+  assert.deepEqual(validateSchema({ game_object_path: "Root/Child", path: null, component_type: "UnityEngine.Transform" }, schema), []);
+  assert.deepEqual(validateSchema({ instance_id: "12", name: null, type_name: null, component_type: "UnityEngine.Transform" }, schema), []);
+});

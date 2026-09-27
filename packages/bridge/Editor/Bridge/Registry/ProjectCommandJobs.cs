@@ -108,8 +108,14 @@ namespace UnityOpenMcpBridge
                 if (action == "cancel")
                 {
                     if (!existing.Cancellable) return Error("not_cancellable", "Command has no cooperative cancellation contract.");
-                    if (existing.Result == null)
-                    { existing.State = "cancel_requested"; existing.Cancellation.Cancel(); }
+                    // Shutdown() has already cancelled and disposed every
+                    // token source; the record stays as it was so the caller
+                    // reads the state rather than a disposed-token fault.
+                    if (existing.Result == null && !shuttingDown)
+                    {
+                        existing.State = "cancel_requested";
+                        try { existing.Cancellation.Cancel(); } catch (ObjectDisposedException) { }
+                    }
                 }
                 else if (action != "status" && action != "start") return Error("invalid_arguments", "Use start, status or cancel.");
                 return Snapshot(existing);

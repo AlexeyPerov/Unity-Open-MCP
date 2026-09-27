@@ -1,11 +1,32 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEditor;
 
 namespace UnityOpenMcpBridge.MetaTools
 {
     public static class ExecuteMenuTool
     {
+        // ExecuteMenuItem answers false both for an unknown path and for an
+        // item whose validate function rejected the current Editor state.
+        // UnityEditor.Menu.MenuItemExists (internal) tells the two apart;
+        // resolved once, and a runtime without it degrades to one combined
+        // "not found or disabled" answer.
+        private static readonly MethodInfo MenuItemExistsMethod = typeof(Menu).GetMethod(
+            "MenuItemExists",
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+            null,
+            new[] { typeof(string) },
+            null);
+
+        /// <summary>Whether a menu item with this exact path is registered; null when the Editor cannot say.</summary>
+        internal static bool? MenuItemExists(string menuPath)
+        {
+            if (MenuItemExistsMethod == null || string.IsNullOrEmpty(menuPath)) return null;
+            try { return MenuItemExistsMethod.Invoke(null, new object[] { menuPath }) as bool?; }
+            catch { return null; }
+        }
+
         private static readonly HashSet<string> BlockedMenus = new(StringComparer.OrdinalIgnoreCase)
         {
             "File/Quit"
@@ -144,7 +165,17 @@ namespace UnityOpenMcpBridge.MetaTools
             try
             {
                 if (!EditorApplication.ExecuteMenuItem(menuPath))
-                    return ToolDispatchResult.Fail("menu_not_found", "Menu item not found: " + menuPath);
+                {
+                    var exists = MenuItemExists(menuPath);
+                    if (exists == true)
+                        return ToolDispatchResult.Fail("menu_disabled",
+                            $"Menu item '{menuPath}' exists but is disabled: its validation function " +
+                            "rejected the current Editor state (for example nothing is selected, or the " +
+                            "selection has the wrong type). Change the state it validates against, then retry.");
+                    return ToolDispatchResult.Fail("menu_not_found", exists == false
+                        ? $"Menu item '{menuPath}' not found. Verify the menu path matches the Editor menu hierarchy exactly."
+                        : $"Menu item '{menuPath}' was not executed: it does not exist, or it is disabled in the current Editor state.");
+                }
                 return ToolDispatchResult.Ok("\"ok\"");
             }
             catch (ArgumentNullException)
