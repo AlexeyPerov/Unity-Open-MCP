@@ -2,9 +2,8 @@
 
 ## Scope
 
-Rules for `demo/` — the default Unity integration fixture for local MCP suites,
-EditMode package tests, and Validation Suite runs. Root `AGENTS.md` also
-applies. User quick start: [`README.md`](README.md).
+Rules for `demo/` — the default Unity integration fixture for local MCP suites
+and EditMode package tests. Root `AGENTS.md` also applies. User quick start: [`README.md`](README.md).
 
 ## Fixture role
 
@@ -26,6 +25,5 @@ applies. User quick start: [`README.md`](README.md).
 
 ## Hygiene
 
-- Do not commit Validation Suite runtime paths
-  (`Assets/_ValidationSuite/`, `UserSettings/ValidationSuite/`).
+- Do not commit project-command fixture output (`Assets/_ProjectCommandFixture/`).
 - Prefer disposable fixture folders under `Assets/` for suite scratch data.

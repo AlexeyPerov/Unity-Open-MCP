@@ -11,7 +11,7 @@ contains a minimal copy-pasteable assembly and command example.
    `tool_or_command: "project.demo.long_write"`, a fresh `idempotency_key`, and
    `args: {"args": {"seconds": 60}, "gate": "enforce"}`.
 4. Call status, then bounded wait until terminal; check the retained gate and
-   `Assets/_ValidationSuite/ProjectCommands/invocation.txt`. Same-key retries
+   `Assets/_ProjectCommandFixture/invocation.txt`. Same-key retries
    must return the same job. Cancel during preparation to avoid the final write.
 5. `project.demo.partial_output` deliberately writes a disposable file before
    returning invalid JSON or throwing. Expect failed execution with terminal

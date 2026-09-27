@@ -174,7 +174,6 @@ Unity Hub Pro is the desktop companion app for Unity Open MCP. It helps you mana
   request.
 - [Contributor troubleshooting](docs/troubleshooting-contributors.md) covers
   local test, bridge, and automation failures.
-- [Validation Suite](validation-suite/README.md) — app for guided manual validation; ships runnable scenario packs.
 - [Maintainer versioning and releases](docs/contributing/versioning.md) — synchronization, tags, and release workflows.
 
 **License:** MIT — see [LICENSE](LICENSE).

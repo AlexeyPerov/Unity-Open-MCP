@@ -594,8 +594,8 @@ export const M14_TOOLS: Tool[] = [readCompileErrors];
 // one /ping). `bridge_stop` / `bridge_start` are deferred (need new bridge
 // HTTP routes; `stop` has a self-disconnect hazard). Like `read_compile_errors`,
 // these carry no tool-group assignment → they are always-visible meta-tools
-// (operators / the Validation Suite reach them; the agent skill does NOT
-// document them in mutate/gate sections). See docs/api/mcp-tools.md.
+// (operators reach them; the agent skill does NOT document them in mutate/gate
+// sections). See docs/api/mcp-tools.md.
 export const BRIDGE_ADMIN_TOOLS: Tool[] = [bridgeStatus];
 
 // M18 Plan 2 / T18.2.2 — manage_tools meta-tool. Server-only, local-routed,

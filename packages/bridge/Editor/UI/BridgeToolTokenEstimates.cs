@@ -48,7 +48,7 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_audio_source_modify", 647 },
             { "unity_open_mcp_baseline_create", 168 },
             { "unity_open_mcp_batch_execute", 1334 },
-            { "unity_open_mcp_bridge_status", 896 },
+            { "unity_open_mcp_bridge_status", 887 },
             { "unity_open_mcp_build_get_active_target", 94 },
             { "unity_open_mcp_build_get_defines", 107 },
             { "unity_open_mcp_build_get_scenes", 98 },

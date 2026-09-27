@@ -69,9 +69,8 @@ export const bridgeStatus = makeTool(
     "package predates the fix (reinstall it) and `stale: false` means the " +
     "failure is a genuine regression worth reporting. A bridge old enough not " +
     "to report the field at all reads as `bridge: null, stale: true`. " +
-    "Designed for the Validation Suite's manual bridge-offline scenario " +
-    "pattern and operators confirming toolbar stop/start — not a " +
-    "general agent health check (use unity_open_mcp_ping for that). " +
+    "Designed for operators confirming toolbar stop/start and bridge-offline " +
+    "recovery — not a general agent health check (use unity_open_mcp_ping for that). " +
     "Read-only, gate-free, never spawns Unity. The /ping fetch uses the " +
     "bridge's standard 5s timeout; project_path optionally selects a different Unity project.",
   {

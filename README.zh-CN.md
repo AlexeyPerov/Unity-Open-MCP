@@ -148,7 +148,6 @@ Unity Hub Pro 是 Unity Open MCP 的桌面配套应用。它帮助你管理项�
 - 在提 issue 或 pull request 之前请先阅读
   [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
 - [贡献者故障排查](docs/troubleshooting-contributors.md)（英文）涵盖本地测试、桥接与自动化失败。
-- [Validation Suite](validation-suite/README.md)（英文）— 用于引导式人工验证的应用；附带可运行的场景包。
 - [维护者版本与发布](docs/contributing/versioning.md)（英文）— 同步、标签与发布工作流。
 
 **许可证：** MIT — 见 [LICENSE](LICENSE)。

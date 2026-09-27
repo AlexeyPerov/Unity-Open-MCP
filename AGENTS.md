@@ -15,7 +15,6 @@
   - `scripts/AGENTS.md` — version sync, token-estimate codegen, and MCP test suites.
   - `skills/AGENTS.md` — agent playbooks and client install-path manifest.
   - `demo/AGENTS.md` — Unity integration fixture, manifest/`testables` sync.
-  - `validation-suite/AGENTS.md` — guided manual-validation app and scenarios.
 
 ## Universal contributor rules
 
@@ -37,7 +36,7 @@
 ## Maintainer process when `specs/` is available
 
 - You may read and edit gitignored working docs under `specs/`, but keep them out of version control.
-- **Milestone validation checklists.** Apply this only while executing a milestone plan under `specs/execution/`. During the final validation pass, create or update its manual checklist following `specs/execution/manual-checklist-convention.md`. Cover every human-driven Done criterion, link it from the milestone plan/spec, and do not mark the milestone DONE until a representative walkthrough passes. A Validation Suite checklist may be an index/sign-off artifact as defined by the convention.
+- **Milestone validation checklists.** Apply this only while executing a milestone plan under `specs/execution/`. During the final validation pass, create or update its manual checklist following `specs/execution/manual-checklist-convention.md`. Cover every human-driven Done criterion, link it from the milestone plan/spec, and do not mark the milestone DONE until a representative walkthrough passes.
 - **MCP-experience feedback.** This is a maintainer process obligation, not a CI-enforced check. If this task used `unity_open_mcp_*` or `unity_senses_*` and `specs/` is available, review the calls before handoff. Record each genuine error, unexpected result, retry, friction point, or improvement idea in `specs/feedback.md` (create it if needed); write nothing for a clean session.
   - **Do not duplicate:** before adding an entry, check whether `specs/feedback.md` already has an entry for the same tool/issue; if so, append a `+1 / reproduces on <date>` note to that entry instead of creating a new one.
   - **Entry format:**

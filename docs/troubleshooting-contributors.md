@@ -175,7 +175,6 @@ when tools ship).
 | **S3** | `scripts/mcp-protocol.mjs` | MCP stdio server process | `tools/list`, `list_changed` notification, route spot-checks |
 | **S4** | `scripts/mcp-extensions.mjs` | Live Editor + bridge | Embedded-domain success chains when groups compile in |
 | **S5** | `scripts/mcp-sandbox.mjs` | Temp project clone (never mutates `demo/`) | Package lifecycle, Hub mutators, destructive build |
-| **S6** | Validation Suite scenarios under `validation-suite/scenarios/unity/` | Validation Suite app + human/agent steps | Onboarding flows, `batch_execute`, client auto-config |
 
 All `scripts/mcp-*.mjs` suites share `scripts/mcp-test-lib.mjs` (arg parsing,
 expect classifier, CLI runner, scene hygiene, cleanup). Common flags:
@@ -185,9 +184,8 @@ header comment.
 
 **S0** is the fast reachability layer — it proves every tool is registered and
 routed, tolerating known tool bugs. **S1–S5** are the strict behavioral layers:
-a failure there is a real regression. **S6** covers flows that need a human or
-MCP client (Hub UI, Validation Suite app). Run order + CI tiers are wired by
-the orchestrator (`scripts/mcp-test-all.mjs`).
+a failure there is a real regression. Run order + CI tiers are wired by the
+orchestrator (`scripts/mcp-test-all.mjs`).
 
 ## Related docs
 
@@ -202,4 +200,3 @@ Run the [live input simulation fixtures](../scripts/README.md#live-input-simulat
 after changing pointer dispatch or framed device input. EditMode tests cover
 handler delivery and resolution; the live replay additionally samples gameplay
 Update, which detects input edges consumed too early by manual input updates.
-The Validation Suite exposes the frame and pointer replays as separate scenarios.

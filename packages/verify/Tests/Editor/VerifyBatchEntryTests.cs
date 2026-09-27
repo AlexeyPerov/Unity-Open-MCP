@@ -10,7 +10,7 @@ namespace UnityOpenMcpVerify.Tests
     // The three operation runners (RunScanAll / RunBaselineCreate /
     // RunRegressionCheck) call the live VerifyRunner, which requires a full
     // Unity project asset scan — those are integration paths exercised by the
-    // Validation Suite and the headless -batchmode entry. This test class owns
+    // live MCP suites and the headless -batchmode entry. This test class owns
     // the pure, deterministic surface: how args are sliced, how operations are
     // dispatched, and how every malformed flag surfaces a structured failure
     // envelope. This is where a regression in the batch CLI contract (wrong

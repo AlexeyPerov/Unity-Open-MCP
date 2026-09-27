@@ -7,15 +7,12 @@ Unity Open MCP has four runtime parts:
 - **MCP server** exposing tools/resources over stdio to AI clients.
 - **Unity Hub Pro** for setup and project operations.
 
-A fifth part, the **Validation Suite**, is a standalone desktop app for guided manual validation; see [validation-suite/README.md](../validation-suite/README.md).
-
 ## Repository map
 
 - `mcp-server/` — MCP stdio server, tool registry, routing.
 - `packages/bridge/` — Unity HTTP bridge and typed tool handlers. Shipped domain tools live under `Editor/TypedTools/Extensions/` and compile-gate on their Unity dependency (see [Contributing — extensions](contributing/extensions.md)).
 - `packages/verify/` — validation rules and fixes used by gate flows.
 - `hub/` — desktop app (Tauri + SvelteKit).
-- `validation-suite/` — standalone Tauri + SvelteKit app that runs manual validation scenarios. Engine-neutral orchestration lives in `validation-suite/packages/core/`; engine specifics (paths, CLI, companions) are declared in bundled engine profiles (`engine-profiles/unity.json`). The suite has no code boundary with `hub/` — it ships standalone and invokes the engine via the MCP CLI as a subprocess.
 
 ### Open-MCP npm cwd
 

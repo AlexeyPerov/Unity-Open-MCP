@@ -572,7 +572,7 @@ interface BridgeWedge {
 }
 
 // Operator-facing "what to do next" hint for each coarse status. Kept short
-// and action-oriented so the Validation Suite can render it inline.
+// and action-oriented so an operator UI can render it inline.
 function bridgeStatusNextStep(
   status: BridgeStatusToken,
   wedge?: BridgeWedge | null,
@@ -628,7 +628,7 @@ function bridgeStatusNextStep(
 }
 
 // M23 Plan 2 — structured recovery hint surfaced alongside `status`. Lets
-// agents (and the Validation Suite) branch on a machine-readable signal
+// agents (and operator UIs) branch on a machine-readable signal
 // instead of scraping `nextStep` prose. `null` when the status is healthy or
 // the recovery path is just "wait/retry" (no specific tool to call). Today
 // only `dead_bridge` carries a hint; the shape is extensible so future

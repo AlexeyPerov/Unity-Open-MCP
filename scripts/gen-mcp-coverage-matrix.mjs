@@ -197,8 +197,7 @@ function s0Status(toolName, s0) {
 //
 // This encodes the design from the plan: S0 reachability for all; S1 strict
 // for live mutating/read tools S0 only tolerates + the 8 absent tools; S2 for
-// batch/offline; S3 transport; S4 extensions; S5 package/hub/destructive; S6
-// for flow-level tools (batch_execute, generate_skill).
+// batch/offline; S3 transport; S4 extensions; S5 package/hub/destructive.
 // ---------------------------------------------------------------------------
 
 // Tools absent from S0 that S1 must cover.
@@ -224,11 +223,6 @@ const S5_TOOLS = new Set([
   "unity_open_mcp_build_start",
 ]);
 
-// S6 owns flow-level tools (covered by validation-suite scenarios).
-const S6_TOOLS = new Set([
-  "unity_open_mcp_batch_execute", "unity_open_mcp_generate_skill",
-]);
-
 // Extension groups → S4.
 const EXTENSION_GROUPS = new Set([
   "navigation", "input-system", "probuilder", "particle-system", "animation",
@@ -247,13 +241,6 @@ function ownershipFor(toolName, group, route, s0StatusVal) {
     strictOwner = "S5";
     passCriteria = "tolerate(env)"; // package/hub/build steps tolerate env-missing codes
     notes = "destructive/disposable-project — S0 skips (would break demo)";
-  } else if (S6_TOOLS.has(toolName)) {
-    owners.push("S6");
-    strictOwner = "S6(scenario) + S0(reachability)";
-    passCriteria = "scenario";
-    notes = toolName === "unity_open_mcp_batch_execute"
-      ? "m27-batch-execute-setup scenario + BatchExecuteToolTests EditMode"
-      : "m27-generate-skill-no-bridge scenario";
   } else if (EXTENSION_GROUPS.has(group)) {
     owners.push("S4");
     strictOwner = "S4";
@@ -310,7 +297,7 @@ function renderMatrix(tools, groups, s0) {
   lines.push("- `tool_id` — the MCP tool name (`name` field in `mcp-server/src/tools/*.ts`)");
   lines.push("- `route` — live / batch / offline / local / live+batch (mirrors `tool-router.ts`)");
   lines.push("- `group` — tool-group assignment from `tool-groups.ts` (null = always-visible meta-tool)");
-  lines.push("- `suite_owner` — which suite(s) cover this tool (S0–S6)");
+  lines.push("- `suite_owner` — which suite(s) cover this tool (S0–S5)");
   lines.push("- `pass_criteria` — the expect mode the strict owner asserts");
   lines.push("- `s0_status` — covered / tolerate / skip / reachable / absent(unavail) / absent");
   lines.push("- `strict_owner` — the suite that asserts real success (not just reachability)");
@@ -326,7 +313,6 @@ function renderMatrix(tools, groups, s0) {
   lines.push("| **S3** | `scripts/mcp-protocol.mjs` | MCP stdio server process | `tools/list`, `list_changed`, route spot-checks |");
   lines.push("| **S4** | `scripts/mcp-extensions.mjs` | Live Editor + bridge | Extension-pack success chains when groups compiled in |");
   lines.push("| **S5** | `scripts/mcp-sandbox.mjs` | Temp project clone (never mutates `demo/`) | Package lifecycle, hub mutators, destructive build |");
-  lines.push("| **S6** | `validation-suite/scenarios/unity/m27/*.json` | Validation Suite app + human/agent steps | Onboarding flows, batch_execute, client auto-config |");
   lines.push("");
   lines.push("## Coverage matrix");
   lines.push("");

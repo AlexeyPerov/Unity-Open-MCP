@@ -19,7 +19,7 @@ namespace ProjectCommandFixture
 
         [ProjectCommand("project.demo.long_write", Title = "Long write fixture", Description = "Prepare over time, then write one disposable asset; cooperatively cancellable between steps.",
             Package = "demo.project-commands", IsMutating = true, Async = true, Cancellable = true,
-            Lifecycle = LifecyclePolicy.EditorSettle, PathsHint = new[] { "Assets/_ValidationSuite/ProjectCommands" })]
+            Lifecycle = LifecyclePolicy.EditorSettle, PathsHint = new[] { "Assets/_ProjectCommandFixture" })]
         public static async System.Threading.Tasks.Task<string> LongWrite(ProjectCommandContext context,
             [ProjectCommandParameter(Minimum = 1, Maximum = 120)] int seconds = 60)
         {
@@ -35,7 +35,7 @@ namespace ProjectCommandFixture
 
         [ProjectCommand("project.demo.partial_output", Title = "Partial output fixture", Description = "Write disposable output, then fail to exercise terminal validation.",
             Package = "demo.project-commands", IsMutating = true, Async = true,
-            Lifecycle = LifecyclePolicy.EditorSettle, PathsHint = new[] { "Assets/_ValidationSuite/ProjectCommands" })]
+            Lifecycle = LifecyclePolicy.EditorSettle, PathsHint = new[] { "Assets/_ProjectCommandFixture" })]
         public static async System.Threading.Tasks.Task<string> PartialOutput(ProjectCommandContext context, bool invalidJson = true)
         {
             await System.Threading.Tasks.Task.Delay(50);
@@ -56,10 +56,10 @@ namespace ProjectCommandFixture
 
         [ProjectCommand("project.demo.write_fixture", Title = "Write fixture", Description = "Write a disposable validation asset.",
             Package = "demo.project-commands", IsMutating = true, Lifecycle = LifecyclePolicy.EditorSettle,
-            PathsHint = new[] { "Assets/_ValidationSuite/ProjectCommands" })]
+            PathsHint = new[] { "Assets/_ProjectCommandFixture" })]
         public static string Write(string text)
         {
-            const string folder = "Assets/_ValidationSuite/ProjectCommands";
+            const string folder = "Assets/_ProjectCommandFixture";
             System.IO.Directory.CreateDirectory(folder);
             System.IO.File.WriteAllText(folder + "/invocation.txt", text);
             UnityEditor.AssetDatabase.ImportAsset(folder + "/invocation.txt");

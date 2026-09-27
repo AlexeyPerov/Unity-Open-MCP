@@ -13,7 +13,7 @@
 //      are fully reachable in EditMode.
 //
 // Dispatch delivery is covered by PointerDispatchTests in EditMode. Actual
-// player-loop and device polling checks are runnable Validation Suite scenarios.
+// player-loop and device polling checks run in the live input simulation replay (scripts/).
 #if UNITY_OPEN_MCP_EXT_INPUTSIM_UGUI
 using System.Collections.Generic;
 using NUnit.Framework;
