@@ -216,19 +216,7 @@ namespace UnityOpenMcpBridge.Tests
         }
         [UnityTest] public IEnumerator RunningJobRefusesEditorStateWritesOnEveryRouteButNotReads()
         {
-            if (BridgeToolRegistry.Count == 0) BridgeToolRegistry.Scan();
-            // A run started through the bridge's own test tool would refuse the start as editor_busy.
-            testRunActive = ProjectCommandJobs.TestRunActive;
-            ProjectCommandJobs.TestRunActive = null;
-            held = new TaskCompletionSource<string>();
-            Register("AsyncHeld", async: true);
-            var id = Guid.NewGuid().ToString();
-            string Job(string action) => ProjectCommandJobs.Handle("{\"action\":\"" + action + "\",\"job_id\":\"" + id + "\""
-                + (action == "start" ? ",\"invocation\":" + Body() : "") + "}", "tests");
-            StringAssert.Contains("\"state\":\"running\"", Job("start"));
-            for (int frame = 0; frame < 600 && !Job("status").Contains("\"phase\":\"executing\""); frame++) yield return null;
-            StringAssert.Contains("\"phase\":\"executing\"", Job("status"));
-
+            yield return StartHeldJob();
             const string pause = "{\"state\":\"pause\"}";
             const string pauseBatch = "{\"commands\":[{\"tool\":\"unity_open_mcp_editor_set_state\",\"params\":" + pause + "}]}";
             Assert.AreEqual("job_busy", Direct("unity_open_mcp_editor_set_state", pause).ErrorCode);
@@ -240,11 +228,48 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsTrue(Gated("unity_open_mcp_batch_execute", "{\"commands\":[{\"tool\":\"unity_open_mcp_selection_get\",\"params\":{}}]}").Mutation.Success);
             StringAssert.Contains("not_cancellable", Job("cancel"));
 
+            yield return FinishHeldJob();
+            Assert.IsTrue(Direct("unity_open_mcp_editor_set_state", pause).Success);
+        }
+        // The route refuses a test start before the tool body runs, so the caller gets the
+        // structured job_busy code. The invalid run_id stops the tool before it schedules a run:
+        // neither a regressed guard nor the call after the job can start a nested test run.
+        [UnityTest] public IEnumerator RunningJobRefusesTestStartsWithJobBusyOnEveryRoute()
+        {
+            yield return StartHeldJob();
+            const string start = "{\"run_id\":\"../escape\"}";
+            var refused = Direct("unity_senses_run_tests", start);
+            Assert.AreEqual("job_busy", refused.ErrorCode, refused.ErrorMessage);
+            Assert.AreEqual("job_busy", Gated("unity_senses_run_tests", start).Mutation.ErrorCode);
+
+            yield return FinishHeldJob();
+            var reached = Direct("unity_senses_run_tests", start);
+            Assert.AreEqual("execution_error", reached.ErrorCode);
+            StringAssert.Contains("Invalid 'run_id'", reached.ErrorMessage);
+        }
+        private static string heldJobId;
+        // Starts AsyncHeld as a project job and waits until it owns the Editor scope.
+        private static IEnumerator StartHeldJob()
+        {
+            if (BridgeToolRegistry.Count == 0) BridgeToolRegistry.Scan();
+            // A run started through the bridge's own test tool would refuse the start as editor_busy.
+            testRunActive = ProjectCommandJobs.TestRunActive;
+            ProjectCommandJobs.TestRunActive = null;
+            held = new TaskCompletionSource<string>();
+            Register("AsyncHeld", async: true);
+            heldJobId = Guid.NewGuid().ToString();
+            StringAssert.Contains("\"state\":\"running\"", Job("start"));
+            for (int frame = 0; frame < 600 && !Job("status").Contains("\"phase\":\"executing\""); frame++) yield return null;
+            StringAssert.Contains("\"phase\":\"executing\"", Job("status"));
+        }
+        private static IEnumerator FinishHeldJob()
+        {
             held.SetResult("{}");
             for (int frame = 0; frame < 600 && ProjectCommandJobs.Active; frame++) yield return null;
             StringAssert.Contains("\"state\":\"succeeded\"", Job("status"));
-            Assert.IsTrue(Direct("unity_open_mcp_editor_set_state", pause).Success);
         }
+        private static string Job(string action) => ProjectCommandJobs.Handle("{\"action\":\"" + action + "\",\"job_id\":\"" + heldJobId + "\""
+            + (action == "start" ? ",\"invocation\":" + Body() : "") + "}", "tests");
         [UnityTearDown] public IEnumerator ReleaseHeldJob()
         {
             held?.TrySetResult("{}");

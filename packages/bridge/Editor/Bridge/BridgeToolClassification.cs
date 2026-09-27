@@ -398,12 +398,15 @@ namespace UnityOpenMcpBridge
         // asynchronous project command depends on, so a running job refuses
         // them with job_busy exactly like gated mutations: a play transition
         // reloads the domain that owns the job, undo/redo rewrites its work
-        // before the terminal validation, and selection, prefs and console
-        // writes change the inputs and diagnostics the command reads.
+        // before the terminal validation, selection, prefs and console writes
+        // change the inputs and diagnostics the command reads, and a test run
+        // executes arbitrary test code against the open Editor (a PlayMode run
+        // also reloads the domain).
         // console_log and the profiler tools stay allowed: they add output or
         // record the Editor without changing what the command sees.
         internal static readonly HashSet<string> JobConflictingTools = new()
         {
+            "unity_senses_run_tests",
             "unity_open_mcp_console_clear",
             "unity_open_mcp_editor_set_state",
             "unity_open_mcp_selection_set",

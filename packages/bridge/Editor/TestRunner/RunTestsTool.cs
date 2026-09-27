@@ -27,7 +27,6 @@ namespace UnityOpenMcpBridge.TestRunner
             string run_id = null,
             bool include_passes = true)
         {
-            if (ProjectCommandJobs.Active) throw new InvalidOperationException("job_busy: an asynchronous project command owns the Editor.");
             bool callerSuppliedRunId = !string.IsNullOrEmpty(run_id);
             if (!callerSuppliedRunId)
                 run_id = System.Diagnostics.Process.GetCurrentProcess().Id + "-"
