@@ -59,17 +59,7 @@ namespace UnityOpenMcpBridge.Batch
                 json = ErrorEnvelope("unhandled_exception", e.Message);
             }
 
-            // System.Console (NOT UnityEngine.Debug) is intentional: this is a
-            // -batchmode entry point whose stdout is parsed by the MCP server
-            // (batch-spawn.ts extractJson reads the spawned process stdout) for
-            // the JSON markers below. Debug.Log writes to Editor.log, not stdout,
-            // so switching to it would break every batch invocation. The bare
-            // 'Console' name is qualified with 'System.' because it would
-            // otherwise resolve to the sibling UnityOpenMcpBridge.Console
-            // namespace (Console/ReadConsoleTool.cs), causing CS0234.
-            System.Console.WriteLine(OutputBegin);
-            System.Console.WriteLine(json);
-            System.Console.WriteLine(OutputEnd);
+            WriteMarkerBlock(json);
 
             if (Application.isBatchMode)
             {
@@ -811,14 +801,37 @@ namespace UnityOpenMcpBridge.Batch
         {
             var wrapped = BuildSuccessEnvelope(compileResultJson);
 
-            System.Console.WriteLine(OutputBegin);
-            System.Console.WriteLine(wrapped);
-            System.Console.WriteLine(OutputEnd);
+            WriteMarkerBlock(wrapped);
 
             if (Application.isBatchMode)
             {
                 UnityEditor.EditorApplication.Exit(exitCode);
             }
+        }
+
+        /// <summary>
+        /// Writes BEGIN marker, JSON, and END marker to stdout as one raw write.
+        /// The MCP server (batch-spawn.ts extractJson) parses the spawned
+        /// process stdout for this block, and the headless run passes
+        /// <c>-logFile -</c>, so Unity's own log (engine and background-thread
+        /// lines, Debug.Log) shares the same stdout. Three separate WriteLine
+        /// calls, or a buffered writer that flushes in chunks, would let such a
+        /// line land inside the block. The block is encoded as UTF-8 (what the
+        /// server decodes) and written in a single call on the unbuffered
+        /// stdout stream, after flushing anything pending on Console.Out. The
+        /// stream is not disposed: it wraps the process's stdout handle.
+        /// 'Console' is qualified with 'System.' because the bare name would
+        /// resolve to the sibling UnityOpenMcpBridge.Console namespace
+        /// (Console/ReadConsoleTool.cs), causing CS0234.
+        /// </summary>
+        private static void WriteMarkerBlock(string json)
+        {
+            var block = "\n" + OutputBegin + "\n" + json + "\n" + OutputEnd + "\n";
+            var bytes = new UTF8Encoding(false).GetBytes(block);
+            System.Console.Out.Flush();
+            var stdout = System.Console.OpenStandardOutput();
+            stdout.Write(bytes, 0, bytes.Length);
+            stdout.Flush();
         }
 
         #endregion

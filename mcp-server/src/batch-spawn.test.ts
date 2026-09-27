@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { EventEmitter } from "node:events";
 
-import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, extractOffendingPackages, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator, diagnoseEditorLock, editorLockedMessage, editorLockedNextSteps, type BatchSpawnOptions } from "./batch-spawn.js";
+import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, extractOffendingPackages, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator, extractJson, diagnoseEditorLock, editorLockedMessage, editorLockedNextSteps, type BatchSpawnOptions } from "./batch-spawn.js";
 import { lockPath } from "./instance-discovery.js";
 import { setUnityProcessScannerForTest, findUnityForProject } from "./running-unity.js";
 import { VERIFY_JSON_BEGIN, VERIFY_JSON_END } from "./constants.js";
@@ -1523,4 +1523,53 @@ test("the pre-spawn re-check consults the lease before the process scan", async 
     if (savedTimeout === undefined) delete process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS; else process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS = savedTimeout;
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// -logFile - routes Unity's whole log to the same stdout as the result
+// markers, so the extractor must survive log lines landing inside the block.
+test("extractJson returns the exact slice for a clean marker block", () => {
+  const stdout = `boot line\n${VERIFY_JSON_BEGIN}\n{"success":true}\n${VERIFY_JSON_END}\nexit line\n`;
+  assert.equal(extractJson(stdout), `{"success":true}`);
+});
+
+test("extractJson skips log lines interleaved between the markers and the JSON", () => {
+  const stdout = [
+    "[Licensing::Client] Handshaking with LicensingClient",
+    VERIFY_JSON_BEGIN,
+    "Refreshing native plugins compatible for Editor in 2.31 ms, found 3 plugins.",
+    `{"success":true,"result":{"status":"compile_passed"}}`,
+    "[Package Manager] Done resolving packages",
+    VERIFY_JSON_END,
+  ].join("\n");
+  assert.deepEqual(JSON.parse(extractJson(stdout)!), { success: true, result: { status: "compile_passed" } });
+});
+
+test("extractJson prefers the last parseable block when the markers repeat", () => {
+  // A logged echo of an earlier block, then the real block; also an unmatched
+  // BEGIN inside log noise before the real block's own BEGIN.
+  const stdout = [
+    VERIFY_JSON_BEGIN, `{"echo":true}`, VERIFY_JSON_END,
+    `log mentions ${VERIFY_JSON_BEGIN} mid-line`,
+    VERIFY_JSON_BEGIN, `{"real":true}`, VERIFY_JSON_END,
+  ].join("\n");
+  assert.equal(extractJson(stdout), `{"real":true}`);
+});
+
+test("extractJson falls back to an earlier block when the last one is unparseable", () => {
+  const stdout = [
+    VERIFY_JSON_BEGIN, `{"real":true}`, VERIFY_JSON_END,
+    VERIFY_JSON_BEGIN, "UnityEngine.Debug:Log (object) truncated {", VERIFY_JSON_END,
+  ].join("\n");
+  assert.equal(extractJson(stdout), `{"real":true}`);
+});
+
+test("extractJson handles CRLF line endings with interleaved noise", () => {
+  const stdout = `${VERIFY_JSON_BEGIN}\r\nnoise line\r\n{"a":1}\r\n${VERIFY_JSON_END}\r\n`;
+  assert.equal(extractJson(stdout), `{"a":1}`);
+});
+
+test("extractJson returns the raw slice when nothing parses and null without a complete block", () => {
+  assert.equal(extractJson(`${VERIFY_JSON_BEGIN}\nnot json\n${VERIFY_JSON_END}`), "not json");
+  assert.equal(extractJson(`${VERIFY_JSON_BEGIN}\n{"a":1}\n`), null);
+  assert.equal(extractJson("no markers at all"), null);
 });

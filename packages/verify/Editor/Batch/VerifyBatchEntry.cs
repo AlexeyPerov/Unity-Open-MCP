@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using UnityOpenMcpVerify.Cache;
 using UnityEngine;
 
@@ -47,14 +48,29 @@ namespace UnityOpenMcpVerify.Batch
                 json = ErrorJson(operation, $"unhandled_exception: {e.Message}");
             }
 
-            Console.WriteLine(OutputBegin);
-            Console.WriteLine(json);
-            Console.WriteLine(OutputEnd);
+            WriteMarkerBlock(json);
 
             if (Application.isBatchMode)
             {
                 UnityEditor.EditorApplication.Exit(exitCode);
             }
+        }
+
+        // Writes BEGIN marker, JSON, and END marker to stdout as one raw write.
+        // The MCP server parses the spawned process stdout for this block, and
+        // the headless run passes `-logFile -`, so Unity's own log (engine and
+        // background-thread lines, Debug.Log) shares the same stdout. Separate
+        // WriteLine calls, or a buffered writer that flushes in chunks, would
+        // let such a line land inside the block. UTF-8 matches what the server
+        // decodes. The stream is not disposed: it wraps the process's stdout.
+        private static void WriteMarkerBlock(string json)
+        {
+            var block = "\n" + OutputBegin + "\n" + json + "\n" + OutputEnd + "\n";
+            var bytes = new UTF8Encoding(false).GetBytes(block);
+            Console.Out.Flush();
+            var stdout = Console.OpenStandardOutput();
+            stdout.Write(bytes, 0, bytes.Length);
+            stdout.Flush();
         }
 
         internal static (int exitCode, string json) Execute(string[] allArgs)

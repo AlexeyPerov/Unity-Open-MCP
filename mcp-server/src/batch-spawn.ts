@@ -85,13 +85,44 @@ interface ParsedBatchResult {
   elapsedMs: number;
 }
 
-function extractJson(stdout: string): string | null {
-  const beginIdx = stdout.indexOf(OUTPUT_BEGIN);
-  if (beginIdx === -1) return null;
-  const jsonStart = beginIdx + OUTPUT_BEGIN.length;
-  const endIdx = stdout.indexOf(OUTPUT_END, jsonStart);
-  if (endIdx === -1) return null;
-  return stdout.slice(jsonStart, endIdx).trim();
+// Returns the JSON payload between the result markers, or null when no
+// complete BEGIN/END block exists. The headless run passes `-logFile -`, so
+// Unity's own log (engine lines, background-thread output, Debug.Log) shares
+// stdout with the markers. The batch entry points emit the whole block in one
+// write, but a log line can still land inside it (a package built before that
+// change writes the block in three pieces), and a logged copy of the output
+// can repeat the markers. Blocks are tried last-first: the exact slice wins
+// when it parses; otherwise the first line inside the block that parses as a
+// JSON object is taken. When nothing parses, the last block's raw slice is
+// returned so the caller reports a parse failure instead of missing markers.
+export function extractJson(stdout: string): string | null {
+  let fallback: string | null = null;
+  let searchFrom = stdout.length;
+  while (searchFrom >= 0) {
+    const beginIdx = stdout.lastIndexOf(OUTPUT_BEGIN, searchFrom);
+    if (beginIdx === -1) break;
+    searchFrom = beginIdx - 1;
+    const jsonStart = beginIdx + OUTPUT_BEGIN.length;
+    const endIdx = stdout.indexOf(OUTPUT_END, jsonStart);
+    if (endIdx === -1) continue;
+    const slice = stdout.slice(jsonStart, endIdx).trim();
+    fallback ??= slice;
+    if (parsesAsObject(slice)) return slice;
+    for (const line of slice.split(/\r?\n/)) {
+      const candidate = line.trim();
+      if (candidate.startsWith("{") && parsesAsObject(candidate)) return candidate;
+    }
+  }
+  return fallback;
+}
+
+function parsesAsObject(text: string): boolean {
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  } catch {
+    return false;
+  }
 }
 
 // M13 — bounded, UTF-8-correct stdout/stderr accumulator for the batch spawn.
