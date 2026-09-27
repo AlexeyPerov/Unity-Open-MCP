@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
+import { EventEmitter } from "node:events";
 
-import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, extractOffendingPackages, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator, diagnoseEditorLock, editorLockedMessage, editorLockedNextSteps } from "./batch-spawn.js";
+import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, extractOffendingPackages, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator, diagnoseEditorLock, editorLockedMessage, editorLockedNextSteps, type BatchSpawnOptions } from "./batch-spawn.js";
 import { lockPath } from "./instance-discovery.js";
 import { setUnityProcessScannerForTest } from "./running-unity.js";
 import { VERIFY_JSON_BEGIN, VERIFY_JSON_END } from "./constants.js";
@@ -1360,4 +1361,79 @@ test("concurrent headless requests share one project lease and release it on exi
     const later = parseBody(await new BatchSpawn({ projectPath: root }).route("unity_open_mcp_compile_check", {}));
     assert.equal((later.error as { code: string }).code, "compile_indeterminate");
   } finally { restore(); if (savedPath === undefined) delete process.env.UNITY_PATH; else process.env.UNITY_PATH = savedPath; rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a spawn that throws synchronously releases the project lease", { skip: process.platform === "win32" }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "batch-sync-throw-"));
+  const savedPath = process.env.UNITY_PATH;
+  const restore = setUnityProcessScannerForTest({ scan: () => [] });
+  try {
+    process.env.UNITY_PATH = fakeReportingInstall(root, "6000.0.10f1");
+    const batch = new BatchSpawn({ projectPath: root });
+    // A NUL byte in an argument makes child_process.spawn throw before any process starts.
+    const refused = parseBody(await batch.route("unity_open_mcp_execute_csharp", { code: "return\u00001;" }));
+    assert.equal((refused.error as { code: string }).code, "batch_spawn_failed");
+    const next = parseBody(await batch.route("unity_open_mcp_compile_check", {}));
+    assert.equal(next.error, undefined, "the next call must not see a leaked batch_in_progress lease");
+    assert.equal(next.status, "compile_passed");
+  } finally { restore(); if (savedPath === undefined) delete process.env.UNITY_PATH; else process.env.UNITY_PATH = savedPath; rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a child that fails with only 'error' releases the lease once; a running child keeps it until close", async () => {
+  const root = mkdtempSync(join(tmpdir(), "batch-error-lease-"));
+  const savedPath = process.env.UNITY_PATH;
+  const savedTimeout = process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS;
+  const restore = setUnityProcessScannerForTest({ scan: () => [] });
+  try {
+    // A call that wrongly spawns a scripted child nobody settles times out
+    // (and fails its assertion) instead of hanging the test.
+    process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS = "2000";
+    process.env.UNITY_PATH = join(root, "Unity");
+    writeFileSync(process.env.UNITY_PATH, "");
+    // Each spawn gets a scripted child; `pid` is undefined for one that never started.
+    const pids: Array<number | undefined> = [undefined, 4242, undefined];
+    const children: EventEmitter[] = [];
+    const spawnProcess = (() => {
+      const child = Object.assign(new EventEmitter(), { pid: pids[children.length], stdout: null, stderr: null, kill: () => true });
+      children.push(child);
+      return child;
+    }) as unknown as NonNullable<BatchSpawnOptions["spawnProcess"]>;
+    const batch = new BatchSpawn({ projectPath: root, spawnProcess });
+    const code = async (pending: Promise<CallToolResult>) => (parseBody(await pending).error as { code: string }).code;
+    const spawned = async (count: number) => {
+      const deadline = Date.now() + 5_000;
+      while (children.length < count) {
+        assert.ok(Date.now() < deadline, `spawn #${count} was never attempted`);
+        await new Promise(r => setImmediate(r));
+      }
+    };
+    const enoent = () => Object.assign(new Error("spawn Unity ENOENT"), { code: "ENOENT" });
+
+    // Never started, and no close follows: the lease must not leak.
+    const failed = batch.route("unity_open_mcp_compile_check", {});
+    await spawned(1);
+    children[0].emit("error", enoent());
+    assert.equal(await code(failed), "unity_spawn_refused");
+
+    const running = batch.route("unity_open_mcp_compile_check", {});
+    await spawned(2);
+    // The failed child's late close must not erase the running child's lease.
+    children[0].emit("close", -2);
+    assert.equal(await code(batch.route("unity_open_mcp_compile_check", {})), "batch_in_progress");
+    // An error from a child that did start (e.g. a failed kill) keeps the lease until close.
+    children[1].emit("error", new Error("kill EPERM"));
+    assert.equal(await code(running), "unity_spawn_refused");
+    assert.equal(await code(batch.route("unity_open_mcp_compile_check", {})), "batch_in_progress");
+    children[1].emit("close", 0);
+
+    const after = batch.route("unity_open_mcp_compile_check", {});
+    await spawned(3);
+    children[2].emit("error", enoent());
+    assert.equal(await code(after), "unity_spawn_refused");
+  } finally {
+    restore();
+    if (savedPath === undefined) delete process.env.UNITY_PATH; else process.env.UNITY_PATH = savedPath;
+    if (savedTimeout === undefined) delete process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS; else process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS = savedTimeout;
+    rmSync(root, { recursive: true, force: true });
+  }
 });

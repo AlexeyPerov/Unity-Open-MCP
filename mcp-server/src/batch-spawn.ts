@@ -1,5 +1,5 @@
 import { detectStaleAssembly } from "./unity-log.js";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { stat } from "node:fs/promises";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -523,6 +523,11 @@ export interface BatchSpawnOptions {
    * UNITY_PROJECT_PATH env var, then the instance lock's projectPath.
    */
   projectPath?: string;
+  /**
+   * Optional replacement for `child_process.spawn` (test hook), for child
+   * event sequences a real process does not produce on demand.
+   */
+  spawnProcess?: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
 }
 
 export class BatchSpawn implements Router {
@@ -531,6 +536,7 @@ export class BatchSpawn implements Router {
   private projectPath: string;
   private timeoutMs: number;
   private readonly discoveryRoots?: string[];
+  private readonly spawnProcess: NonNullable<BatchSpawnOptions["spawnProcess"]>;
   private resolutionError?: Extract<UnityPathResolution, { ok: false }>;
   // Project editor version the cached executable was resolved for; undefined
   // until the first resolution. See refreshUnityPath.
@@ -538,6 +544,7 @@ export class BatchSpawn implements Router {
 
   constructor(options: BatchSpawnOptions = {}) {
     this.discoveryRoots = options.discoveryRoots;
+    this.spawnProcess = options.spawnProcess ?? spawn;
 
     const requestedProjectPath =
       options.projectPath ?? process.env.UNITY_PROJECT_PATH ?? "";
@@ -876,7 +883,6 @@ export class BatchSpawn implements Router {
         reject(new BatchClassificationError("batch_in_progress", "A headless operation already owns this project. Wait for it to finish."));
         return;
       }
-      activeBatchProjects.add(this.projectPath);
       console.error(`[unity-open-mcp] Batch spawn: ${this.unityPath} ${unityArgs.join(" ")}`);
       const beforeAssembly = detectStaleAssembly(this.projectPath).dllMtimeMs;
       const startTime = Date.now();
@@ -884,9 +890,29 @@ export class BatchSpawn implements Router {
       const stdoutAcc = new BoundedTextAccumulator();
       const stderrAcc = new BoundedTextAccumulator();
 
-      const child = spawn(this.unityPath, unityArgs, {
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      // The project lease lives as long as a Unity process may own the
+      // project. Released at most once, so this child's late close cannot
+      // erase a replacement call's lease.
+      activeBatchProjects.add(this.projectPath);
+      let leaseHeld = true;
+      const releaseLease = (): void => {
+        if (!leaseHeld) return;
+        leaseHeld = false;
+        activeBatchProjects.delete(this.projectPath);
+      };
+
+      let child: ChildProcess;
+      try {
+        child = this.spawnProcess(this.unityPath, unityArgs, {
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch (err) {
+        // A synchronous throw (NUL byte in an argument, E2BIG, ...) starts no
+        // process and fires no child events.
+        releaseLease();
+        reject(err);
+        return;
+      }
 
       // Register with the process-wide supervision registry so the
       // SIGINT/SIGTERM/exit handlers installed at the entry points tear this
@@ -933,8 +959,10 @@ export class BatchSpawn implements Router {
       });
 
       child.on("error", (err) => {
-        // Retain the lease until close; releasing here could let this child's
-        // later close event erase a replacement child's lease.
+        // A child that never started (no pid) owns nothing, and a failed spawn
+        // may emit only 'error' on some Node versions. A started child's error
+        // (e.g. a failed kill) keeps the lease until close.
+        if (child.pid === undefined) releaseLease();
         clearTimers();
         reject(new BatchClassificationError(
           "unity_spawn_refused",
@@ -944,7 +972,7 @@ export class BatchSpawn implements Router {
       });
 
       child.on("close", (code) => {
-        activeBatchProjects.delete(this.projectPath);
+        releaseLease();
         clearTimers();
         const elapsedMs = Date.now() - startTime;
         const exitCode = code ?? 1;
