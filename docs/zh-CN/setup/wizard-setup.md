@@ -126,6 +126,8 @@ npm run build
 - **Install template skill** — 写入模板操作手册（`skills/unity-open-mcp/SKILL.md`）。适用于每个项目的同一份工作流指引；无需构建。可展开 **Preview template skill** 在写入前查看内容。
 - **Write project skill** — 生成项目专属的 `SKILL.md`，将模板操作手册与本项目的清单（Unity 版本、已安装的包、关键 MonoBehaviour / ScriptableObject 类型）合并。需要已构建的 MCP 服务器（`mcp-server/dist/index.js`）。
 
+两者都写在上一步写入的 MCP 配置旁边：通常在 Unity 项目中；当提交安全（commit-safe）配置写到仓库根目录时则写在根目录，这样在根目录打开的客户端也能找到技能。Unity AI 会把两者都保留在 Unity 项目中。
+
 两者都遵循一个显式的覆盖勾选框；现有文件在被替换前会备份为 `*.bak`。你可以只安装模板、只写入项目技能，或两者都做（写入项目技能会覆盖模板安装写入的同一路径，因此请确认覆盖）。
 
 **Team CI** 预设会自动跳过此步骤 — CI 智能体通常不需要桌面技能文件。

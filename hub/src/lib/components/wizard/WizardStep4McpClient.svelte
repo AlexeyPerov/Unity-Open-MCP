@@ -147,7 +147,11 @@
         />
         <span>
           <strong>Use project-scoped config</strong> —
-          <small>write to <code>{state.projectPath}/.cursor/mcp.json</code> instead of <code>~/.cursor/mcp.json</code>.</small>
+          <small>
+            write a workspace <code>.cursor/mcp.json</code> instead of
+            <code>~/.cursor/mcp.json</code>{#if state.cursorProjectScope && state.mcpPlan?.targetPath}
+              — <code>{state.mcpPlan.targetPath}</code>{/if}.
+          </small>
         </span>
       </label>
     </div>
@@ -173,7 +177,7 @@
               <code>{state.mcpPlan.detectedUnitySubpath}/</code> inside
               <code>{state.mcpPlan.detectedWorkspaceRoot}</code>. Write the entry
               at the repository root with no machine path, so the whole team can
-              share one committed file.
+              share one committed file; the agent skill goes there too.
             {/if}
           </small>
         </span>

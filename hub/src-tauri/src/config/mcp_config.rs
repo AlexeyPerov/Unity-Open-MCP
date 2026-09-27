@@ -354,6 +354,11 @@ pub struct McpConfigPlan {
     /// `false` even with `params.portable` when the client, scope, or
     /// launch mode forced the absolute fallback.
     pub portable: bool,
+    /// Folder the entry's project-side files go under: the workspace root
+    /// for a portable monorepo entry, else the Unity project. The wizard
+    /// installs the agent skill here, next to the config the client loads.
+    /// A global config file lives under the home folder instead.
+    pub config_root: String,
     /// Repository root the wizard detected above the Unity project
     /// (nearest ancestor with a `.git` entry, within four levels).
     /// `None` when the Unity project is the repository root or no
@@ -469,6 +474,7 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
                 command: Some(command_for(params, &resolved_str, true)),
                 resolved_mcp_index: resolved_str,
                 portable: effective_placement(params).is_some(),
+                config_root: config_root_for(params, ClientScope::Project),
                 detected_workspace_root: detected.root,
                 detected_unity_subpath: detected.subpath,
             });
@@ -494,12 +500,14 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
                 command: None,
                 resolved_mcp_index: resolved_str,
                 portable: effective_placement(params).is_some(),
+                config_root: config_root_for(params, ClientScope::Project),
                 detected_workspace_root: detected.root,
                 detected_unity_subpath: detected.subpath,
             });
         }
     };
-    let target = resolve_target_path(params.client, scope, &config_root_for(params, scope), home)
+    let config_root = config_root_for(params, scope);
+    let target = resolve_target_path(params.client, scope, &config_root, home)
         .ok_or_else(|| {
             McpConfigError::new(
                 "homeMissing",
@@ -543,6 +551,7 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
         command: None,
         resolved_mcp_index: resolved_str,
         portable: portable_placement(params, scope).is_some(),
+        config_root,
         detected_workspace_root: detected.root,
         detected_unity_subpath: detected.subpath,
     })
@@ -818,7 +827,8 @@ pub(crate) fn effective_placement(params: &McpConfigParams) -> Option<PortablePl
 }
 
 /// Folder the client config file lives under. A portable monorepo write puts
-/// it at the workspace root (where the AI client is opened).
+/// it at the workspace root (where the AI client is opened). The plan reports
+/// it as [`McpConfigPlan::config_root`] so the agent skill follows the config.
 fn config_root_for(params: &McpConfigParams, scope: ClientScope) -> String {
     match portable_placement(params, scope) {
         Some(_) => workspace_root_for(params),
@@ -1558,7 +1568,7 @@ pub struct SkillCopyTarget {
     /// Absolute target path (the file the wizard will create
     /// or overwrite).
     pub target_path: String,
-    /// Target path relative to the project root, for display
+    /// Target path relative to the skill root, for display
     /// (e.g. `.claude/skills/unity-open-mcp/SKILL.md`).
     pub relative_path: String,
     /// Absolute source path under the toolkit root. `null`
@@ -1594,6 +1604,11 @@ pub struct SkillCopyPlan {
 #[serde(rename_all = "camelCase")]
 pub struct SkillCopyParams {
     pub project_path: String,
+    /// Folder the skill targets resolve under: the MCP plan's
+    /// [`McpConfigPlan::config_root`], so the skill sits next to the client
+    /// config. Empty means the Unity project.
+    #[serde(default)]
+    pub skill_root: String,
     pub toolkit_root: String,
     /// The MCP client selected in the wizard Step 4. Drives which
     /// skill targets are included via the manifest mapping.
@@ -1658,6 +1673,20 @@ pub async fn copy_skill_files(
         .map_err(|e| SkillCopyError::new("copyFailed", format!("task failed: {e}")))?
 }
 
+/// Folder the skill targets go under. An explicit root must be the Unity
+/// project or contain it: it is the workspace the client config was written
+/// for, never an unrelated folder.
+fn resolve_skill_root(project_path: &str, skill_root: &str) -> Option<PathBuf> {
+    let project = Path::new(project_path);
+    match skill_root.trim() {
+        "" => Some(project.to_path_buf()),
+        root => relative_subpath(Path::new(root), project).map(|_| PathBuf::from(root)),
+    }
+}
+
+const SKILL_ROOT_INVALID: &str =
+    "The skill folder must be the Unity project or a folder that contains it.";
+
 fn plan_skill_copy_at(params: &SkillCopyParams) -> Result<SkillCopyPlan, SkillCopyError> {
     let project = PathBuf::from(&params.project_path);
     if !project.is_dir() {
@@ -1666,6 +1695,8 @@ fn plan_skill_copy_at(params: &SkillCopyParams) -> Result<SkillCopyPlan, SkillCo
             "Project path is not a directory.",
         ));
     }
+    let root = resolve_skill_root(&params.project_path, &params.skill_root)
+        .ok_or_else(|| SkillCopyError::new("skillRootInvalid", SKILL_ROOT_INVALID))?;
     let manifest = load_client_paths_manifest(&params.toolkit_root)?;
     let source_path = resolve_source_skill(&params.toolkit_root, &manifest);
     let source_path_str = source_path
@@ -1692,7 +1723,7 @@ fn plan_skill_copy_at(params: &SkillCopyParams) -> Result<SkillCopyPlan, SkillCo
             targets.push(build_skill_target(
                 key,
                 &entry.relative_path,
-                &project,
+                &root,
                 source_path.as_deref(),
             ));
         }
@@ -1714,10 +1745,10 @@ fn plan_skill_copy_at(params: &SkillCopyParams) -> Result<SkillCopyPlan, SkillCo
 fn build_skill_target(
     kind: &str,
     relative: &str,
-    project: &Path,
+    root: &Path,
     source: Option<&Path>,
 ) -> SkillCopyTarget {
-    let target_path = project.join(relative);
+    let target_path = root.join(relative);
     let exists = target_path.exists();
     // "Up to date" mirrors the MCP config step: a copy would be a no-op
     // when the target exists and matches the source byte-for-byte. We
@@ -1885,11 +1916,13 @@ fn copy_skill_files_at(
 // Surfaces `unity_open_mcp_generate_skill` from the wizard, alongside
 // the template copy. Generate runs the local MCP server CLI
 // (`node <toolkit>/mcp-server/dist/index.js run-tool
-// unity_open_mcp_generate_skill`) with `write: true`, so it composes
-// the template workflow playbook with this project's inventory
-// (Unity version, installed packages, key types) into one SKILL.md
-// per selected client. No live Unity bridge is required — the tool
-// is server-routed and reads the project from disk.
+// unity_open_mcp_generate_skill`), which composes the template workflow
+// playbook with this project's inventory (Unity version, installed
+// packages, key types). The Hub writes the result itself, to the same
+// targets the template copy uses, because the tool only writes under the
+// Unity project and the skill root can be the workspace above it. No live
+// Unity bridge is required — the tool is server-routed and reads the
+// project from disk.
 
 /// Inputs to `generate_project_skill`. Mirrors `SkillCopyParams` plus
 /// the Step 4 `mcp_index_override` escape hatch so the same MCP entry
@@ -1898,6 +1931,11 @@ fn copy_skill_files_at(
 #[serde(rename_all = "camelCase")]
 pub struct GenerateSkillParams {
     pub project_path: String,
+    /// Folder the generated skill is written under; see
+    /// [`SkillCopyParams::skill_root`]. The inventory is always read from
+    /// `project_path`.
+    #[serde(default)]
+    pub skill_root: String,
     pub toolkit_root: String,
     #[serde(default)]
     pub mcp_index_override: String,
@@ -1975,14 +2013,47 @@ fn client_keys_for_mcp_client(
 }
 
 /// Build the `--args` JSON blob the CLI forwards to the tool. Exposed
-/// for unit testing (the spawn itself has no Rust mock harness).
-fn build_generate_skill_args_json(client_keys: &[String]) -> String {
+/// for unit testing (the spawn itself has no Rust mock harness). The tool
+/// only composes the skill; [`write_generated_skill`] places it.
+fn build_generate_skill_args_json() -> String {
     json!({
-        "write": true,
-        "clients": client_keys,
+        "write": false,
         "include_workflow": true,
     })
     .to_string()
+}
+
+/// Write a generated skill to each client target under `root`, with the
+/// template's `references/` folder beside it — the layout
+/// [`copy_skill_files_at`] installs, so both wizard actions land where the
+/// skill-copy plan says.
+fn write_generated_skill(
+    root: &Path,
+    manifest: &ClientPathsManifest,
+    client_keys: &[String],
+    skill: &str,
+    template: Option<&Path>,
+) -> std::io::Result<Vec<GenerateSkillTarget>> {
+    let mut targets = Vec::new();
+    for key in client_keys {
+        let Some(entry) = manifest.clients.get(key) else { continue };
+        let target = root.join(&entry.relative_path);
+        let existed = target.exists();
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&target, skill)?;
+        if let Some(template) = template {
+            copy_skill_references(template, &target)?;
+        }
+        targets.push(GenerateSkillTarget {
+            client: key.clone(),
+            relative_path: entry.relative_path.clone(),
+            absolute_path: target.to_string_lossy().into_owned(),
+            existed,
+        });
+    }
+    Ok(targets)
 }
 
 /// Truncate a skill preview for the JSON envelope, cutting on a line
@@ -2060,6 +2131,8 @@ pub(crate) fn generate_project_skill_at(
             "Project path is not a directory.",
         ));
     }
+    let root = resolve_skill_root(&params.project_path, &params.skill_root)
+        .ok_or_else(|| GenerateSkillError::new("skillRootInvalid", SKILL_ROOT_INVALID))?;
 
     // Resolve + validate the MCP entry, mirroring write_mcp_config_at.
     let index_path = match resolve_mcp_index_path(&params.toolkit_root, &params.mcp_index_override)
@@ -2098,7 +2171,7 @@ pub(crate) fn generate_project_skill_at(
             ),
         ));
     }
-    let args_json = build_generate_skill_args_json(&client_keys);
+    let args_json = build_generate_skill_args_json();
 
     // Spawn node with PATH enrichment (mirrors probe_node / run_project_sync_version).
     // The child is spawned with piped stdio and polled against a deadline
@@ -2230,42 +2303,15 @@ pub(crate) fn generate_project_skill_at(
         .and_then(Value::as_str)
         .map(String::from);
 
-    let mut targets = Vec::new();
-    if let Some(written) = result.get("written").and_then(Value::as_array) {
-        for entry in written {
-            let client = entry
-                .get("client")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            let relative_path = entry
-                .get("relativePath")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            let existed = entry
-                .get("existed")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let absolute_path = if relative_path.is_empty() {
-                String::new()
-            } else {
-                project.join(&relative_path).to_string_lossy().into_owned()
-            };
-            targets.push(GenerateSkillTarget {
-                client,
-                relative_path,
-                absolute_path,
-                existed,
-            });
-        }
-    }
-
-    let inventory_preview = result
-        .get("skill")
-        .and_then(Value::as_str)
-        .map(|s| truncate_inventory_preview(s))
-        .unwrap_or_default();
+    let skill = result.get("skill").and_then(Value::as_str).ok_or_else(|| {
+        GenerateSkillError::new("cliError", "run-tool output carries no generated skill text")
+    })?;
+    let template = resolve_source_skill(&params.toolkit_root, &manifest);
+    let targets = write_generated_skill(&root, &manifest, &client_keys, skill, template.as_deref())
+        .map_err(|e| {
+            GenerateSkillError::new("writeFailed", format!("cannot write the project skill: {}", e))
+        })?;
+    let inventory_preview = truncate_inventory_preview(skill);
 
     Ok(GenerateSkillResult {
         project_path: params.project_path.clone(),
@@ -2342,6 +2388,7 @@ mod tests {
     fn make_skill_params(project: &Path, toolkit_root: &Path, client: McpClientId) -> SkillCopyParams {
         SkillCopyParams {
             project_path: project.to_string_lossy().into_owned(),
+            skill_root: String::new(),
             toolkit_root: toolkit_root.to_string_lossy().into_owned(),
             mcp_client: client,
         }
@@ -3275,12 +3322,12 @@ mod tests {
     }
 
     #[test]
-    fn build_generate_skill_args_json_carries_write_clients_workflow() {
-        let raw = build_generate_skill_args_json(&["claude".to_string()]);
+    fn build_generate_skill_args_json_composes_without_writing() {
+        // The Hub writes the result itself, under the skill root.
+        let raw = build_generate_skill_args_json();
         let v: Value = serde_json::from_str(&raw).expect("args json parses");
-        assert_eq!(v["write"], json!(true));
+        assert_eq!(v["write"], json!(false));
         assert_eq!(v["include_workflow"], json!(true));
-        assert_eq!(v["clients"], json!(["claude"]));
     }
 
     #[test]
@@ -3328,6 +3375,7 @@ mod tests {
         make_fake_toolkit(&toolkit);
         let params = GenerateSkillParams {
             project_path: dir.path().join("does-not-exist").to_string_lossy().into_owned(),
+            skill_root: String::new(),
             toolkit_root: toolkit.to_string_lossy().into_owned(),
             mcp_index_override: String::new(),
             mcp_client: McpClientId::Cursor,
@@ -3346,6 +3394,7 @@ mod tests {
         fs::create_dir_all(&project).unwrap();
         let params = GenerateSkillParams {
             project_path: project.to_string_lossy().into_owned(),
+            skill_root: String::new(),
             toolkit_root: toolkit.to_string_lossy().into_owned(),
             mcp_index_override: String::new(),
             mcp_client: McpClientId::Cursor,
@@ -3385,6 +3434,7 @@ mod tests {
         fs::create_dir_all(&project).unwrap();
         let params = GenerateSkillParams {
             project_path: project.to_string_lossy().into_owned(),
+            skill_root: String::new(),
             toolkit_root: toolkit.to_string_lossy().into_owned(),
             mcp_index_override: String::new(),
             mcp_client: McpClientId::Cursor,
@@ -3837,6 +3887,124 @@ mod tests {
         let command = plan.command.unwrap();
         assert!(!command.contains("--env"));
         assert!(command.contains("--project-from-cwd --unity-subpath Client"));
+    }
+
+    /// Skill-copy targets for `client` under the plan's `config_root`, as the
+    /// wizard chains the two commands.
+    fn skill_targets_beside_config(plan: &McpConfigPlan, project: &Path, client: McpClientId) -> Vec<String> {
+        let toolkit = tempfile::tempdir().unwrap();
+        make_fake_skill_manifest(toolkit.path());
+        let mut params = make_skill_params(project, toolkit.path(), client);
+        params.skill_root = plan.config_root.clone();
+        plan_skill_copy_at(&params)
+            .unwrap()
+            .targets
+            .into_iter()
+            .map(|t| t.target_path)
+            .collect()
+    }
+
+    #[test]
+    fn portable_skill_goes_to_the_workspace_root_beside_the_config() {
+        // Claude Code opened at `<repo>` runs the portable command there, so
+        // the skill must sit at `<repo>/.claude/skills`, not under `Client/`.
+        // The wizard sends no workspace path; the writer detects `<repo>`.
+        let (_tmp, workspace, project) = monorepo_tree();
+        let home = tempfile::tempdir().unwrap();
+        let mut params = portable_params(McpClientId::ClaudeCode, &workspace, &project);
+        params.workspace_path = String::new();
+        let plan = plan_mcp_config_at(&params, home.path()).unwrap();
+        assert!(plan.portable);
+        assert_eq!(plan.config_root, workspace.to_string_lossy());
+        let claude_skill = workspace.join(".claude").join("skills").join("unity-open-mcp").join("SKILL.md");
+        assert_eq!(
+            skill_targets_beside_config(&plan, &project, McpClientId::ClaudeCode),
+            vec![claude_skill.to_string_lossy().into_owned()]
+        );
+
+        // A file-backed client: the config and the skill share the root.
+        let mut params = portable_params(McpClientId::Cursor, &workspace, &project);
+        params.workspace_path = String::new();
+        params.cursor_project_scope = true;
+        let plan = plan_mcp_config_at(&params, home.path()).unwrap();
+        assert_eq!(plan.config_root, workspace.to_string_lossy());
+        assert!(plan.target_path.as_deref().unwrap().starts_with(&plan.config_root));
+        let cursor_skill = workspace.join(".cursor").join("skills").join("unity-open-mcp").join("SKILL.md");
+        assert_eq!(
+            skill_targets_beside_config(&plan, &project, McpClientId::Cursor),
+            vec![cursor_skill.to_string_lossy().into_owned()]
+        );
+    }
+
+    #[test]
+    fn the_skill_stays_in_the_unity_project_when_the_config_does() {
+        let (_tmp, workspace, project) = monorepo_tree();
+        let home = tempfile::tempdir().unwrap();
+        let project_root = project.to_string_lossy().into_owned();
+        // Unity AI keeps its config in the Unity project even when portable.
+        let unity_ai = portable_params(McpClientId::UnityAi, &workspace, &project);
+        // A global config has no portable form, so nothing moves.
+        let cursor_global = portable_params(McpClientId::Cursor, &workspace, &project);
+        // Portable not requested.
+        let mut plain = portable_params(McpClientId::ClaudeCode, &workspace, &project);
+        plain.portable = false;
+        for params in [unity_ai, cursor_global, plain] {
+            let plan = plan_mcp_config_at(&params, home.path()).unwrap();
+            assert_eq!(plan.config_root, project_root, "{:?}", params.client);
+        }
+        let plan = plan_mcp_config_at(
+            &portable_params(McpClientId::ClaudeCode, &workspace, &project),
+            home.path(),
+        )
+        .unwrap();
+        assert_eq!(plan.config_root, workspace.to_string_lossy());
+    }
+
+    #[test]
+    fn a_skill_root_outside_the_unity_project_chain_is_refused() {
+        let (tmp, _workspace, project) = monorepo_tree();
+        let toolkit = tempfile::tempdir().unwrap();
+        make_fake_toolkit(toolkit.path());
+        let sibling = tmp.path().join("elsewhere");
+        fs::create_dir_all(&sibling).unwrap();
+        let mut params = make_skill_params(&project, toolkit.path(), McpClientId::ClaudeCode);
+        params.skill_root = sibling.to_string_lossy().into_owned();
+        assert_eq!(plan_skill_copy_at(&params).unwrap_err().kind, "skillRootInvalid");
+        assert_eq!(copy_skill_files_at(&params, false).unwrap_err().kind, "skillRootInvalid");
+        let generate = GenerateSkillParams {
+            project_path: params.project_path.clone(),
+            skill_root: params.skill_root.clone(),
+            toolkit_root: params.toolkit_root.clone(),
+            mcp_index_override: String::new(),
+            mcp_client: McpClientId::ClaudeCode,
+        };
+        assert_eq!(generate_project_skill_at(&generate).unwrap_err().kind, "skillRootInvalid");
+    }
+
+    #[test]
+    fn generated_skill_is_written_under_the_skill_root_with_references() {
+        let (_tmp, workspace, _project) = monorepo_tree();
+        let toolkit = tempfile::tempdir().unwrap();
+        make_fake_skill_manifest(toolkit.path());
+        let template = toolkit.path().join("skills").join("unity-open-mcp").join("SKILL.md");
+        fs::write(&template, "template").unwrap();
+        write_text(&template.parent().unwrap().join("references").join("tools.md"), "refs");
+        let manifest = load_client_paths_manifest(&toolkit.path().to_string_lossy()).unwrap();
+        let keys = client_keys_for_mcp_client(&manifest, McpClientId::ClaudeCode);
+
+        let targets =
+            write_generated_skill(&workspace, &manifest, &keys, "generated", Some(&template)).unwrap();
+        let skill_dir = workspace.join(".claude").join("skills").join("unity-open-mcp");
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].absolute_path, skill_dir.join("SKILL.md").to_string_lossy());
+        assert!(!targets[0].existed);
+        assert_eq!(fs::read_to_string(skill_dir.join("SKILL.md")).unwrap(), "generated");
+        assert_eq!(fs::read_to_string(skill_dir.join("references").join("tools.md")).unwrap(), "refs");
+
+        let again =
+            write_generated_skill(&workspace, &manifest, &keys, "regenerated", Some(&template)).unwrap();
+        assert!(again[0].existed);
+        assert_eq!(fs::read_to_string(skill_dir.join("SKILL.md")).unwrap(), "regenerated");
     }
 
     #[test]

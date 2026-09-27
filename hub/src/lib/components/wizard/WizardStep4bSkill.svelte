@@ -59,6 +59,13 @@
         Use the **Skip** button to continue, or pick a different MCP client on the Configure AI client step.
       </p>
     {:else}
+      {#if state.skillRoot !== state.projectPath}
+        <p class="wiz-hint">
+          Written under the repository root <code>{state.skillRoot}</code>,
+          next to the commit-safe MCP config, so the client opened there
+          finds the skill.
+        </p>
+      {/if}
       <ul class="wiz-fingerprints" aria-label="Agent skill install targets">
         {#each state.skillPlan.targets as target (target.targetPath)}
           {@const needsOverwrite = target.exists && !target.upToDate}

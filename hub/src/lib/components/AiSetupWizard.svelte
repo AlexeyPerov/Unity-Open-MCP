@@ -255,6 +255,10 @@
   let mcpWriteResult = $state<McpConfigWriteResult | null>(null);
   let mcpWriting = $state(false);
   let mcpWriteError = $state<McpConfigError | null>(null);
+  // The agent skill goes where the planner put the client config — the
+  // repository root for a commit-safe monorepo entry — so the client that
+  // loads the server also finds the skill.
+  let skillRoot = $derived(mcpPlan?.configRoot ?? wizardProjectPath);
 
   // Done — skill copy state.
   let skillPlan = $state<SkillCopyPlan | null>(null);
@@ -1097,6 +1101,7 @@
     if (currentStep !== "step4b" && currentStep !== "done") return;
     const root = toolkitRoot;
     const projectPath = wizardProjectPath;
+    const targetRoot = skillRoot;
     const client = mcpClient;
     if (!projectPath || !root) {
       skillPlan = null;
@@ -1108,6 +1113,7 @@
       try {
         const params: SkillCopyParamsWire = {
           projectPath,
+          skillRoot: targetRoot,
           toolkitRoot: root,
           mcpClient: clientToWire(client),
         };
@@ -1280,6 +1286,7 @@
     try {
       const params: SkillCopyParamsWire = {
         projectPath,
+        skillRoot,
         toolkitRoot: root,
         mcpClient: clientToWire(mcpClient),
       };
@@ -1324,6 +1331,7 @@
     try {
       const params: GenerateSkillParamsWire = {
         projectPath,
+        skillRoot,
         toolkitRoot: root,
         mcpIndexOverride,
         mcpClient: clientToWire(mcpClient),
@@ -2015,6 +2023,7 @@
     canWriteMcpConfig: canWriteMcpConfig(),
     primaryActionLabel: primaryActionLabel(),
     secondaryActionLabel: secondaryActionLabel(),
+    skillRoot,
     skillPlan,
     skillPlanning,
     skillResult,

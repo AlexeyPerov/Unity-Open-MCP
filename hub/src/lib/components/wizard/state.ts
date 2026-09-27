@@ -132,6 +132,9 @@ export interface WizardState {
   secondaryActionLabel: string;
 
   // --- Step 4b / Done — skill ---
+  /** Folder the skill targets resolve under: `mcpPlan.configRoot`, else the
+   *  Unity project. */
+  skillRoot: string;
   skillPlan: SkillCopyPlan | null;
   skillPlanning: boolean;
   skillResult: SkillCopyResult | null;

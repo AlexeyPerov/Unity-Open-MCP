@@ -130,6 +130,8 @@ The agent skill gives your AI client workflow guidance for the Unity MCP tools �
 - **Install template skill** — writes the template playbook (`skills/unity-open-mcp/SKILL.md`). The same workflow guidance for every project; no build required. Expand **Preview template skill** to read the content before writing.
 - **Write project skill** — produces a project-specific `SKILL.md` that merges the template playbook with this project's inventory (Unity version, installed packages, key MonoBehaviour / ScriptableObject types). Requires the built MCP server (`mcp-server/dist/index.js`).
 
+Both options write next to the MCP config the previous step wrote: normally under the Unity project, and under the repository root when a commit-safe config went there, so the client opened at the root also finds the skill. Unity AI keeps both in the Unity project.
+
 Both honor an explicit overwrite checkbox; existing files are backed up to `*.bak` before they are replaced. You can install the template only, write a project skill only, or both (write project skill overwrites the same path the template install writes, so confirm the overwrite).
 
 The **Team CI** preset auto-skips this step — CI agents typically don't need a desktop skill file.

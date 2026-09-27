@@ -1823,6 +1823,12 @@ export interface McpConfigPlan {
   /** `true` when the emitted entry really carries no machine path. */
   portable: boolean;
   /**
+   * Folder the entry's project-side files go under: the workspace root for a
+   * portable monorepo entry, else the Unity project. The wizard installs the
+   * agent skill here (`SkillCopyParamsWire.skillRoot`), next to the config.
+   */
+  configRoot: string;
+  /**
    * Repository root detected above the Unity project (nearest ancestor with a
    * `.git` entry, within four levels). `null` when the Unity project is the
    * repository root — the portable option is offered only when this is set.
@@ -1933,6 +1939,12 @@ export type McpClientWire =
 
 export interface SkillCopyParamsWire {
   projectPath: string;
+  /**
+   * Folder the skill targets resolve under — `McpConfigPlan.configRoot`, so
+   * the skill sits next to the client config. Must be the Unity project or a
+   * folder containing it; omitted means the Unity project.
+   */
+  skillRoot?: string;
   toolkitRoot: string;
   mcpClient: McpClientWire;
 }
@@ -1975,15 +1987,17 @@ export async function copySkillFiles(
 
 /**
  * Wizard "Generate project skill" — invokes the local MCP server's
- * `unity_open_mcp_generate_skill` tool via the CLI (`run-tool`) with
- * `write: true`, producing a project-specific SKILL.md that merges the
- * template workflow playbook with this project's inventory (Unity
- * version, installed packages, key types). No live Unity bridge is
- * required. Mirrors the Rust `mcp_config::{GenerateSkillParams,
+ * `unity_open_mcp_generate_skill` tool via the CLI (`run-tool`) to compose
+ * a project-specific SKILL.md that merges the template workflow playbook
+ * with this project's inventory (Unity version, installed packages, key
+ * types), then writes it to the same targets as the template copy. No live
+ * Unity bridge is required. Mirrors the Rust `mcp_config::{GenerateSkillParams,
  * GenerateSkillResult, GenerateSkillError}` types.
  */
 export interface GenerateSkillParamsWire {
   projectPath: string;
+  /** Same as `SkillCopyParamsWire.skillRoot`; the inventory is read from `projectPath`. */
+  skillRoot?: string;
   toolkitRoot: string;
   mcpIndexOverride: string;
   mcpClient: McpClientWire;

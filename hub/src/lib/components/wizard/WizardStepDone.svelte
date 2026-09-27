@@ -226,6 +226,12 @@
           No skill targets are mapped for the selected client. Pick a different MCP client on the Configure AI client step or use the Manual option to install into all known client folders.
         </p>
       {:else}
+        {#if state.skillRoot !== state.projectPath}
+          <p class="wiz-hint">
+            Written under the repository root <code>{state.skillRoot}</code>,
+            next to the commit-safe MCP config.
+          </p>
+        {/if}
         <ul class="wiz-fingerprints" aria-label="Skill copy targets">
           {#each state.skillPlan.targets as target (target.targetPath)}
             {@const tone = target.exists ? "warn" : "ok"}
