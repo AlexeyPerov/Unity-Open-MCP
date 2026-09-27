@@ -957,7 +957,14 @@ export class ToolRouter implements Router {
 
   private async routeUnchecked(live: LiveClient, toolName: string, args: Record<string, unknown>, identity: RequestIdentity): Promise<CallToolResult> {
     const localProbe = skipsReloadProbe(toolName);
-    if (!localProbe && this.projectPath && classifyInstance(readInstanceLock(this.projectPath)) === "reloading") {
+    const lock = !localProbe && this.projectPath ? readInstanceLock(this.projectPath) : null;
+    // The lock describes the default project's Editor. A per-request port
+    // override aimed elsewhere has no lock of its own (override clients never
+    // read locks) and its LiveClient handles that bridge's readiness, so the
+    // default Editor's reload must not refuse it. An override naming the
+    // default Editor's own port still targets the reloading Editor.
+    const targetsLockedEditor = identity.port === undefined || identity.port === lock?.port;
+    if (targetsLockedEditor && classifyInstance(lock) === "reloading") {
       // One bounded re-probe. No headless fallback can acquire this Editor's project.
       await new Promise(resolve => setTimeout(resolve, 250));
       const available = await live.isLiveAvailable(750);

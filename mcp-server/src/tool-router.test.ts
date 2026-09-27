@@ -4640,6 +4640,37 @@ test("fresh reloading lock causes one bounded live re-probe and never calls batc
   } finally { rmSync(path, { force: true }); await rm(root, { recursive: true, force: true }); }
 });
 
+test("default project's reloading lock does not refuse a port override aimed at another Editor", async () => {
+  const root = await mkdtemp(join(tmpdir(), "reload-override-"));
+  const path = lockPath(root);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({ pid: process.pid, projectPath: root, port: 27999,
+    state: "reloading", heartbeatAt: new Date().toISOString() }));
+  try {
+    const defaultLive = makeFakeLive({ available: false });
+    const overrideLive = makeFakeLive({ available: true });
+    const router = new ToolRouter(defaultLive, makeFakeBatch(), root, makeFakeEventStream(), new ToolSessionState());
+    const args = { game_object_path: "Player", name: "Hero", paths_hint: ["Assets/Scenes/Main.unity"] };
+
+    const routed = await router.routeOverride("unity_open_mcp_gameobject_modify", args,
+      overrideLive as unknown as LiveClient, { agent: "A", port: 28001 });
+    assert.notEqual(errorCode(routed), "editor_reloading");
+    assert.equal(overrideLive.calls.length, 1);
+    assert.equal(overrideLive.calls[0].tool, "unity_open_mcp_gameobject_modify");
+    assert.equal(defaultLive.calls.length, 0);
+
+    // An override naming the default Editor's own port still hits the probe.
+    const samePort = await router.routeOverride("unity_open_mcp_gameobject_modify", args,
+      makeFakeLive({ available: true }) as unknown as LiveClient, { agent: "A", port: 27999 });
+    assert.equal(errorCode(samePort), "editor_reloading");
+
+    // The default route is unchanged: the reloading lock refuses the call.
+    const refused = await router.route("unity_open_mcp_gameobject_modify", args);
+    assert.equal(errorCode(refused), "editor_reloading");
+    assert.equal(defaultLive.calls.length, 0);
+  } finally { rmSync(path, { force: true }); await rm(root, { recursive: true, force: true }); }
+});
+
 test("compiling/reloading lock still serves offline-capable reads from disk", async () => {
   await withTmp("reload-offline-", async (tmp) => {
     await setupProject(tmp);
