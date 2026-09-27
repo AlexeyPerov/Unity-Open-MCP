@@ -15,6 +15,7 @@ import {
   readInstanceLock,
   isPidAlive,
   classifyInstance,
+  normalizePath,
   type InstanceLock,
 } from "./instance-discovery.js";
 import { findUnityForProject } from "./running-unity.js";
@@ -30,7 +31,47 @@ const DEFAULT_BATCH_TIMEOUT_MS = 600_000;
 // How long a FAILED editor resolution is reused by availability checks
 // before the Hub install roots are rescanned. See refreshUnityPath.
 export const FAILED_RESOLUTION_TTL_MS = 30_000;
-const activeBatchProjects = new Set<string>();
+
+/**
+ * A headless Unity run this server is currently driving for a project. Held
+ * for exactly as long as the per-project batch lease: from just before the
+ * spawn until the child closes (or fails to start).
+ */
+export interface HeadlessRunInfo {
+  /** MCP tool whose call spawned the run, e.g. `unity_open_mcp_compile_check`. */
+  tool: string;
+  /** Batch operation passed to the Unity entry point, e.g. `compile_check`. */
+  operation: string;
+  /** Epoch ms when the lease was taken. */
+  startedAt: number;
+  /** Overall batch timeout; the child is killed once it elapses. */
+  timeoutMs: number;
+  /** OS pid of the Unity child; null until the spawn returned one. */
+  pid: number | null;
+}
+
+// Per-project batch lease, keyed by the normalized project path (the same
+// normalization the Unity process scan compares with), carrying what the run
+// is so Editor-ownership surfaces can explain it instead of reporting "no
+// Unity running".
+const activeBatchProjects = new Map<string, HeadlessRunInfo>();
+
+function leaseKey(projectPath: string): string {
+  return normalizePath(projectPath);
+}
+
+/**
+ * The headless run this server is driving for `projectPath`, or null when no
+ * batch lease is held for it. Returns a copy; callers cannot mutate the lease.
+ */
+export function activeHeadlessRun(
+  projectPath: string | null | undefined,
+): HeadlessRunInfo | null {
+  if (!projectPath) return null;
+  const run = activeBatchProjects.get(leaseKey(projectPath));
+  return run ? { ...run } : null;
+}
+
 const BATCH_IN_PROGRESS_MESSAGE = "A headless operation already owns this project. Wait for it to finish.";
 
 const VERIFY_TOOL_TO_OPERATION: Record<string, string> = {
@@ -663,7 +704,7 @@ export class BatchSpawn implements Router {
     // This server's own headless child for the project is a -batchmode Unity
     // with a matching -projectPath, so the lock/process checks below would
     // misreport it as a live Editor. The lease is authoritative for it.
-    if (this.projectPath && activeBatchProjects.has(this.projectPath)) {
+    if (this.projectPath && activeBatchProjects.has(leaseKey(this.projectPath))) {
       return makeErrorResult({ code: "batch_in_progress", message: BATCH_IN_PROGRESS_MESSAGE });
     }
 
@@ -938,7 +979,8 @@ export class BatchSpawn implements Router {
       // Re-check after asynchronous executable discovery, immediately before
       // spawn. Lease first: a concurrent call may have spawned our own child
       // meanwhile, and that child must not read as a live Editor.
-      if (activeBatchProjects.has(this.projectPath)) {
+      const projectKey = leaseKey(this.projectPath);
+      if (activeBatchProjects.has(projectKey)) {
         reject(new BatchClassificationError("batch_in_progress", BATCH_IN_PROGRESS_MESSAGE));
         return;
       }
@@ -957,12 +999,19 @@ export class BatchSpawn implements Router {
       // The project lease lives as long as a Unity process may own the
       // project. Released at most once, so this child's late close cannot
       // erase a replacement call's lease.
-      activeBatchProjects.add(this.projectPath);
+      const run: HeadlessRunInfo = {
+        tool: toolName,
+        operation,
+        startedAt: startTime,
+        timeoutMs: this.timeoutMs,
+        pid: null,
+      };
+      activeBatchProjects.set(projectKey, run);
       let leaseHeld = true;
       const releaseLease = (): void => {
         if (!leaseHeld) return;
         leaseHeld = false;
-        activeBatchProjects.delete(this.projectPath);
+        activeBatchProjects.delete(projectKey);
       };
 
       let child: ChildProcess;
@@ -977,6 +1026,7 @@ export class BatchSpawn implements Router {
         reject(err);
         return;
       }
+      run.pid = child.pid ?? null;
 
       // Register with the process-wide supervision registry so the
       // SIGINT/SIGTERM/exit handlers installed at the entry points tear this

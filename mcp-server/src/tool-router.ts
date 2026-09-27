@@ -120,7 +120,7 @@ const defaultHubBackend: HubControlBackend = {
   getInstallPath: () => getInstallPath(),
   setInstallPath: (path) => setInstallPath(path),
 };
-import { BatchSpawn, BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS } from "./batch-spawn.js";
+import { BatchSpawn, BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, activeHeadlessRun, type HeadlessRunInfo } from "./batch-spawn.js";
 import { filterVisibleTools, type ToolSessionState } from "./tool-session-state.js";
 import {
   readProfileAndDetail,
@@ -625,6 +625,72 @@ function bridgeStatusNextStep(
         "may be off — open the bridge window (Unity menu: Tools/Unity Open MCP " +
         "Bridge) and confirm it is started.";
   }
+}
+
+// This server's own headless batch run holds the project. The Unity process
+// scan deliberately skips that child (it is not an Editor the user owns), so
+// Editor-ownership surfaces would otherwise report "no Unity running" and send
+// the agent to relaunch via the Hub, which would collide with the run.
+function describeHeadlessRun(run: HeadlessRunInfo, now = Date.now()): Record<string, unknown> {
+  return {
+    tool: run.tool,
+    operation: run.operation,
+    pid: run.pid,
+    startedAt: new Date(run.startedAt).toISOString(),
+    elapsedMs: Math.max(0, now - run.startedAt),
+    timeoutMs: run.timeoutMs,
+  };
+}
+
+function headlessRunSentence(run: HeadlessRunInfo, now = Date.now()): string {
+  const elapsedS = Math.round(Math.max(0, now - run.startedAt) / 1000);
+  const timeoutS = Math.round(run.timeoutMs / 1000);
+  return (
+    `The only Unity process for this project is this MCP server's own headless ` +
+    `run for ${run.tool}` +
+    (run.pid !== null ? ` (pid ${run.pid})` : "") +
+    `, started ${elapsedS}s ago with a ${timeoutS}s timeout. It is not an ` +
+    `interactive Editor, and it exits on its own when the operation finishes ` +
+    `or the timeout elapses.`
+  );
+}
+
+const HEADLESS_RUN_NEXT_STEPS: readonly string[] = [
+  "Wait for the pending headless call to return; it releases the project " +
+    "when it finishes or when its timeout elapses.",
+  "Do not relaunch Unity for this project via the Hub meanwhile: Unity " +
+    "allows one Editor per project, so a second instance collides with the " +
+    "headless run's project lock.",
+];
+
+function headlessRunErrorResult(
+  action: "restart_editor" | "resource_pressure",
+  run: HeadlessRunInfo,
+  projectPath: string,
+): CallToolResult {
+  const now = Date.now();
+  const tail =
+    action === "restart_editor"
+      ? " restart_editor never targets the server's own headless run, so there is no Editor to restart."
+      : " resource_pressure watches the interactive Editor's descriptor leak, which a short-lived headless run does not accumulate.";
+  return sourceResult(
+    {
+      error: {
+        code: "headless_run_in_progress",
+        message: headlessRunSentence(run, now) + tail,
+        projectPath,
+        ...describeHeadlessRun(run, now),
+      },
+      agentNextSteps: [
+        ...HEADLESS_RUN_NEXT_STEPS,
+        action === "restart_editor"
+          ? "Call restart_editor again only if an interactive Editor for this project hangs after the run completes."
+          : "Once the run completes and an interactive Editor is open, call resource_pressure again; pass an explicit pid to sample the headless process anyway.",
+      ],
+    },
+    "local",
+    true,
+  );
 }
 
 // M23 Plan 2 — structured recovery hint surfaced alongside `status`. Lets
@@ -2516,6 +2582,12 @@ export class ToolRouter implements Router {
       status = "stopped";
     }
 
+    // A "stopped" bridge while this server's own headless run holds the
+    // project: the process scan skips that child, so without this hint the
+    // generic nextStep would send the agent to launch Unity into the run's
+    // project lock.
+    const headlessRun = status === "stopped" ? activeHeadlessRun(this.projectPath) : null;
+
     const body = {
       status,
       // Coarse ready flag for clients that want a single boolean: true only
@@ -2565,7 +2637,13 @@ export class ToolRouter implements Router {
       // `stale: true` block is the signal to reinstall the Unity package
       // rather than file a regression.
       wireContract: wireContractBlock(pingReachable, pingBody?.wireContract),
-      nextStep: bridgeStatusNextStep(status, wedge),
+      ...(headlessRun !== null ? { headlessRun: describeHeadlessRun(headlessRun) } : {}),
+      nextStep:
+        headlessRun !== null
+          ? headlessRunSentence(headlessRun) +
+            " The bridge stays offline until then. Wait for the pending headless call to return; " +
+            "do not launch Unity for this project meanwhile."
+          : bridgeStatusNextStep(status, wedge),
     };
 
     // bridge_status never reports an error — even a stopped bridge is a
@@ -2703,6 +2781,17 @@ export class ToolRouter implements Router {
         }
       } catch {
         pid = null;
+      }
+    }
+
+    // No interactive Editor, but this server's own headless run holds the
+    // project: say so (both dry-run and confirmed) instead of the misleading
+    // "relaunch via the Hub" of unity_process_not_found. The scan never
+    // returns that child, so it is never a kill target.
+    if (pid === null) {
+      const headlessRun = activeHeadlessRun(this.projectPath);
+      if (headlessRun !== null) {
+        return headlessRunErrorResult("restart_editor", headlessRun, this.projectPath);
       }
     }
 
@@ -2936,6 +3025,10 @@ export class ToolRouter implements Router {
       }
     }
     if (pid === null) {
+      const headlessRun = activeHeadlessRun(this.projectPath);
+      if (headlessRun !== null) {
+        return headlessRunErrorResult("resource_pressure", headlessRun, this.projectPath);
+      }
       return sourceResult(
         {
           error: {

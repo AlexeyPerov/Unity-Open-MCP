@@ -41,7 +41,13 @@ definitions live in `mcp-server/src/tools/`.
   Windows HandleCount metric stays informational over the ceiling proxy — in
   the ≥90% band below it, it still warns, with handle-aware wording rather
   than fd-hang claims). All
-  local-routed; they act on the OS process and survive a dead bridge.
+  local-routed; they act on the OS process and survive a dead bridge. While
+  this server's own headless run (e.g. `compile_check`) is the only Unity for
+  the project, `restart_editor` and `resource_pressure` answer
+  `headless_run_in_progress` with the run's `tool`, `operation`, `pid`,
+  `startedAt`, `elapsedMs` and `timeoutMs` (never a kill target; wait for the
+  pending call instead of relaunching via the Hub), and a `stopped`
+  `bridge_status` carries the same data in a `headlessRun` block.
 - **Gate and validation** — validation, checkpoints, deltas, references,
   dependencies, scans, baselines, regression checks, and targeted fixes.
 - **Asset intelligence** — reserialize plus structured asset read/search/list.

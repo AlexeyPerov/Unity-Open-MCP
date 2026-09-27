@@ -33,6 +33,12 @@ import { EXPECTED_BRIDGE_WIRE_CONTRACT } from "./constants.js";
 // routes (no real process.kill / lsof / /proc in unit tests).
 import { setProcessKillerForTest } from "./editor-process-control.js";
 import { setFdProbeForTest } from "./process-diagnostics.js";
+import { EventEmitter } from "node:events";
+import {
+  BatchSpawn as RealBatchSpawn,
+  activeHeadlessRun,
+  type BatchSpawnOptions,
+} from "./batch-spawn.js";
 
 // The default-active group set is the single source of truth in
 // `capabilities/tool-groups.ts` (the catalog's `defaultEnabled: true`
@@ -3595,6 +3601,103 @@ test("route: resource_pressure refuses with unity_process_not_found when no scan
     } finally {
       restoreProbe();
       restoreScan();
+    }
+  });
+});
+
+// --- restart_editor / resource_pressure / bridge_status during this server's own headless run ---
+
+test("route: this server's own headless run reads as headless_run_in_progress, not a missing Unity", async () => {
+  await withTmp("router-own-headless-", async (tmp) => {
+    await setupProject(tmp);
+    await plantEditorLog(tmp, FD_EXHAUSTION_LOG);
+    const savedPath = process.env.UNITY_PATH;
+    const savedTimeout = process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS;
+    const children: EventEmitter[] = [];
+    let childOpen = false;
+    // The OS scan sees the headless child (-batchmode, same -projectPath)
+    // while it runs; the server must not treat it as the user's Editor.
+    const restoreScan = setUnityProcessScannerForTest({
+      scan: () => (childOpen ? [{ pid: 4242, projectPath: tmp }] : []),
+    });
+    const restoreKiller = setProcessKillerForTest({
+      async kill() {
+        throw new Error("the headless child must never be killed");
+      },
+    });
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        throw new Error("the probe must not sample without an explicit pid");
+      },
+    });
+    try {
+      process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS = "5000";
+      process.env.UNITY_PATH = join(tmp, "Unity");
+      writeFileSync(process.env.UNITY_PATH, "");
+      const spawnProcess = (() => {
+        const child = Object.assign(new EventEmitter(), { pid: 4242, stdout: null, stderr: null, kill: () => true });
+        children.push(child);
+        childOpen = true;
+        return child;
+      }) as unknown as NonNullable<BatchSpawnOptions["spawnProcess"]>;
+      const batch = new RealBatchSpawn({ projectPath: tmp, spawnProcess });
+      const running = batch.route("unity_open_mcp_compile_check", {});
+      const deadline = Date.now() + 5_000;
+      while (children.length < 1) {
+        assert.ok(Date.now() < deadline, "the headless call never spawned");
+        await new Promise((r) => setImmediate(r));
+      }
+      // The lease lookup normalizes the path like the process scan does.
+      assert.equal(activeHeadlessRun(tmp + "/")?.pid, 4242);
+
+      const router = makeRouter(
+        makePingFakeLive({ pingBody: null, available: false }),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const assertHeadless = (result: CallToolResult): void => {
+        assert.equal(result.isError, true);
+        const body = parseBody(result);
+        const err = body.error as Record<string, unknown>;
+        assert.equal(err.code, "headless_run_in_progress");
+        assert.equal(err.tool, "unity_open_mcp_compile_check");
+        assert.equal(err.operation, "compile_check");
+        assert.equal(err.pid, 4242);
+        assert.equal(err.timeoutMs, 5000);
+        assert.equal(typeof err.elapsedMs, "number");
+        assert.ok(!Number.isNaN(Date.parse(err.startedAt as string)));
+        assert.doesNotMatch(err.message as string, /Relaunch Unity/);
+        assert.ok(Array.isArray(body.agentNextSteps));
+      };
+
+      assertHeadless(await router.route("unity_open_mcp_restart_editor", {}));
+      assertHeadless(await router.route("unity_open_mcp_restart_editor", { confirm: true }));
+      assertHeadless(await router.route("unity_open_mcp_resource_pressure", {}));
+
+      const status = parseBody(await router.route("unity_open_mcp_bridge_status", {}));
+      assert.equal(status.status, "stopped");
+      assert.equal((status.headlessRun as { tool?: string }).tool, "unity_open_mcp_compile_check");
+      assert.match(status.nextStep as string, /headless run/);
+
+      childOpen = false;
+      children[0].emit("close", 0);
+      await running;
+      assert.equal(activeHeadlessRun(tmp), null);
+
+      // With the run gone and no Unity left, the genuine no-process answer returns.
+      const restart = parseBody(await router.route("unity_open_mcp_restart_editor", { confirm: true }));
+      assert.equal((restart.error as { code?: string }).code, "unity_process_not_found");
+      const pressure = parseBody(await router.route("unity_open_mcp_resource_pressure", {}));
+      assert.equal((pressure.error as { code?: string }).code, "unity_process_not_found");
+      const after = parseBody(await router.route("unity_open_mcp_bridge_status", {}));
+      assert.equal(after.headlessRun, undefined);
+    } finally {
+      restoreProbe();
+      restoreKiller();
+      restoreScan();
+      if (savedPath === undefined) delete process.env.UNITY_PATH; else process.env.UNITY_PATH = savedPath;
+      if (savedTimeout === undefined) delete process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS; else process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS = savedTimeout;
     }
   });
 });
