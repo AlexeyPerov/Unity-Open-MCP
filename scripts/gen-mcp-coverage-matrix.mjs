@@ -1,126 +1,86 @@
 #!/usr/bin/env node
 // gen-mcp-coverage-matrix.mjs — generates the MCP coverage matrix.
 //
-// Scans the registered tool definitions (mcp-server/src/tools/*.ts), the group
-// catalog (mcp-server/src/capabilities/tool-groups.ts), and the S0 suite
-// (scripts/mcp-full-test.mjs) to produce specs/execution/M27/m27-mcp-coverage-matrix.md
-// — one row per registered tool with route, group, suite owner, pass criteria,
-// and S0 status. The matrix is the single artifact that proves "zero unowned
+// Imports the registered tool definitions (mcp-server/src/tools/index.ts →
+// ALL_TOOLS), the group catalog (capabilities/tool-groups.ts) and the route
+// sets (local-tools.ts, batch-spawn.ts) straight from the MCP-server TS
+// sources, and parses the S0 suite (scripts/mcp-full-test.mjs) to produce one
+// row per registered tool with route, group, suite owner, pass criteria, and
+// S0 status. The matrix is the single artifact that proves "zero unowned
 // tools" — every tool appears in at least one suite with a strict owner.
 //
 // Re-run whenever tools ship:
-//   node scripts/gen-mcp-coverage-matrix.mjs
+//   node scripts/gen-mcp-coverage-matrix.mjs              # write the matrix
+//   node scripts/gen-mcp-coverage-matrix.mjs --out <path> # write elsewhere
+//   node scripts/gen-mcp-coverage-matrix.mjs --check      # invariants only, no write
 //
 // The generator EXITS NON-ZERO if any tool has no suite_owner (an orphan), or
 // if any S0 tolerate step has no strict owner in S1 / wont-fix link. This makes
 // "zero unowned rows" a machine-checked invariant, not a manual claim.
 //
-// Output: specs/execution/M27/m27-mcp-coverage-matrix.md (gitignored — a working
-// artifact). The generator itself is tracked (like scripts/sync-version.mjs).
+// Default output: specs/execution/done/M27/m27-mcp-coverage-matrix.md
+// (gitignored — a maintainer working artifact). Without a specs/ tree the
+// write is skipped and only the invariants are checked. Requires Node 22.6+
+// (TS type stripping), like scripts/generate-token-estimates.mjs.
 
-import { readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
-import { dirname, resolve, join } from "node:path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { register } from "node:module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
-const TOOLS_DIR = resolve(REPO_ROOT, "mcp-server", "src", "tools");
-const GROUPS_FILE = resolve(REPO_ROOT, "mcp-server", "src", "capabilities", "tool-groups.ts");
+const MCP_SRC = resolve(REPO_ROOT, "mcp-server", "src");
 const S0_FILE = resolve(REPO_ROOT, "scripts", "mcp-full-test.mjs");
-const S1_FILE = resolve(REPO_ROOT, "scripts", "mcp-behavior.mjs");
-const S2_FILE = resolve(REPO_ROOT, "scripts", "mcp-headless.mjs");
-const S3_FILE = resolve(REPO_ROOT, "scripts", "mcp-protocol.mjs");
-const S4_FILE = resolve(REPO_ROOT, "scripts", "mcp-extensions.mjs");
-const S5_FILE = resolve(REPO_ROOT, "scripts", "mcp-sandbox.mjs");
-const OUT_FILE = resolve(REPO_ROOT, "specs", "execution", "M27", "m27-mcp-coverage-matrix.md");
+const SPECS_DIR = resolve(REPO_ROOT, "specs");
+const DEFAULT_OUT_FILE = resolve(SPECS_DIR, "execution", "done", "M27", "m27-mcp-coverage-matrix.md");
 
 // ---------------------------------------------------------------------------
-// 1. Scan tool definitions → tool names + defining file
+// 1. Load the MCP-server sources. The source tree emits `.js` import
+//    specifiers that point at `.ts` files; this resolve hook (the same one
+//    generate-token-estimates.mjs uses) rewrites relative ones so the sources
+//    load under Node's type stripping without a dist build.
 // ---------------------------------------------------------------------------
 
-function scanTools() {
-  const files = readdirSync(TOOLS_DIR).filter((f) => f.endsWith(".ts") && f !== "index.ts");
-  const tools = []; // { name, file }
-  const seen = new Set();
-  for (const f of files) {
-    const content = readFileSync(join(TOOLS_DIR, f), "utf8");
-    // Match: name: "unity_open_mcp_*" or name: "unity_senses_*"
-    const match = content.match(/name:\s*"(unity_[a-z0-9_]+)"/);
-    if (match && !seen.has(match[1])) {
-      seen.add(match[1]);
-      tools.push({ name: match[1], file: f });
+const LOADER_SOURCE = `
+export async function resolve(specifier, context, nextResolve) {
+  if (
+    specifier.endsWith(".js") &&
+    !specifier.startsWith("node:") &&
+    !specifier.includes("node_modules") &&
+    !specifier.startsWith("@")
+  ) {
+    try {
+      return await nextResolve(specifier.slice(0, -3) + ".ts", context);
+    } catch {
+      // fall through to default resolve
     }
   }
-  return tools.sort((a, b) => a.name.localeCompare(b.name));
+  return nextResolve(specifier, context);
 }
+`;
+register(`data:text/javascript,${encodeURIComponent(LOADER_SOURCE)}`, import.meta.url);
+
+const { ALL_TOOLS } = await import(resolve(MCP_SRC, "tools", "index.ts"));
+const { groupFor } = await import(resolve(MCP_SRC, "capabilities", "tool-groups.ts"));
+const { isLocalTool, OFFLINE_CAPABLE_TOOL_NAMES } = await import(resolve(MCP_SRC, "local-tools.ts"));
+const { ALWAYS_BATCH_TOOLS, BATCH_TOOL_NAMES } = await import(resolve(MCP_SRC, "batch-spawn.ts"));
 
 // ---------------------------------------------------------------------------
-// 2. Parse tool-groups.ts → { toolName: group }
+// 2. Route policy (mirrors mcp-server/src/tool-router.ts priority order):
+//    local → offline-capable → always-batch → batch fallback → live.
 // ---------------------------------------------------------------------------
-
-function parseGroups() {
-  const content = readFileSync(GROUPS_FILE, "utf8");
-  const assignment = {};
-  // Match: assign("group-id", [ ... "tool", ... ]);
-  // The bracket contents span multiple lines; capture until the closing ]);
-  const assignRegex = /assign\(\s*"([^"]+)"\s*,\s*\[([\s\S]*?)\]\s*\)/g;
-  let m;
-  while ((m = assignRegex.exec(content)) !== null) {
-    const group = m[1];
-    const body = m[2];
-    const toolRegex = /"((?:unity_open_mcp|unity_senses)_[a-z0-9_]+)"/g;
-    let tm;
-    while ((tm = toolRegex.exec(body)) !== null) {
-      assignment[tm[1]] = group;
-    }
-  }
-  return assignment;
-}
-
-// ---------------------------------------------------------------------------
-// 3. Route policy (mirrors mcp-server/src/tool-router.ts priority order)
-// ---------------------------------------------------------------------------
-
-// Local route set — parsed from the MCP server's single source of truth
-// (mcp-server/src/local-tools.ts: LOCAL_TOOL_NAMES + the hub_* prefix rule in
-// isLocalTool) so this script can never drift from what the router does.
-const LOCAL_TOOLS_FILE = resolve(REPO_ROOT, "mcp-server", "src", "local-tools.ts");
-function parseLocalToolNames() {
-  const source = readFileSync(LOCAL_TOOLS_FILE, "utf8");
-  const literal = source.match(/LOCAL_TOOL_NAMES[^=]*=\s*new Set\(\[([\s\S]*?)\]\)/);
-  if (!literal) throw new Error(`Could not parse LOCAL_TOOL_NAMES from ${LOCAL_TOOLS_FILE}`);
-  const names = new Set([...literal[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]));
-  if (names.size === 0) throw new Error(`LOCAL_TOOL_NAMES in ${LOCAL_TOOLS_FILE} is empty`);
-  return names;
-}
-const LOCAL_TOOL_NAMES = parseLocalToolNames();
-function isLocalTool(toolName) {
-  return LOCAL_TOOL_NAMES.has(toolName) || toolName.startsWith("unity_open_mcp_hub_");
-}
-const OFFLINE_PINNED = new Set([
-  "unity_open_mcp_list_assets", "unity_open_mcp_read_compile_errors",
-  "unity_open_mcp_read_asset", "unity_open_mcp_search_assets",
-  "unity_open_mcp_find_references", "unity_open_mcp_dependencies",
-]);
-const BATCH_META = new Set([
-  "unity_open_mcp_compile_check", "unity_open_mcp_scan_all",
-  "unity_open_mcp_baseline_create", "unity_open_mcp_regression_check",
-]);
-const BATCH_FALLBACK = new Set([
-  "unity_open_mcp_find_members", "unity_open_mcp_execute_csharp",
-  "unity_open_mcp_invoke_method", "unity_open_mcp_execute_menu",
-]);
 
 function routeFor(toolName) {
   if (isLocalTool(toolName)) return "local";
-  if (OFFLINE_PINNED.has(toolName)) return "offline";
-  if (BATCH_META.has(toolName)) return "batch";
-  if (BATCH_FALLBACK.has(toolName)) return "live+batch";
+  if (OFFLINE_CAPABLE_TOOL_NAMES.has(toolName)) return "offline";
+  if (ALWAYS_BATCH_TOOLS.has(toolName)) return "batch";
+  if (BATCH_TOOL_NAMES.has(toolName)) return "live+batch";
   return "live";
 }
 
 // ---------------------------------------------------------------------------
-// 4. S0 status (parse mcp-full-test.mjs for step tool/expect pairs + SKIPS)
+// 3. S0 status (parse mcp-full-test.mjs for step tool/expect pairs + SKIPS)
 // ---------------------------------------------------------------------------
 
 function parseS0() {
@@ -193,7 +153,7 @@ function s0Status(toolName, s0) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Ownership map — which suite owns each tool, and the strict owner.
+// 4. Ownership map — which suite owns each tool, and the strict owner.
 //
 // This encodes the design from the plan: S0 reachability for all; S1 strict
 // for live mutating/read tools S0 only tolerates + the 8 absent tools; S2 for
@@ -282,10 +242,10 @@ function ownershipFor(toolName, group, route, s0StatusVal) {
 }
 
 // ---------------------------------------------------------------------------
-// 6. Render the matrix markdown
+// 5. Render the matrix markdown
 // ---------------------------------------------------------------------------
 
-function renderMatrix(tools, groups, s0) {
+function renderMatrix(tools, s0) {
   const lines = [];
   lines.push("# MCP coverage matrix");
   lines.push("");
@@ -294,7 +254,7 @@ function renderMatrix(tools, groups, s0) {
   lines.push(`**Tool count:** ${tools.length}`);
   lines.push("");
   lines.push("One row per registered MCP tool. Columns:");
-  lines.push("- `tool_id` — the MCP tool name (`name` field in `mcp-server/src/tools/*.ts`)");
+  lines.push("- `tool_id` — the MCP tool name (`ALL_TOOLS` in `mcp-server/src/tools/index.ts`)");
   lines.push("- `route` — live / batch / offline / local / live+batch (mirrors `tool-router.ts`)");
   lines.push("- `group` — tool-group assignment from `tool-groups.ts` (null = always-visible meta-tool)");
   lines.push("- `suite_owner` — which suite(s) cover this tool (S0–S5)");
@@ -324,7 +284,7 @@ function renderMatrix(tools, groups, s0) {
   let counts = { covered: 0, tolerate: 0, skip: 0, reachable: 0, absent: 0, "absent(unavail)": 0 };
 
   for (const t of tools) {
-    const group = groups[t.name] ?? "—";
+    const group = groupFor(t.name) ?? "—";
     const route = routeFor(t.name);
     const s0stat = s0Status(t.name, s0);
     counts[s0stat] = (counts[s0stat] ?? 0) + 1;
@@ -374,14 +334,37 @@ function renderMatrix(tools, groups, s0) {
 // main
 // ---------------------------------------------------------------------------
 
-function main() {
-  const tools = scanTools();
-  const groups = parseGroups();
-  const s0 = parseS0();
-  const { markdown, orphans, tolerateWithoutOwner, counts, total } = renderMatrix(tools, groups, s0);
+function parseArgs(argv) {
+  const opts = { check: false, out: null };
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--check") opts.check = true;
+    else if (argv[i] === "--out") opts.out = argv[++i];
+    else throw new Error(`Unknown argument: ${argv[i]}`);
+  }
+  if (opts.out === undefined) throw new Error("--out needs a path");
+  return opts;
+}
 
-  writeFileSync(OUT_FILE, markdown);
-  console.log(`Wrote ${OUT_FILE}`);
+function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  const tools = ALL_TOOLS.map((t) => ({ name: t.name })).sort((a, b) => a.name.localeCompare(b.name));
+  const s0 = parseS0();
+  const { markdown, orphans, tolerateWithoutOwner, counts, total } = renderMatrix(tools, s0);
+
+  if (opts.check) {
+    console.log("--check: matrix not written");
+  } else if (opts.out) {
+    const outFile = resolve(opts.out);
+    mkdirSync(dirname(outFile), { recursive: true });
+    writeFileSync(outFile, markdown);
+    console.log(`Wrote ${outFile}`);
+  } else if (existsSync(SPECS_DIR)) {
+    mkdirSync(dirname(DEFAULT_OUT_FILE), { recursive: true });
+    writeFileSync(DEFAULT_OUT_FILE, markdown);
+    console.log(`Wrote ${DEFAULT_OUT_FILE}`);
+  } else {
+    console.log("No specs/ tree: matrix not written (pass --out <path> to write it elsewhere)");
+  }
   console.log(`  tools:       ${total}`);
   console.log(`  S0 covered:  ${counts.covered ?? 0}`);
   console.log(`  S0 tolerate: ${counts.tolerate ?? 0}`);

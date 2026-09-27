@@ -2,10 +2,8 @@
 //
 // Three consumers used to keep their own copy of this list (capabilities
 // discovery, the reload probe in the router, the coverage-matrix script) and
-// they had already drifted. Discovery and routing import from here; the
-// coverage-matrix script (scripts/gen-mcp-coverage-matrix.mjs) parses the
-// LOCAL_TOOL_NAMES literal below straight out of this file, so keep the set a
-// plain array of string literals.
+// they had already drifted. All of them import from here, including
+// scripts/gen-mcp-coverage-matrix.mjs.
 
 /** Server-only tools: no live bridge hop, no headless spawn. */
 export const LOCAL_TOOL_NAMES: ReadonlySet<string> = new Set([

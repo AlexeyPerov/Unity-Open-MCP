@@ -161,7 +161,7 @@ node scripts/mcp-full-test.mjs --project /absolute/path/to/demo --json-out /tmp/
 
 ## MCP test suite catalog
 
-The full test surface is split into seven suites. Each owns a distinct
+The full test surface is split into six suites. Each owns a distinct
 environment + pass-criteria tier; together they cover every registered tool
 with at least one strict owner. The per-tool → suite mapping lives in the
 generated coverage matrix (re-run `node scripts/gen-mcp-coverage-matrix.mjs`
@@ -184,8 +184,8 @@ header comment.
 
 **S0** is the fast reachability layer — it proves every tool is registered and
 routed, tolerating known tool bugs. **S1–S5** are the strict behavioral layers:
-a failure there is a real regression. Run order + CI tiers are wired by the
-orchestrator (`scripts/mcp-test-all.mjs`).
+a failure there is a real regression. There is no single orchestrator: run the
+suites individually in the [suggested order](../scripts/README.md#suggested-order).
 
 ## Related docs
 
