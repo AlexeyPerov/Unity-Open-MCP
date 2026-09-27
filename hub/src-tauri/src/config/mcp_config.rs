@@ -869,16 +869,16 @@ pub(crate) fn relative_subpath(workspace: &Path, project: &Path) -> Option<Strin
     )
 }
 
-/// Nearest ancestor of `project` (up to `max_depth` levels above it) that
-/// holds a `.git` entry — the repository root an AI client is usually opened
-/// on. Returns `None` when the Unity project is itself that root, so the
-/// caller only offers the portable path for a real monorepo layout.
+/// Nearest of `project` and its ancestors (up to `max_depth` levels above
+/// it) that holds a `.git` entry — the repository root an AI client is usually
+/// opened on. The Unity project that is itself the repository is its own
+/// workspace root: its configs get committed just like a monorepo's, so the
+/// wizard offers (and defaults to) the commit-safe form for both layouts,
+/// matching the bridge window's `McpClientCatalog.FindWorkspaceRoot`.
+/// `None` when the project is not inside a repository.
 pub(crate) fn detect_workspace_root(project: &Path, max_depth: usize) -> Option<PathBuf> {
-    if project.join(".git").exists() {
-        return None;
-    }
-    let mut current = project.parent()?.to_path_buf();
-    for _ in 0..max_depth {
+    let mut current = project.to_path_buf();
+    for _ in 0..=max_depth {
         if current.join(".git").exists() {
             return Some(current);
         }
@@ -890,9 +890,9 @@ pub(crate) fn detect_workspace_root(project: &Path, max_depth: usize) -> Option<
     None
 }
 
-/// What the wizard can offer for this project: the repository root above the
-/// Unity project, and the Unity folder relative to it. Both `None` for the
-/// common "Unity project IS the repository" layout.
+/// What the wizard can offer for this project: the repository root at or
+/// above the Unity project, and the Unity folder relative to it (empty when
+/// the project IS the repository). Both `None` outside any repository.
 struct DetectedLayout {
     root: Option<String>,
     subpath: Option<String>,
@@ -1678,9 +1678,24 @@ pub fn claude_mcp_add_command_portable(
         invocation = launch_invocation(launch_mode, resolved_index),
     );
     if !unity_subpath.is_empty() {
-        command.push_str(&format!(" --unity-subpath {unity_subpath}"));
+        command.push_str(&format!(" --unity-subpath {}", shell_quote(unity_subpath)));
     }
     command
+}
+
+/// Quote one argument for the shell the operator pastes the command into: a
+/// Unity subfolder with a space (`My Client`) must stay one `--unity-subpath`
+/// value. Double quotes are understood by POSIX shells, PowerShell and cmd
+/// alike; anything without whitespace or quotes is left bare so the common
+/// case reads as documented.
+fn shell_quote(arg: &str) -> String {
+    if arg.is_empty() {
+        return "\"\"".to_string();
+    }
+    if !arg.chars().any(|c| c.is_whitespace() || c == '"') {
+        return arg.to_string();
+    }
+    format!("\"{}\"", arg.replace('"', "\\\""))
 }
 
 fn launch_invocation(launch_mode: McpLaunchMode, resolved_index: &str) -> String {
@@ -4354,12 +4369,29 @@ mod tests {
     }
 
     #[test]
-    fn no_repository_root_is_offered_when_the_unity_project_is_the_repository() {
+    fn the_unity_project_that_is_the_repository_is_its_own_workspace_root() {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path().join("MyGame");
         fs::create_dir_all(project.join(".git")).unwrap();
         fs::create_dir_all(project.join("Assets")).unwrap();
-        assert!(detect_workspace_root(&project, 4).is_none());
+        assert_eq!(detect_workspace_root(&project, 4).as_deref(), Some(project.as_path()));
+        assert_eq!(relative_subpath(&project, &project), Some(String::new()));
+    }
+
+    #[test]
+    fn no_workspace_root_outside_a_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("MyGame");
+        fs::create_dir_all(project.join("Assets")).unwrap();
+        assert!(detect_workspace_root(&project, 0).is_none());
+    }
+
+    #[test]
+    fn the_portable_claude_command_quotes_a_subpath_with_spaces() {
+        let command = claude_mcp_add_command_portable(McpLaunchMode::Npx, "", "My Client");
+        assert!(command.ends_with("--project-from-cwd --unity-subpath \"My Client\""), "{command}");
+        let plain = claude_mcp_add_command_portable(McpLaunchMode::Npx, "", "Client");
+        assert!(plain.ends_with("--project-from-cwd --unity-subpath Client"), "{plain}");
     }
 
     #[test]

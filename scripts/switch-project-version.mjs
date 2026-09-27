@@ -87,11 +87,13 @@ const PRUNED_DIRS = new Set([
 const AGENT_CONFIG_DIRS = new Set([
   ".cursor", ".codex", ".zcode", ".claude", ".agents", ".vscode", ".vs",
   ".junie", ".gemini", ".kilocode", ".roo", ".github", ".config",
-  // Launch-wrapper homes (`scripts/mcp/…`, `.unity-open-mcp/…`). Only the
-  // wrapper names in WRAPPER_FILE_NAMES are opened there, so a repository's
-  // other scripts are never read.
-  "scripts", ".unity-open-mcp",
 ]);
+
+/** Launch-wrapper homes (`scripts/mcp/…`, `.unity-open-mcp/…`). An ancestor
+ *  scan descends into these for the wrapper alone: only WRAPPER_FILE_NAMES are
+ *  opened there, so a repository's other scripts and tooling files are never
+ *  read. Under the project root itself the general walk applies. */
+const WRAPPER_DIRS = new Set(["scripts", ".unity-open-mcp"]);
 
 /** Skip pathologically large files — a pin never lives in one, and reading it
  *  would just stall the scan. */
@@ -324,9 +326,14 @@ function processFile(absPath, version, opts) {
 // ---------------------------------------------------------------------------
 
 /** @param {string} name */
+function isWrapperFile(name) {
+  return WRAPPER_FILE_NAMES.includes(name.toLowerCase());
+}
+
+/** @param {string} name */
 function isScannedFile(name) {
   const lower = name.toLowerCase();
-  return SCANNED_EXTENSIONS.some((ext) => lower.endsWith(ext)) || WRAPPER_FILE_NAMES.includes(lower);
+  return SCANNED_EXTENSIONS.some((ext) => lower.endsWith(ext)) || isWrapperFile(name);
 }
 
 /** @param {string} name */
@@ -346,8 +353,10 @@ function isPrunedDir(name) {
 function collectFiles(root, opts) {
   /** @type {string[]} */
   const found = [];
-  /** @param {string} dir @param {number} depth */
-  const walk = (dir, depth) => {
+  /** @param {string} dir @param {number} depth
+   *  @param {boolean} wrapperOnly inside a WRAPPER_DIRS subtree of an ancestor:
+   *         open nothing but the wrapper script */
+  const walk = (dir, depth, wrapperOnly) => {
     /** @type {import("node:fs").Dirent[]} */
     let entries;
     try {
@@ -362,9 +371,10 @@ function collectFiles(root, opts) {
         // the walk cannot cycle.
         if (depth >= opts.maxDepth) continue;
         if (isPrunedDir(e.name)) continue;
-        if (opts.agentDirsOnly && depth === 0 && !AGENT_CONFIG_DIRS.has(e.name)) continue;
-        walk(child, depth + 1);
-      } else if (e.isFile() && isScannedFile(e.name)) {
+        const restricted = opts.agentDirsOnly && depth === 0;
+        if (restricted && !AGENT_CONFIG_DIRS.has(e.name) && !WRAPPER_DIRS.has(e.name)) continue;
+        walk(child, depth + 1, wrapperOnly || (restricted && WRAPPER_DIRS.has(e.name)));
+      } else if (e.isFile() && (wrapperOnly ? isWrapperFile(e.name) : isScannedFile(e.name))) {
         try {
           if (statSync(child).size > MAX_FILE_BYTES) continue;
         } catch {
@@ -374,7 +384,7 @@ function collectFiles(root, opts) {
       }
     }
   };
-  walk(root, 0);
+  walk(root, 0, false);
   return found;
 }
 

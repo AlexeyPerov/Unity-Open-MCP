@@ -142,6 +142,33 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void Snippet_ClaudeCodeQuotesASubpathWithSpaces()
+        {
+            var placement = McpClientCatalog.ResolvePortablePlacement(
+                Find("claudeCode"), Repo + "/My Client", Repo).Value;
+            var snippet = McpClientCatalog.BuildSnippet(Find("claudeCode"), Project, 21234, "npx", Args, placement);
+            StringAssert.EndsWith("--project-from-cwd --unity-subpath \"My Client\"", snippet);
+        }
+
+        [Test]
+        public void ShellQuote_QuotesOnlyWhatTheShellWouldSplit()
+        {
+            Assert.AreEqual("Client", McpClientCatalog.ShellQuote("Client"));
+            Assert.AreEqual("games/Client", McpClientCatalog.ShellQuote("games/Client"));
+            Assert.AreEqual("\"My Client\"", McpClientCatalog.ShellQuote("My Client"));
+            Assert.AreEqual("\"a\\\"b\"", McpClientCatalog.ShellQuote("a\"b"));
+            Assert.AreEqual("\"\"", McpClientCatalog.ShellQuote(""));
+        }
+
+        [Test]
+        public void Placement_WrapperAbsolutePathIsUnderTheWorkspaceRoot()
+        {
+            Assert.AreEqual(Repo + "/scripts/mcp/unity-open-mcp.sh", Placement("codex").WrapperAbsolutePath);
+            var unityRoot = McpClientCatalog.ResolvePortablePlacement(Find("codex"), Project, Project).Value;
+            Assert.AreEqual(Project + "/.unity-open-mcp/mcp-wrapper.sh", unityRoot.WrapperAbsolutePath);
+        }
+
+        [Test]
         public void Snippet_CodexRunsTheWrapper()
         {
             Assert.AreEqual(
@@ -188,6 +215,16 @@ namespace UnityOpenMcpBridge.Tests
             var body = McpWrapperScript.Render("1.3.0", ".unity-open-mcp/mcp-wrapper.sh", "");
             StringAssert.Contains("\"${script_dir}/..\"", body);
             StringAssert.Contains("subpath=\"${UNITY_SUBPATH-}\"", body);
+        }
+
+        [Test]
+        public void WrapperScript_AlwaysUsesLfLineEndings()
+        {
+            // The template is a verbatim literal: a CRLF checkout of this
+            // source file must not produce a script bash cannot run.
+            var body = McpWrapperScript.Render("1.3.0", "scripts/mcp/unity-open-mcp.sh", "Client");
+            StringAssert.DoesNotContain("\r", body);
+            StringAssert.StartsWith("#!/usr/bin/env bash\n", body);
         }
 
         [Test]

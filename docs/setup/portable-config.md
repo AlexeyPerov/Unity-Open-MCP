@@ -232,8 +232,9 @@ becomes portable and vice versa, and sibling MCP servers are preserved.
 
 **Tools → Unity Open MCP Bridge → Status → Configure AI client** has a
 **Commit-safe config** toggle. It is on by default when the Unity project is
-inside a git repository and names the target at the repository root. With it
-on, the snippet carries no machine path and no bridge port:
+inside a git repository (a subfolder of it, or the repository itself) and
+names the target at the repository root. With it on, the snippet carries no
+machine path and no bridge port:
 
 - `${workspaceFolder}` clients (Cursor project config, VS Code, Visual Studio)
   get the interpolated `UNITY_PROJECT_PATH`.
@@ -245,17 +246,20 @@ on, the snippet carries no machine path and no bridge port:
 Clients that only read a machine-wide config (Claude Desktop, Cline,
 Antigravity, the global Cursor/OpenCode/ZCode rows) keep the absolute form, and
 the panel says so. The Hub setup wizard's **Commit-safe config** option follows
-the same default when it detects a repository above the Unity project.
+the same default when it detects a repository at or above the Unity project.
 
 ## Keeping the pin current
 
 The committed entry still pins a version (`unity-open-mcp@1.3.0`), and it must
 move together with the bridge and verify pins in `Packages/manifest.json`. The
-bridge window's **Updates** flow treats portable entries as belonging to the
-project whose repository holds them: a `${workspaceFolder}` or relative
-`UNITY_PROJECT_PATH`, an args-only entry, and the committed wrapper script
-(`scripts/mcp/unity-open-mcp.sh` or `.unity-open-mcp/mcp-wrapper.sh`) are all
-rewritten. Commit the updated files together.
+bridge window's **Updates** flow resolves portable entries against the
+directory the config was found under — the workspace root — and rewrites the
+ones that name this project: a `${workspaceFolder}` or relative
+`UNITY_PROJECT_PATH`, `--project-from-cwd [--unity-subpath …]`, and the
+committed wrapper script (`scripts/mcp/unity-open-mcp.sh` or
+`.unity-open-mcp/mcp-wrapper.sh`) with its baked default subfolder. An entry
+that names another Unity project of the same repository is left alone, like
+any foreign entry. Commit the updated files together.
 
 ## After a teammate clones
 

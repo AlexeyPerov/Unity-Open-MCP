@@ -137,7 +137,7 @@ namespace UnityOpenMcpBridge.Update
                     if (candidate.Kind == UpgradeScanner.CandidateKind.ProjectConfig
                         || candidate.Kind == UpgradeScanner.CandidateKind.HomeConfig)
                     {
-                        var scope = UpgradeEntryScope.Classify(body, projectPath);
+                        var scope = UpgradeEntryScope.Classify(body, projectPath, candidate.WorkspaceRoot);
                         if (!UpgradeEntryScope.ShouldRewrite(scope, candidate.IsHomeScoped))
                             file.SkipReason = scope.SkipReason;
                     }

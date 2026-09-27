@@ -32,6 +32,15 @@ namespace UnityOpenMcpBridge.Update
     ///     rewrite in a project-scoped config, where the file's location is
     ///     itself the ownership claim.
     ///
+    /// A committed (portable) entry names the project without a machine path:
+    /// <c>${workspaceFolder}/Client</c>, a relative <c>Client</c>, the
+    /// <c>--unity-subpath Client</c> flag, or the wrapper script's default
+    /// <c>UNITY_SUBPATH</c>. Each is relative to the workspace root the client
+    /// is opened on — the directory the config file was found under — so with
+    /// that root known they resolve to a concrete folder and take part in the
+    /// comparison like an absolute path. This is what keeps one Unity project
+    /// of a monorepo from moving a sibling project's committed pin.
+    ///
     /// Pure string math over the raw body: JSON and TOML both spell the env
     /// pair as <c>KEY … "value"</c>, so one pattern covers both dialects
     /// without a parser.
@@ -47,8 +56,9 @@ namespace UnityOpenMcpBridge.Update
             /// <summary>This project and at least one other share the file.</summary>
             Mixed,
             /// <summary>No project marker found (no env, no matching port) —
-            /// including a portable entry whose project env is a workspace
-            /// variable or a relative path.</summary>
+            /// including a portable entry that cannot be resolved here: no
+            /// workspace root was supplied, or the value is a shell variable
+            /// the file itself expands (<c>${project_path}</c>).</summary>
             Unknown,
         }
 
@@ -110,10 +120,26 @@ namespace UnityOpenMcpBridge.Update
         private static readonly Regex PortPattern = new Regex(
             "\"?" + Regex.Escape(BridgeConstants.PortEnvVar) + "\"?\\s*[:=]\\s*\"?(\\d+)\"?");
 
+        // Portable markers that name the project relative to the workspace
+        // root. `"--unity-subpath", "Client"` is the args form in JSON and TOML
+        // arrays alike; a bare `"--project-from-cwd"` claims the root itself.
+        private static readonly Regex UnitySubpathArgPattern = new Regex(
+            "\"--unity-subpath\"\\s*,\\s*\"([^\"]*)\"");
+        private static readonly Regex ProjectFromCwdArgPattern = new Regex("\"--project-from-cwd\"");
+        // The committed wrapper bakes its default Unity subfolder into
+        // `subpath="${UNITY_SUBPATH-Client}"`; empty means the workspace root.
+        private static readonly Regex WrapperSubpathPattern = new Regex(
+            "\\$\\{UNITY_SUBPATH-([^}\"]*)\\}");
+
         /// <summary>
         /// Classify a config body against a Unity project path.
+        /// <paramref name="workspaceRoot"/> is the directory the config was
+        /// found under (the workspace an AI client opens, and the folder a
+        /// committed wrapper resolves to); it anchors portable markers. Pass
+        /// <c>null</c> for a home-scoped file, whose portable markers cannot be
+        /// resolved and are ignored.
         /// </summary>
-        internal static ScopeResult Classify(string body, string projectPath)
+        internal static ScopeResult Classify(string body, string projectPath, string workspaceRoot = null)
         {
             if (string.IsNullOrEmpty(body) || string.IsNullOrEmpty(projectPath))
             {
@@ -125,25 +151,20 @@ namespace UnityOpenMcpBridge.Update
             var matched = false;
             string foreign = null;
 
-            foreach (Match m in ProjectPathPattern.Matches(body))
+            foreach (var resolved in CollectClaims(body, workspaceRoot))
             {
-                var raw = m.Groups[1].Value;
-                if (string.IsNullOrEmpty(raw)) continue;
-                // A committed, machine-independent value names no project on
-                // disk, so it can neither claim nor disown this file.
-                if (!IsMachinePath(raw)) continue;
-                if (!claimed.Contains(raw)) claimed.Add(raw);
+                if (!claimed.Contains(resolved)) claimed.Add(resolved);
                 // OrdinalIgnoreCase: Windows paths are case-insensitive and
                 // macOS volumes usually are too. Two real projects differing
                 // only by case is not a case worth breaking the common one for.
-                if (string.Equals(NormalizeForCompare(raw), target,
+                if (string.Equals(NormalizeForCompare(resolved), target,
                         StringComparison.OrdinalIgnoreCase))
                 {
                     matched = true;
                 }
                 else if (foreign == null)
                 {
-                    foreign = raw;
+                    foreign = resolved;
                 }
             }
 
@@ -193,13 +214,77 @@ namespace UnityOpenMcpBridge.Update
         }
 
         /// <summary>
-        /// True for a value that names a concrete folder on this machine. A
-        /// portable config spells the project through the client
-        /// (<c>${workspaceFolder}/Client</c>), a wrapper script through a shell
-        /// variable (<c>${project_path}</c>), or relative to the spawn
-        /// directory (<c>Client</c>) — none of those can be compared with this
-        /// project's absolute path, and treating them as a foreign project
-        /// would stop the updater from ever moving a committed config's pin.
+        /// Every project folder the body claims, resolved to an absolute path
+        /// in first-seen order: each <c>UNITY_PROJECT_PATH</c> value
+        /// (absolute, or portable and anchored at
+        /// <paramref name="workspaceRoot"/>), then the args-form flags, then
+        /// the wrapper's baked subfolder. Values that cannot be resolved are
+        /// left out — they neither claim nor disown the file.
+        /// </summary>
+        private static IEnumerable<string> CollectClaims(string body, string workspaceRoot)
+        {
+            foreach (Match m in ProjectPathPattern.Matches(body))
+            {
+                var resolved = ResolveClaim(m.Groups[1].Value, workspaceRoot);
+                if (resolved != null) yield return resolved;
+            }
+            if (string.IsNullOrEmpty(workspaceRoot)) yield break;
+
+            var sawSubpath = false;
+            foreach (Match m in UnitySubpathArgPattern.Matches(body))
+            {
+                sawSubpath = true;
+                yield return JoinWorkspace(workspaceRoot, m.Groups[1].Value);
+            }
+            // `--project-from-cwd` alone: the workspace root is the project.
+            // With a subpath the flag adds nothing — the server's fallback to
+            // cwd only applies when the subfolder is not a Unity project, and
+            // the config still asks for the subfolder.
+            if (!sawSubpath && ProjectFromCwdArgPattern.IsMatch(body))
+            {
+                yield return workspaceRoot;
+            }
+            foreach (Match m in WrapperSubpathPattern.Matches(body))
+            {
+                yield return JoinWorkspace(workspaceRoot, m.Groups[1].Value);
+            }
+        }
+
+        /// <summary>
+        /// Absolute folder a <c>UNITY_PROJECT_PATH</c> value names, or
+        /// <c>null</c> when it cannot be resolved: a portable value with no
+        /// workspace root to anchor it, or a shell variable the file expands
+        /// itself (<c>${project_path}</c> in the wrapper, <c>$HOME/…</c>).
+        /// </summary>
+        internal static string ResolveClaim(string raw, string workspaceRoot)
+        {
+            if (string.IsNullOrEmpty(raw)) return null;
+            if (IsMachinePath(raw)) return raw;
+            if (string.IsNullOrEmpty(workspaceRoot)) return null;
+            if (raw.StartsWith(McpClientCatalog.WorkspaceFolderVar, StringComparison.Ordinal))
+            {
+                var rest = raw.Substring(McpClientCatalog.WorkspaceFolderVar.Length);
+                if (rest.Length == 0) return workspaceRoot;
+                if (rest[0] != '/' && rest[0] != '\\') return null;
+                return JoinWorkspace(workspaceRoot, rest.Substring(1));
+            }
+            if (raw.IndexOf('$') >= 0) return null;
+            // Relative: the server resolves it against the spawn directory,
+            // which for a committed config is the workspace root.
+            return JoinWorkspace(workspaceRoot, raw);
+        }
+
+        private static string JoinWorkspace(string workspaceRoot, string relative)
+        {
+            var root = workspaceRoot.Replace('\\', '/').TrimEnd('/');
+            var rel = relative.Replace('\\', '/').Trim('/');
+            return rel.Length == 0 ? root : root + "/" + rel;
+        }
+
+        /// <summary>
+        /// True for a value that names a concrete folder on this machine, as
+        /// opposed to a portable form (<c>${workspaceFolder}/Client</c>,
+        /// <c>Client</c>) or a shell variable (<c>${project_path}</c>).
         /// </summary>
         internal static bool IsMachinePath(string raw)
         {

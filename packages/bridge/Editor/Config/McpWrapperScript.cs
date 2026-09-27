@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 
 namespace UnityOpenMcpBridge.Config
 {
@@ -67,8 +68,14 @@ exec npx -y ""unity-open-mcp@__UNITY_OPEN_MCP_VERSION__"" ""$@""
         internal static string Render(string version, string wrapperRelativePath, string unitySubpath)
         {
             var depth = wrapperRelativePath.Split('/').Length - 1;
-            var upward = depth > 0 ? string.Join("/", Repeat("..", depth)) : ".";
+            var upward = depth > 0 ? string.Join("/", Enumerable.Repeat("..", depth)) : ".";
+            // The template is a verbatim literal, so it carries whatever line
+            // endings this source file was checked out with. A CRLF checkout
+            // (Windows, core.autocrlf) must not leak into a bash script: bash
+            // rejects `set -euo pipefail\r`, and once committed the script
+            // would break on every machine.
             return Template
+                .Replace("\r\n", "\n")
                 .Replace("__WORKSPACE_FROM_SCRIPT__", upward)
                 .Replace("__UNITY_SUBPATH__", (unitySubpath ?? "").Replace('\\', '/'))
                 .Replace("__UNITY_ROOT_MARKERS__", UnityRootMarkers)
@@ -82,13 +89,6 @@ exec npx -y ""unity-open-mcp@__UNITY_OPEN_MCP_VERSION__"" ""$@""
             var pin = BridgeConstants.NpmPackage;
             var at = pin.LastIndexOf('@');
             return at > 0 ? pin.Substring(at + 1) : pin;
-        }
-
-        private static string[] Repeat(string value, int count)
-        {
-            var parts = new string[count];
-            for (var i = 0; i < count; i++) parts[i] = value;
-            return parts;
         }
     }
 }

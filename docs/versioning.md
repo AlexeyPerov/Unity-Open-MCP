@@ -94,10 +94,12 @@ file changes.
 
 Home-scoped files are updated only when their `UNITY_PROJECT_PATH` (or
 deterministic bridge port) identifies this project and the file does not also
-configure another project. Project-scoped files are claimed by location, so a
+configure another project. Project-scoped files are claimed by location, and a
 committed [portable config](setup/portable-config.md) — a `${workspaceFolder}`
 or relative project path, an args-only entry, or the committed wrapper script —
-is updated too. Config and prose files receive a one-time `.bak`
+is resolved against the directory it was found under, so it is updated when it
+names this project and skipped when it names a sibling Unity project of the
+same repository. Config and prose files receive a one-time `.bak`
 before their first write. The package step uses one Unity Package Manager
 request for verify and bridge; it is disabled for embedded or `file:`
 development installs so the updater cannot replace a checkout. After applying,

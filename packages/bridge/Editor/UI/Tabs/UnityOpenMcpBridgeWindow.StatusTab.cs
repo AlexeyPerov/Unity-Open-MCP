@@ -942,8 +942,7 @@ namespace UnityOpenMcpBridge
         private static void DrawConfigureClientWrapperRow(
             UnityOpenMcpBridge.Config.McpClientCatalog.PortablePlacement placement)
         {
-            var wrapperPath = Path.Combine(placement.WorkspaceRoot, placement.WrapperRelativePath)
-                .Replace('\\', '/');
+            var wrapperPath = placement.WrapperAbsolutePath;
             var exists = File.Exists(wrapperPath);
             EditorGUILayout.HelpBox(
                 "This client cannot name the project in its config, so it runs a committed wrapper " +

@@ -218,8 +218,8 @@ npx -y unity-open-mcp@latest setup \
 ## 在 Unity 编辑器中
 
 **Tools → Unity Open MCP Bridge → Status → Configure AI client** 提供
-**Commit-safe config** 开关。当 Unity 项目位于 git 仓库内时默认开启，目标文件
-指向仓库根目录。开启后，片段中既没有本机路径，也没有 bridge 端口：
+**Commit-safe config** 开关。当 Unity 项目位于 git 仓库内（作为子目录，或项目本身
+就是仓库）时默认开启，目标文件指向仓库根目录。开启后，片段中既没有本机路径，也没有 bridge 端口：
 
 - 支持 `${workspaceFolder}` 的客户端（Cursor 项目配置、VS Code、Visual
   Studio）得到插值后的 `UNITY_PROJECT_PATH`；
@@ -230,16 +230,18 @@ npx -y unity-open-mcp@latest setup \
 
 只读取机器级配置的客户端（Claude Desktop、Cline、Antigravity，以及全局的
 Cursor/OpenCode/ZCode）保持绝对路径形式，面板会给出说明。Hub 设置向导中的
-**Commit-safe config** 选项在检测到 Unity 项目上方有仓库时同样默认开启。
+**Commit-safe config** 选项在 Unity 项目所在目录或其上方检测到仓库时同样默认开启。
 
 ## 保持版本号最新
 
 已提交的条目仍然固定版本（`unity-open-mcp@1.3.0`），它必须与
 `Packages/manifest.json` 中的 bridge 与 verify 版本一起更新。bridge 窗口的
-**Updates** 流程把可移植条目视为所在仓库对应项目的条目：`${workspaceFolder}`
-或相对路径形式的 `UNITY_PROJECT_PATH`、仅命令参数的条目，以及已提交的包装
-脚本（`scripts/mcp/unity-open-mcp.sh` 或 `.unity-open-mcp/mcp-wrapper.sh`）
-都会被改写。请把更新后的文件一起提交。
+**Updates** 流程会以配置文件所在目录（工作区根目录）为基准解析可移植条目，并改写
+指向本项目的条目：`${workspaceFolder}` 或相对路径形式的 `UNITY_PROJECT_PATH`、
+`--project-from-cwd [--unity-subpath …]`，以及已提交的包装脚本
+（`scripts/mcp/unity-open-mcp.sh` 或 `.unity-open-mcp/mcp-wrapper.sh`）及其
+内置的默认子目录。指向同一仓库中另一个 Unity 项目的条目会像其他外部条目一样
+保持不动。请把更新后的文件一起提交。
 
 ## 同事克隆之后
 

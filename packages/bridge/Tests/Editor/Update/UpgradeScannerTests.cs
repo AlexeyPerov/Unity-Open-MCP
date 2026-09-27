@@ -107,6 +107,24 @@ namespace UnityOpenMcpBridge.Tests
                 new[] { _repo + "/scripts/mcp/unity-open-mcp.sh", _project + "/.unity-open-mcp/mcp-wrapper.sh" },
                 wrappers.Select(c => c.Path).ToArray());
             Assert.IsTrue(wrappers.All(c => c.Kind == CandidateKind.ProjectConfig && !c.IsHomeScoped));
+            // Each wrapper resolves the workspace from its own location: the
+            // directory the scan found it under.
+            Assert.AreEqual(_repo, wrappers.Single(c => c.Path.StartsWith(_repo + "/scripts")).WorkspaceRoot);
+            Assert.AreEqual(_project, wrappers.Single(c => c.Path.StartsWith(_project + "/.unity")).WorkspaceRoot);
+        }
+
+        [Test]
+        public void Collect_ProjectConfigsRememberTheDirectoryTheyWereFoundUnder()
+        {
+            // The workspace root anchors a config's portable project markers
+            // (`${workspaceFolder}/Client`, `--unity-subpath Client`).
+            var cursor = UpgradeScanner.Collect(_project, All)
+                .Single(c => c.Path == _repo + "/.cursor/mcp.json");
+            Assert.AreEqual(_repo, cursor.WorkspaceRoot);
+
+            var home = UpgradeScanner.Collect(_project, All)
+                .Single(c => c.Path == _home + "/.cursor/mcp.json");
+            Assert.IsNull(home.WorkspaceRoot, "A home-scoped file has no workspace to anchor to.");
         }
 
         [Test]

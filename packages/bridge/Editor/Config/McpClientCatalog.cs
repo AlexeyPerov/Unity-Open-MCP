@@ -192,6 +192,11 @@ namespace UnityOpenMcpBridge.Config
             /// <summary>Committed wrapper path relative to <see cref="WorkspaceRoot"/>.</summary>
             public string WrapperRelativePath =>
                 UnitySubpath.Length > 0 ? MonorepoWrapperPath : UnityRootWrapperPath;
+
+            /// <summary>On-disk wrapper path (forward slashes), the file the
+            /// Configure panel writes and the wrapper snippet runs.</summary>
+            public string WrapperAbsolutePath =>
+                Path.Combine(WorkspaceRoot, WrapperRelativePath).Replace('\\', '/');
         }
 
         /// <summary>
@@ -433,8 +438,31 @@ namespace UnityOpenMcpBridge.Config
         {
             var sb = new StringBuilder("claude mcp add --scope project ");
             sb.Append(ServerKey).Append(" -- ").Append(command);
-            foreach (var a in args) sb.Append(' ').Append(a);
+            foreach (var a in args) sb.Append(' ').Append(ShellQuote(a));
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Quote one argument for the shell the operator pastes the command
+        /// into: a Unity subfolder with a space (<c>My Client</c>) must stay
+        /// one <c>--unity-subpath</c> value. Double quotes are understood by
+        /// POSIX shells, PowerShell and cmd alike; anything without whitespace
+        /// or quotes is left bare so the common case reads as documented.
+        /// </summary>
+        internal static string ShellQuote(string arg)
+        {
+            if (string.IsNullOrEmpty(arg)) return "\"\"";
+            var needsQuotes = false;
+            foreach (var c in arg)
+            {
+                if (char.IsWhiteSpace(c) || c == '"')
+                {
+                    needsQuotes = true;
+                    break;
+                }
+            }
+            if (!needsQuotes) return arg;
+            return "\"" + arg.Replace("\"", "\\\"") + "\"";
         }
 
         /// <summary>

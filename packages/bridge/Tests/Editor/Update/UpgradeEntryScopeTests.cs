@@ -177,21 +177,61 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(Ownership.Unknown, UpgradeEntryScope.Classify(null, Project).Kind);
         }
 
-        // ---- portable entries: no machine path to compare -------------------
+        // ---- portable entries: anchored at the workspace root ---------------
 
-        [Test]
-        public void Classify_WorkspaceFolderEntry_IsUnknownAndRewrittenInProject()
+        private const string Repo = "/Users/dev/repo";
+        private const string Sibling = Repo + "/ClientB";
+
+        private static string WorkspaceFolderEntry(string subpath)
         {
-            // A committed Cursor config names the Unity folder through the
-            // client's workspace variable. It is not "another project": inside
-            // the repository its location is the ownership claim.
-            var body =
+            return
                 "{\n  \"mcpServers\": {\n    \"unity-open-mcp\": {\n" +
                 "      \"command\": \"npx\",\n" +
                 "      \"args\": [\"-y\", \"unity-open-mcp@1.3.0\"],\n" +
-                "      \"env\": { \"UNITY_PROJECT_PATH\": \"${workspaceFolder}/Client\" }\n" +
+                "      \"env\": { \"UNITY_PROJECT_PATH\": \"${workspaceFolder}/" + subpath + "\" }\n" +
                 "    }\n  }\n}";
-            var scope = UpgradeEntryScope.Classify(body, Project);
+        }
+
+        [Test]
+        public void Classify_WorkspaceFolderEntry_ResolvesAgainstTheWorkspaceRoot()
+        {
+            // A committed Cursor config at <repo>/.cursor/mcp.json names the
+            // Unity folder through the client's workspace variable; the
+            // directory it was found under is that workspace.
+            var scope = UpgradeEntryScope.Classify(WorkspaceFolderEntry("Client"), Project, Repo);
+
+            Assert.AreEqual(Ownership.Matched, scope.Kind);
+            CollectionAssert.AreEqual(new[] { Project }, scope.ProjectPaths);
+            Assert.IsFalse(scope.ViaPort);
+        }
+
+        [Test]
+        public void Classify_WorkspaceFolderEntryOfASiblingProject_IsForeign()
+        {
+            // Two Unity projects in one repository: ClientB's Editor must not
+            // move ClientA's committed pin.
+            var scope = UpgradeEntryScope.Classify(WorkspaceFolderEntry("Client"), Sibling, Repo);
+
+            Assert.AreEqual(Ownership.OtherProject, scope.Kind);
+            CollectionAssert.AreEqual(new[] { Project }, scope.ProjectPaths);
+            Assert.IsFalse(UpgradeEntryScope.ShouldRewrite(scope, isHomeScoped: false));
+        }
+
+        [Test]
+        public void Classify_BareWorkspaceFolder_IsTheWorkspaceRoot()
+        {
+            var body = "\"UNITY_PROJECT_PATH\": \"${workspaceFolder}\"";
+            Assert.AreEqual(Ownership.Matched, UpgradeEntryScope.Classify(body, Repo, Repo).Kind);
+            Assert.AreEqual(Ownership.OtherProject, UpgradeEntryScope.Classify(body, Project, Repo).Kind);
+        }
+
+        [Test]
+        public void Classify_WorkspaceFolderEntryWithoutARoot_IsUnknownAndRewrittenInProject()
+        {
+            // No workspace root to anchor the value (a caller that only has
+            // the body): the entry claims nothing, and inside the repository
+            // the file's location is the ownership claim.
+            var scope = UpgradeEntryScope.Classify(WorkspaceFolderEntry("Client"), Project);
 
             Assert.AreEqual(Ownership.Unknown, scope.Kind);
             Assert.IsEmpty(scope.ProjectPaths);
@@ -199,30 +239,87 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
-        public void Classify_WrapperScriptExport_IsUnknown()
-        {
-            var body =
-                "export UNITY_PROJECT_PATH=\"${project_path}\"\n" +
-                "exec npx -y \"unity-open-mcp@1.3.0\" \"$@\"\n";
-            Assert.AreEqual(Ownership.Unknown, UpgradeEntryScope.Classify(body, Project).Kind);
-        }
-
-        [Test]
-        public void Classify_RelativeProjectPath_IsUnknown()
+        public void Classify_RelativeProjectPath_ResolvesAgainstTheWorkspaceRoot()
         {
             var body = "\"UNITY_PROJECT_PATH\": \"Client\"";
+            Assert.AreEqual(Ownership.Matched, UpgradeEntryScope.Classify(body, Project, Repo).Kind);
+            Assert.AreEqual(Ownership.OtherProject, UpgradeEntryScope.Classify(body, Sibling, Repo).Kind);
             Assert.AreEqual(Ownership.Unknown, UpgradeEntryScope.Classify(body, Project).Kind);
         }
 
         [Test]
-        public void Classify_PortableEntryNextToForeignProject_StaysForeign()
+        public void Classify_UnitySubpathArg_ResolvesAgainstTheWorkspaceRoot()
         {
-            // The portable entry claims nothing, so the absolute foreign entry
-            // still decides — and a foreign file is never rewritten.
+            // The args form (Gemini, Claude Code's .mcp.json, OpenCode …):
+            // no env at all, the subfolder rides in the launch arguments.
+            var body =
+                "\"args\": [\"-y\", \"unity-open-mcp@1.3.0\", \"--project-from-cwd\", \"--unity-subpath\", \"Client\"],\n" +
+                "\"env\": {}";
+            var scope = UpgradeEntryScope.Classify(body, Project, Repo);
+            Assert.AreEqual(Ownership.Matched, scope.Kind);
+            CollectionAssert.AreEqual(new[] { Project }, scope.ProjectPaths);
+            Assert.AreEqual(Ownership.OtherProject, UpgradeEntryScope.Classify(body, Sibling, Repo).Kind);
+        }
+
+        [Test]
+        public void Classify_ProjectFromCwdAlone_ClaimsTheWorkspaceRoot()
+        {
+            var body = "\"args\": [\"-y\", \"unity-open-mcp@1.3.0\", \"--project-from-cwd\"]";
+            Assert.AreEqual(Ownership.Matched, UpgradeEntryScope.Classify(body, Repo, Repo).Kind);
+            Assert.AreEqual(Ownership.OtherProject, UpgradeEntryScope.Classify(body, Project, Repo).Kind);
+        }
+
+        [Test]
+        public void Classify_WrapperScript_ResolvesItsBakedSubpath()
+        {
+            // The committed wrapper exports a shell variable (unresolvable)
+            // but bakes the Unity subfolder it defaults to.
+            var body =
+                "subpath=\"${UNITY_SUBPATH-Client}\"\n" +
+                "export UNITY_PROJECT_PATH=\"${project_path}\"\n" +
+                "exec npx -y \"unity-open-mcp@1.3.0\" \"$@\"\n";
+            var scope = UpgradeEntryScope.Classify(body, Project, Repo);
+            Assert.AreEqual(Ownership.Matched, scope.Kind);
+            CollectionAssert.AreEqual(new[] { Project }, scope.ProjectPaths);
+            Assert.AreEqual(Ownership.OtherProject, UpgradeEntryScope.Classify(body, Sibling, Repo).Kind);
+            Assert.AreEqual(Ownership.Unknown, UpgradeEntryScope.Classify(body, Project).Kind);
+        }
+
+        [Test]
+        public void Classify_UnityRootWrapper_ClaimsTheWorkspaceRoot()
+        {
+            var body = "subpath=\"${UNITY_SUBPATH-}\"\nexport UNITY_PROJECT_PATH=\"${project_path}\"\n";
+            Assert.AreEqual(Ownership.Matched, UpgradeEntryScope.Classify(body, Repo, Repo).Kind);
+        }
+
+        [Test]
+        public void Classify_PortableEntryNextToForeignProject_IsMixed()
+        {
+            // Our resolved portable entry plus an absolute foreign one share
+            // the file — a whole-file rewrite would move both, so skip.
             var body =
                 "\"UNITY_PROJECT_PATH\": \"${workspaceFolder}/Client\"\n" +
                 "\"UNITY_PROJECT_PATH\": \"" + Other + "\"";
+            Assert.AreEqual(Ownership.Mixed, UpgradeEntryScope.Classify(body, Project, Repo).Kind);
+            // Without a root the portable entry claims nothing and the
+            // foreign entry decides.
             Assert.AreEqual(Ownership.OtherProject, UpgradeEntryScope.Classify(body, Project).Kind);
+        }
+
+        [Test]
+        public void ResolveClaim_HandlesEveryForm()
+        {
+            Assert.AreEqual(Other, UpgradeEntryScope.ResolveClaim(Other, Repo));
+            Assert.AreEqual(Other, UpgradeEntryScope.ResolveClaim(Other, null));
+            Assert.AreEqual(Repo + "/Client", UpgradeEntryScope.ResolveClaim("${workspaceFolder}/Client", Repo));
+            Assert.AreEqual(Repo + "/Client", UpgradeEntryScope.ResolveClaim("${workspaceFolder}\\Client", Repo + "/"));
+            Assert.AreEqual(Repo, UpgradeEntryScope.ResolveClaim("${workspaceFolder}", Repo));
+            Assert.AreEqual(Repo + "/Client", UpgradeEntryScope.ResolveClaim("Client", Repo));
+            Assert.IsNull(UpgradeEntryScope.ResolveClaim("${workspaceFolder}Client", Repo));
+            Assert.IsNull(UpgradeEntryScope.ResolveClaim("${project_path}", Repo));
+            Assert.IsNull(UpgradeEntryScope.ResolveClaim("$HOME/game", Repo));
+            Assert.IsNull(UpgradeEntryScope.ResolveClaim("Client", null));
+            Assert.IsNull(UpgradeEntryScope.ResolveClaim("", Repo));
         }
 
         [Test]

@@ -62,12 +62,19 @@ namespace UnityOpenMcpBridge.Update
             /// <summary>Catalog id of the client this file configures;
             /// <c>null</c> for prose.</summary>
             public readonly string ClientId;
+            /// <summary>For a project config: the directory it was found
+            /// under — the workspace an AI client opens on it, and the root a
+            /// committed wrapper resolves to. Anchors the file's portable
+            /// project markers in <see cref="UpgradeEntryScope.Classify"/>.
+            /// <c>null</c> for every other kind.</summary>
+            public readonly string WorkspaceRoot;
 
-            public Candidate(string path, CandidateKind kind, string clientId)
+            public Candidate(string path, CandidateKind kind, string clientId, string workspaceRoot = null)
             {
                 Path = path;
                 Kind = kind;
                 ClientId = clientId;
+                WorkspaceRoot = workspaceRoot;
             }
 
             /// <summary>Home-scoped files are shared across every project on
@@ -167,13 +174,14 @@ namespace UnityOpenMcpBridge.Update
         /// and the Unity-project-is-the-repository form. A wrapper-backed
         /// client config names only the script, so the npm pin lives here —
         /// skipping it would leave every such client on the old server.
-        /// Kept equal to <c>wrapperRelativePath</c> in
-        /// <c>mcp-server/src/setup/portable-config.ts</c>.
+        /// The catalog owns the two locations (its Configure panel writes
+        /// them); <c>wrapperRelativePath</c> in
+        /// <c>mcp-server/src/setup/portable-config.ts</c> spells the same pair.
         /// </summary>
         internal static readonly string[] WrapperScriptRelativePaths =
         {
-            "scripts/mcp/unity-open-mcp.sh",
-            ".unity-open-mcp/mcp-wrapper.sh",
+            McpClientCatalog.MonorepoWrapperPath,
+            McpClientCatalog.UnityRootWrapperPath,
         };
 
         /// <summary>Catalog-style id reported for a wrapper candidate.</summary>
@@ -200,21 +208,25 @@ namespace UnityOpenMcpBridge.Update
 
             if (options.ProjectConfigs)
             {
+                // Same walk as McpClientCatalog.ResolveSearchPaths, spelled
+                // out so each candidate remembers the directory it came from.
                 foreach (var client in McpClientCatalog.Clients)
                 {
                     if (!client.IsFileBacked) continue;
                     if (client.ScopeKind != McpClientCatalog.Scope.Project) continue;
-                    foreach (var path in McpClientCatalog.ResolveSearchPaths(
-                                 client, projectPath, options.HomeOverride, options.MaxAncestorLevels))
+                    if (client.PathTemplate == null) continue;
+                    foreach (var dir in dirs)
                     {
-                        Add(found, seen, path, CandidateKind.ProjectConfig, client.Id);
+                        Add(found, seen, Combine(dir, client.PathTemplate),
+                            CandidateKind.ProjectConfig, client.Id, dir);
                     }
                 }
                 foreach (var dir in dirs)
                 {
                     foreach (var relative in WrapperScriptRelativePaths)
                     {
-                        Add(found, seen, Combine(dir, relative), CandidateKind.ProjectConfig, WrapperClientId);
+                        Add(found, seen, Combine(dir, relative),
+                            CandidateKind.ProjectConfig, WrapperClientId, dir);
                     }
                 }
             }
@@ -277,13 +289,14 @@ namespace UnityOpenMcpBridge.Update
         // by more than one catalog row); the first claim wins so the report
         // never lists the same path twice.
         private static void Add(
-            List<Candidate> found, HashSet<string> seen, string path, CandidateKind kind, string clientId)
+            List<Candidate> found, HashSet<string> seen, string path, CandidateKind kind, string clientId,
+            string workspaceRoot = null)
         {
             if (string.IsNullOrEmpty(path)) return;
             var normalized = path.Replace('\\', '/');
             if (!seen.Add(normalized)) return;
             if (!FileExists(normalized)) return;
-            found.Add(new Candidate(normalized, kind, clientId));
+            found.Add(new Candidate(normalized, kind, clientId, workspaceRoot));
         }
 
         // A candidate path is user-controlled (it can be long, malformed, or on

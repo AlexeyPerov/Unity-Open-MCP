@@ -293,7 +293,9 @@ export function resolveWrapperTemplatePath(): string {
 }
 
 function readWrapperTemplate(): string {
-  return readFileSync(resolveWrapperTemplatePath(), "utf8");
+  // A CRLF checkout (Windows, core.autocrlf) must not leak into a bash
+  // script: bash rejects `set -euo pipefail\r`.
+  return readFileSync(resolveWrapperTemplatePath(), "utf8").replace(/\r\n/g, "\n");
 }
 
 function toPosix(relative: string): string {
