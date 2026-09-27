@@ -46,7 +46,9 @@ namespace UnityOpenMcpBridge.Update
             OtherProject,
             /// <summary>This project and at least one other share the file.</summary>
             Mixed,
-            /// <summary>No project marker found (no env, no matching port).</summary>
+            /// <summary>No project marker found (no env, no matching port) —
+            /// including a portable entry whose project env is a workspace
+            /// variable or a relative path.</summary>
             Unknown,
         }
 
@@ -127,6 +129,9 @@ namespace UnityOpenMcpBridge.Update
             {
                 var raw = m.Groups[1].Value;
                 if (string.IsNullOrEmpty(raw)) continue;
+                // A committed, machine-independent value names no project on
+                // disk, so it can neither claim nor disown this file.
+                if (!IsMachinePath(raw)) continue;
                 if (!claimed.Contains(raw)) claimed.Add(raw);
                 // OrdinalIgnoreCase: Windows paths are case-insensitive and
                 // macOS volumes usually are too. Two real projects differing
@@ -185,6 +190,22 @@ namespace UnityOpenMcpBridge.Update
             }
 
             return new ScopeResult(Ownership.Unknown, new string[0], false);
+        }
+
+        /// <summary>
+        /// True for a value that names a concrete folder on this machine. A
+        /// portable config spells the project through the client
+        /// (<c>${workspaceFolder}/Client</c>), a wrapper script through a shell
+        /// variable (<c>${project_path}</c>), or relative to the spawn
+        /// directory (<c>Client</c>) — none of those can be compared with this
+        /// project's absolute path, and treating them as a foreign project
+        /// would stop the updater from ever moving a committed config's pin.
+        /// </summary>
+        internal static bool IsMachinePath(string raw)
+        {
+            if (string.IsNullOrEmpty(raw) || raw.IndexOf('$') >= 0) return false;
+            if (raw[0] == '/' || raw[0] == '\\') return true;
+            return raw.Length >= 2 && raw[1] == ':' && char.IsLetter(raw[0]);
         }
 
         // Path comparison form. On top of the shared normalization (backslash

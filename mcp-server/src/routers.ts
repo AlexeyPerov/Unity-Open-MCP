@@ -15,6 +15,7 @@ import { BridgeEventStream } from "./event-stream.js";
 import { resolvePort, resolveAuthToken } from "./instance-discovery.js";
 import { ToolSessionState } from "./tool-session-state.js";
 import {
+  isUnityProjectRoot,
   ProjectPathError,
   resolveProjectPath,
   type ProjectPathSource,
@@ -73,6 +74,7 @@ export function resolveEnv(
       cwd: process.cwd(),
       projectFromCwd: options.projectFromCwd,
       unitySubpath: options.unitySubpath,
+      isUnityRoot: isUnityProjectRoot,
     });
   } catch (err) {
     throw new ResolveEnvError(

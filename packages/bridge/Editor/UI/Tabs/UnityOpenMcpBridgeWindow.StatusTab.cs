@@ -719,12 +719,18 @@ namespace UnityOpenMcpBridge
             var command = "npx";
             var args = new[] { "-y", BridgeConstants.NpmPackage };
 
+            // Commit-safe form: no machine path, no bridge port. Offered for
+            // every client that has one; on by default inside a repository.
+            var workspaceRoot = ConfigureClientWorkspaceRoot(projectPath);
+            var placement = DrawConfigureClientPortableToggle(client, projectPath, workspaceRoot);
+
             // Regenerate the snippet + target path on every repaint so it
             // always reflects the current client + project.
             _configureClientSnippet =
-                UnityOpenMcpBridge.Config.McpClientCatalog.BuildSnippet(client, projectPath, port, command, args);
-            _configureClientTargetPath =
-                UnityOpenMcpBridge.Config.McpClientCatalog.ResolveDisplayPath(client, projectPath) ?? "";
+                UnityOpenMcpBridge.Config.McpClientCatalog.BuildSnippet(client, projectPath, port, command, args, placement);
+            _configureClientTargetPath = placement.HasValue
+                ? UnityOpenMcpBridge.Config.McpClientCatalog.ResolvePortableTargetPath(client, placement.Value) ?? ""
+                : UnityOpenMcpBridge.Config.McpClientCatalog.ResolveDisplayPath(client, projectPath) ?? "";
 
             // Configured-state check: read the candidate files (when
             // file-backed) and look for our server key under the client's merge
@@ -784,6 +790,13 @@ namespace UnityOpenMcpBridge
                     EditorGUILayout.EndHorizontal();
                 }
             }
+            else if (client.IsCliOnly && placement.HasValue)
+            {
+                EditorGUILayout.HelpBox(
+                    "Run the `claude mcp add` command below from " + placement.Value.WorkspaceRoot +
+                    ". `--scope project` writes the entry to .mcp.json there — commit that file.",
+                    MessageType.Info);
+            }
             else if (client.IsCliOnly)
             {
                 EditorGUILayout.HelpBox(
@@ -797,6 +810,12 @@ namespace UnityOpenMcpBridge
                     "Manual / custom — copy the snippet below and paste it into your client's " +
                     "config under the appropriate merge key.",
                     MessageType.Info);
+            }
+
+            if (placement.HasValue
+                && placement.Value.Strategy == UnityOpenMcpBridge.Config.McpClientCatalog.PortableStrategy.Wrapper)
+            {
+                DrawConfigureClientWrapperRow(placement.Value);
             }
 
             EditorGUILayout.LabelField("Snippet", EditorStyles.miniBoldLabel);
@@ -863,6 +882,112 @@ namespace UnityOpenMcpBridge
                 MessageType.None);
 
             EditorGUI.indentLevel--;
+        }
+
+        private string ConfigureClientWorkspaceRoot(string projectPath)
+        {
+            if (!string.Equals(_configureClientWorkspaceFor, projectPath, StringComparison.Ordinal))
+            {
+                _configureClientWorkspaceFor = projectPath;
+                _configureClientWorkspaceRoot =
+                    UnityOpenMcpBridge.Config.McpClientCatalog.FindWorkspaceRoot(projectPath);
+            }
+            return _configureClientWorkspaceRoot;
+        }
+
+        /// <summary>
+        /// Draw the commit-safe toggle and return the portable placement to
+        /// build the snippet with, or <c>null</c> for the absolute form. A client
+        /// without a portable form (a global config) gets a note instead of a
+        /// toggle, so the operator knows why the snippet names this machine.
+        /// </summary>
+        private UnityOpenMcpBridge.Config.McpClientCatalog.PortablePlacement? DrawConfigureClientPortableToggle(
+            UnityOpenMcpBridge.Config.McpClientCatalog.ClientEntry client,
+            string projectPath,
+            string workspaceRoot)
+        {
+            var candidate = UnityOpenMcpBridge.Config.McpClientCatalog.ResolvePortablePlacement(
+                client, projectPath, workspaceRoot);
+            if (!candidate.HasValue)
+            {
+                EditorGUILayout.HelpBox(
+                    client.DisplayName + " reads a machine-wide config, so its entry carries this " +
+                    "machine's absolute project path and bridge port. Pick a project-scoped client " +
+                    "for a config you can commit.",
+                    MessageType.None);
+                return null;
+            }
+
+            var enabled = EditorPrefs.HasKey(ConfigureClientPortablePref)
+                ? EditorPrefs.GetBool(ConfigureClientPortablePref)
+                : !string.IsNullOrEmpty(workspaceRoot);
+            var tooltip =
+                "Name the Unity project without this machine's path, so the config can be committed " +
+                "and works for every teammate after checkout. The entry goes to the repository root (" +
+                candidate.Value.WorkspaceRoot + ")" +
+                (candidate.Value.UnitySubpath.Length > 0
+                    ? " and points at " + candidate.Value.UnitySubpath + "/ inside it."
+                    : ".") +
+                " The bridge port is discovered at startup instead of pinned.";
+            var next = EditorGUILayout.ToggleLeft(new GUIContent("Commit-safe config", tooltip), enabled);
+            if (next != enabled) EditorPrefs.SetBool(ConfigureClientPortablePref, next);
+            return next ? candidate : null;
+        }
+
+        /// <summary>
+        /// Wrapper-backed clients (Codex, ZCode) run a committed script that
+        /// resolves the project from its own location. Show where it goes and
+        /// offer to write it, since the snippet is useless without it.
+        /// </summary>
+        private static void DrawConfigureClientWrapperRow(
+            UnityOpenMcpBridge.Config.McpClientCatalog.PortablePlacement placement)
+        {
+            var wrapperPath = Path.Combine(placement.WorkspaceRoot, placement.WrapperRelativePath)
+                .Replace('\\', '/');
+            var exists = File.Exists(wrapperPath);
+            EditorGUILayout.HelpBox(
+                "This client cannot name the project in its config, so it runs a committed wrapper " +
+                "script that resolves the Unity folder from its own location. Commit the script " +
+                "together with the config." + (exists ? "" : " The script does not exist yet."),
+                exists ? MessageType.None : MessageType.Warning);
+            EditorGUILayout.BeginHorizontal();
+            BridgeGUIUtilities.FieldLabel(
+                "Wrapper",
+                "Launch script the snippet runs, relative to the repository root.",
+                120);
+            EditorGUILayout.SelectableLabel(
+                wrapperPath,
+                EditorStyles.textField,
+                GUILayout.Height(EditorGUIUtility.singleLineHeight));
+            if (GUILayout.Button(new GUIContent(
+                    exists ? "Rewrite" : "Write",
+                    "Write the wrapper script for " + BridgeConstants.NpmPackage + ". Overwrites an " +
+                    "existing script at this path."),
+                GUILayout.Width(70)))
+            {
+                WriteWrapperScript(wrapperPath, placement);
+            }
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private static void WriteWrapperScript(
+            string wrapperPath, UnityOpenMcpBridge.Config.McpClientCatalog.PortablePlacement placement)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(wrapperPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                var body = UnityOpenMcpBridge.Config.McpWrapperScript.Render(
+                    UnityOpenMcpBridge.Config.McpWrapperScript.PinnedVersion(),
+                    placement.WrapperRelativePath,
+                    placement.UnitySubpath);
+                File.WriteAllText(wrapperPath, body);
+                Debug.Log($"[UnityOpenMcpBridge] Wrote MCP wrapper script {wrapperPath}.");
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"Could not write '{wrapperPath}': {e.Message}");
+            }
         }
 
         // M29 Plan 4 — reveal the resolved target file in the OS file browser

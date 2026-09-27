@@ -17,7 +17,7 @@
    不要清掉同级项。
 5. 重启 MCP 客户端以重新加载配置。
 
-服务器版本需与 bridge/verify 包锁定一致（下方为 `0.8.4`）。升级见
+服务器版本需与 bridge/verify 包锁定一致（下方为 `unity-open-mcp@1.3.0`）。升级见
 [版本管理](../../versioning.md)。首次 `npx` 启动可能需要 10–60 秒下载包；之后很快。
 
 ## 放在哪里
@@ -26,7 +26,7 @@
 |---|---|---|
 | Cursor | `<project>/.cursor/mcp.json` | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
 | Claude Desktop | OS 全局配置 | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
-| Claude Code | CLI（无文件） | [`Claude Code`](#claude-code) |
+| Claude Code | `<project>/.mcp.json`（项目范围）或 CLI | [`Claude Code`](#claude-code) |
 | VS Code Copilot | `<project>/.vscode/mcp.json` | [VS Code](#vs-code-与-visual-studio-copilot) |
 | Visual Studio Copilot | `<project>/.vs/mcp.json` | [VS Code](#vs-code-与-visual-studio-copilot) |
 | OpenCode | `<project>/opencode.json` | [OpenCode](#opencode) |
@@ -151,6 +151,11 @@ claude mcp add unity-open-mcp \
 ```
 
 若服务器已注册，当命令、版本锁定或项目路径需要变更时，请先移除再重新添加。
+
+不加 `--scope` 时，条目保存在该文件夹的用户级 Claude Code 配置中。
+`--scope project` 则写入 `<project>/.mcp.json`——这个文件通常会被提交，因此请使用
+[可移植 MCP 配置](portable-config.md#claude-code-及其他仅命令参数的客户端)中的可移植形式，
+而不是这里的绝对路径。
 
 ## 项目路径解析
 

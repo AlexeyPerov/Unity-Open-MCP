@@ -74,7 +74,8 @@ npx -y unity-open-mcp@latest setup \
   --layout monorepo --unity-subpath Client
 ```
 
-这是单体仓库的首选路径，优于让每位开发者各自修改绝对路径。细节与客户端矩阵见
+这是单体仓库的首选路径，优于让每位开发者各自修改绝对路径。若 Unity 项目本身
+就是仓库且配置会被提交，请改为在默认命令上加 `--portable`。细节与客户端矩阵见
 [可移植 MCP 配置](portable-config.md)。
 
 选项：`--dry-run` 只报告而不写文件；`--skip-skill` 不修改技能；

@@ -84,8 +84,9 @@ npx -y unity-open-mcp@latest setup \
 ```
 
 This is the happy path for a monorepo: prefer it over asking every developer to
-edit an absolute path. Details and the per-client matrix:
-[Portable MCP config](portable-config.md).
+edit an absolute path. When the Unity project IS the repository and the config
+will be committed, add `--portable` to the default command instead. Details and
+the per-client matrix: [Portable MCP config](portable-config.md).
 
 Useful options:
 

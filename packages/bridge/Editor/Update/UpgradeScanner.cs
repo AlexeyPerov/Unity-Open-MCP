@@ -42,7 +42,8 @@ namespace UnityOpenMcpBridge.Update
     {
         internal enum CandidateKind
         {
-            /// <summary>Client config inside the project or one of its ancestors.</summary>
+            /// <summary>Client config (or committed launch wrapper) inside the
+            /// project or one of its ancestors.</summary>
             ProjectConfig,
             /// <summary>Machine-wide client config under <c>$HOME</c>.</summary>
             HomeConfig,
@@ -160,6 +161,24 @@ namespace UnityOpenMcpBridge.Update
             "Packages/" + VersionPinRewriter.PackagesLockFileName,
         };
 
+        /// <summary>
+        /// Committed launch wrappers written by <c>unity-open-mcp setup
+        /// --wrapper</c>, relative to the workspace root: the monorepo form
+        /// and the Unity-project-is-the-repository form. A wrapper-backed
+        /// client config names only the script, so the npm pin lives here —
+        /// skipping it would leave every such client on the old server.
+        /// Kept equal to <c>wrapperRelativePath</c> in
+        /// <c>mcp-server/src/setup/portable-config.ts</c>.
+        /// </summary>
+        internal static readonly string[] WrapperScriptRelativePaths =
+        {
+            "scripts/mcp/unity-open-mcp.sh",
+            ".unity-open-mcp/mcp-wrapper.sh",
+        };
+
+        /// <summary>Catalog-style id reported for a wrapper candidate.</summary>
+        internal const string WrapperClientId = "wrapper";
+
         /// <summary>Suffix of a committed sample config (e.g.
         /// <c>.cursor/mcp.json.example</c>) — not read by any client, but
         /// copied by humans and agents, so a stale pin there propagates.</summary>
@@ -189,6 +208,13 @@ namespace UnityOpenMcpBridge.Update
                                  client, projectPath, options.HomeOverride, options.MaxAncestorLevels))
                     {
                         Add(found, seen, path, CandidateKind.ProjectConfig, client.Id);
+                    }
+                }
+                foreach (var dir in dirs)
+                {
+                    foreach (var relative in WrapperScriptRelativePaths)
+                    {
+                        Add(found, seen, Combine(dir, relative), CandidateKind.ProjectConfig, WrapperClientId);
                     }
                 }
             }

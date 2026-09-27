@@ -177,6 +177,67 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(Ownership.Unknown, UpgradeEntryScope.Classify(null, Project).Kind);
         }
 
+        // ---- portable entries: no machine path to compare -------------------
+
+        [Test]
+        public void Classify_WorkspaceFolderEntry_IsUnknownAndRewrittenInProject()
+        {
+            // A committed Cursor config names the Unity folder through the
+            // client's workspace variable. It is not "another project": inside
+            // the repository its location is the ownership claim.
+            var body =
+                "{\n  \"mcpServers\": {\n    \"unity-open-mcp\": {\n" +
+                "      \"command\": \"npx\",\n" +
+                "      \"args\": [\"-y\", \"unity-open-mcp@1.3.0\"],\n" +
+                "      \"env\": { \"UNITY_PROJECT_PATH\": \"${workspaceFolder}/Client\" }\n" +
+                "    }\n  }\n}";
+            var scope = UpgradeEntryScope.Classify(body, Project);
+
+            Assert.AreEqual(Ownership.Unknown, scope.Kind);
+            Assert.IsEmpty(scope.ProjectPaths);
+            Assert.IsTrue(UpgradeEntryScope.ShouldRewrite(scope, isHomeScoped: false));
+        }
+
+        [Test]
+        public void Classify_WrapperScriptExport_IsUnknown()
+        {
+            var body =
+                "export UNITY_PROJECT_PATH=\"${project_path}\"\n" +
+                "exec npx -y \"unity-open-mcp@1.3.0\" \"$@\"\n";
+            Assert.AreEqual(Ownership.Unknown, UpgradeEntryScope.Classify(body, Project).Kind);
+        }
+
+        [Test]
+        public void Classify_RelativeProjectPath_IsUnknown()
+        {
+            var body = "\"UNITY_PROJECT_PATH\": \"Client\"";
+            Assert.AreEqual(Ownership.Unknown, UpgradeEntryScope.Classify(body, Project).Kind);
+        }
+
+        [Test]
+        public void Classify_PortableEntryNextToForeignProject_StaysForeign()
+        {
+            // The portable entry claims nothing, so the absolute foreign entry
+            // still decides — and a foreign file is never rewritten.
+            var body =
+                "\"UNITY_PROJECT_PATH\": \"${workspaceFolder}/Client\"\n" +
+                "\"UNITY_PROJECT_PATH\": \"" + Other + "\"";
+            Assert.AreEqual(Ownership.OtherProject, UpgradeEntryScope.Classify(body, Project).Kind);
+        }
+
+        [Test]
+        public void IsMachinePath_RecognizesAbsoluteForms()
+        {
+            Assert.IsTrue(UpgradeEntryScope.IsMachinePath("/Users/dev/repo/Client"));
+            Assert.IsTrue(UpgradeEntryScope.IsMachinePath("C:\\\\work\\\\Client"));
+            Assert.IsTrue(UpgradeEntryScope.IsMachinePath("C:/work/Client"));
+            Assert.IsTrue(UpgradeEntryScope.IsMachinePath("\\\\\\\\server\\\\share"));
+            Assert.IsFalse(UpgradeEntryScope.IsMachinePath("${workspaceFolder}/Client"));
+            Assert.IsFalse(UpgradeEntryScope.IsMachinePath("$HOME/game"));
+            Assert.IsFalse(UpgradeEntryScope.IsMachinePath("Client"));
+            Assert.IsFalse(UpgradeEntryScope.IsMachinePath(""));
+        }
+
         // ---- ShouldRewrite: where the file lives decides the unknown case ---
 
         [Test]

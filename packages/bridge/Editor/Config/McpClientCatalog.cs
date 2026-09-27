@@ -123,13 +123,160 @@ namespace UnityOpenMcpBridge.Config
             public bool IsCliOnly => EnvelopeKind == Envelope.CliOnly;
         }
 
+        // --- commit-safe (portable) configuration ------------------------------
+        //
+        // A config committed to the repository cannot carry this machine's
+        // absolute project path or the bridge port hashed from it. Mirrors the
+        // Hub writer's `portable_strategy` and the `setup` CLI's client matrix
+        // (mcp-server/src/setup/portable-config.ts); keep the three in step.
+
+        /// <summary>How a client's entry can name the Unity project without a
+        /// machine path.</summary>
+        public enum PortableStrategy
+        {
+            /// <summary>No portable form: a global config outside any workspace.</summary>
+            Absolute,
+            /// <summary>The client expands <c>${workspaceFolder}</c> in env values.</summary>
+            Interpolation,
+            /// <summary>The server resolves the project from its spawn directory:
+            /// <c>--project-from-cwd [--unity-subpath &lt;rel&gt;]</c>.</summary>
+            Args,
+            /// <summary>A committed shell script resolves the project from its own
+            /// location (clients that support neither of the above).</summary>
+            Wrapper,
+        }
+
+        public const string WorkspaceFolderVar = "${workspaceFolder}";
+
+        /// <summary>Wrapper location relative to the workspace root when the
+        /// Unity project is a subfolder of the repository.</summary>
+        public const string MonorepoWrapperPath = "scripts/mcp/unity-open-mcp.sh";
+
+        /// <summary>Wrapper location when the Unity project IS the repository.</summary>
+        public const string UnityRootWrapperPath = ".unity-open-mcp/mcp-wrapper.sh";
+
+        public static PortableStrategy PortableStrategyFor(ClientEntry client)
+        {
+            if (client.ScopeKind == Scope.Global) return PortableStrategy.Absolute;
+            switch (client.Id)
+            {
+                case "cursor-project":
+                case "vscodeCopilot":
+                case "vsCopilot":
+                    return PortableStrategy.Interpolation;
+                case "codex":
+                case "zcodeProject":
+                    return PortableStrategy.Wrapper;
+                default:
+                    return PortableStrategy.Args;
+            }
+        }
+
+        /// <summary>Where a portable entry goes and how it names the Unity
+        /// folder: the workspace root the AI client is opened on, and the Unity
+        /// project relative to it (POSIX separators, empty when they are the
+        /// same folder).</summary>
+        public readonly struct PortablePlacement
+        {
+            public readonly PortableStrategy Strategy;
+            public readonly string WorkspaceRoot;
+            public readonly string UnitySubpath;
+
+            public PortablePlacement(PortableStrategy strategy, string workspaceRoot, string unitySubpath)
+            {
+                Strategy = strategy;
+                WorkspaceRoot = workspaceRoot;
+                UnitySubpath = unitySubpath ?? "";
+            }
+
+            /// <summary>Committed wrapper path relative to <see cref="WorkspaceRoot"/>.</summary>
+            public string WrapperRelativePath =>
+                UnitySubpath.Length > 0 ? MonorepoWrapperPath : UnityRootWrapperPath;
+        }
+
+        /// <summary>
+        /// Portable placement for <paramref name="client"/>, or <c>null</c> when
+        /// the entry must carry the absolute path after all: a global config, or
+        /// a Unity project outside <paramref name="workspaceRoot"/>. Unity AI
+        /// reads its config from inside the Unity project, so its workspace is
+        /// always that project.
+        /// </summary>
+        public static PortablePlacement? ResolvePortablePlacement(
+            ClientEntry client, string projectPath, string workspaceRoot)
+        {
+            var strategy = PortableStrategyFor(client);
+            if (strategy == PortableStrategy.Absolute || string.IsNullOrEmpty(projectPath)) return null;
+            var project = NormalizeDir(projectPath);
+            var workspace = client.Id == "unityAi" || string.IsNullOrEmpty(workspaceRoot)
+                ? project
+                : NormalizeDir(workspaceRoot);
+            var subpath = RelativeSubpath(workspace, project);
+            if (subpath == null) return null;
+            return new PortablePlacement(strategy, workspace, subpath);
+        }
+
+        /// <summary>
+        /// The repository root an AI client is usually opened on: the nearest
+        /// of the project folder and its ancestors (the same walk as
+        /// <see cref="ResolveSearchDirectories"/>) that holds a <c>.git</c>
+        /// entry. <c>null</c> when the project is not inside a repository.
+        /// <paramref name="hasRepoMarker"/> is a test seam.
+        /// </summary>
+        public static string FindWorkspaceRoot(
+            string projectPath, string homePath = null, Func<string, bool> hasRepoMarker = null)
+        {
+            var probe = hasRepoMarker ?? HasGitEntry;
+            foreach (var dir in ResolveSearchDirectories(projectPath, homePath))
+            {
+                if (probe(dir)) return dir;
+            }
+            return null;
+        }
+
+        private static bool HasGitEntry(string dir)
+        {
+            try
+            {
+                var git = Path.Combine(dir, ".git");
+                // A worktree or submodule checkout has a `.git` file, not a folder.
+                return Directory.Exists(git) || File.Exists(git);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        // `project` below `workspace` as a POSIX relative path; "" when equal,
+        // null when outside. Case-insensitive like the rest of the path math
+        // here (macOS and Windows volumes usually are).
+        private static string RelativeSubpath(string workspace, string project)
+        {
+            if (string.Equals(workspace, project, StringComparison.OrdinalIgnoreCase)) return "";
+            var prefix = workspace.EndsWith("/") ? workspace : workspace + "/";
+            if (!project.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+            return project.Substring(prefix.Length);
+        }
+
         /// <summary>
         /// Build the config snippet (JSON or TOML) for a client against the
         /// given project + port + launch command. Mirrors the Hub Rust
-        /// envelope builders so the bytes match the wizard's output.
+        /// envelope builders so the bytes match the wizard's output. With a
+        /// <paramref name="portable"/> placement the snippet carries no machine
+        /// path and no bridge port, so it can be committed.
         /// </summary>
-        public static string BuildSnippet(ClientEntry client, string unityProjectPath, int bridgePort, string command, IReadOnlyList<string> args)
+        public static string BuildSnippet(
+            ClientEntry client,
+            string unityProjectPath,
+            int bridgePort,
+            string command,
+            IReadOnlyList<string> args,
+            PortablePlacement? portable = null)
         {
+            if (portable.HasValue)
+            {
+                return BuildPortableSnippet(client, portable.Value, command, args);
+            }
             if (client.EnvelopeKind == Envelope.CliOnly)
             {
                 return ClaudeMcpAddCommand(unityProjectPath, bridgePort, command, args);
@@ -142,7 +289,7 @@ namespace UnityOpenMcpBridge.Config
             // Build the entry as a dictionary tree, then wrap it under the
             // merge key (handling nested keys like "mcp.servers") and
             // serialize once. Manual clients emit just the bare entry.
-            var entryFields = BuildEntryFields(client, unityProjectPath, bridgePort, command, args);
+            var entryFields = BuildEntryFields(client, EnvMap(unityProjectPath, bridgePort), command, args);
             if (client.EnvelopeKind == Envelope.Manual || string.IsNullOrEmpty(client.MergeKey))
             {
                 return SerializeJson(entryFields);
@@ -151,10 +298,53 @@ namespace UnityOpenMcpBridge.Config
             return BuildNestedJson(segments, ServerKey, entryFields);
         }
 
-        /// <summary>Build the entry as a dictionary tree (the leaf object).</summary>
-        private static Dictionary<string, object> BuildEntryFields(ClientEntry client, string project, int port, string command, IReadOnlyList<string> args)
+        private static string BuildPortableSnippet(
+            ClientEntry client, PortablePlacement placement, string command, IReadOnlyList<string> args)
         {
-            var env = EnvMap(project, port);
+            var env = new Dictionary<string, string>();
+            var launchArgs = new List<string>(args);
+            switch (placement.Strategy)
+            {
+                case PortableStrategy.Interpolation:
+                    env[BridgeConstants.ProjectPathEnvVar] = placement.UnitySubpath.Length > 0
+                        ? WorkspaceFolderVar + "/" + placement.UnitySubpath
+                        : WorkspaceFolderVar;
+                    break;
+                case PortableStrategy.Args:
+                    launchArgs.Add("--project-from-cwd");
+                    if (placement.UnitySubpath.Length > 0)
+                    {
+                        launchArgs.Add("--unity-subpath");
+                        launchArgs.Add(placement.UnitySubpath);
+                    }
+                    break;
+                case PortableStrategy.Wrapper:
+                    // The script exports UNITY_PROJECT_PATH and execs the
+                    // pinned package itself; the client only runs it.
+                    command = "bash";
+                    launchArgs = new List<string> { placement.WrapperRelativePath };
+                    break;
+            }
+
+            if (client.EnvelopeKind == Envelope.CliOnly)
+            {
+                return ClaudeMcpAddCommandPortable(command, launchArgs);
+            }
+            if (client.EnvelopeKind == Envelope.Codex)
+            {
+                return CodexTomlHeader(command, launchArgs);
+            }
+            var entryFields = BuildEntryFields(client, env, command, launchArgs);
+            if (client.EnvelopeKind == Envelope.Manual || string.IsNullOrEmpty(client.MergeKey))
+            {
+                return SerializeJson(entryFields);
+            }
+            return BuildNestedJson(client.MergeKey.Split('.'), ServerKey, entryFields);
+        }
+
+        /// <summary>Build the entry as a dictionary tree (the leaf object).</summary>
+        private static Dictionary<string, object> BuildEntryFields(ClientEntry client, Dictionary<string, string> env, string command, IReadOnlyList<string> args)
+        {
             var argsList = new List<object>();
             foreach (var a in args) argsList.Add(a);
             switch (client.EnvelopeKind)
@@ -231,6 +421,30 @@ namespace UnityOpenMcpBridge.Config
                 BridgeConstants.ProjectPathEnvVar, unityProjectPath,
                 BridgeConstants.PortEnvVar, bridgePort,
                 invocation);
+        }
+
+        /// <summary>
+        /// Portable <c>claude mcp add</c>: no env pairs, and
+        /// <c>--scope project</c> so Claude Code writes the workspace
+        /// <c>.mcp.json</c> the team commits. Matches the Hub Rust
+        /// <c>claude_mcp_add_command_portable</c>.
+        /// </summary>
+        public static string ClaudeMcpAddCommandPortable(string command, IReadOnlyList<string> args)
+        {
+            var sb = new StringBuilder("claude mcp add --scope project ");
+            sb.Append(ServerKey).Append(" -- ").Append(command);
+            foreach (var a in args) sb.Append(' ').Append(a);
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Target config file for a portable entry: the client's project
+        /// template under the workspace root. <c>null</c> for CLI/manual clients.
+        /// </summary>
+        public static string ResolvePortableTargetPath(ClientEntry client, PortablePlacement placement)
+        {
+            if (!client.IsFileBacked || client.PathTemplate == null) return null;
+            return Path.Combine(placement.WorkspaceRoot, client.PathTemplate).Replace('\\', '/');
         }
 
         /// <summary>
@@ -503,6 +717,7 @@ namespace UnityOpenMcpBridge.Config
                     break;
                 case Dictionary<string, object> dict:
                 {
+                    if (dict.Count == 0) { sb.Append("{}"); break; }
                     sb.Append("{\n");
                     var pad = new string(' ', (indent + 1) * 2);
                     var closePad = new string(' ', indent * 2);
@@ -519,6 +734,7 @@ namespace UnityOpenMcpBridge.Config
                 }
                 case Dictionary<string, string> smap:
                 {
+                    if (smap.Count == 0) { sb.Append("{}"); break; }
                     sb.Append("{\n");
                     var pad = new string(' ', (indent + 1) * 2);
                     var closePad = new string(' ', indent * 2);
@@ -576,7 +792,7 @@ namespace UnityOpenMcpBridge.Config
             sb.Append('"');
         }
 
-        private static string CodexTomlEntry(string command, IReadOnlyList<string> args, string project, int port)
+        private static string CodexTomlHeader(string command, IReadOnlyList<string> args)
         {
             var sb = new StringBuilder();
             sb.Append("[mcp_servers.").Append(ServerKey).Append("]\n");
@@ -588,7 +804,14 @@ namespace UnityOpenMcpBridge.Config
                 if (i > 0) sb.Append(", ");
                 sb.Append(TomlString(args[i]));
             }
-            sb.Append("]\n\n");
+            sb.Append("]\n");
+            return sb.ToString();
+        }
+
+        private static string CodexTomlEntry(string command, IReadOnlyList<string> args, string project, int port)
+        {
+            var sb = new StringBuilder(CodexTomlHeader(command, args));
+            sb.Append('\n');
             sb.Append("[mcp_servers.").Append(ServerKey).Append(".env]\n");
             sb.Append(BridgeConstants.ProjectPathEnvVar).Append(" = ").Append(TomlString(project)).Append('\n');
             sb.Append(BridgeConstants.PortEnvVar).Append(" = ").Append(TomlString(port.ToString())).Append('\n');

@@ -24,7 +24,9 @@ npx unity-open-mcp --version
 bridge + verify 包步骤。
 
 只有当 `UNITY_PROJECT_PATH`（或确定性 bridge 端口）唯一指向当前项目，且
-同一文件未配置其他项目时，才会改写主目录配置。配置和文档首次写入前会
+同一文件未配置其他项目时，才会改写主目录配置。项目级文件按所在位置归属项目，
+因此已提交的[可移植配置](setup/portable-config.md)——`${workspaceFolder}` 或
+相对路径、仅命令参数的条目，或已提交的包装脚本——也会被更新。配置和文档首次写入前会
 创建 `.bak`。bridge 与 verify 通过一次 Unity Package Manager 请求更新。
 embedded/`file:` 开发安装会禁用包步骤，避免覆盖本地检出。应用后等待 Unity
 重新加载，重启 MCP/AI 客户端，并运行 `status` 或 `ping`。
@@ -42,7 +44,7 @@ node scripts/switch-project-version.mjs /path/to/my-game 1.2.3 --dry-run
 node scripts/switch-project-version.mjs /path/to/my-game 1.2.3
 ```
 
-该脚本更新项目配置与 UPM 锁定，但有意不修改文档和 `$HOME` 配置。对于当前
+该脚本更新项目配置（包括[可移植配置](setup/portable-config.md)已提交的包装脚本）与 UPM 锁定，但有意不修改文档和 `$HOME` 配置。对于当前
 打开的项目，请由 bridge 窗口安全处理这些位置。
 
 ## Unity 兼容性

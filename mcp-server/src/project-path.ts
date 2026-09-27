@@ -51,6 +51,13 @@ export interface ResolveProjectPathOptions {
   projectFromCwd?: boolean;
   /** `--unity-subpath`: relative segment under cwd (monorepo, e.g. "Client"). */
   unitySubpath?: string;
+  /**
+   * Optional Unity-root probe for the `--unity-subpath` fallback: when
+   * `cwd/<subpath>` is not a Unity project but `cwd` itself is, the client was
+   * opened on the Unity folder instead of the repository root, and `cwd` wins.
+   * Omitted → no fallback (the resolver stays filesystem-free).
+   */
+  isUnityRoot?: (absolute: string) => boolean;
   /** Test seam; defaults to `node:path`. */
   pathApi?: PathApi;
 }
@@ -69,15 +76,19 @@ export class ProjectPathError extends Error {
  *   2. `envPath` (`UNITY_PROJECT_PATH`) — keeps every existing client config
  *      working, and wins over `--project-from-cwd` so a machine-local env
  *      override can still redirect a committed config.
- *   3. `projectFromCwd` (+ optional `unitySubpath`) — the portable path.
+ *   3. `projectFromCwd` (+ optional `unitySubpath`) — the portable path. With
+ *      an `isUnityRoot` probe, a subpath that misses falls back to `cwd` when
+ *      `cwd` is itself the Unity project, so one committed config also works
+ *      for a teammate who opens the client on the Unity folder.
  *   4. nothing → `ProjectPathError` with an actionable message.
  *
  * Relative `flagPath` / `envPath` values resolve against `cwd`, so
  * `--project Client` works from a monorepo root. The result is always
  * absolute: bridge port hashing and instance locks are keyed on it.
  *
- * Does NOT touch the filesystem — validation is `validateUnityProjectRoot`,
- * which callers apply according to how strict they need to be.
+ * Does NOT touch the filesystem unless the caller passes `isUnityRoot` —
+ * validation is `validateUnityProjectRoot`, which callers apply according to
+ * how strict they need to be.
  */
 export function resolveProjectPath(
   options: ResolveProjectPathOptions = {},
@@ -100,10 +111,13 @@ export function resolveProjectPath(
           `--unity-subpath must be relative to the workspace (received '${subpath}').`,
         );
       }
-      return {
-        absolute: absolutize(p, cwd, subpath),
-        source: "cwd+subpath",
-      };
+      const withSubpath = absolutize(p, cwd, subpath);
+      const probe = options.isUnityRoot;
+      if (probe && !probe(withSubpath)) {
+        const cwdRoot = absolutize(p, cwd, ".");
+        if (probe(cwdRoot)) return { absolute: cwdRoot, source: "cwd" };
+      }
+      return { absolute: withSubpath, source: "cwd+subpath" };
     }
     return { absolute: absolutize(p, cwd, "."), source: "cwd" };
   }
@@ -150,6 +164,11 @@ export function validateUnityProjectRoot(absolute: string): UnityRootValidation 
     }
   });
   return { valid: missing.length === 0, missing };
+}
+
+/** {@link validateUnityProjectRoot} as a boolean probe for `isUnityRoot`. */
+export function isUnityProjectRoot(absolute: string): boolean {
+  return validateUnityProjectRoot(absolute).valid;
 }
 
 /** One-line explanation of a failed {@link validateUnityProjectRoot}. */

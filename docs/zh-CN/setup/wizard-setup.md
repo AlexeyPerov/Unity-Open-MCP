@@ -115,6 +115,8 @@ npm run build
 
 审阅生成的配置预览（JSON 或 TOML，或 Claude Code 的 CLI 命令），然后写入。写入是合并安全的：无关键和其他 MCP 服务器会被保留，并在原文件旁留下一份 `.bak` 备份。
 
+当 Unity 项目位于 git 仓库内（例如 `<repo>/Client`）时，会出现默认开启的 **Commit-safe config** 选项：条目写入仓库根目录，不含本机路径和 bridge 端口，因此可以提交并与团队共享。如需仅限本机的绝对路径条目，请关闭它。参见[可移植 MCP 配置](portable-config.md)。
+
 **Advanced (optional)：** **Bridge HTTP port** 覆盖位于此处（默认折叠；端口会从项目路径自动推导）。
 
 ![plot](../../../screenshots/hub-wizard-4.png)

@@ -44,7 +44,11 @@ my-game/                    <- 在这里打开 AI 客户端，配置也放这里
 | 4 | 都没有 | 启动报错，并列出以上选项 |
 
 `UNITY_PROJECT_PATH` 优先于 `--project-from-cwd`，所以开发者仍可用自己的环境
-覆盖已提交的配置。启动时解析结果会打到 stderr：
+覆盖已提交的配置。
+
+即使同事把客户端打开在 Unity 文件夹而不是仓库根目录，`--unity-subpath` 也能
+工作：当 `<cwd>/<subpath>` 不是 Unity 项目、而工作目录本身是时，使用工作目录
+（来源 `cwd`）。启动时解析结果会打到 stderr：
 
 ```
 [unity-open-mcp] Unity project resolved to /Users/dev/my-game/Client (source: cwd+subpath)
@@ -124,6 +128,15 @@ my-game/                    <- 在这里打开 AI 客户端，配置也放这里
 
 布局 A 去掉最后两个参数。
 
+如果想让 Claude Code 自己写入该文件，请在仓库根目录运行下面的命令，并提交
+生成的 `.mcp.json`：
+
+```bash
+claude mcp add --scope project unity-open-mcp -- npx -y unity-open-mcp@1.3.0 --project-from-cwd --unity-subpath Client
+```
+
+不加 `--scope project` 时，条目会写入用户级 Claude Code 配置，不会共享。
+
 ### OpenCode
 
 ```json
@@ -163,7 +176,8 @@ command = "bash"
 args = ["scripts/mcp/unity-open-mcp.sh"]
 ```
 
-用 setup CLI 生成该脚本，这样其中的版本号与你实际安装的包一致：
+bridge 窗口可以替你写入该脚本（见[在 Unity 编辑器中](#在-unity-编辑器中)），
+也可以用 setup CLI 生成，这样其中的版本号与你实际安装的包一致：
 
 ```bash
 npx -y unity-open-mcp@latest setup \
@@ -176,6 +190,10 @@ npx -y unity-open-mcp@latest setup \
 时落在 `.unity-open-mcp/mcp-wrapper.sh`。脚本按自身位置解析 Unity 根目录，导出
 `UNITY_PROJECT_PATH`，再执行固定版本的包 —— 客户端的工作目录不再重要。单次运行
 可用 `UNITY_SUBPATH=OtherClient` 覆盖 Unity 子文件夹。
+
+`setup` 没有 Codex 或 ZCode 的配置写入器，因此命令中使用 `--client cursor`：它会在
+脚本旁边同时写入可移植的 Cursor 条目（`.cursor/mcp.json`）。团队使用 Cursor 就保留，
+否则删除，并手动添加上面的 Codex/ZCode 条目。
 
 ## 用 setup CLI 写入
 
@@ -196,6 +214,46 @@ npx -y unity-open-mcp@latest setup \
 
 用不同参数重跑会就地改写该条目：绝对形式变为可移植形式，反之亦然，同一文件中的
 其他 MCP 服务器会被保留。
+
+## 在 Unity 编辑器中
+
+**Tools → Unity Open MCP Bridge → Status → Configure AI client** 提供
+**Commit-safe config** 开关。当 Unity 项目位于 git 仓库内时默认开启，目标文件
+指向仓库根目录。开启后，片段中既没有本机路径，也没有 bridge 端口：
+
+- 支持 `${workspaceFolder}` 的客户端（Cursor 项目配置、VS Code、Visual
+  Studio）得到插值后的 `UNITY_PROJECT_PATH`；
+- 仅命令参数的客户端得到 `--project-from-cwd [--unity-subpath Client]`；
+  Claude Code 则显示 `claude mcp add --scope project …` 命令；
+- Codex 与 ZCode（project）得到包装脚本形式，并提供 **Write** 按钮，在显示的
+  路径创建该脚本。
+
+只读取机器级配置的客户端（Claude Desktop、Cline、Antigravity，以及全局的
+Cursor/OpenCode/ZCode）保持绝对路径形式，面板会给出说明。Hub 设置向导中的
+**Commit-safe config** 选项在检测到 Unity 项目上方有仓库时同样默认开启。
+
+## 保持版本号最新
+
+已提交的条目仍然固定版本（`unity-open-mcp@1.3.0`），它必须与
+`Packages/manifest.json` 中的 bridge 与 verify 版本一起更新。bridge 窗口的
+**Updates** 流程把可移植条目视为所在仓库对应项目的条目：`${workspaceFolder}`
+或相对路径形式的 `UNITY_PROJECT_PATH`、仅命令参数的条目，以及已提交的包装
+脚本（`scripts/mcp/unity-open-mcp.sh` 或 `.unity-open-mcp/mcp-wrapper.sh`）
+都会被改写。请把更新后的文件一起提交。
+
+## 同事克隆之后
+
+不需要修改任何与本机相关的内容。每位同事：
+
+1. 安装 Node.js 18 或更新版本。
+2. 打开 Unity 项目（单体仓库中为 `Client/`），让 Package Manager 按
+   `Packages/manifest.json` 解析 bridge 与 verify 版本。
+3. 在仓库根目录打开 AI 客户端，并在提示时批准项目的 MCP 服务器：Claude Code 与
+   Cursor 会对仓库中定义的服务器询问一次，Codex 只为受信任的项目读取
+   `.codex/config.toml`。
+
+如果同事本地已有同一配置文件的未提交副本，需在 `git pull` 之前删除或重命名：
+Git 不会用已跟踪的文件覆盖未跟踪的文件。
 
 ## 不要提交的内容
 

@@ -116,9 +116,13 @@ advisory: if tools work, the client is configured.
   the updated `PATH`.
 - **First `npx` launch looks stuck:** allow up to a minute for npm to download
   the pinned server package. Later launches use npm's cache.
-- **Server exits immediately:** verify `UNITY_PROJECT_PATH` is present,
-  absolute, and points to the folder containing `Assets/`, `Packages/`, and
-  `ProjectSettings/`.
+- **Server exits immediately:** read the startup line
+  `[unity-open-mcp] Unity project resolved to … (source: …)` on stderr. The
+  resolved folder must contain `Assets/`, `Packages/`, and `ProjectSettings/`.
+  With `UNITY_PROJECT_PATH`, check the value (absolute, or relative to the
+  client's working directory). With `--project-from-cwd`, check that the client
+  starts the server in the repository root and that `--unity-subpath` names the
+  Unity folder — see [Portable MCP config](setup/portable-config.md).
 
 ## Startup dialog blocks Unity
 

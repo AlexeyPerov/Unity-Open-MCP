@@ -57,6 +57,10 @@ install.
 5. Save the file (if it already has other MCP servers, add only the
    `unity-open-mcp` entry).
 
+Will this file be committed to your repository? Then skip step 4 and use the
+[portable form](portable-config.md) instead — it names the project without
+your machine's path, so every teammate gets a working config after checkout.
+
 ## 3) Open Unity and verify
 
 1. Open the **same** Unity project (`UNITY_PROJECT_PATH`) in the Editor.

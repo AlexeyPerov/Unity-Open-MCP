@@ -40,6 +40,11 @@ project is found below it (`my-game/Client/Packages/manifest.json`). If you poin
 at the Unity project itself, its client configs are one level up: the summary
 lists them and `--up 2` includes them.
 
+Besides client configs and the UPM files, the committed launch wrapper of a
+[portable config](../docs/setup/portable-config.md#wrapper-script)
+(`scripts/mcp/unity-open-mcp.sh` or `.unity-open-mcp/mcp-wrapper.sh`) is
+rewritten too; other shell scripts are never opened.
+
 Markdown and other prose are deliberately left alone, and the script never
 touches `$HOME`-scoped client configs. See
 [Version compatibility](../docs/versioning.md#switch-a-whole-project-to-a-release).

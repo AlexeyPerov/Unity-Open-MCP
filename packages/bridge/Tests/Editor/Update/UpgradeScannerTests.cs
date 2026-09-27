@@ -92,6 +92,24 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void Collect_FindsCommittedWrapperScripts()
+        {
+            // Codex/ZCode configs point at a committed wrapper; the npm pin
+            // lives in the script, so it is a project config for the updater.
+            Write(_repo + "/scripts/mcp/unity-open-mcp.sh", "exec npx -y \"unity-open-mcp@1.0.0\" \"$@\"");
+            Write(_project + "/.unity-open-mcp/mcp-wrapper.sh", "exec npx -y \"unity-open-mcp@1.0.0\" \"$@\"");
+
+            var wrappers = UpgradeScanner.Collect(_project, All)
+                .Where(c => c.ClientId == UpgradeScanner.WrapperClientId)
+                .ToArray();
+
+            CollectionAssert.AreEquivalent(
+                new[] { _repo + "/scripts/mcp/unity-open-mcp.sh", _project + "/.unity-open-mcp/mcp-wrapper.sh" },
+                wrappers.Select(c => c.Path).ToArray());
+            Assert.IsTrue(wrappers.All(c => c.Kind == CandidateKind.ProjectConfig && !c.IsHomeScoped));
+        }
+
+        [Test]
         public void Collect_FindsHomeScopedConfigs()
         {
             var candidates = UpgradeScanner.Collect(_project, All)

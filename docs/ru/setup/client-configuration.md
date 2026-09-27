@@ -20,7 +20,7 @@
    добавьте только запись `unity-open-mcp` — не стирайте соседние.
 5. Перезапустите MCP-клиент, чтобы он перечитал конфигурацию.
 
-Зафиксируйте ту же версию сервера, что у пакетов bridge/verify (`0.8.4` ниже).
+Зафиксируйте ту же версию сервера, что у пакетов bridge/verify (`unity-open-mcp@1.3.0` ниже).
 При обновлении см. [Версионирование](../../versioning.md). Первый запуск `npx`
 может занять 10–60 секунд на скачивание пакета; последующие запуски быстрые.
 
@@ -30,7 +30,7 @@
 |---|---|---|
 | Cursor | `<project>/.cursor/mcp.json` | [`mcpServers`](#mcpservers-cursor-и-большинство-клиентов) |
 | Claude Desktop | OS-глобальная конфигурация | [`mcpServers`](#mcpservers-cursor-и-большинство-клиентов) |
-| Claude Code | CLI (без файла) | [`Claude Code`](#claude-code) |
+| Claude Code | `<project>/.mcp.json` (область проекта) или CLI | [`Claude Code`](#claude-code) |
 | VS Code Copilot | `<project>/.vscode/mcp.json` | [VS Code](#vs-code-и-visual-studio-copilot) |
 | Visual Studio Copilot | `<project>/.vs/mcp.json` | [VS Code](#vs-code-и-visual-studio-copilot) |
 | OpenCode | `<project>/opencode.json` | [OpenCode](#opencode) |
@@ -157,6 +157,12 @@ claude mcp add unity-open-mcp \
 
 Если сервер уже зарегистрирован, удалите и добавьте его заново, когда нужно
 изменить команду, привязку версии или путь к проекту.
+
+Без `--scope` запись хранится в пользовательском конфиге Claude Code для этой
+папки. `--scope project` пишет её в `<project>/.mcp.json` — этот файл обычно
+коммитят, поэтому используйте в нём переносимую форму из
+[Переносимой конфигурации MCP](portable-config.md#claude-code-и-другие-клиенты-только-аргументы),
+а не абсолютный путь.
 
 ## Определение пути к проекту
 

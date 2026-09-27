@@ -43,6 +43,9 @@ namespace UnityOpenMcpBridge
         // foldout toggle across window reopens. Absent = no manual choice yet,
         // so the panel auto-expands when the selected client is unconfigured.
         private const string ConfigureClientFoldoutPref = "UOMCB_ConfigureClientFoldout";
+        // Commit-safe snippet toggle. Absent = no manual choice yet, so it
+        // follows the layout: on when the project is inside a git repository.
+        private const string ConfigureClientPortablePref = "UOMCB_ConfigureClientPortable";
         private const string UpgradeUpmPref = "UOMCB_UpgradeUpm";
         private const string UpgradeProjectConfigsPref = "UOMCB_UpgradeProjectConfigs";
         private const string UpgradeHomeConfigsPref = "UOMCB_UpgradeHomeConfigs";
@@ -149,6 +152,10 @@ namespace UnityOpenMcpBridge
         // Unity project (a Unity folder inside a larger repository); empty when
         // the client is not configured.
         [NonSerialized] private string _configureClientFoundPath = "";
+        // Repository root above (or at) the Unity project, cached per project
+        // path so the `.git` probe does not run on every repaint.
+        [NonSerialized] private string _configureClientWorkspaceFor;
+        [NonSerialized] private string _configureClientWorkspaceRoot;
 
         // Explicit check → preview → apply update flow. The preview object is
         // intentionally in-memory: changing a target/toggle invalidates it,

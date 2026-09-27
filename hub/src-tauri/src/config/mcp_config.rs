@@ -1665,14 +1665,15 @@ pub fn claude_mcp_add_command(
 
 /// Portable variant: no `--env` pair at all. The server resolves the project
 /// from the directory Claude Code spawns it in, so the same command works on
-/// every machine and can live in a team runbook.
+/// every machine. `--scope project` writes the entry to the workspace's
+/// `.mcp.json`, the file a team commits.
 pub fn claude_mcp_add_command_portable(
     launch_mode: McpLaunchMode,
     resolved_index: &str,
     unity_subpath: &str,
 ) -> String {
     let mut command = format!(
-        "claude mcp add {name} -- {invocation} --project-from-cwd",
+        "claude mcp add --scope project {name} -- {invocation} --project-from-cwd",
         name = MCP_SERVER_KEY,
         invocation = launch_invocation(launch_mode, resolved_index),
     );
@@ -4215,6 +4216,7 @@ mod tests {
         let plan = plan_mcp_config_at(&params, home.path()).unwrap();
         let command = plan.command.unwrap();
         assert!(!command.contains("--env"));
+        assert!(command.starts_with("claude mcp add --scope project unity-open-mcp -- "));
         assert!(command.contains("--project-from-cwd --unity-subpath Client"));
     }
 

@@ -8,9 +8,10 @@
 //   1. Agent / MCP client configs — every `unity-open-mcp@<X.Y.Z>` npm pin, in
 //      whatever client config files the project actually has (`.cursor/mcp.json`,
 //      `.codex/config.toml`, `.zcode/cli/config.json`, `.mcp.json`,
-//      `.vscode/mcp.json`, `opencode.json`, …). The scan is content-driven
-//      rather than catalog-driven so a client we have not enumerated yet is
-//      still covered.
+//      `.vscode/mcp.json`, `opencode.json`, …) and in the committed launch
+//      wrapper a portable Codex/ZCode config runs (`scripts/mcp/unity-open-mcp.sh`,
+//      `.unity-open-mcp/mcp-wrapper.sh`). The scan is content-driven rather than
+//      catalog-driven so a client we have not enumerated yet is still covered.
 //   2. UPM package pins — `#bridge-v<X.Y.Z>` / `#verify-v<X.Y.Z>` git-URL
 //      fragments in `Packages/manifest.json`.
 //   3. `Packages/packages-lock.json` — the same git-URL fragments, the
@@ -61,6 +62,13 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
  *  markdown in the header. */
 const SCANNED_EXTENSIONS = [".json", ".jsonc", ".json5", ".toml", ".yaml", ".yml"];
 
+/** Committed launch wrappers written by `unity-open-mcp setup --wrapper` (and
+ *  the bridge window). A wrapper-backed client config names only the script,
+ *  so the npm pin lives here. Matched by exact name, not by `.sh`, so ordinary
+ *  shell scripts stay out of the scan. Keep equal to `wrapperRelativePath` in
+ *  `mcp-server/src/setup/portable-config.ts`. */
+const WRAPPER_FILE_NAMES = ["unity-open-mcp.sh", "mcp-wrapper.sh"];
+
 /** Directory names never worth descending into: VCS metadata, Unity-generated
  *  trees (Library holds PackageCache — copies of the very packages we are
  *  re-pinning), build output, and dependency caches. `Assets` /
@@ -79,6 +87,10 @@ const PRUNED_DIRS = new Set([
 const AGENT_CONFIG_DIRS = new Set([
   ".cursor", ".codex", ".zcode", ".claude", ".agents", ".vscode", ".vs",
   ".junie", ".gemini", ".kilocode", ".roo", ".github", ".config",
+  // Launch-wrapper homes (`scripts/mcp/…`, `.unity-open-mcp/…`). Only the
+  // wrapper names in WRAPPER_FILE_NAMES are opened there, so a repository's
+  // other scripts are never read.
+  "scripts", ".unity-open-mcp",
 ]);
 
 /** Skip pathologically large files — a pin never lives in one, and reading it
@@ -314,7 +326,7 @@ function processFile(absPath, version, opts) {
 /** @param {string} name */
 function isScannedFile(name) {
   const lower = name.toLowerCase();
-  return SCANNED_EXTENSIONS.some((ext) => lower.endsWith(ext));
+  return SCANNED_EXTENSIONS.some((ext) => lower.endsWith(ext)) || WRAPPER_FILE_NAMES.includes(lower);
 }
 
 /** @param {string} name */

@@ -244,8 +244,11 @@
   // Portable MCP config: write `${workspaceFolder}` / `--project-from-cwd`
   // instead of this machine's absolute path, so the entry can be committed.
   // The planner reports the repository root it found above the Unity project
-  // (`McpConfigPlan.detectedWorkspaceRoot`); the toggle is offered only then.
+  // (`McpConfigPlan.detectedWorkspaceRoot`); the toggle is offered only then,
+  // and it starts ON there: a Unity project inside a repository is the layout
+  // whose config gets committed. Once the user flips it, their choice sticks.
   let portableConfig = $state(false);
+  let portableConfigUserChose = $state(false);
   let bridgePort = $state("");
   let resolvedBridgePort = $state<number | null>(null);
   let copyToast = $state<string | null>(null);
@@ -1095,6 +1098,15 @@
     return () => {
       cancelled = true;
     };
+  });
+
+  // Default the commit-safe toggle from the detected layout until the user
+  // picks a side. Only a finished plan counts — `mcpPlan` is null while a
+  // re-plan is in flight, and that must not flip the toggle back.
+  $effect(() => {
+    if (portableConfigUserChose || !mcpPlan) return;
+    const detected = Boolean(mcpPlan.detectedWorkspaceRoot);
+    if (portableConfig !== detected) portableConfig = detected;
   });
 
   $effect(() => {
@@ -2089,7 +2101,10 @@
     skipToMcpClient: () => goToStep("step4"),
     setMcpClient: (v: McpClientId) => (mcpClient = v),
     setCursorProjectScope: (v: boolean) => (cursorProjectScope = v),
-    setPortableConfig: (v: boolean) => (portableConfig = v),
+    setPortableConfig: (v: boolean) => {
+      portableConfigUserChose = true;
+      portableConfig = v;
+    },
     setBridgePort: (v: string) => (bridgePort = v),
     setMcpClientSearch: (v: string) => (mcpClientSearch = v),
     primaryMcpAction: () => void primaryMcpAction(),

@@ -20,6 +20,7 @@ import { runCli } from "./cli/cli.js";
 import { readPackageVersion } from "./package-version.js";
 import { PROJECT_PATH_ENV_VAR } from "./constants.js";
 import {
+  isUnityProjectRoot,
   notUnityProjectMessage,
   parseServerFlags,
   ProjectPathError,
@@ -96,6 +97,7 @@ function resolveStdioProjectPath(flags: ReturnType<typeof parseServerFlags>): st
       cwd: process.cwd(),
       projectFromCwd: flags.projectFromCwd,
       unitySubpath: flags.unitySubpath,
+      isUnityRoot: isUnityProjectRoot,
     });
   } catch (err) {
     const message = err instanceof ProjectPathError ? err.message : String(err);

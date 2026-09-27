@@ -119,6 +119,8 @@ snippet catalog lives in
 
 Review the generated config preview (JSON or TOML, or a CLI command for Claude Code), then write it. Writes are merge-safe: unrelated keys and sibling MCP servers are preserved, and a `.bak` backup is left next to the original file.
 
+When the Unity project sits inside a git repository (for example `<repo>/Client`), a **Commit-safe config** option appears and starts on: the entry goes to the repository root with no machine path and no bridge port, so the file can be committed and shared. Turn it off for a machine-local absolute entry. See [Portable MCP config](portable-config.md).
+
 **Advanced (optional):** the **Bridge HTTP port** override lives here (collapsed by default; the port auto-derives from the project path).
 
 ![plot](../../screenshots/hub-wizard-4.png)

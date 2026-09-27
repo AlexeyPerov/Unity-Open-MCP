@@ -53,6 +53,9 @@ Unity Open MCP 有两边都需要安装：**Unity 侧**（编辑器中的 bridge
    `Assets/`、`Packages/`、`ProjectSettings/` 的文件夹）。
 5. 保存文件（若已有其他 MCP 服务器，只添加 `unity-open-mcp` 条目）。
 
+这个文件会提交到仓库吗？那就跳过第 4 步，改用[可移植形式](portable-config.md)：
+它不含本机路径，每位同事检出后即可直接使用。
+
 ## 3) 打开 Unity 并校验
 
 1. 在编辑器中打开**同一个** Unity 项目（`UNITY_PROJECT_PATH`）。

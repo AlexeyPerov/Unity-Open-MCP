@@ -47,6 +47,42 @@ test("--project-from-cwd --unity-subpath Client resolves the monorepo layout", (
   assert.deepEqual(resolved, { absolute: "/repo/Client", source: "cwd+subpath" });
 });
 
+test("--unity-subpath falls back to cwd when the client was opened on the Unity folder", () => {
+  // A committed `--unity-subpath Client` config, but this teammate opened the
+  // client on /repo/Client itself: /repo/Client/Client is not a Unity root.
+  const roots = new Set(["/repo/Client"]);
+  const resolved = resolveProjectPath({
+    cwd: "/repo/Client",
+    pathApi: path.posix,
+    projectFromCwd: true,
+    unitySubpath: "Client",
+    isUnityRoot: (p) => roots.has(p),
+  });
+  assert.deepEqual(resolved, { absolute: "/repo/Client", source: "cwd" });
+});
+
+test("--unity-subpath keeps the subpath when the probe accepts it", () => {
+  const resolved = resolveProjectPath({
+    ...POSIX,
+    projectFromCwd: true,
+    unitySubpath: "Client",
+    isUnityRoot: () => true,
+  });
+  assert.deepEqual(resolved, { absolute: "/repo/Client", source: "cwd+subpath" });
+});
+
+test("--unity-subpath keeps the subpath when neither candidate is a Unity root", () => {
+  // No fallback target: report the subpath so the validation error names the
+  // folder the config actually asked for.
+  const resolved = resolveProjectPath({
+    ...POSIX,
+    projectFromCwd: true,
+    unitySubpath: "Client",
+    isUnityRoot: () => false,
+  });
+  assert.deepEqual(resolved, { absolute: "/repo/Client", source: "cwd+subpath" });
+});
+
 test("nested subpath segments resolve", () => {
   const resolved = resolveProjectPath({
     ...POSIX,

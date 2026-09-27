@@ -94,7 +94,10 @@ file changes.
 
 Home-scoped files are updated only when their `UNITY_PROJECT_PATH` (or
 deterministic bridge port) identifies this project and the file does not also
-configure another project. Config and prose files receive a one-time `.bak`
+configure another project. Project-scoped files are claimed by location, so a
+committed [portable config](setup/portable-config.md) — a `${workspaceFolder}`
+or relative project path, an args-only entry, or the committed wrapper script —
+is updated too. Config and prose files receive a one-time `.bak`
 before their first write. The package step uses one Unity Package Manager
 request for verify and bridge; it is disabled for embedded or `file:`
 development installs so the updater cannot replace a checkout. After applying,
@@ -145,7 +148,9 @@ Unity so Package Manager re-resolves the two packages. `--dry-run`, `--up`,
 `-h` prints the same list.
 
 Rewrites are idempotent, so running it twice changes nothing the second time. The
-script only edits config files under the path you pass: a client config in your
+script only edits config files under the path you pass (plus the committed
+launch wrapper of a [portable config](setup/portable-config.md), which carries
+its own pin): a client config in your
 home directory (`~/.cursor/mcp.json`) is a machine-wide surface and stays yours
 to update. Use the bridge window for the current open project's safely scoped
 home configs and prose; keep this script for maintainer and multi-project work.

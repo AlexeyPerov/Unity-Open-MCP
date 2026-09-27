@@ -45,8 +45,12 @@ these that is set:
 | 4 | none | startup error listing these options |
 
 `UNITY_PROJECT_PATH` wins over `--project-from-cwd`, so a developer can still
-override a committed config from their own environment. The resolved path is
-printed on stderr at startup:
+override a committed config from their own environment.
+
+`--unity-subpath` tolerates a teammate who opens the client on the Unity
+folder instead of the repository root: when `<cwd>/<subpath>` is not a Unity
+project but the working directory itself is, the working directory is used
+(source `cwd`). The resolved path is printed on stderr at startup:
 
 ```
 [unity-open-mcp] Unity project resolved to /Users/dev/my-game/Client (source: cwd+subpath)
@@ -128,6 +132,16 @@ Drop `/Client` for Layout A.
 
 Drop the last two arguments for Layout A.
 
+To let Claude Code write that file, run this from the repository root and
+commit the resulting `.mcp.json`:
+
+```bash
+claude mcp add --scope project unity-open-mcp -- npx -y unity-open-mcp@1.3.0 --project-from-cwd --unity-subpath Client
+```
+
+Without `--scope project` the entry lands in your user-level Claude Code
+config and is not shared.
+
 ### OpenCode
 
 ```json
@@ -168,8 +182,9 @@ command = "bash"
 args = ["scripts/mcp/unity-open-mcp.sh"]
 ```
 
-Write the script with the setup CLI so its version pin matches the package you
-actually installed:
+The bridge window writes the script for you (see
+[From the Unity Editor](#from-the-unity-editor)), or write it with the setup CLI
+so its version pin matches the package you actually installed:
 
 ```bash
 npx -y unity-open-mcp@latest setup \
@@ -184,6 +199,11 @@ script resolves the Unity root from its own location, exports
 `UNITY_PROJECT_PATH`, and execs the pinned package — so the client's working
 directory does not matter. Override the Unity subfolder for one run with
 `UNITY_SUBPATH=OtherClient`.
+
+`setup` has no Codex or ZCode config writer, so the command names
+`--client cursor`: next to the script it also writes the portable Cursor entry
+(`.cursor/mcp.json`). Keep it if the team uses Cursor, otherwise delete it, and
+add the Codex/ZCode entry above by hand.
 
 ## Write it with the setup CLI
 
@@ -207,6 +227,51 @@ npx -y unity-open-mcp@latest setup \
 
 Re-running with different flags rewrites the entry in place: an absolute entry
 becomes portable and vice versa, and sibling MCP servers are preserved.
+
+## From the Unity Editor
+
+**Tools → Unity Open MCP Bridge → Status → Configure AI client** has a
+**Commit-safe config** toggle. It is on by default when the Unity project is
+inside a git repository and names the target at the repository root. With it
+on, the snippet carries no machine path and no bridge port:
+
+- `${workspaceFolder}` clients (Cursor project config, VS Code, Visual Studio)
+  get the interpolated `UNITY_PROJECT_PATH`.
+- Args clients get `--project-from-cwd [--unity-subpath Client]`; for Claude
+  Code the panel shows the `claude mcp add --scope project …` command.
+- Codex and ZCode (project) get the wrapper form, plus a **Write** button that
+  creates the wrapper script at the path shown.
+
+Clients that only read a machine-wide config (Claude Desktop, Cline,
+Antigravity, the global Cursor/OpenCode/ZCode rows) keep the absolute form, and
+the panel says so. The Hub setup wizard's **Commit-safe config** option follows
+the same default when it detects a repository above the Unity project.
+
+## Keeping the pin current
+
+The committed entry still pins a version (`unity-open-mcp@1.3.0`), and it must
+move together with the bridge and verify pins in `Packages/manifest.json`. The
+bridge window's **Updates** flow treats portable entries as belonging to the
+project whose repository holds them: a `${workspaceFolder}` or relative
+`UNITY_PROJECT_PATH`, an args-only entry, and the committed wrapper script
+(`scripts/mcp/unity-open-mcp.sh` or `.unity-open-mcp/mcp-wrapper.sh`) are all
+rewritten. Commit the updated files together.
+
+## After a teammate clones
+
+Nothing machine-specific needs editing. Each teammate:
+
+1. Installs Node.js 18 or newer.
+2. Opens the Unity project (`Client/` in a monorepo) so Package Manager
+   resolves the bridge and verify pins from `Packages/manifest.json`.
+3. Opens the AI client on the repository root and approves the project's MCP
+   servers when asked — Claude Code and Cursor ask once for servers defined in
+   the repository, and Codex reads `.codex/config.toml` only for a project it
+   trusts.
+
+A teammate who already had a local, uncommitted copy of the same config file
+must remove or rename it before pulling: Git refuses to overwrite an untracked
+file with a tracked one.
 
 ## What must not be committed
 

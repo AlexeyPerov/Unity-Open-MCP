@@ -21,7 +21,7 @@ stays on your machine. To commit one config for the whole team instead, see
    add only the `unity-open-mcp` entry — do not wipe siblings.
 5. Restart the MCP client so it reloads the config.
 
-Pin the same server version as your bridge/verify packages (`0.8.4` below).
+Pin the same server version as your bridge/verify packages (`unity-open-mcp@1.3.0` below).
 See [Versioning](../versioning.md) when upgrading. The first `npx` launch can
 take 10–60 seconds while the package downloads; later launches are fast.
 
@@ -31,7 +31,7 @@ take 10–60 seconds while the package downloads; later launches are fast.
 |---|---|---|
 | Cursor | `<project>/.cursor/mcp.json` | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
 | Claude Desktop | OS global config | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
-| Claude Code | CLI (no file) | [`Claude Code`](#claude-code) |
+| Claude Code | `<project>/.mcp.json` (project scope) or CLI | [`Claude Code`](#claude-code) |
 | VS Code Copilot | `<project>/.vscode/mcp.json` | [VS Code](#vs-code-and-visual-studio-copilot) |
 | Visual Studio Copilot | `<project>/.vs/mcp.json` | [VS Code](#vs-code-and-visual-studio-copilot) |
 | OpenCode | `<project>/opencode.json` | [OpenCode](#opencode) |
@@ -159,6 +159,12 @@ claude mcp add unity-open-mcp \
 
 If the server is already registered, remove and re-add it when the command,
 version pin, or project path must change.
+
+Without `--scope`, the entry is stored in your user-level Claude Code config for
+this folder. `--scope project` writes `<project>/.mcp.json` instead — a file you
+would commit, so give it the portable form from
+[Portable MCP config](portable-config.md#claude-code-and-other-args-only-clients)
+rather than this absolute path.
 
 ## Project path resolution
 
