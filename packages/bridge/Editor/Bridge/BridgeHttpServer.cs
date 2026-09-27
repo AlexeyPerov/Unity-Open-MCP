@@ -1305,28 +1305,9 @@ namespace UnityOpenMcpBridge
             // thread (this whole method is dispatched via MainThreadDispatcher),
             // which is required for EditorSceneManager access. The decision is
             // taken from the resolved contract, not re-derived from the body.
-            if (SceneDirtyGuard.AppliesTo(contract, body))
-            {
-                var guard = SceneDirtyGuard.Check();
-                if (!guard.Allowed && SceneDirtyAutoSave.IsEnabled)
-                {
-                    SceneDirtyAutoSave.TrySaveAllDirty(out _, out _);
-                    guard = SceneDirtyGuard.Check();
-                }
-                if (!guard.Allowed)
-                {
-                    return new GateDispatchResult
-                    {
-                        Mutation = ToolDispatchResult.Fail("scene_dirty", guard.RefusalMessage),
-                        GateRan = false,
-                        Outcome = GateOutcome.Skipped,
-                        SkippedReason = "request_rejected",
-                        GateFailed = false,
-                        DirtyScenePaths = guard.DirtyScenePaths,
-                        AgentNextSteps = BridgeJson.BuildSceneDirtyNextSteps(guard.DirtyScenePaths)
-                    };
-                }
-            }
+            // Asynchronous project-command starts run the same preflight.
+            var sceneDirty = SceneDirtyGuard.Refuse(contract, body);
+            if (sceneDirty != null) return sceneDirty;
 
             if (!isMutating)
             {

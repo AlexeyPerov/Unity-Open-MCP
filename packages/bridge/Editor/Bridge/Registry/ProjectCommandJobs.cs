@@ -83,17 +83,29 @@ namespace UnityOpenMcpBridge
                 return Error("invalid_arguments", "invocation must be an object within 256 KiB.");
             var entry = new Entry { Id = id, Owner = owner, Body = invocation };
             var context = new ProjectCommandContext(id, entry.Cancellation.Token, phase => entry.Phase = phase);
-            var refusal = ProjectCommandInvocation.Preflight(invocation, out var command, out var values, context);
-            if (refusal != null)
+            // Refusals past the transport checks carry the invocation's gate envelope and audit record.
+            string Reject(GateDispatchResult rejected, LifecyclePolicy lifecycle)
             {
                 entry.Cancellation.Dispose();
-                var rejected = GatePolicy.Skipped(refusal, "request_rejected");
                 var gate = BridgeRequestBody.ExtractGateMode(invocation);
                 ProjectCommandInvocation.Decorate(rejected, invocation, 0);
                 BridgeAuditRecorder.RecordGateRun(ProjectCommandInvocation.ToolName, gate, rejected, ProjectCommandInvocation.ScopedPaths(invocation));
-                return BridgeJson.BuildGateEnvelope(rejected, gate, LifecyclePolicy.None);
+                return BridgeJson.BuildGateEnvelope(rejected, gate, lifecycle);
             }
+            var refusal = ProjectCommandInvocation.Preflight(invocation, out var command, out var values, context);
+            if (refusal != null) return Reject(GatePolicy.Skipped(refusal, "request_rejected"), LifecyclePolicy.None);
             if (!command.Attribute.Async) { entry.Cancellation.Dispose(); return Error("job_operation_unsupported", "Command is synchronous."); }
+            // Same dirty-scene preflight as the synchronous route, refused before any work so
+            // the caller can save/discard or opt out with ignore_scene_dirty. The catalog
+            // currently refuses async disruptive lifecycles; this keeps the start path safe
+            // without depending on that declaration rule.
+            var sceneDirty = SceneDirtyGuard.Refuse(new ToolRequestContract
+            {
+                ToolName = ProjectCommandInvocation.ToolName,
+                IsMutating = command.Attribute.IsMutating,
+                Lifecycle = command.Attribute.Lifecycle,
+            }, invocation);
+            if (sceneDirty != null) return Reject(sceneDirty, command.Attribute.Lifecycle);
             entry.Cancellable = command.Attribute.Cancellable;
             entries.Add(id, entry);
             // Let the start transport finish before checkpointing or invoking project code.

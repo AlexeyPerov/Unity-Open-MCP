@@ -139,21 +139,62 @@ namespace UnityOpenMcpBridge.Tests
         }
         [Test] public void SharedDirtyGuardIncludesUnsavedAdditiveScenes()
         {
-            // The native runner starts with an untitled scene; Unity refuses an
-            // additive scene beside it. Reuse that disposable scene in this case.
-            var active = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
-            bool reuse = string.IsNullOrEmpty(active.path);
-            bool wasDirty = active.isDirty;
-            var scene = reuse ? active : UnityEditor.SceneManagement.EditorSceneManager.NewScene(
-                UnityEditor.SceneManagement.NewSceneSetup.EmptyScene, UnityEditor.SceneManagement.NewSceneMode.Additive);
+            var dirty = DirtyScratchScene.Mark();
             try
             {
-                UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
                 var guard = SceneDirtyGuard.Check();
                 Assert.IsFalse(guard.Allowed);
                 CollectionAssert.Contains(guard.DirtyScenePaths, "(unsaved scene)");
             }
-            finally
+            finally { dirty.Restore(); }
+        }
+        // An async start runs the synchronous route's dirty-scene preflight: the refusal is
+        // synchronous, leaves no job record, and ignore_scene_dirty lets the same id start.
+        [UnityTest] public IEnumerator JobStartRefusesRestartThenSettleCommandOnDirtyScene()
+        {
+            PrepareHeldJob();
+            var entry = Register("AsyncHeld", true, LifecyclePolicy.EditorSettle, new[] { "Assets/Test" }, async: true);
+            Assert.IsNull(entry.Code, entry.Message);
+            // Declarations refuse async RestartThenSettle (a reload cannot resume user code).
+            // Force it on the published entry so the start guard is pinned on its own.
+            entry.Attribute.Lifecycle = LifecyclePolicy.RestartThenSettle;
+            const string gateOff = ",\"gate\":\"off\"";
+            var dirty = DirtyScratchScene.Mark();
+            try
+            {
+                var refused = Job("start", gateOff);
+                Assert.IsTrue(BridgeJson.IsCompleteJson(refused), refused);
+                StringAssert.Contains("\"code\":\"scene_dirty\"", refused);
+                StringAssert.Contains("\"dirtyScenes\":[", refused);
+                StringAssert.Contains("(unsaved scene)", refused);
+                StringAssert.Contains("\"lifecycle\":\"restart_then_settle\"", refused);
+                StringAssert.Contains("\"projectCommand\":{\"id\":\"project.tests.invoke\"", refused);
+                StringAssert.Contains("Save or discard", refused);
+                Assert.IsFalse(ProjectCommandJobs.Active);
+                StringAssert.Contains("job_not_found", Job("status"));
+
+                StringAssert.Contains("\"state\":\"running\"", Job("start", gateOff + ",\"ignore_scene_dirty\":true"));
+                for (int frame = 0; frame < 600 && !Job("status").Contains("\"phase\":\"executing\""); frame++) yield return null;
+                yield return FinishHeldJob();
+            }
+            finally { dirty.Restore(); }
+        }
+        // Marks a disposable scene dirty. The native runner starts with an untitled scene;
+        // Unity refuses an additive scene beside it, so that scene is reused instead.
+        private struct DirtyScratchScene
+        {
+            private UnityEngine.SceneManagement.Scene scene;
+            private bool reuse, wasDirty;
+            internal static DirtyScratchScene Mark()
+            {
+                var active = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+                var dirty = new DirtyScratchScene { reuse = string.IsNullOrEmpty(active.path), wasDirty = active.isDirty };
+                dirty.scene = dirty.reuse ? active : UnityEditor.SceneManagement.EditorSceneManager.NewScene(
+                    UnityEditor.SceneManagement.NewSceneSetup.EmptyScene, UnityEditor.SceneManagement.NewSceneMode.Additive);
+                UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(dirty.scene);
+                return dirty;
+            }
+            internal void Restore()
             {
                 if (!reuse) UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
                 // Hand the reused session scene back in the state we found it.
@@ -251,16 +292,20 @@ namespace UnityOpenMcpBridge.Tests
         // Starts AsyncHeld as a project job and waits until it owns the Editor scope.
         private static IEnumerator StartHeldJob()
         {
+            PrepareHeldJob();
+            Register("AsyncHeld", async: true);
+            StringAssert.Contains("\"state\":\"running\"", Job("start"));
+            for (int frame = 0; frame < 600 && !Job("status").Contains("\"phase\":\"executing\""); frame++) yield return null;
+            StringAssert.Contains("\"phase\":\"executing\"", Job("status"));
+        }
+        private static void PrepareHeldJob()
+        {
             if (BridgeToolRegistry.Count == 0) BridgeToolRegistry.Scan();
             // A run started through the bridge's own test tool would refuse the start as editor_busy.
             testRunActive = ProjectCommandJobs.TestRunActive;
             ProjectCommandJobs.TestRunActive = null;
             held = new TaskCompletionSource<string>();
-            Register("AsyncHeld", async: true);
             heldJobId = Guid.NewGuid().ToString();
-            StringAssert.Contains("\"state\":\"running\"", Job("start"));
-            for (int frame = 0; frame < 600 && !Job("status").Contains("\"phase\":\"executing\""); frame++) yield return null;
-            StringAssert.Contains("\"phase\":\"executing\"", Job("status"));
         }
         private static IEnumerator FinishHeldJob()
         {
@@ -268,8 +313,8 @@ namespace UnityOpenMcpBridge.Tests
             for (int frame = 0; frame < 600 && ProjectCommandJobs.Active; frame++) yield return null;
             StringAssert.Contains("\"state\":\"succeeded\"", Job("status"));
         }
-        private static string Job(string action) => ProjectCommandJobs.Handle("{\"action\":\"" + action + "\",\"job_id\":\"" + heldJobId + "\""
-            + (action == "start" ? ",\"invocation\":" + Body() : "") + "}", "tests");
+        private static string Job(string action, string invocationExtra = "") => ProjectCommandJobs.Handle("{\"action\":\"" + action + "\",\"job_id\":\"" + heldJobId + "\""
+            + (action == "start" ? ",\"invocation\":" + Body(extra: invocationExtra) : "") + "}", "tests");
         [UnityTearDown] public IEnumerator ReleaseHeldJob()
         {
             held?.TrySetResult("{}");

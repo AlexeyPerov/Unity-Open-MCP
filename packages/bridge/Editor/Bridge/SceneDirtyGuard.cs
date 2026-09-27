@@ -65,6 +65,34 @@ namespace UnityOpenMcpBridge
             return !JsonBody.GetBool(JsonBody.TopLevelField(body, "ignore_scene_dirty"), "ignore_scene_dirty");
         }
 
+        // The whole preflight every entry point that can start a
+        // RestartThenSettle op shares (the tool gate path and asynchronous
+        // project-command job starts): the AppliesTo decision, one opt-in
+        // auto-save retry, then the scene_dirty refusal envelope carrying the
+        // dirty paths and recovery steps. Null when the op may proceed. Must
+        // be called on the main thread.
+        internal static GateDispatchResult Refuse(ToolRequestContract contract, string body)
+        {
+            if (!AppliesTo(contract, body)) return null;
+            var guard = Check();
+            if (!guard.Allowed && SceneDirtyAutoSave.IsEnabled)
+            {
+                SceneDirtyAutoSave.TrySaveAllDirty(out _, out _);
+                guard = Check();
+            }
+            if (guard.Allowed) return null;
+            return new GateDispatchResult
+            {
+                Mutation = ToolDispatchResult.Fail("scene_dirty", guard.RefusalMessage),
+                GateRan = false,
+                Outcome = GateOutcome.Skipped,
+                SkippedReason = "request_rejected",
+                GateFailed = false,
+                DirtyScenePaths = guard.DirtyScenePaths,
+                AgentNextSteps = BridgeJson.BuildSceneDirtyNextSteps(guard.DirtyScenePaths)
+            };
+        }
+
         // scene_create and scene_open accept a `mode` parameter whose "additive"
         // value keeps currently-open scenes open. The body's mode string is
         // matched case-insensitively against "additive"; any other value
