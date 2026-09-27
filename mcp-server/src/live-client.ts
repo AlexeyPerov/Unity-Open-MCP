@@ -18,7 +18,7 @@ import {
   readDismissConfig,
   type PollAndDismissOptions,
 } from "./dialog-dismiss.js";
-import { readInstanceLock, classifyInstance, lockPath, isPidAlive, statusDir, hasRecentPendingTestRun, resolveRefreshedEndpoint, normalizePath } from "./instance-discovery.js";
+import { readInstanceLock, classifyInstance, lockPath, isPidAlive, statusDir, hasRecentPendingTestRun, resolveRefreshedEndpoint, normalizePath, findInstanceLockByPort, computePort } from "./instance-discovery.js";
 import type { InstanceClassification } from "./instance-discovery.js";
 import {
   bridgeBaseUrl,
@@ -634,6 +634,32 @@ export class LiveClient implements Router {
       return this.annotateCompileVerify(toolName, result, before, args);
     }
     return result;
+  }
+
+  /**
+   * Transient client for a per-request `_meta.port` override. The override
+   * names a bridge, not a project, so the client binds to the project whose
+   * instance lock claims that port: its lock-derived diagnostics
+   * (bridge_compile_failed, cold Safe Mode, the ping lockCheck, the offline
+   * hint) and its bearer token then describe the Editor actually called, not
+   * the configured project. With no claiming lock it binds to the configured
+   * project only when that project has no lock and the port is its
+   * deterministic one; otherwise it runs without a project, so a failure
+   * reports plain bridge_offline instead of another Editor's state. The port
+   * is passed as envPort: an explicit override never re-resolves from a lock.
+   * A private PingCache keeps the default bridge's readiness snapshot from
+   * short-circuiting this bridge's own /ping.
+   */
+  static forPortOverride(port: number, defaultProjectPath: string | undefined, agentId: string): LiveClient {
+    const lock = findInstanceLockByPort(port);
+    const projectPath = lock
+      ? lock.projectPath
+      : defaultProjectPath && !readInstanceLock(defaultProjectPath) && computePort(defaultProjectPath) === port
+        ? defaultProjectPath
+        : undefined;
+    const token = lock && isPidAlive(lock.pid) ? lock.authToken : undefined;
+    const authToken = typeof token === "string" && token.length > 0 ? token : undefined;
+    return new LiveClient(port, new PingCache(), authToken, projectPath, agentId, port);
   }
 
   /** Preserve configured endpoint/auth when attaching an independent job owner. */

@@ -243,30 +243,12 @@ export function createServer(
       if (routing.portOverride === undefined) {
         return router.route(name, routedArgs, identity);
       }
-      // Port override → build a transient LiveClient aimed at the override
-      // port. The override bypasses shared session state: it is a fresh client
-      // that resolves its own auth token from the override port's instance
-      // lock (when one exists). The agent id travels as X-Agent-Id so the
-      // target bridge's fair queue can schedule it.
-      const overrideAuth = resolveAuthToken(projectPath, routing.portOverride);
-      // M23 Plan 3 review (M2) — the override client targets a different bridge
-      // port than the default client, so it must NOT share the default
-      // PingCache: a fresh snapshot from the default bridge would let a call
-      // to bridge B short-circuit its own /ping and bypass
-      // bridge_not_connected / compile-wait checks. A private per-client cache
-      // (matching the client's per-request, session-bypassing nature) keeps
-      // each port's ready-state isolated.
-      const overrideLive = new LiveClient(
-        routing.portOverride,
-        new PingCache(),
-        overrideAuth,
-        projectPath,
-        routing.agentId,
-        // A per-request _meta.port override is authoritative exactly like an
-        // env-port override: pass it as envPort so refreshEndpointFromLock is
-        // a no-op for this transient client (no lock re-resolution).
-        routing.portOverride,
-      );
+      // Port override → a transient LiveClient bound to the Editor whose
+      // instance lock claims the override port (see forPortOverride). It
+      // bypasses shared session state, including the default PingCache. The
+      // agent id travels as X-Agent-Id so the target bridge's fair queue can
+      // schedule it.
+      const overrideLive = LiveClient.forPortOverride(routing.portOverride, projectPath, routing.agentId);
       return router.routeOverride(name, routedArgs, overrideLive, identity);
     },
   );

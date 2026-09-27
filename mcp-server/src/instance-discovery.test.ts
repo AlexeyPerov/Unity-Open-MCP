@@ -20,6 +20,7 @@ import {
   statusDir,
   hasRecentPendingTestRun,
   TEST_PENDING_TTL_MS,
+  findInstanceLockByPort,
   type InstanceLock,
 } from "./instance-discovery.js";
 import { bridgeBaseUrl } from "./constants.js";
@@ -643,5 +644,42 @@ test("resolveRefreshedEndpoint: a tokenless (older-bridge) lock clears a stale c
     );
   } finally {
     cleanupSandbox(sandbox);
+  }
+});
+
+// --- findInstanceLockByPort ---------------------------------------------------
+
+function writePortLock(dir: string, projectPath: string, port: number, pid: number, heartbeatAgeMs: number, fileName?: string): void {
+  const heartbeatAt = new Date(Date.now() - heartbeatAgeMs).toISOString();
+  writeFileSync(
+    join(dir, fileName ?? `${projectHash(projectPath)}.json`),
+    JSON.stringify({ pid, port, projectPath, projectHash: projectHash(projectPath), heartbeatAt, state: "idle" }),
+  );
+}
+
+test("findInstanceLockByPort: returns the lock claiming the port, preferring a live PID over stale claims", () => {
+  const dir = mkdtempSync(join(tmpdir(), "idx-port-"));
+  try {
+    writePortLock(dir, "/p/Other", 21000, process.pid, 0);
+    writePortLock(dir, "/p/StaleNewer", 22000, 999_999_999, 1_000);
+    writePortLock(dir, "/p/StaleOlder", 22000, 999_999_999, 60_000);
+    assert.equal(findInstanceLockByPort(22000, dir)?.projectPath, "/p/StaleNewer");
+    writePortLock(dir, "/p/Live", 22000, process.pid, 90_000);
+    assert.equal(findInstanceLockByPort(22000, dir)?.projectPath, "/p/Live");
+    assert.equal(findInstanceLockByPort(23000, dir), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("findInstanceLockByPort: skips unparsable locks and locks filed under another project's hash", () => {
+  const dir = mkdtempSync(join(tmpdir(), "idx-port-"));
+  try {
+    writeFileSync(join(dir, "garbage.json"), "{not json");
+    writePortLock(dir, "/p/Misfiled", 22000, process.pid, 0, `${projectHash("/p/Elsewhere")}.json`);
+    assert.equal(findInstanceLockByPort(22000, dir), null);
+    assert.equal(findInstanceLockByPort(22000, join(dir, "missing")), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

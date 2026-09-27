@@ -29,7 +29,7 @@ import { join } from "node:path";
 import { BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS, COMPILE_STATE_HEADER } from "./constants.js";
 import { PingCache } from "./ping-cache.js";
 import { LiveClient, shouldRetryPostAfterFailure } from "./live-client.js";
-import { projectHash } from "./instance-discovery.js";
+import { computePort, projectHash } from "./instance-discovery.js";
 import { setUnityProcessScannerForTest } from "./running-unity.js";
 import type { PollAndDismissOptions } from "./dialog-dismiss.js";
 
@@ -559,6 +559,141 @@ test("LiveClient: mid-session dead bridge (lock + stale heartbeat) unchanged by 
     assert.equal(body.error.code, "bridge_compile_failed");
   } finally {
     restore();
+    disposeSandbox(s);
+  }
+});
+
+// ----- Per-request port override: lock diagnostics follow the override port -----
+//
+// A `_meta.port` override names a bridge, not a project. The transient client
+// must read the lock of the Editor that claims the override port — never the
+// configured project's lock — or an unreachable override bridge reports the
+// default Editor's dead bridge / cold Safe Mode.
+
+const OVERRIDE_TARGET_PROJECT = "/test/OverrideTargetGame";
+
+function errorCode(result: CallToolResult): string {
+  return JSON.parse((result.content[0] as { text: string }).text).error.code;
+}
+
+test("LiveClient.forPortOverride: default project's dead bridge does not leak into an unclaimed override port", async () => {
+  const s = makeSandbox();
+  const restore = setUnityProcessScannerForTest({ scan: () => [] });
+  try {
+    plantLock(s, DEAD_BRIDGE_PROJECT, process.pid, 60_000, "reloading", 22028);
+    const client = LiveClient.forPortOverride(1, DEAD_BRIDGE_PROJECT, "agent-a");
+    const result = await client.route("unity_open_mcp_validate_edit", { paths: ["Assets"] });
+    assert.equal(result.isError, true);
+    assert.equal(errorCode(result), "bridge_offline");
+    const text = (result.content[0] as { text: string }).text;
+    assert.ok(!text.includes(projectHash(DEAD_BRIDGE_PROJECT)), "the offline hint must not name the default project's lock");
+  } finally {
+    restore();
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient.forPortOverride: default project's cold Safe Mode does not leak into an override (tool call + ping)", async () => {
+  const s = makeSandbox();
+  process.env.HOME = s.dir;
+  process.env.USERPROFILE = s.dir;
+  const restore = setUnityProcessScannerForTest({
+    scan: () => [{ pid: 7777, projectPath: COLD_SAFE_PROJECT }],
+  });
+  try {
+    const client = LiveClient.forPortOverride(1, COLD_SAFE_PROJECT, "agent-a");
+    assert.equal(errorCode(await client.route("unity_open_mcp_validate_edit", { paths: ["Assets"] })), "bridge_offline");
+    assert.equal(errorCode(await client.route("unity_open_mcp_ping", {})), "bridge_offline");
+  } finally {
+    restore();
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient.forPortOverride: reports the dead bridge of the Editor whose lock claims the override port", async () => {
+  const s = makeSandbox();
+  const restore = setUnityProcessScannerForTest({ scan: () => [] });
+  try {
+    plantLock(s, COLD_SAFE_PROJECT, process.pid, 0, "idle", 22028);
+    plantLock(s, OVERRIDE_TARGET_PROJECT, process.pid, 60_000, "reloading", 1);
+    const client = LiveClient.forPortOverride(1, COLD_SAFE_PROJECT, "agent-a");
+    const result = await client.route("unity_open_mcp_validate_edit", { paths: ["Assets"] });
+    assert.equal(errorCode(result), "bridge_compile_failed");
+  } finally {
+    restore();
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient.forPortOverride: reports cold Safe Mode for the project of a stale lock claiming the port", async () => {
+  const s = makeSandbox();
+  const restore = setUnityProcessScannerForTest({
+    scan: () => [{ pid: 7777, projectPath: OVERRIDE_TARGET_PROJECT }],
+  });
+  try {
+    plantLock(s, OVERRIDE_TARGET_PROJECT, 999_999_999, 60_000, "idle", 1);
+    const client = LiveClient.forPortOverride(1, COLD_SAFE_PROJECT, "agent-a");
+    assert.equal(errorCode(await client.route("unity_open_mcp_ping", {})), "bridge_compile_failed");
+  } finally {
+    restore();
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient.forPortOverride: keeps the configured project for its own deterministic port when it has no lock", async () => {
+  const s = makeSandbox();
+  process.env.HOME = s.dir;
+  process.env.USERPROFILE = s.dir;
+  const restore = setUnityProcessScannerForTest({
+    scan: () => [{ pid: 7777, projectPath: COLD_SAFE_PROJECT }],
+  });
+  try {
+    const own = LiveClient.forPortOverride(computePort(COLD_SAFE_PROJECT), COLD_SAFE_PROJECT, "agent-a");
+    assert.equal((own as unknown as { projectPath?: string }).projectPath, COLD_SAFE_PROJECT);
+    // Once the configured project holds a lock on another port, its
+    // deterministic port no longer identifies it.
+    plantLock(s, COLD_SAFE_PROJECT, process.pid, 0, "idle", 22028);
+    const moved = LiveClient.forPortOverride(computePort(COLD_SAFE_PROJECT), COLD_SAFE_PROJECT, "agent-a");
+    assert.equal((moved as unknown as { projectPath?: string }).projectPath, undefined);
+  } finally {
+    restore();
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient.forPortOverride: ping lockCheck and bearer token come from the override port's lock", async () => {
+  const s = makeSandbox();
+  // The configured project has no lock: an override client bound to it would
+  // flag every successful override ping with a "gone" lockCheck.
+  process.env.HOME = s.dir;
+  process.env.USERPROFILE = s.dir;
+  const seen: { auth?: string | null } = {};
+  const bridge = await startBridgeStub(headerCapturingHandler(seen));
+  try {
+    plantLock(s, OVERRIDE_TARGET_PROJECT, process.pid, 0, "idle", bridge.port, "cafef00d");
+    const client = LiveClient.forPortOverride(bridge.port, COLD_SAFE_PROJECT, "agent-a");
+    const result = await client.route("unity_open_mcp_ping", {});
+    assert.equal(result.isError, false);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.lockCheck, undefined, "a healthy lock on the override port adds no warning");
+    assert.equal(seen.auth, "Bearer cafef00d");
+  } finally {
+    await bridge.close();
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient.forPortOverride: sends no bearer token from a stale lock", async () => {
+  const s = makeSandbox();
+  const seen: { auth?: string | null } = {};
+  const bridge = await startBridgeStub(headerCapturingHandler(seen));
+  try {
+    plantLock(s, OVERRIDE_TARGET_PROJECT, 999_999_999, 0, "idle", bridge.port, "cafef00d");
+    const client = LiveClient.forPortOverride(bridge.port, COLD_SAFE_PROJECT, "agent-a");
+    await client.isLiveAvailable();
+    assert.equal(seen.auth, null);
+  } finally {
+    await bridge.close();
     disposeSandbox(s);
   }
 });

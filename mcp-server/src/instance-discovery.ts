@@ -182,6 +182,45 @@ export function readInstanceLock(projectPath: string): InstanceLock | null {
 }
 
 /**
+ * The instance lock whose bridge claims `port`, scanning every lock in
+ * {@link instancesDir}. A per-request port override names a bridge, not a
+ * project, so this is how the server learns which Editor (and therefore which
+ * lock) the override targets. A lock with a live PID wins; otherwise the most
+ * recently heartbeated stale claim is returned so the caller classifies it as
+ * "gone" exactly like a stale lock found by project path. Locks whose
+ * `projectPath` does not hash to their own file name are skipped — re-reading
+ * them by project path would land on a different file. Returns null when no
+ * lock claims the port. Never throws.
+ *
+ * @param port  bridge port to match against each lock's `port`
+ * @param dir   lock directory (injectable for tests). Defaults to
+ *              {@link instancesDir}.
+ */
+export function findInstanceLockByPort(port: number, dir: string = instancesDir()): InstanceLock | null {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  let stale: InstanceLock | null = null;
+  for (const entry of entries) {
+    if (!entry.endsWith(".json")) continue;
+    let lock: InstanceLock;
+    try {
+      lock = JSON.parse(readFileSync(join(dir, entry), "utf8")) as InstanceLock;
+    } catch {
+      continue;
+    }
+    if (!lock || lock.port !== port || typeof lock.projectPath !== "string" || !lock.projectPath) continue;
+    if (`${projectHash(lock.projectPath)}.json` !== entry) continue;
+    if (isPidAlive(lock.pid)) return lock;
+    if (!stale || heartbeatAgeMs(lock) < heartbeatAgeMs(stale)) stale = lock;
+  }
+  return stale;
+}
+
+/**
  * kill -0 equivalent. Returns true if a process with the given pid exists.
  * Wrapped in try/catch: EPERM (exists but can't be probed) → true,
  * ESRCH (no such process) → false. Mirrors the C# Process.GetProcessById

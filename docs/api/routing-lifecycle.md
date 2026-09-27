@@ -214,6 +214,15 @@ A call can use `_meta.port` to target a specific bridge and `_meta.agentId` to
 override agent identity. These routing fields are removed before the tool
 arguments reach Unity.
 
+A `_meta.port` call is diagnosed against the Editor whose instance lock claims
+that port, not the configured project. A lock with a live PID is preferred;
+otherwise the most recent stale lock claiming the port is used. That lock
+supplies the bearer token and drives `bridge_compile_failed`, cold Safe Mode
+detection, the ping `lockCheck` note and the offline hint. If no lock claims
+the port, the configured project is used only when it has no lock and the port
+is its deterministic port. Otherwise an unreachable override bridge reports
+plain `bridge_offline` and never picks up another Editor's state.
+
 When multiple agent identities share a bridge, the bridge can enable its fair
 round-robin queue: several reads and one serialized write per Editor frame.
 Single-agent traffic bypasses this scheduling path. Configure it in
