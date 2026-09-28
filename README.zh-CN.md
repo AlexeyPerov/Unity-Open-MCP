@@ -12,12 +12,15 @@
 |-------------------------|--------------------------------|------------------------------|
 
 <p align="center">
-  <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="Unity Open MCP" width="250">
+  <img src="assets/brand/openmcp-symbol.svg" alt="" width="86">
+  &nbsp;&nbsp;
+  <img src="assets/brand/openmcp-wordmark-color.svg" alt="Open MCP" width="341">
 </p>
 
-Unity Open MCP 为 AI 智能体提供了一个类型化、带安全门禁的工具接口，用于操作 Unity 项目。
-
-该 MCP 服务器暴露了 **250+ 个工具**，覆盖类型化编辑器工作流、门禁与校验、资源智能分析、诊断，以及嵌入式领域工具组。
+Unity Open MCP 是覆盖面最广的开源 Unity MCP 实现之一，在面向生产环境的
+自动化栈中提供 **270+ 个类型化工具**。安全门禁变更、内置校验以及实时、
+无头和离线执行，使其能够可靠地服务于真实项目——从资源智能分析和编辑器创作，
+到闭环游戏测试、诊断、CI 和依赖包门控的 Unity 领域。
 
 ---
 Open MCP 工具集的一部分
@@ -27,80 +30,73 @@ Open MCP 工具集的一部分
 
 ## 核心特性
 
-### 资源智能分析
+### 安全的类型化创作
 
-结构化搜索、检视、重新序列化，以及引用 / 依赖分析——Unity 关闭时也可用离线读取。
+编辑 GameObject、场景、预制体、材质、包，以及 NavMesh、Input System、
+Cinemachine、Timeline、Shader Graph 等依赖包门控领域。变更按
+`checkpoint → mutate → validate → delta` 执行，并带有回归检查与定向修复。
 
-> **示例：**「找出所有引用 `PlayerController` 的预制体，并汇总入站依赖。」
+> **用户：**删除那个预制体。<br>
+> **智能体：**门禁预览发现 `Level1` 和 `SpawnPoint` 会新增 missing references，
+> 因此我在项目损坏前停止了操作。
 
-### 实时桥接、批处理回退与离线读取
+### 测试与观察
 
-优先使用实时 Editor；受支持的工具可回退到无头批处理；也可从磁盘读取资源与编译错误。
+运行 Edit/Play Mode 测试，读取控制台，采集截图、性能分析器与内存数据，
+并拉取事件。输入模拟可闭合游戏测试循环：探测交互项、点击 / 拖动 / 滑动、
+推进帧，然后通过视觉结果验证。
 
-> **示例：**「桥接离线——从 Editor 日志中显示最近的编译错误。」
+### 实时、批处理或离线
 
-### 类型化编辑器与嵌入式领域
+优先使用实时 Editor；受支持的工具可回退到精确版本的无头 Editor；Unity
+关闭时仍可从磁盘读取资源与编译诊断。结构化搜索、重新序列化以及引用 /
+依赖分析会在对应路由支持时继续可用。
 
-GameObject、场景、预制体、材质、包管理，以及依赖包门控的领域（NavMesh、Input System、Cinemachine、Timeline、Shader Graph 等）。
-
-> **示例：**「激活 `cinemachine`，并为 Player 创建跟随相机。」
-
-### 智能体感知与诊断
-
-测试运行器、截图、控制台、性能分析器 / 内存快照，以及事件拉取，支持闭环智能体工作流。
-
-> **示例：**「运行 Combat 程序集的 Play Mode 测试，失败时截取 Game 视图。」
-
-### 项目自定义命令与异步作业
+### 扩展与自动化
 
 Unity 项目无需发布新的 MCP 服务器版本，即可公开类型化、可发现的命令。
 显式异步操作会作为可观察作业运行，并提供进度、幂等性、保留结果与真实的取消状态。
-
-> **示例：**「描述项目的关卡生成命令，把它作为作业启动，并等待经过验证的结果。」
+CLI 与 CI 流程还提供健康检查、verify 基线和回归门禁。
 
 详见[项目命令](docs/api/project-commands.md)与[异步作业](docs/api/jobs.md)（英文）。
 
-### 会话工具组与技能
+### 只发现所需工具
 
-默认工具面保持精简；按需激活领域。项目技能指导智能体执行 mutate → gate → fix 循环。
+默认仅显示 `core` 与 `gate-and-verify`；其他领域按需激活。运行时 capabilities
+提供精确 schema、路由与可用性，项目技能则指导智能体执行 mutate → gate → fix 循环。
 
-> **示例：**「重置工具组，然后只激活 `core` 与 `gate-and-verify`。」
+### 安装与维护
 
-### CI、基线与回归
-
-扫描项目、创建 verify 基线，并在出现新的阻塞性问题时让自动化失败——支持实时或批处理 / CLI。
-
-> **示例：**「为此项目创建 verify 基线，并报告相对上一基线的新阻塞性问题。」
-
-### Unity Hub Pro
-
-可选桌面应用，用于项目管理、AI 安装向导与维护者操作——走 MCP 路径时并非必需。
-
-> **示例：**在 Hub 项目行上使用 **AI** 操作（见 [Unity Hub Pro](docs/unity-hub-pro.md)，英文）。
-
-### 带安全门禁的变更
-
-变更按 `checkpoint → mutate → validate → delta` 执行，并配合回归检查与针对性修复——智能体可以在「看起来成功」的编辑把项目弄坏之前停下来。
-
-> **用户：**删掉那个预制体。  
-> **智能体：**正在检查删除 `Enemy` 的影响…  
-> **门禁：**删除会在 `Level1` 和 `SpawnPoint` 上引入新的 missing references。  
-> **智能体：**Unity Open MCP 在门禁预览里标出了这次回归。在你确认之前我**不会**删除该预制体——那些场景会坏掉。要我删除后再修好引用，还是先保留？
+一条命令即可安装匹配的包版本、MCP 配置与智能体技能。团队和 monorepo
+布局默认生成可提交、与机器无关的配置。协调更新流程覆盖 MCP 服务器、Unity
+包以及可选的 [Unity Hub Pro](docs/unity-hub-pro.md) 桌面应用。
 
 更多示例提示词：[docs/api/mcp-tools.md](docs/api/mcp-tools.md#example-prompts)（英文）。
 完整工具目录与契约：[docs/api/mcp-tools.md](docs/api/mcp-tools.md)（英文）。
 
 ## 快速开始
 
-需要 **Unity 2022.3 LTS 或更高版本**。
+需要 **Unity 2022.3 LTS 或更高版本**，MCP 服务器还需要 **Node.js 18+**。
 
-1. **手动安装：** 自行编辑包和 MCP 客户端配置，参见
-   [手动安装](docs/zh-CN/setup/manual-setup.md)。
-2. **Unity Hub Pro：** 使用 UI 流程，参见
+1. **CLI — 推荐：**在 Unity 项目中打开终端并运行：
+
+   ```bash
+   npx -y unity-open-mcp@latest setup --client cursor
+   ```
+
+   其他受支持的写入器可使用 `claude`、`zcode`、`vscode`、`codex`、
+   `opencode` 或 `agents`。命令会安装匹配的版本锁定、项目配置与内置技能；
+   详见[手动安装](docs/zh-CN/setup/manual-setup.md)。
+2. **Unity Hub Pro：** 使用图形化流程，参见
    [向导安装](docs/zh-CN/setup/wizard-setup.md)。
-3. **本地检出：** 构建并运行本仓库，参见
+3. **手动安装：**从 [MCP 客户端配置](docs/zh-CN/setup/client-configuration.md)
+   复制包与客户端配置。
+4. **本地检出：** 构建并运行本仓库，参见
    [开发安装](docs/zh-CN/setup/development-setup.md)。
-4. **实验性 — AI 智能体：** 把下面的提示词粘贴到你的 AI 客户端（Cursor、Claude 等）。若要可预期的安装，优先用手动或向导。
+5. **实验性 — AI 智能体：**把下面的提示词粘贴到你的 AI 客户端。
+
+<details>
+<summary>智能体安装提示词</summary>
 
 ```text
 按照
@@ -112,6 +108,8 @@ npx -y unity-open-mcp@latest setup --project <绝对项目路径> --client <id>�
 自行完成所有智能体步骤，只在需要用户操作时停下。如果 monorepo 已在本地打开，
 请从磁盘读取 docs/setup/agent-setup.md。
 ```
+
+</details>
 
 完整流程见 [Agent 安装](docs/zh-CN/setup/agent-setup.md)。
 团队与 monorepo 可使用[可移植 MCP 配置](docs/zh-CN/setup/portable-config.md)，
@@ -137,11 +135,6 @@ npx -y unity-open-mcp@latest setup --project <绝对项目路径> --client <id>�
 > 想看看其他 MCP 方案？参见 [Unity MCP 工具对比](docs/mcp-tools-comparison.md)（英文）— Unity Open MCP 与业内其他 MCP 工具 / AI 助手的功能矩阵并排对比。
 
 > 注：除本 README、`docs/zh-CN/setup/` 下的安装文档与版本兼容页面外，其余文档目前仅有英文版。
-
-## Unity Hub Pro
-
-Unity Hub Pro 是 Unity Open MCP 的桌面配套应用。它帮助你管理项目、运行 AI 安装向导，并在一个界面中处理维护者工作流。
-[详见文档（英文）](docs/unity-hub-pro.md)。
 
 ## 贡献
 

@@ -24,7 +24,7 @@ Unity Open MCP 有两边都需要安装：**Unity 侧**（编辑器中的 bridge
   OpenCode、ZCode、Cline、Codex、VS Code Copilot、Gemini CLI，或任何兼容客户端。
   可复制片段见 [MCP 客户端配置](client-configuration.md)。
 
-## 快速路径：一条命令（实验性）
+## 快速路径：一条命令
 
 setup 命令会替你完成第 1、2 步。在 Unity 项目文件夹（包含 `Assets/`、`Packages/`
 和 `ProjectSettings/` 的文件夹）中打开终端并运行：

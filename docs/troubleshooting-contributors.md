@@ -187,16 +187,16 @@ routed, tolerating known tool bugs. **S1–S5** are the strict behavioral layers
 a failure there is a real regression. There is no single orchestrator: run the
 suites individually in the [suggested order](../scripts/README.md#suggested-order).
 
+## Input simulation replay
+
+Run the [live input simulation fixtures](../scripts/README.md#live-input-simulation-regression-replay)
+after changing pointer dispatch or framed device input. EditMode tests cover
+handler delivery and resolution; the live replay additionally samples gameplay
+Update, which detects input edges consumed too early by manual input updates.
+
 ## Related docs
 
 - [Troubleshooting](troubleshooting.md) — user-facing recovery
 - [Development setup](setup/development-setup.md) — local checkout and build
 - [Dialog policy](dialog-policy.md) — dismiss env vars and macOS Accessibility
 - [Bridge HTTP API](api/bridge-http.md)
-
-### Input simulation replay
-
-Run the [live input simulation fixtures](../scripts/README.md#live-input-simulation-regression-replay)
-after changing pointer dispatch or framed device input. EditMode tests cover
-handler delivery and resolution; the live replay additionally samples gameplay
-Update, which detects input edges consumed too early by manual input updates.

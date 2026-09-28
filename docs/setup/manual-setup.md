@@ -26,7 +26,7 @@ client launches). The steps below cover each in turn.
   any compatible client. Copy-paste snippets live in
   [MCP client configuration](client-configuration.md).
 
-## Fast path: one command (experimental)
+## Fast path: one command
 
 The setup command does steps 1 and 2 for you. Open a terminal in the Unity
 project folder (the one with `Assets/`, `Packages/`, and `ProjectSettings/`) and

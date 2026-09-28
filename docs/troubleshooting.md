@@ -282,15 +282,6 @@ reason (a fixable compile failure, a modal, an unresponsive main thread) — re-
 bridge is down and the log is stale, start the Editor from the Hub and use
 `resource_pressure` to monitor fd headroom proactively.
 
-## Related docs
-
-- [Dialog policy](dialog-policy.md) — startup and steady-state modal handling
-- [Agent setup](setup/agent-setup.md) — AI-driven install procedure
-- [MCP client configuration](setup/client-configuration.md) — client paths and copy-paste snippets
-- [Bridge HTTP API](api/bridge-http.md) — `/ping` and listener contract
-- [Routing and lifecycle](api/routing-lifecycle.md) — route classes and recovery
-
-
 ## Project commands and asynchronous jobs
 
 - Missing or unavailable command: list, then describe its exact id and inspect
@@ -317,3 +308,11 @@ bridge is down and the log is stale, start the Editor from the Hub and use
   target is a refusal, not permission to wrap arbitrary blocking code as a job.
 
 See [project command authoring](api/project-commands.md) and [job workflows](api/jobs.md).
+
+## Related docs
+
+- [Dialog policy](dialog-policy.md) — startup and steady-state modal handling
+- [Agent setup](setup/agent-setup.md) — AI-driven install procedure
+- [MCP client configuration](setup/client-configuration.md) — client paths and copy-paste snippets
+- [Bridge HTTP API](api/bridge-http.md) — `/ping` and listener contract
+- [Routing and lifecycle](api/routing-lifecycle.md) — route classes and recovery

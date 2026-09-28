@@ -21,6 +21,7 @@ Live suites need a Unity Editor open on the target project with the bridge runni
 | [`release.mjs`](release.mjs) | One-shot release: clean-tree gate → token estimates → set trio + Hub → commit → tags → push (trio and Hub tags in separate pushes, ≤3 tags each — GitHub drops tag webhooks above that). Supports `--dry-run`, `--yes`, `--trio-only`, `--hub-only`. See [Maintainer versioning](../docs/contributing/versioning.md#one-shot-release-trio--hub). |
 | [`generate-token-estimates.mjs`](generate-token-estimates.mjs) | Generates `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs` from live MCP tool schemas. `--check` is advisory in CI (`continue-on-error`). |
 | [`gen-mcp-coverage-matrix.mjs`](gen-mcp-coverage-matrix.mjs) | Regenerates the internal, gitignored per-tool coverage matrix from the live MCP tool registry. Fails if any registered tool has no suite owner. `--check` verifies ownership without writing; `--out <path>` writes elsewhere. The default location is a gitignored maintainer working tree; when it is absent only the invariants are checked and nothing is written. |
+| [`check-docs.mjs`](check-docs.mjs) | Validates local Markdown links and anchors, heading hierarchy, table structure, and README/API index coverage. Runs in the docs CI workflow. |
 
 ### Switch a consuming project onto a release
 

@@ -92,8 +92,9 @@ installation together or to update without network access.
 ## Environment
 
 `UNITY_PROJECT_PATH` can provide the project path when `--project` is omitted
-for bridge-backed commands. `setup` deliberately requires an explicit absolute
-`--project`; `update` does not need a Unity project path.
+for bridge-backed commands. `setup` ignores that environment variable and uses
+`--project`, `--unity-subpath`, or the current directory; `update` does not need
+a Unity project path.
 Batch fallback may also need `UNITY_PATH`. For unattended startup modal
 handling, use [Dialog policy](../dialog-policy.md).
 

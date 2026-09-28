@@ -1,6 +1,6 @@
 # MCP tools API
 
-`unity-open-mcp` exposes **250+ tools** for Unity editor workflows. This page is
+`unity-open-mcp` exposes **270+ tools** for Unity editor workflows. This page is
 the overview and index; focused pages own session visibility, routing/lifecycle,
 and CLI automation.
 
@@ -116,7 +116,7 @@ Important response fields:
 - `lifecycleBlock` for recovery policy
 
 The response is the authoritative current catalog. Public documentation uses
-`250+` instead of a hand-maintained exact total.
+`270+` instead of a hand-maintained exact total.
 
 ### Keeping the discovery call cheap
 
@@ -755,17 +755,6 @@ request is accepted, not after download completion. Poll `hub_list_editors` to
 confirm completion. System-level mutations are gate-free because they do not
 modify project assets.
 
-## Source references
-
-- `mcp-server/src/tools/index.ts`
-- `mcp-server/src/tool-router.ts`
-- `mcp-server/src/batch-spawn.ts`
-- `mcp-server/src/compressible-router.ts`
-- `mcp-server/src/capabilities/build-capabilities.ts`
-- `mcp-server/src/capabilities/tool-groups.ts`
-- `mcp-server/src/tool-session-state.ts`
-- `mcp-server/src/cli/`
-
 ## Locator and argument contract
 
 Prefer `asset_path` for the target asset, `game_object_path` for a hierarchy
@@ -813,3 +802,14 @@ See [Project command catalog](project-commands.md) for the always-visible
 `unity_open_mcp_project_commands` list/describe/invoke surface, C# authoring,
 schema versions and safety contract. Async declarations use the [job workflow](jobs.md):
 start, status, bounded wait, then inspect the retained terminal result and gate.
+
+## Source references
+
+- `mcp-server/src/tools/index.ts`
+- `mcp-server/src/tool-router.ts`
+- `mcp-server/src/batch-spawn.ts`
+- `mcp-server/src/compressible-router.ts`
+- `mcp-server/src/capabilities/build-capabilities.ts`
+- `mcp-server/src/capabilities/tool-groups.ts`
+- `mcp-server/src/tool-session-state.ts`
+- `mcp-server/src/cli/`

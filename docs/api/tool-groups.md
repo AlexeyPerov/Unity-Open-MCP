@@ -1,6 +1,6 @@
 # Tool groups and session visibility
 
-The full MCP catalog contains **250+ tools**, but each session exposes a smaller
+The full MCP catalog contains **270+ tools**, but each session exposes a smaller
 active set through `ListTools`.
 
 ## Default visibility

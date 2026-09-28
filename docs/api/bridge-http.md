@@ -12,16 +12,17 @@ Default bind is loopback (`127.0.0.1`).
 | `/instance` | `GET` | Runtime instance metadata snapshot. |
 | `/events` | `GET` | SSE event stream (console/editor-state events). |
 | `/events/poll` | `GET` | Pull-style event drain endpoint. |
+| `/compile-state` | `GET` | Read-only main-thread CompilationPipeline generation, source-content match, current errors, and before/after assembly mtimes. Unconfirmed generations return `indeterminate`. The same snapshot can ride on a tool response instead ([Compile state on tool responses](#compile-state-on-tool-responses)). |
+| `/tools` | `GET` | Compiled-state tool inventory + group→tools map (used by capabilities / manage_tools for per-group availability). |
+| `/tools/{toolName}` | `POST` | Execute one bridge tool. |
+| `/project-command-jobs` | `POST` | Start, inspect, or cancel an asynchronous project command job. |
+| `/resources` | `GET` | List bridge resources. |
+| `/resources/{route}` | `GET` | Read one bridge resource payload. |
 
 Subscriber lifecycle on both event endpoints: a client-supplied `subscriber`
 id persists across polls/reconnects and keeps its cursor; an id the bridge
 mints (no `subscriber` param) is retired with the request/stream so anonymous
 clients don't accumulate subscriber state.
-| `/compile-state` | `GET` | Read-only main-thread CompilationPipeline generation, source-content match, current errors, and before/after assembly mtimes. Unconfirmed generations return `indeterminate`. The same snapshot can ride on a tool response instead ([Compile state on tool responses](#compile-state-on-tool-responses)). |
-| `/tools` | `GET` | Compiled-state tool inventory + group→tools map (used by capabilities / manage_tools for per-group availability). |
-| `/tools/{toolName}` | `POST` | Execute one bridge tool. |
-| `/resources` | `GET` | List bridge resources. |
-| `/resources/{route}` | `GET` | Read one bridge resource payload. |
 
 ## Port and discovery
 
@@ -36,7 +37,7 @@ clients don't accumulate subscriber state.
 
 - `authMode: "none"` (default): requests accepted without bearer token.
 - `authMode: "required"`: requests must send `Authorization: Bearer <token>`.
-- Remote bind (`bindAddress: "0.0.0.0"`) is intended for controlled environments and should be paired with `authMode: "required"`.
+- Remote bind (`bindAddress: "0.0.0.0"`) requires `authMode: "required"`; the bridge refuses to start on a non-loopback interface without token authentication.
 - If remote access is needed, terminate TLS in front of the bridge (reverse proxy or tunnel).
 
 ## Tool execution envelopes
@@ -129,13 +130,7 @@ fix, so `wireContract` is what distinguishes a stale install from a regression:
 was built against and reports `wireContract.stale`. A bridge old enough to omit
 the field is, by definition, older than revision 1.
 
-## Related docs
-
-- [Routing and lifecycle](routing-lifecycle.md)
-- [MCP client configuration](../setup/client-configuration.md)
-- [Architecture](../architecture.md)
-
-### Request-scoped JSON responses
+## Request-scoped JSON responses
 
 Wire contract revision 2 adds `GET /compile-state` (and its
 [tool-response header](#compile-state-on-tool-responses)) and `X-Request-Id`
@@ -152,7 +147,7 @@ Per-call console logs use Unity Console mode flags: scripting/import/compiler
 warnings retain `warning` severity, compiler errors and exceptions retain `error`,
 and ordinary managed logs remain `log`.
 
-### Compile state on tool responses
+## Compile state on tool responses
 
 A `/tools/{toolName}` request that sends `X-Unity-Open-MCP-Compile-State: 1` and
 is answered with the gate envelope (`execute_csharp` and `invoke_method`
@@ -167,7 +162,7 @@ client then reads `GET /compile-state`. The MCP server asks for it on
 `execute_csharp` and `invoke_method`, the results it qualifies with
 `_compileState`.
 
-### Effective read-only requests and gate outcomes
+## Effective read-only requests and gate outcomes
 
 The bridge derives request mutability before scope enforcement, queueing, and
 checkpoint/undo setup. Inspection-only `execute_csharp(read_only:true)`, explicitly
@@ -194,7 +189,7 @@ independently of `mutation.success`. Existing delta and next-step fields remain.
 and `skippedReason`. `request_rejected`, `gate_off`, `no_scope`, `read_only`, and
 `play_mode` identify other skip causes.
 
-### Published argument schemas
+## Published argument schemas
 
 Requests for shipped tools are validated against the generated MCP schemas
 before dispatch. Unknown keys, selector conflicts, invalid types, bounds and
@@ -238,3 +233,9 @@ steps arrive in `agentNextSteps` (a top-level sibling of `error` on direct-respo
 tools). The job id is the MCP job id. Job
 records are owned by `X-Agent-Id` and lost on domain reload, which the MCP
 adapter reports as an unknown outcome.
+
+## Related docs
+
+- [Routing and lifecycle](routing-lifecycle.md)
+- [MCP client configuration](../setup/client-configuration.md)
+- [Architecture](../architecture.md)

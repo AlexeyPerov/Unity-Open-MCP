@@ -12,14 +12,16 @@
 |-------------------------|--------------------------------|------------------------------|
 
 <p align="center">
-  <img src="assets/brand/openmcp-wordmark-color-v2.svg" alt="Open MCP" width="508">
+  <img src="assets/brand/openmcp-symbol.svg" alt="" width="86">
+  &nbsp;&nbsp;
+  <img src="assets/brand/openmcp-wordmark-color.svg" alt="Open MCP" width="341">
 </p>
 
-Unity Open MCP gives AI agents a typed, safety-gated tool surface for Unity
-projects.
-
-The MCP server exposes **250+ tools** across typed editor workflows, gate and
-validation, asset intelligence, diagnostics, and embedded domain groups.
+Unity Open MCP is one of the broadest open-source MCP implementations for Unity,
+with **270+ typed tools** in a production-oriented automation stack. Safety-gated
+mutations, built-in validation, and live, headless, and offline execution support
+reliable work on real projects—from asset intelligence and editor authoring to
+closed-loop game testing, diagnostics, CI, and package-gated Unity domains.
 
 ---
 Part of Open MCP toolset
@@ -29,103 +31,79 @@ Part of Open MCP toolset
 
 ## Key features
 
-### Asset intelligence
+### Safe typed authoring
 
-Structured search, inspection, reserialization, and reference / dependency
-analysis — including offline readers when Unity is closed.
+Edit GameObjects, scenes, prefabs, materials, packages, and package-gated
+domains such as NavMesh, Input System, Cinemachine, Timeline, and Shader Graph.
+Mutations run `checkpoint → mutate → validate → delta`, with regression checks
+and targeted fixes.
 
-> **Example:** "Find all Prefabs that reference `PlayerController` and summarize
-> inbound dependencies."
+> **User:** Remove that prefab.<br>
+> **Agent:** The gate preview found new missing references in `Level1` and
+> `SpawnPoint`, so I stopped before committing a broken project.
 
-### Live bridge, batch fallback, offline reads
+### Test and observe
 
-Prefer the live Editor; fall back to headless batch for supported tools; read
-assets and compile errors from disk when needed.
+Run Edit/Play Mode tests, inspect the console, capture screenshots, profiler and
+memory data, and pull events. Input simulation closes the gameplay loop: probe
+interactables, click / drag / swipe, advance frames, then verify visually.
 
-> **Example:** "Bridge is offline — show me the latest compile errors from the
-> Editor log."
+### Live, batch, or offline
 
-### Typed editor + embedded domains
+Prefer the live Editor, fall back to an exact-version headless Editor for
+supported tools, and read assets or compile diagnostics from disk when Unity is
+closed. Structured search, reserialization, and reference / dependency analysis
+remain available where their route supports it.
 
-GameObjects, scenes, prefabs, materials, packages, plus package-gated domains
-(NavMesh, Input System, Cinemachine, Timeline, Shader Graph, and more).
-
-> **Example:** "Activate `cinemachine` and create a follow camera for the Player."
-
-### Agent senses and diagnostics
-
-Test runner, screenshots, console, profiler / memory snapshots, and event pull
-for closed-loop agent workflows.
-
-> **Example:** "Run Play Mode tests for the Combat assembly and capture a
-> Game-view screenshot on failure."
-
-### Project-defined commands and asynchronous jobs
+### Extend and automate
 
 Unity projects can expose typed, discoverable commands without an MCP server
 release. Explicitly async operations run as observable jobs with progress,
-idempotency, retained results, and truthful cancellation.
-
-> **Example:** "Describe the project's level-generation command, start it as a
-> job, and wait for the validated result."
+idempotency, retained results, and truthful cancellation. The CLI and CI flows
+add health checks, verify baselines, and regression gates.
 
 See [Project commands](docs/api/project-commands.md) and
 [Asynchronous jobs](docs/api/jobs.md).
 
-### Session tool groups and skills
+### Discover only what you need
 
-Default groups stay small; activate domains on demand. Project skills teach
-agents the mutate → gate → fix loop.
+Only `core` and `gate-and-verify` are visible by default; activate the other
+domains on demand. Runtime capabilities provide exact schemas, routes, and
+availability, while project skills teach agents the mutate → gate → fix loop.
 
-> **Example:** "Reset tool groups, then activate only `core` and
-> `gate-and-verify`."
+### Install and maintain
 
-### CI, baselines, and regression
-
-Scan projects, create verify baselines, and fail automation when new blocking
-issues appear — live or via batch/CLI.
-
-> **Example:** "Create a verify baseline for this project, then report any new
-> blocking issues since the last baseline."
-
-### Unity Hub Pro
-
-Optional desktop app for project management, AI Setup wizard, and maintainer
-actions — not required for the MCP path.
-
-> **Example:** use the Hub **AI** action on a project row (see
-> [Unity Hub Pro](docs/unity-hub-pro.md)).
-
-### Safety-gated mutations
-
-Mutations run `checkpoint → mutate → validate → delta`, with regression checks
-and targeted fixes — so agents can stop before a “successful” edit leaves the
-project broken.
-
-> **User:** Remove that prefab.  
-> **Agent:** Checking impact for `Enemy`…  
-> **Gate:** Deleting it would introduce new missing references on `Level1` and
-> `SpawnPoint`.  
-> **Agent:** Unity Open MCP flagged that regression in the gate preview. I am
-> **not** removing the prefab without your confirmation — those scenes would
-> break. Want me to delete it and then fix the references, or leave it?
+One command installs matching package pins, MCP configuration, and the agent
+skill. Team and monorepo layouts default to committable, machine-independent
+configuration. Coordinated update flows cover the MCP server, Unity packages,
+and the optional [Unity Hub Pro](docs/unity-hub-pro.md) desktop app.
 
 More example prompts: [docs/api/mcp-tools.md](docs/api/mcp-tools.md#example-prompts).
 Full catalog and contracts: [docs/api/mcp-tools.md](docs/api/mcp-tools.md).
 
 ## Quick setup
 
-Requires **Unity 2022.3 LTS or newer**.
+Requires **Unity 2022.3 LTS or newer** and **Node.js 18+** for the MCP server.
 
-1. **Manual:** edit the package and MCP client configuration yourself with
-   [Manual setup](docs/setup/manual-setup.md).
-2. **Unity Hub Pro:** use the UI flow in
+1. **CLI — recommended:** open a terminal in the Unity project and run:
+
+   ```bash
+   npx -y unity-open-mcp@latest setup --client cursor
+   ```
+
+   Use `claude`, `zcode`, `vscode`, `codex`, `opencode`, or `agents` for another
+   supported writer. The command installs matching pins, project config, and the
+   bundled skill; see [Manual setup](docs/setup/manual-setup.md) for details.
+2. **Unity Hub Pro:** use the graphical flow in
    [Wizard setup](docs/setup/wizard-setup.md).
-3. **Local checkout:** build and run the repository with
+3. **Manual:** copy the package and client configuration yourself from
+   [MCP client configuration](docs/setup/client-configuration.md).
+4. **Local checkout:** build and run the repository with
    [Development setup](docs/setup/development-setup.md).
-4. **Experimental — AI agent:** paste this prompt into your AI client
-   (Cursor, Claude, …). Prefer Manual or Wizard when you want a predictable
-   install.
+5. **Experimental — AI agent:** paste the prompt below into your AI client.
+
+<details>
+<summary>Agent installation prompt</summary>
 
 ```text
 Install Unity Open MCP in this Unity project by following
@@ -138,6 +116,8 @@ invent versions, rewrite the skill, or call generate_skill. Do every agent step
 yourself and stop only when human action is required. If this monorepo is already
 open locally, read docs/setup/agent-setup.md from disk instead of fetching it.
 ```
+
+</details>
 
 Full procedure: [Agent setup](docs/setup/agent-setup.md).
 For teams and monorepos, use a
@@ -162,11 +142,6 @@ For contributors:
 - [Code conventions](docs/code-conventions.md) — non-obvious C# contracts.
 
 > Would like to see other MCP options? See the [MCP tools for Unity comparison](docs/mcp-tools-comparison.md) — a side-by-side feature matrix of Unity Open MCP and the other MCP tools / AI assistants in the space.
-
-## Unity Hub Pro
-
-Unity Hub Pro is the desktop companion app for Unity Open MCP. It helps you manage projects, run the AI Setup wizard, and handle maintainer workflows from one UI.
-[See docs for details.](docs/unity-hub-pro.md)
 
 ## Contributing
 

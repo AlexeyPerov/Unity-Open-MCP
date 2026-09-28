@@ -55,13 +55,7 @@ See [Version compatibility](versioning.md) for user behavior and
 [Maintainer versioning and releases](contributing/versioning.md) for sources,
 sync, tags, and release workflows.
 
-## Related docs
-
-- [MCP tools API](api/mcp-tools.md)
-- [Routing and lifecycle](api/routing-lifecycle.md)
-- [Bridge HTTP API](api/bridge-http.md)
-- [Extensions](extensions.md)
-- [Contributing — extensions](contributing/extensions.md)
+## Ownership boundaries
 
 ### Compiler evidence boundary
 
@@ -93,3 +87,11 @@ the native test runner's run-id file handoff. The bridge owns execution, Unity
 main-thread access, mutation exclusion, checkpoint and terminal validation.
 Reload cannot resume project command code; lost ownership is orphaned. Job state
 is not persisted across MCP restarts. [Jobs](api/jobs.md) documents these limits.
+
+## Related docs
+
+- [MCP tools API](api/mcp-tools.md)
+- [Routing and lifecycle](api/routing-lifecycle.md)
+- [Bridge HTTP API](api/bridge-http.md)
+- [Extensions](extensions.md)
+- [Contributing — extensions](contributing/extensions.md)
