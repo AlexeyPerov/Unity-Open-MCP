@@ -97,7 +97,7 @@ my-game/                    <- 在这里打开 AI 客户端，配置也放这里
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@1.3.0"],
+      "args": ["-y", "unity-open-mcp@1.4.0"],
       "env": { "UNITY_PROJECT_PATH": "${workspaceFolder}/Client" }
     }
   }
@@ -115,7 +115,7 @@ my-game/                    <- 在这里打开 AI 客户端，配置也放这里
       "command": "npx",
       "args": [
         "-y",
-        "unity-open-mcp@1.3.0",
+        "unity-open-mcp@1.4.0",
         "--project-from-cwd",
         "--unity-subpath",
         "Client"
@@ -132,7 +132,7 @@ my-game/                    <- 在这里打开 AI 客户端，配置也放这里
 生成的 `.mcp.json`：
 
 ```bash
-claude mcp add --scope project unity-open-mcp -- npx -y unity-open-mcp@1.3.0 --project-from-cwd --unity-subpath Client
+claude mcp add --scope project unity-open-mcp -- npx -y unity-open-mcp@1.4.0 --project-from-cwd --unity-subpath Client
 ```
 
 不加 `--scope project` 时，条目会写入用户级 Claude Code 配置，不会共享。
@@ -148,7 +148,7 @@ claude mcp add --scope project unity-open-mcp -- npx -y unity-open-mcp@1.3.0 --p
       "unity-open-mcp": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "unity-open-mcp@1.3.0", "--project-from-cwd", "--unity-subpath", "Client"],
+        "args": ["-y", "unity-open-mcp@1.4.0", "--project-from-cwd", "--unity-subpath", "Client"],
         "env": {}
       }
     }
@@ -170,7 +170,7 @@ ZCode 在会话的工作目录（即打开的仓库根目录）中启动 stdio �
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@1.3.0", "--project-from-cwd", "--unity-subpath", "Client"],
+      "command": ["npx", "-y", "unity-open-mcp@1.4.0", "--project-from-cwd", "--unity-subpath", "Client"],
       "enabled": true,
       "environment": {}
     }
@@ -261,7 +261,7 @@ Cursor/OpenCode/ZCode）保持绝对路径形式，面板会给出说明。Hub �
 
 ## 保持版本号最新
 
-已提交的条目仍然固定版本（`unity-open-mcp@1.3.0`），它必须与
+已提交的条目仍然固定版本（`unity-open-mcp@1.4.0`），它必须与
 `Packages/manifest.json` 中的 bridge 与 verify 版本一起更新。bridge 窗口的
 **Updates** 流程会以配置文件所在目录（工作区根目录）为基准解析可移植条目，并改写
 指向本项目的条目：`${workspaceFolder}` 或相对路径形式的 `UNITY_PROJECT_PATH`、
@@ -298,7 +298,7 @@ Git 不会用已跟踪的文件覆盖未跟踪的文件。
 在仓库根目录执行：
 
 ```bash
-npx -y unity-open-mcp@1.3.0 ping --project-from-cwd --unity-subpath Client
+npx -y unity-open-mcp@1.4.0 ping --project-from-cwd --unity-subpath Client
 ```
 
 启动行会显示哪个输入生效、解析出的绝对路径是什么。桥还没运行时返回非零退出码

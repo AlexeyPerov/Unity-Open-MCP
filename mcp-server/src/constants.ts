@@ -116,7 +116,7 @@ export const COMPILE_STATE_HEADER = "X-Unity-Open-MCP-Compile-State";
  * verify packages. Mirrors the C# `BridgeConstants.NpmPackage`. Kept in
  * sync by `scripts/sync-version.mjs`.
  */
-export const NPM_PACKAGE = "unity-open-mcp@1.3.0";
+export const NPM_PACKAGE = "unity-open-mcp@1.4.0";
 
 /**
  * Build the bridge base URL for a given port. Centralizes the loopback +

@@ -101,7 +101,7 @@ per-machine fallback, not the team default.
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@1.3.0"],
+      "args": ["-y", "unity-open-mcp@1.4.0"],
       "env": { "UNITY_PROJECT_PATH": "${workspaceFolder}/Client" }
     }
   }
@@ -119,7 +119,7 @@ Drop `/Client` for Layout A.
       "command": "npx",
       "args": [
         "-y",
-        "unity-open-mcp@1.3.0",
+        "unity-open-mcp@1.4.0",
         "--project-from-cwd",
         "--unity-subpath",
         "Client"
@@ -136,7 +136,7 @@ To let Claude Code write that file, run this from the repository root and
 commit the resulting `.mcp.json`:
 
 ```bash
-claude mcp add --scope project unity-open-mcp -- npx -y unity-open-mcp@1.3.0 --project-from-cwd --unity-subpath Client
+claude mcp add --scope project unity-open-mcp -- npx -y unity-open-mcp@1.4.0 --project-from-cwd --unity-subpath Client
 ```
 
 Without `--scope project` the entry lands in your user-level Claude Code
@@ -154,7 +154,7 @@ your personal one):
       "unity-open-mcp": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "unity-open-mcp@1.3.0", "--project-from-cwd", "--unity-subpath", "Client"],
+        "args": ["-y", "unity-open-mcp@1.4.0", "--project-from-cwd", "--unity-subpath", "Client"],
         "env": {}
       }
     }
@@ -177,7 +177,7 @@ the workspace one, so remove an old personal `unity-open-mcp` entry there.
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@1.3.0", "--project-from-cwd", "--unity-subpath", "Client"],
+      "command": ["npx", "-y", "unity-open-mcp@1.4.0", "--project-from-cwd", "--unity-subpath", "Client"],
       "enabled": true,
       "environment": {}
     }
@@ -280,7 +280,7 @@ the same default when it detects a repository at or above the Unity project.
 
 ## Keeping the pin current
 
-The committed entry still pins a version (`unity-open-mcp@1.3.0`), and it must
+The committed entry still pins a version (`unity-open-mcp@1.4.0`), and it must
 move together with the bridge and verify pins in `Packages/manifest.json`. The
 bridge window's **Updates** flow resolves portable entries against the
 directory the config was found under — the workspace root — and rewrites the
@@ -322,7 +322,7 @@ file with a tracked one.
 From the repository root:
 
 ```bash
-npx -y unity-open-mcp@1.3.0 ping --project-from-cwd --unity-subpath Client
+npx -y unity-open-mcp@1.4.0 ping --project-from-cwd --unity-subpath Client
 ```
 
 The startup line shows which input won and which absolute path was resolved. A

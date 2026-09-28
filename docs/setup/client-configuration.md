@@ -22,7 +22,7 @@ stays on your machine. To commit one config for the whole team instead, see
    add only the `unity-open-mcp` entry — do not wipe siblings.
 5. Restart the MCP client so it reloads the config.
 
-Pin the same server version as your bridge/verify packages (`unity-open-mcp@1.3.0` below).
+Pin the same server version as your bridge/verify packages (`unity-open-mcp@1.4.0` below).
 See [Versioning](../versioning.md) when upgrading. The first `npx` launch can
 take 10–60 seconds while the package downloads; later launches are fast.
 
@@ -81,7 +81,7 @@ Code, Rider, Unity AI, ZooCode, and Antigravity:
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@1.3.0"],
+      "args": ["-y", "unity-open-mcp@1.4.0"],
       "env": {
         "UNITY_PROJECT_PATH": "/absolute/path/to/project"
       }
@@ -98,7 +98,7 @@ Code, Rider, Unity AI, ZooCode, and Antigravity:
     "unity-open-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@1.3.0"],
+      "args": ["-y", "unity-open-mcp@1.4.0"],
       "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
   }
@@ -113,7 +113,7 @@ Code, Rider, Unity AI, ZooCode, and Antigravity:
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@1.3.0"],
+      "command": ["npx", "-y", "unity-open-mcp@1.4.0"],
       "enabled": true,
       "environment": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
@@ -135,7 +135,7 @@ the args form from [Portable MCP config](portable-config.md#zcode).
       "unity-open-mcp": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "unity-open-mcp@1.3.0"],
+        "args": ["-y", "unity-open-mcp@1.4.0"],
         "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
       }
     }
@@ -149,7 +149,7 @@ the args form from [Portable MCP config](portable-config.md#zcode).
 [mcp_servers.unity-open-mcp]
 enabled = true
 command = "npx"
-args = ["-y", "unity-open-mcp@1.3.0"]
+args = ["-y", "unity-open-mcp@1.4.0"]
 
 [mcp_servers.unity-open-mcp.env]
 UNITY_PROJECT_PATH = "/absolute/path/to/project"
@@ -160,7 +160,7 @@ UNITY_PROJECT_PATH = "/absolute/path/to/project"
 ```sh
 claude mcp add unity-open-mcp \
   --env UNITY_PROJECT_PATH=/absolute/path/to/project \
-  -- npx -y unity-open-mcp@1.3.0
+  -- npx -y unity-open-mcp@1.4.0
 ```
 
 If the server is already registered, remove and re-add it when the command,

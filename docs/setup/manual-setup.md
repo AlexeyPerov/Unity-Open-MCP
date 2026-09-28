@@ -33,13 +33,13 @@ project folder (the one with `Assets/`, `Packages/`, and `ProjectSettings/`) and
 run:
 
 ```bash
-npx -y unity-open-mcp@1.3.0 setup --client cursor
+npx -y unity-open-mcp@1.4.0 setup --client cursor
 ```
 
 Use `claude`, `zcode`, `vscode`, `codex`, `opencode`, or `agents` instead of `cursor` for
 another client. When the Unity project is a subfolder of your repository, run it
 from the repository root and name the folder:
-`npx -y unity-open-mcp@1.3.0 setup --client cursor --unity-subpath Client`. Add
+`npx -y unity-open-mcp@1.4.0 setup --client cursor --unity-subpath Client`. Add
 `--dry-run` first to see every file it would change.
 
 The command pins the bridge, verify, and server to one version, merges the MCP
@@ -57,8 +57,8 @@ Open `Packages/manifest.json` in your Unity project (for example
 ```json
 {
   "dependencies": {
-    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v1.3.0",
-    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v1.3.0"
+    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v1.4.0",
+    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v1.4.0"
   }
 }
 ```

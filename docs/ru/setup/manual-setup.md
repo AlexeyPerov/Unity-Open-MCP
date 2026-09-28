@@ -34,13 +34,13 @@ MCP-сервер, который запускает клиент). Ниже — 
 Unity (где лежат `Assets/`, `Packages/` и `ProjectSettings/`) и выполните:
 
 ```bash
-npx -y unity-open-mcp@1.3.0 setup --client cursor
+npx -y unity-open-mcp@1.4.0 setup --client cursor
 ```
 
 Для другого клиента укажите `claude`, `zcode`, `vscode`, `codex`, `opencode` или `agents`
 вместо `cursor`. Если проект Unity — подпапка репозитория, запустите команду из
 корня репозитория и назовите папку:
-`npx -y unity-open-mcp@1.3.0 setup --client cursor --unity-subpath Client`.
+`npx -y unity-open-mcp@1.4.0 setup --client cursor --unity-subpath Client`.
 Сначала добавьте `--dry-run`, чтобы увидеть все файлы, которые она изменит.
 
 Команда фиксирует bridge, verify и сервер на одной версии, добавляет запись MCP,
@@ -59,8 +59,8 @@ git-репозитория или задан `--unity-subpath`, она пише�
 ```json
 {
   "dependencies": {
-    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v1.3.0",
-    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v1.3.0"
+    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v1.4.0",
+    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v1.4.0"
   }
 }
 ```

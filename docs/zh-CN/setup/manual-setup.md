@@ -30,12 +30,12 @@ setup 命令会替你完成第 1、2 步。在 Unity 项目文件夹（包含 `A
 和 `ProjectSettings/` 的文件夹）中打开终端并运行：
 
 ```bash
-npx -y unity-open-mcp@1.3.0 setup --client cursor
+npx -y unity-open-mcp@1.4.0 setup --client cursor
 ```
 
 其他客户端请把 `cursor` 换成 `claude`、`zcode`、`vscode`、`codex`、`opencode` 或 `agents`。
 若 Unity 项目是仓库的子文件夹，请在仓库根目录运行并指明该文件夹：
-`npx -y unity-open-mcp@1.3.0 setup --client cursor --unity-subpath Client`。
+`npx -y unity-open-mcp@1.4.0 setup --client cursor --unity-subpath Client`。
 建议先加 `--dry-run` 查看它将修改的所有文件。
 
 该命令把 bridge、verify 与服务器锁定到同一版本，合并 MCP 条目而不改动其他服务器，
@@ -51,8 +51,8 @@ npx -y unity-open-mcp@1.3.0 setup --client cursor
 ```json
 {
   "dependencies": {
-    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v1.3.0",
-    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v1.3.0"
+    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v1.4.0",
+    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v1.4.0"
   }
 }
 ```

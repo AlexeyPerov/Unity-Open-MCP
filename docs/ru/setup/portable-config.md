@@ -104,7 +104,7 @@ my-game/                    <- здесь открыт AI-клиент, здес
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@1.3.0"],
+      "args": ["-y", "unity-open-mcp@1.4.0"],
       "env": { "UNITY_PROJECT_PATH": "${workspaceFolder}/Client" }
     }
   }
@@ -122,7 +122,7 @@ my-game/                    <- здесь открыт AI-клиент, здес
       "command": "npx",
       "args": [
         "-y",
-        "unity-open-mcp@1.3.0",
+        "unity-open-mcp@1.4.0",
         "--project-from-cwd",
         "--unity-subpath",
         "Client"
@@ -139,7 +139,7 @@ my-game/                    <- здесь открыт AI-клиент, здес
 репозитория и закоммитьте получившийся `.mcp.json`:
 
 ```bash
-claude mcp add --scope project unity-open-mcp -- npx -y unity-open-mcp@1.3.0 --project-from-cwd --unity-subpath Client
+claude mcp add --scope project unity-open-mcp -- npx -y unity-open-mcp@1.4.0 --project-from-cwd --unity-subpath Client
 ```
 
 Без `--scope project` запись попадёт в пользовательский конфиг Claude Code и
@@ -157,7 +157,7 @@ claude mcp add --scope project unity-open-mcp -- npx -y unity-open-mcp@1.3.0 --p
       "unity-open-mcp": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "unity-open-mcp@1.3.0", "--project-from-cwd", "--unity-subpath", "Client"],
+        "args": ["-y", "unity-open-mcp@1.4.0", "--project-from-cwd", "--unity-subpath", "Client"],
         "env": {}
       }
     }
@@ -181,7 +181,7 @@ ZCode запускает stdio-серверы в рабочем каталоге
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@1.3.0", "--project-from-cwd", "--unity-subpath", "Client"],
+      "command": ["npx", "-y", "unity-open-mcp@1.4.0", "--project-from-cwd", "--unity-subpath", "Client"],
       "enabled": true,
       "environment": {}
     }
@@ -285,7 +285,7 @@ Unity или над ним.
 
 ## Как держать версию актуальной
 
-Закоммиченная запись по-прежнему фиксирует версию (`unity-open-mcp@1.3.0`), и
+Закоммиченная запись по-прежнему фиксирует версию (`unity-open-mcp@1.4.0`), и
 её нужно менять вместе с пинами bridge и verify в `Packages/manifest.json`.
 Поток **Updates** в окне bridge разрешает portable-записи относительно
 каталога, в котором найден конфиг (корня рабочей области), и переписывает те,
@@ -327,7 +327,7 @@ Unity или над ним.
 Из корня репозитория:
 
 ```bash
-npx -y unity-open-mcp@1.3.0 ping --project-from-cwd --unity-subpath Client
+npx -y unity-open-mcp@1.4.0 ping --project-from-cwd --unity-subpath Client
 ```
 
 Строка при старте показывает, какой вход победил и какой абсолютный путь
