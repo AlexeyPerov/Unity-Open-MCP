@@ -1,5 +1,7 @@
 import { copySkillReferences } from "../skill/copy-references.js";
+import { existsSync, readdirSync } from "node:fs";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,8 +13,8 @@ import {
 import { PROJECT_PATH_ENV_VAR } from "../constants.js";
 import { validateUnityProjectRoot } from "../project-path.js";
 import { isRecord } from "./json-guards.js";
+import { CodexTomlError, mergeCodexServer, renderCodexServer } from "../setup/codex-toml.js";
 import {
-  catalogIdForSetupClient,
   portableEnv,
   portableServerArgs,
   portableSupportFor,
@@ -28,9 +30,41 @@ const BRIDGE_PACKAGE = "com.alexeyperov.unity-open-mcp-bridge";
 const VERIFY_PACKAGE = "com.alexeyperov.unity-open-mcp-verify";
 const REPOSITORY_URL = "https://github.com/AlexeyPerov/unity-open-mcp.git";
 const SERVER_KEY = "unity-open-mcp";
-const CONFIG_CLIENTS = ["cursor", "claude", "opencode", "agents"] as const;
 
-type SetupConfigClient = (typeof CONFIG_CLIENTS)[number];
+/** How a client's config file spells the server entry. */
+type SetupConfigFormat = "mcpServers" | "opencode" | "vscode" | "codex";
+
+export interface SetupClientSpec {
+  /** `--client` value. */
+  id: string;
+  /** Config file relative to the workspace root, POSIX separators. */
+  configPath: string;
+  format: SetupConfigFormat;
+  /** Skill target key in skills/client-paths.json `clients`. */
+  skillKey: string;
+  /** Row in the portable-config client matrix. */
+  catalogId: string;
+}
+
+/**
+ * Clients `setup` can write a config for. The skill key follows
+ * `mcpClientMapping` in skills/client-paths.json (Codex installs into the
+ * shared `.agents/skills`); a unit test keeps the two in step.
+ */
+export const SETUP_CLIENTS: readonly SetupClientSpec[] = [
+  { id: "cursor", configPath: ".cursor/mcp.json", format: "mcpServers", skillKey: "cursor", catalogId: "cursor" },
+  { id: "claude", configPath: ".mcp.json", format: "mcpServers", skillKey: "claude", catalogId: "claude-code" },
+  { id: "vscode", configPath: ".vscode/mcp.json", format: "vscode", skillKey: "vscode", catalogId: "vscode-copilot" },
+  { id: "codex", configPath: ".codex/config.toml", format: "codex", skillKey: "agents", catalogId: "codex" },
+  { id: "opencode", configPath: "opencode.json", format: "opencode", skillKey: "opencode", catalogId: "opencode" },
+  { id: "agents", configPath: ".mcp.json", format: "mcpServers", skillKey: "agents", catalogId: "agents" },
+];
+
+/** Where the Unity project came from. */
+export type SetupProjectSource = "flag" | "workspace" | "cwd" | "cwd+subpath";
+
+/** How many folders above the workspace setup looks for a repository root. */
+const REPO_DETECT_DEPTH = 4;
 
 export interface SetupCommandOptions {
   version: string;
@@ -57,6 +91,11 @@ export interface SetupCommandOptions {
   wrapper?: boolean;
   /** Test/development override; published builds use dist/skill/SKILL.md. */
   skillSourcePath?: string;
+  /** Test seams; default to the running process. */
+  cwd?: string;
+  env?: Record<string, string | undefined>;
+  platform?: NodeJS.Platform;
+  homeDir?: string;
 }
 
 export interface SetupCommandResult {
@@ -69,6 +108,8 @@ export interface SetupCommandResult {
 export interface SetupReport {
   version: string;
   project: string;
+  /** `flag` (--project), `workspace` (--workspace [+ --unity-subpath]), `cwd`, or `cwd+subpath`. */
+  projectSource: SetupProjectSource;
   client: string;
   dryRun: boolean;
   /** Repository root the client config and skill are written under. */
@@ -124,11 +165,18 @@ export async function runSetupCommand(
   opts: SetupCommandOptions,
 ): Promise<SetupCommandResult> {
   try {
-    const project = await validateProject(opts.projectPath);
+    const cwd = opts.cwd ?? process.cwd();
     const client = validateClient(opts.client);
+    const { project, source } = resolveSetupProject(opts, cwd);
     const pins = packagePins(opts.version);
-    const placement = resolvePlacement(project, client, opts);
+    const placement = resolvePlacement(project, client, opts, cwd);
     const warnings = [...placement.warnings];
+    const envProject = (opts.env ?? process.env)[PROJECT_PATH_ENV_VAR]?.trim();
+    if (envProject && !samePath(resolve(cwd, envProject), project)) {
+      warnings.push(
+        `${PROJECT_PATH_ENV_VAR} is set to ${envProject} in this shell; setup ignores it and configures ${project}.`,
+      );
+    }
 
     const manifestPath = join(project, "Packages", "manifest.json");
     const manifest = await readJsonObject(manifestPath, false);
@@ -145,9 +193,9 @@ export async function runSetupCommand(
 
     // Client config and the agent skill live where the AI client is opened —
     // the workspace root, which equals the Unity root for a plain layout.
-    const configPath = configPathFor(placement.workspace, client);
-    const config = await readJsonObject(configPath, true);
-    const entry = mergeClientConfig(config, client, project, pins.npm, placement);
+    const clientConfig = await planClientConfig(client, project, pins.npm, placement);
+    const configPath = clientConfig.path;
+    const entry = clientConfig.entry;
 
     const wrapperPath = placement.emitWrapper
       ? join(placement.workspace, ...wrapperRelativePath(placement.layout).split("/"))
@@ -163,7 +211,7 @@ export async function runSetupCommand(
     let skillBytes: Buffer | null = null;
     let skillPath: string | null = null;
     if (!opts.skipSkill) {
-      skillPath = join(placement.workspace, clientSkillRelativePath(client));
+      skillPath = join(placement.workspace, clientSkillRelativePath(client.skillKey));
       const source = opts.skillSourcePath ?? resolveBundledSkillPath();
       if (!source) {
         throw new SetupError(
@@ -181,7 +229,7 @@ export async function runSetupCommand(
 
     if (!opts.dryRun) {
       await writeJson(manifestPath, manifest);
-      await writeJson(configPath, config);
+      await writeText(configPath, clientConfig.body);
       if (skillBytes && skillPath) {
         try {
           await mkdir(dirname(skillPath), { recursive: true });
@@ -204,7 +252,8 @@ export async function runSetupCommand(
     const report: SetupReport = {
       version: opts.version,
       project,
-      client,
+      projectSource: source,
+      client: client.id,
       dryRun: opts.dryRun,
       workspace: placement.workspace,
       layout: placement.layout,
@@ -239,6 +288,9 @@ export async function runSetupCommand(
       userAction: [
         `Open Unity with ${project} and wait for compilation to finish.`,
         "Restart the MCP / AI client so it reloads the updated configuration.",
+        ...(client.format === "codex"
+          ? [`Trust ${placement.workspace} in Codex — it reads .codex/config.toml only for a trusted project.`]
+          : []),
       ],
     };
     return { exitCode: 0, json: report, human: formatSetupReport(report) };
@@ -267,35 +319,98 @@ export async function runSetupCommand(
   }
 }
 
-async function validateProject(input: string | undefined): Promise<string> {
-  if (!input) {
-    throw new SetupError(
-      "missing_project",
-      "setup requires --project <absolute Unity project path>.",
-      2,
-    );
+/**
+ * The Unity project this run configures. First match wins:
+ *
+ *   1. `--project <path>` — absolute, or relative to the working directory.
+ *   2. `--workspace <path>` (+ `--unity-subpath <rel>`) — the Unity folder
+ *      under an explicit repository root.
+ *   3. `--unity-subpath <rel>` — a monorepo, run from the repository root.
+ *   4. the working directory itself.
+ *
+ * `UNITY_PROJECT_PATH` is deliberately not an input: an agent's shell can
+ * carry a stale value from another project, and setup writes files.
+ */
+function resolveSetupProject(
+  opts: SetupCommandOptions,
+  cwd: string,
+): { project: string; source: SetupProjectSource } {
+  const subpath = normalizeSubpath(opts.unitySubpath);
+  const flag = opts.projectPath?.trim();
+  const workspace = opts.workspacePath?.trim();
+  let project: string;
+  let source: SetupProjectSource;
+  if (flag) {
+    project = resolve(cwd, flag);
+    source = "flag";
+  } else if (workspace) {
+    project = resolve(cwd, workspace, ...subpath.split("/").filter(Boolean));
+    source = "workspace";
+  } else if (subpath) {
+    project = resolve(cwd, ...subpath.split("/"));
+    source = "cwd+subpath";
+  } else {
+    project = resolve(cwd);
+    source = "cwd";
   }
-  if (!isAbsolute(input)) {
-    throw new SetupError(
-      "project_not_absolute",
-      `--project must be absolute (received '${input}').`,
-      2,
-    );
-  }
-  const project = resolve(input);
+
   const validation = validateUnityProjectRoot(project);
   if (!validation.valid) {
+    const missing = validation.missing.map((m) => `${m}/`).join(", ");
     throw new SetupError(
       "not_unity_project",
-      `${project} is not a Unity project root: missing ${validation.missing.map((m) => `${m}/`).join(", ")}.`,
+      `${project} is not a Unity project root: missing ${missing}. ${notUnityProjectHint(project, source)}`,
       2,
     );
   }
-  return project;
+  return { project, source };
 }
 
-function validateClient(input: string | undefined): SetupConfigClient {
-  const known = knownClientKeys();
+/** Point at a Unity project just below the folder that missed, when there is one. */
+function notUnityProjectHint(searched: string, source: SetupProjectSource): string {
+  const found = findUnityProjectsBelow(searched, 2);
+  if (found.length > 0) {
+    const shown = found.slice(0, 3);
+    if (source === "cwd") {
+      return `Found a Unity project at ${shown.map((rel) => `${rel}/`).join(", ")} — run again with --unity-subpath ${quoteArg(shown[0])}.`;
+    }
+    return `Found a Unity project at ${shown.map((rel) => join(searched, rel)).join(", ")} — pass that folder instead.`;
+  }
+  return source === "flag"
+    ? "Pass the folder that contains Assets/, Packages/, and ProjectSettings/."
+    : "Run setup in the folder that contains Assets/, Packages/, and ProjectSettings/, or pass --project <path>.";
+}
+
+/** Folders that never hold a Unity project worth suggesting. */
+const SEARCH_PRUNED = new Set([
+  "node_modules", "Library", "Temp", "Logs", "Build", "Builds", "obj", "bin", "dist",
+]);
+
+/** Unity roots up to `depth` levels below `root`, as POSIX relative paths. */
+function findUnityProjectsBelow(root: string, depth: number): string[] {
+  const found: string[] = [];
+  const walk = (dir: string, rel: string, level: number) => {
+    if (level > depth) return;
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name.startsWith(".") || SEARCH_PRUNED.has(e.name)) continue;
+      const child = join(dir, e.name);
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (validateUnityProjectRoot(child).valid) found.push(childRel);
+      else walk(child, childRel, level + 1);
+    }
+  };
+  walk(root, "", 1);
+  return found.sort();
+}
+
+function validateClient(input: string | undefined): SetupClientSpec {
+  const known = SETUP_CLIENTS.map((c) => c.id);
   if (!input) {
     throw new SetupError(
       "missing_client",
@@ -303,21 +418,20 @@ function validateClient(input: string | undefined): SetupConfigClient {
       2,
     );
   }
-  if (!known.includes(input)) {
-    throw new SetupError(
-      "unknown_client",
-      `Unknown client '${input}'. Known ids: ${known.join(", ")}.`,
-      2,
-    );
-  }
-  if (!(CONFIG_CLIENTS as readonly string[]).includes(input)) {
+  const spec = SETUP_CLIENTS.find((c) => c.id === input);
+  if (spec) return spec;
+  if (knownClientKeys().includes(input)) {
     throw new SetupError(
       "unsupported_client_config",
-      `Client '${input}' has a skill path but no setup config writer. Configure MCP manually; skill-only is not enough. Setup config writers: ${CONFIG_CLIENTS.join(", ")}.`,
+      `Client '${input}' has a skill path but no setup config writer. Configure MCP manually; skill-only is not enough. Setup config writers: ${known.join(", ")}.`,
       2,
     );
   }
-  return input as SetupConfigClient;
+  throw new SetupError(
+    "unknown_client",
+    `Unknown client '${input}'. Known ids: ${known.join(", ")}.`,
+    2,
+  );
 }
 
 /**
@@ -343,22 +457,16 @@ interface SetupPlacement {
 
 function resolvePlacement(
   project: string,
-  client: SetupConfigClient,
+  client: SetupClientSpec,
   opts: SetupCommandOptions,
+  cwd: string,
 ): SetupPlacement {
   const warnings: string[] = [];
   const requestedSubpath = normalizeSubpath(opts.unitySubpath);
 
   let workspace: string;
-  if (opts.workspacePath) {
-    if (!isAbsolute(opts.workspacePath)) {
-      throw new SetupError(
-        "workspace_not_absolute",
-        `--workspace must be absolute (received '${opts.workspacePath}').`,
-        2,
-      );
-    }
-    workspace = resolve(opts.workspacePath);
+  if (opts.workspacePath?.trim()) {
+    workspace = resolve(cwd, opts.workspacePath.trim());
   } else if (requestedSubpath) {
     // Derive the workspace by stripping the subpath off the Unity root, so
     // `--project /abs/repo/Client --unity-subpath Client` needs no --workspace.
@@ -401,21 +509,47 @@ function resolvePlacement(
     );
   }
 
-  const support = portableSupportFor(catalogIdForSetupClient(client));
-  // Portable by default exactly where the absolute path is the real problem:
-  // a monorepo whose config file is not inside the Unity project.
-  let portable = opts.portable ?? layout === "monorepo";
+  const support = portableSupportFor(client.catalogId);
+  const repoRoot = findRepoRoot(workspace, opts.homeDir ?? homedir());
+  // Portable by default wherever the config is likely to be committed: a
+  // monorepo, or a workspace that is itself a repository root — the same
+  // default the bridge window and the Hub wizard use.
+  let portable = opts.portable ?? (layout === "monorepo" || repoRoot === workspace);
   if (portable && support?.strategy === "absolute") {
     warnings.push(
-      `Client '${client}' has no portable configuration form; writing the absolute path.`,
+      `Client '${client.id}' has no portable configuration form; writing the absolute path.`,
     );
     portable = false;
   }
   if (portable && !support) {
     warnings.push(
-      `Client '${client}' is not in the portable-config catalog; writing the absolute path.`,
+      `Client '${client.id}' is not in the portable-config catalog; writing the absolute path.`,
     );
     portable = false;
+  }
+  if (portable && support?.strategy === "wrapper" && (opts.platform ?? process.platform) === "win32") {
+    if (opts.portable === undefined) {
+      warnings.push(
+        `The portable ${client.id} entry runs a bash wrapper script, which Windows cannot start without Git Bash or WSL; writing the absolute path. Pass --portable to write the wrapper anyway.`,
+      );
+      portable = false;
+    } else {
+      warnings.push(
+        `The ${client.id} wrapper is a bash script: on Windows it needs Git Bash or WSL on PATH.`,
+      );
+    }
+  }
+
+  // The Unity project sits inside a repository whose root is above the
+  // workspace: an AI client opened on that root never reads this config.
+  if (repoRoot && repoRoot !== workspace && !opts.workspacePath?.trim()) {
+    const rel = relativeSubpath(repoRoot, project);
+    if (rel) {
+      warnings.push(
+        `${project} is inside the repository ${repoRoot}. An AI client opened on ${repoRoot} does not read ${join(workspace, ...client.configPath.split("/"))}. ` +
+          `To configure the repository instead, run from ${repoRoot}: npx -y unity-open-mcp@${opts.version} setup --client ${client.id} --unity-subpath ${quoteArg(rel)}`,
+      );
+    }
   }
 
   const strategy: ConfigStrategy = portable && support ? support.strategy : "absolute";
@@ -474,17 +608,91 @@ export function packagePins(version: string): {
   };
 }
 
-function configPathFor(workspace: string, client: SetupConfigClient): string {
-  switch (client) {
-    case "cursor":
-      return join(workspace, ".cursor", "mcp.json");
-    case "claude":
-      return join(workspace, ".mcp.json");
-    case "opencode":
-      return join(workspace, "opencode.json");
-    case "agents":
-      return join(workspace, ".mcp.json");
+/**
+ * Nearest folder at or above `start` (up to {@link REPO_DETECT_DEPTH} levels)
+ * that holds a `.git` entry, stopping before the home directory — a dotfiles
+ * repository in `$HOME` must not make every project look committed.
+ */
+function findRepoRoot(start: string, home: string): string | undefined {
+  const boundary = home ? resolve(home) : "";
+  let dir = resolve(start);
+  for (let level = 0; level <= REPO_DETECT_DEPTH; level++) {
+    if (boundary && samePath(dir, boundary)) return undefined;
+    if (existsSync(join(dir, ".git"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
   }
+  return undefined;
+}
+
+interface ClientConfigPlan {
+  path: string;
+  /** The server entry as written (for the report). */
+  entry: Record<string, unknown>;
+  /** Full file body to write. */
+  body: string;
+}
+
+async function planClientConfig(
+  client: SetupClientSpec,
+  project: string,
+  npmPin: string,
+  placement: SetupPlacement,
+): Promise<ClientConfigPlan> {
+  const path = join(placement.workspace, ...client.configPath.split("/"));
+  const launch = launchFields(project, npmPin, placement);
+
+  if (client.format === "codex") {
+    const codexEntry = {
+      command: launch.command,
+      args: launch.args,
+      env: launch.env,
+      removeEnv: launch.env[PROJECT_PATH_ENV_VAR] === undefined ? [PROJECT_PATH_ENV_VAR] : [],
+    };
+    const raw = (await readTextIfExists(path)) ?? "";
+    let body: string;
+    try {
+      body = mergeCodexServer(raw, SERVER_KEY, codexEntry);
+    } catch (error) {
+      if (!(error instanceof CodexTomlError)) throw error;
+      throw new SetupError(
+        error.code,
+        `${path}: ${error.message} Add this entry by hand:\n${renderCodexServer(SERVER_KEY, codexEntry)}`,
+        1,
+      );
+    }
+    return {
+      path,
+      entry: { enabled: true, command: launch.command, args: launch.args, env: launch.env },
+      body,
+    };
+  }
+
+  const raw = await readTextIfExists(path);
+  let config: Record<string, unknown> = {};
+  if (raw !== undefined) {
+    try {
+      config = parseJsonObject(raw);
+    } catch (error) {
+      if (isJsonc(raw)) {
+        const snippet = {};
+        mergeClientConfig(snippet, client, launch);
+        throw new SetupError(
+          "jsonc_config",
+          `${path} has comments or trailing commas. setup rewrites the file as plain JSON and would drop them, so it leaves the file unchanged. Add this entry by hand:\n${JSON.stringify(snippet, null, 2)}`,
+          1,
+        );
+      }
+      throw new SetupError(
+        "invalid_json",
+        `${path} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+        1,
+      );
+    }
+  }
+  const entry = mergeClientConfig(config, client, launch);
+  return { path, entry, body: `${JSON.stringify(config, null, 2)}\n` };
 }
 
 /**
@@ -497,14 +705,10 @@ function configPathFor(workspace: string, client: SetupConfigClient): string {
  */
 function mergeClientConfig(
   config: Record<string, unknown>,
-  client: SetupConfigClient,
-  project: string,
-  npmPin: string,
-  placement: SetupPlacement,
+  client: SetupClientSpec,
+  launch: LaunchFields,
 ): Record<string, unknown> {
-  const launch = launchFields(project, npmPin, placement);
-
-  if (client === "opencode") {
+  if (client.format === "opencode") {
     const mcp = ensureObject(config, "mcp");
     const previous = isRecord(mcp[SERVER_KEY]) ? mcp[SERVER_KEY] : {};
     const previousEnvironment = isRecord(previous.environment)
@@ -521,10 +725,13 @@ function mergeClientConfig(
     return entry;
   }
 
-  const servers = ensureObject(config, "mcpServers");
+  // VS Code (and Visual Studio) read `servers`, with an explicit transport.
+  const vscode = client.format === "vscode";
+  const servers = ensureObject(config, vscode ? "servers" : "mcpServers");
   const previous = isRecord(servers[SERVER_KEY]) ? servers[SERVER_KEY] : {};
   const previousEnv = isRecord(previous.env) ? previous.env : {};
   const entry = {
+    ...(vscode ? { type: "stdio" } : {}),
     ...previous,
     command: launch.command,
     args: launch.args,
@@ -635,6 +842,78 @@ async function writeJson(path: string, value: Record<string, unknown>): Promise<
   }
 }
 
+async function writeText(path: string, body: string): Promise<void> {
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, body, "utf8");
+  } catch (error) {
+    throw ioError(`Could not write ${path}`, error);
+  }
+}
+
+async function readTextIfExists(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return undefined;
+    throw ioError(`Could not read ${path}`, error);
+  }
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(raw);
+  if (!isRecord(parsed)) throw new Error("top level must be a JSON object");
+  return parsed;
+}
+
+/**
+ * True when `raw` only parses once comments and trailing commas are removed —
+ * the JSONC dialect VS Code allows in `.vscode/mcp.json`.
+ */
+function isJsonc(raw: string): boolean {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (inString) {
+      out += ch;
+      if (ch === "\\") out += raw[++i] ?? "";
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') {
+      inString = true;
+      out += ch;
+    } else if (raw.startsWith("//", i)) {
+      while (i < raw.length && raw[i] !== "\n") i++;
+      out += "\n";
+    } else if (raw.startsWith("/*", i)) {
+      const close = raw.indexOf("*/", i + 2);
+      i = close < 0 ? raw.length : close + 1;
+    } else {
+      out += ch;
+    }
+  }
+  try {
+    parseJsonObject(out.replace(/,(\s*[}\]])/g, "$1"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Path equality after resolution; case folds on Windows and macOS. */
+function samePath(a: string, b: string): boolean {
+  const norm = (p: string) => {
+    const r = resolve(p);
+    return process.platform === "win32" || process.platform === "darwin" ? r.toLowerCase() : r;
+  };
+  return norm(a) === norm(b);
+}
+
+/** Shell-quote an argument that contains whitespace. */
+function quoteArg(value: string): string {
+  return /\s/.test(value) ? `"${value}"` : value;
+}
+
 function resolveBundledSkillPath(): string | null {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   // Published package: dist/cli/setup-command.js -> dist/skill/SKILL.md.
@@ -651,7 +930,7 @@ function formatSetupReport(report: SetupReport): string {
   const lines = [
     mode,
     `VERSION: ${report.version}`,
-    `Project: ${report.project}`,
+    `Project: ${report.project} (from ${report.projectSource})`,
     `Client: ${report.client}`,
     `UPM bridge: ${report.manifest.dependencies[BRIDGE_PACKAGE]}`,
     `UPM verify: ${report.manifest.dependencies[VERIFY_PACKAGE]}`,
@@ -663,17 +942,14 @@ function formatSetupReport(report: SetupReport): string {
     lines.push(
       `Workspace: ${report.workspace}`,
       `Layout: ${report.layout}${report.unitySubpath ? ` (Unity at ${report.unitySubpath}/)` : ""}`,
-      `Config: ${report.portable ? `portable — safe to commit (${report.configStrategy})` : "absolute path"}`,
     );
   }
+  lines.push(
+    `Config: ${report.portable ? `portable — safe to commit (${report.configStrategy})` : "absolute path — this machine only"}`,
+  );
   if (report.wrapper.path) lines.push(`Wrapper: ${report.wrapper.path}`);
   for (const warning of report.warnings) lines.push(`Warning: ${warning}`);
-  lines.push(
-    "",
-    "USER ACTION:",
-    `1. ${report.userAction[0]}`,
-    `2. ${report.userAction[1]}`,
-  );
+  lines.push("", "USER ACTION:", ...report.userAction.map((action, i) => `${i + 1}. ${action}`));
   return lines.join("\n");
 }
 

@@ -3,8 +3,9 @@
 Connect an MCP client to one Unity project: find your client, copy the snippet,
 set your project path, save the file, restart the client.
 
-For first-time setup with Cursor, Claude, OpenCode, or a generic
-agent, prefer the merge-safe [`unity-open-mcp setup`](agent-setup.md) command.
+For first-time setup with Cursor, Claude Code, VS Code Copilot, Codex, OpenCode,
+or a generic agent, prefer the merge-safe [`unity-open-mcp setup`](agent-setup.md)
+command.
 Use the catalog below for other clients or manual configuration.
 
 Every snippet on this page names **your** absolute project path, so the file

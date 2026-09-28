@@ -174,18 +174,6 @@ export const PORTABLE_CLIENT_MATRIX: readonly PortableClientSupport[] = [
   },
 ];
 
-/** `setup --client <id>` → catalog id. */
-const SETUP_CLIENT_TO_CATALOG: Record<string, string> = {
-  cursor: "cursor",
-  claude: "claude-code",
-  opencode: "opencode",
-  agents: "agents",
-};
-
-export function catalogIdForSetupClient(setupClient: string): string {
-  return SETUP_CLIENT_TO_CATALOG[setupClient] ?? setupClient;
-}
-
 export function portableSupportFor(catalogId: string): PortableClientSupport | undefined {
   return PORTABLE_CLIENT_MATRIX.find((client) => client.id === catalogId);
 }

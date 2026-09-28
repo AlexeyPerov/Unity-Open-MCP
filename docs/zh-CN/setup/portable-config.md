@@ -180,10 +180,8 @@ bridge 窗口可以替你写入该脚本（见[在 Unity 编辑器中](#在-unit
 也可以用 setup CLI 生成，这样其中的版本号与你实际安装的包一致：
 
 ```bash
-npx -y unity-open-mcp@latest setup \
-  --project /absolute/path/to/my-game/Client \
-  --client cursor \
-  --layout monorepo --unity-subpath Client --wrapper
+cd my-game
+npx -y unity-open-mcp@latest setup --client codex --unity-subpath Client
 ```
 
 单体仓库下脚本落在 `scripts/mcp/unity-open-mcp.sh`；当 Unity 项目本身就是仓库
@@ -191,24 +189,29 @@ npx -y unity-open-mcp@latest setup \
 `UNITY_PROJECT_PATH`，再执行固定版本的包 —— 客户端的工作目录不再重要。单次运行
 可用 `UNITY_SUBPATH=OtherClient` 覆盖 Unity 子文件夹。
 
-`setup` 没有 Codex 或 ZCode 的配置写入器，因此命令中使用 `--client cursor`：它会在
-脚本旁边同时写入可移植的 Cursor 条目（`.cursor/mcp.json`）。团队使用 Cursor 就保留，
-否则删除，并手动添加上面的 Codex/ZCode 条目。
+对 Codex，该命令会写出脚本，并在 `.codex/config.toml` 中写入
+`[mcp_servers.unity-open-mcp]` 表，文件其余字节保持不变。ZCode 没有 setup 写入器：
+`--client cursor --wrapper` 会写出脚本（外加一个可删除的 Cursor 条目），ZCode 条目
+需按上文手动添加。包装脚本是 bash 脚本，在 Windows 上需要 Git Bash 或 WSL；在
+Windows 上除非传入 `--portable`，setup 会写入绝对路径形式的 Codex 条目。
 
 ## 用 setup CLI 写入
 
 ```bash
-npx -y unity-open-mcp@latest setup \
-  --project /absolute/path/to/my-game/Client \
-  --client cursor \
-  --layout monorepo --unity-subpath Client
+cd my-game
+npx -y unity-open-mcp@latest setup --client cursor --unity-subpath Client
 ```
 
+- 在仓库根目录运行：`--unity-subpath` 指明当前目录下的 Unity 文件夹。布局 A
+  请在 Unity 项目中运行且不加子路径。在其他位置可用 `--project <path>`（绝对或
+  相对路径）指定 Unity 项目。
 - 客户端配置与技能写入**工作区根目录**（`my-game/`）；Unity 包版本固定始终写入
   **Unity 项目**（`my-game/Client/Packages/manifest.json`）。
-- `--layout monorepo` 默认就是可移植配置。用 `--no-portable` 强制写绝对路径，
-  用 `--portable` 让布局 A 的项目也得到可提交形式。
-- `--workspace <abs>` 显式指定仓库根目录；不传时由 `--project` 减去
+- 单体仓库，以及本身就是 git 仓库根目录的 Unity 项目，默认使用可移植形式。
+  用 `--no-portable` 强制写绝对路径，用 `--portable` 强制写可提交形式。
+- 若在更大仓库的 `Client/` 中运行，setup 会配置 `Client/` 本身，并在警告中给出
+  应在仓库根目录运行的命令。
+- `--workspace <path>` 显式指定仓库根目录；不传时由项目路径减去
   `--unity-subpath` 推导。
 - `--dry-run` 只打印将要写入的片段而不落盘 —— 提交前用它确认里面没有机器路径。
 

@@ -93,6 +93,23 @@ test("parseCliArgs: setup flags are captured", () => {
   assert.equal(p.json, true);
 });
 
+test("parseCliArgs: setup needs no --project, and a relative one is kept as given", () => {
+  const bare = parse(["setup", "--client", "vscode"]);
+  assert.equal(bare.command, "setup");
+  assert.equal(bare.projectPath, undefined);
+  assert.equal(bare.setupClient, "vscode");
+  assert.equal(bare.error, undefined);
+
+  const relative = parse(["setup", "--project", "Client", "--client", "codex"]);
+  assert.equal(relative.projectPath, "Client");
+  assert.equal(relative.setupClient, "codex");
+
+  const subpath = parse(["setup", "--client", "cursor", "--unity-subpath", "Client"]);
+  assert.equal(subpath.projectPath, undefined);
+  assert.equal(subpath.unitySubpath, "Client");
+  assert.equal(subpath.error, undefined);
+});
+
 test("parseCliArgs: setup --help remembers dedicated help target", () => {
   const p = parse(["setup", "--help"]);
   assert.equal(p.command, "help");

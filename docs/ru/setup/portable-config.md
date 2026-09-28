@@ -190,10 +190,8 @@ args = ["scripts/mcp/unity-open-mcp.sh"]
 установленным пакетом:
 
 ```bash
-npx -y unity-open-mcp@latest setup \
-  --project /absolute/path/to/my-game/Client \
-  --client cursor \
-  --layout monorepo --unity-subpath Client --wrapper
+cd my-game
+npx -y unity-open-mcp@latest setup --client codex --unity-subpath Client
 ```
 
 Для монорепозитория он появится в `scripts/mcp/unity-open-mcp.sh`, а когда
@@ -203,28 +201,34 @@ npx -y unity-open-mcp@latest setup \
 клиента при этом не важен. Для разового запуска подпапку Unity можно
 переопределить через `UNITY_SUBPATH=OtherClient`.
 
-У `setup` нет записи конфигов Codex и ZCode, поэтому в команде указан
-`--client cursor`: рядом со скриптом она пишет и переносимую запись Cursor
-(`.cursor/mcp.json`). Оставьте её, если команда пользуется Cursor, иначе
-удалите, а запись Codex/ZCode выше добавьте вручную.
+Для Codex команда пишет скрипт и таблицу `[mcp_servers.unity-open-mcp]` в
+`.codex/config.toml`, не меняя остальные байты файла. Для ZCode записи в setup
+нет: `--client cursor --wrapper` пишет скрипт (и запись Cursor, её можно
+удалить), а запись ZCode выше добавьте вручную. Обёртка — bash-скрипт, поэтому на
+Windows ей нужен Git Bash или WSL; там setup пишет абсолютную запись Codex, если
+не передан `--portable`.
 
 ## Запись через setup-CLI
 
 ```bash
-npx -y unity-open-mcp@latest setup \
-  --project /absolute/path/to/my-game/Client \
-  --client cursor \
-  --layout monorepo --unity-subpath Client
+cd my-game
+npx -y unity-open-mcp@latest setup --client cursor --unity-subpath Client
 ```
 
+- Запускайте из корня репозитория: `--unity-subpath` называет папку Unity под
+  текущим каталогом. Для раскладки A запускайте в проекте Unity без подпапки.
+  `--project <path>` (абсолютный или относительный) указывает проект Unity из
+  любого другого места.
 - Конфигурация клиента и навык пишутся в **корень рабочей области**
   (`my-game/`), а пины пакетов Unity — всегда в **проект Unity**
   (`my-game/Client/Packages/manifest.json`).
-- `--layout monorepo` уже подразумевает переносимую конфигурацию. `--no-portable`
-  принудительно вернёт абсолютный путь, `--portable` даст переносимую форму и
-  для раскладки A.
-- `--workspace <abs>` задаёт корень репозитория явно; без него setup выводит его
-  из `--project` минус `--unity-subpath`.
+- Переносимая форма — по умолчанию для монорепозитория и для проекта Unity,
+  который сам является корнем git-репозитория. `--no-portable` принудительно
+  вернёт абсолютный путь, `--portable` — форму для коммита.
+- Если запустить внутри `Client/` большего репозитория, setup настроит сам
+  `Client/` и в предупреждении подскажет команду для запуска из корня.
+- `--workspace <path>` задаёт корень репозитория явно; без него setup выводит
+  его из проекта минус `--unity-subpath`.
 - `--dry-run` печатает точный фрагмент, ничего не записывая — удобно проверить,
   что перед коммитом в нём нет машинного пути.
 

@@ -17,14 +17,15 @@ uses the same routing stack from a terminal or CI job.
 | `baseline create\|update` | Create or refresh a regression baseline. | `unity_open_mcp_baseline_create` |
 | `regression check` | Compare the project with its baseline. | `unity_open_mcp_regression_check` |
 | `update [--check]` | Check for or apply an MCP server update; no Unity project is required. | npm registry, then GitHub Releases fallback |
-| `setup --project P --client C` | Install or repair Unity package pins, project MCP config, and the bundled core skill. | Local files only; no bridge required |
+| `setup --client C [--project P]` | Install or repair Unity package pins, project MCP config, and the bundled core skill. | Local files only; no bridge required |
 
 Use `unity-open-mcp --help` or
 `unity-open-mcp <command> --help` for the current option list.
 
 ## Common options
 
-- `--project <absolute-path>` selects the Unity project.
+- `--project <path>` selects the Unity project, absolute or relative to the
+  current directory.
 - `--json` emits machine-readable JSON.
 - `--arg key=value` supplies a `run-tool` argument; repeat it for multiple
   arguments.
@@ -49,14 +50,18 @@ npx -y unity-open-mcp@1.3.0 run-tool unity_open_mcp_capabilities \
 ## Project setup
 
 ```bash
-npx -y unity-open-mcp@latest setup \
-  --project /absolute/path/to/MyGame \
-  --client cursor
+cd MyGame
+npx -y unity-open-mcp@latest setup --client cursor
 ```
+
+Without `--project`, the current directory is the Unity project; with
+`--unity-subpath Client` it is that folder below the current directory, and the
+current directory is the repository root the config goes to. `setup` ignores
+`UNITY_PROJECT_PATH` and warns when it names a different project.
 
 `setup` pins the bridge, verify package, and MCP server to the version of the
 package currently running. It accepts the project-config writers `cursor`,
-`claude`, `opencode`, and `agents`. The command preserves unrelated Unity
+`claude`, `vscode`, `codex`, `opencode`, and `agents`. The command preserves unrelated Unity
 dependencies, MCP servers, and environment keys, then byte-copies the core
 skill bundled in the npm package. It never needs a live Editor or bridge and
 does not install optional domain packages.

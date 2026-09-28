@@ -187,10 +187,8 @@ The bridge window writes the script for you (see
 so its version pin matches the package you actually installed:
 
 ```bash
-npx -y unity-open-mcp@latest setup \
-  --project /absolute/path/to/my-game/Client \
-  --client cursor \
-  --layout monorepo --unity-subpath Client --wrapper
+cd my-game
+npx -y unity-open-mcp@latest setup --client codex --unity-subpath Client
 ```
 
 It lands at `scripts/mcp/unity-open-mcp.sh` for a monorepo, or
@@ -200,28 +198,34 @@ script resolves the Unity root from its own location, exports
 directory does not matter. Override the Unity subfolder for one run with
 `UNITY_SUBPATH=OtherClient`.
 
-`setup` has no Codex or ZCode config writer, so the command names
-`--client cursor`: next to the script it also writes the portable Cursor entry
-(`.cursor/mcp.json`). Keep it if the team uses Cursor, otherwise delete it, and
-add the Codex/ZCode entry above by hand.
+For Codex this writes the script and the `[mcp_servers.unity-open-mcp]` table in
+`.codex/config.toml`, leaving the rest of that file byte for byte. ZCode has no
+setup writer: `--client cursor --wrapper` writes the script (plus a Cursor
+entry you can delete), and the ZCode entry above goes in by hand. The wrapper is
+a bash script, so on Windows it needs Git Bash or WSL; there setup writes the
+absolute Codex entry unless you pass `--portable`.
 
 ## Write it with the setup CLI
 
 ```bash
-npx -y unity-open-mcp@latest setup \
-  --project /absolute/path/to/my-game/Client \
-  --client cursor \
-  --layout monorepo --unity-subpath Client
+cd my-game
+npx -y unity-open-mcp@latest setup --client cursor --unity-subpath Client
 ```
 
+- Run it from the repository root: `--unity-subpath` names the Unity folder
+  below the current directory. For Layout A, run it in the Unity project with no
+  subpath. `--project <path>` (absolute or relative) names the Unity project
+  from anywhere else.
 - Client config and the agent skill are written under the **workspace root**
   (`my-game/`); the Unity package pins always go to the **Unity project**
   (`my-game/Client/Packages/manifest.json`).
-- `--layout monorepo` implies a portable config. Pass `--no-portable` to force
-  the absolute path, or `--portable` to get the committable form for a
-  Layout A project as well.
-- `--workspace <abs>` names the repository root explicitly; without it, setup
-  derives it from `--project` minus `--unity-subpath`.
+- The portable form is the default for a monorepo and for a Unity project that
+  is itself a git repository root. Pass `--no-portable` to force the absolute
+  path, or `--portable` to force the committable form.
+- Run inside `Client/` of a larger repository, setup configures `Client/` itself
+  and warns with the command to run from the repository root instead.
+- `--workspace <path>` names the repository root explicitly; without it, setup
+  derives it from the project minus `--unity-subpath`.
 - `--dry-run` prints the exact snippet without writing anything — use it to
   confirm no machine path appears before you commit.
 

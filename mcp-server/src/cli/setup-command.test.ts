@@ -2,10 +2,11 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { packagePins, runSetupCommand, type SetupReport } from "./setup-command.js";
+import { renderCodexServer } from "../setup/codex-toml.js";
 
 test("build bundles the canonical core skill bytes", async () => {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -176,15 +177,19 @@ test("setup --skip-skill leaves an existing skill untouched", async (t) => {
 
 test("setup validation errors use exit 2 and list known clients", async (t) => {
   const f = await fixture(t);
-  const missingProject = await runSetupCommand({
+  const notUnity = await mkdtemp(join(tmpdir(), "unity-open-mcp-not-unity-"));
+  t.after(() => rm(notUnity, { recursive: true, force: true }));
+  const cwdNotUnity = await runSetupCommand({
     version: "1.2.3",
     projectPath: undefined,
     client: "cursor",
     skipSkill: true,
     dryRun: false,
+    cwd: notUnity,
   });
-  assert.equal(missingProject.exitCode, 2);
-  assert.equal(missingProject.errorLabel, "missing_project");
+  assert.equal(cwdNotUnity.exitCode, 2);
+  assert.equal(cwdNotUnity.errorLabel, "not_unity_project");
+  assert.match(cwdNotUnity.human, /Run setup in the folder that contains Assets\/, Packages\/, and ProjectSettings\/, or pass --project/);
 
   const missingClient = await runSetupCommand({
     version: "1.2.3",
@@ -196,15 +201,17 @@ test("setup validation errors use exit 2 and list known clients", async (t) => {
   assert.equal(missingClient.exitCode, 2);
   assert.equal(missingClient.errorLabel, "missing_client");
 
-  const relative = await runSetupCommand({
+  const relativeMissing = await runSetupCommand({
     version: "1.2.3",
     projectPath: "relative/project",
     client: "cursor",
     skipSkill: true,
     dryRun: false,
+    cwd: notUnity,
   });
-  assert.equal(relative.exitCode, 2);
-  assert.equal(relative.errorLabel, "project_not_absolute");
+  assert.equal(relativeMissing.exitCode, 2);
+  assert.equal(relativeMissing.errorLabel, "not_unity_project");
+  assert.ok(relativeMissing.human.includes(`${join(notUnity, "relative", "project")} is not a Unity project root`));
 
   const unknown = await runSetupCommand({
     version: "1.2.3",
@@ -455,10 +462,11 @@ test("layout and subpath conflicts are usage errors", async (t) => {
   assert.equal(outside.errorLabel, "project_outside_workspace");
 
   const relativeWorkspace = await runSetupCommand(
-    setupOpts(f, { workspacePath: "relative/repo" }),
+    setupOpts(f, { workspacePath: basename(f.workspace), cwd: dirname(f.workspace), dryRun: true }),
   );
-  assert.equal(relativeWorkspace.exitCode, 2);
-  assert.equal(relativeWorkspace.errorLabel, "workspace_not_absolute");
+  assert.equal(relativeWorkspace.exitCode, 0);
+  assert.equal((relativeWorkspace.json as SetupReport).workspace, f.workspace);
+  assert.equal((relativeWorkspace.json as SetupReport).unitySubpath, "Client");
 });
 
 test("the monorepo skill copy lands at the workspace root", async (t) => {
@@ -472,4 +480,264 @@ test("the monorepo skill copy lands at the workspace root", async (t) => {
     join(f.workspace, ".cursor", "skills", "unity-open-mcp", "SKILL.md"),
   );
   assert.equal(await readFile(report.skill.path!, "utf8"), "# skill\n");
+});
+
+// --- project resolution ----------------------------------------------------
+
+test("without --project the working directory is the Unity project", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(
+    setupOpts(f, { projectPath: undefined, cwd: f.project, dryRun: true, env: {} }),
+  );
+  assert.equal(result.exitCode, 0);
+  const report = result.json as SetupReport;
+  assert.equal(report.project, f.project);
+  assert.equal(report.projectSource, "cwd");
+  assert.match(result.human, /Project: .* \(from cwd\)/);
+});
+
+test("a relative --project resolves against the working directory", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(
+    setupOpts(f, { projectPath: "Client", cwd: f.workspace, dryRun: true, env: {} }),
+  );
+  assert.equal(result.exitCode, 0);
+  const report = result.json as SetupReport;
+  assert.equal(report.project, f.project);
+  assert.equal(report.projectSource, "flag");
+  assert.equal(report.workspace, f.project, "no subpath: the Unity root is the workspace");
+});
+
+test("--unity-subpath without --project is a monorepo run from the repository root", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(
+    setupOpts(f, { projectPath: undefined, unitySubpath: "Client", cwd: f.workspace, dryRun: true, env: {} }),
+  );
+  assert.equal(result.exitCode, 0);
+  const report = result.json as SetupReport;
+  assert.equal(report.project, f.project);
+  assert.equal(report.projectSource, "cwd+subpath");
+  assert.equal(report.workspace, f.workspace);
+  assert.equal(report.layout, "monorepo");
+  assert.equal(report.portable, true);
+});
+
+test("a working directory above a Unity project suggests --unity-subpath", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(
+    setupOpts(f, { projectPath: undefined, cwd: f.workspace, dryRun: true, env: {} }),
+  );
+  assert.equal(result.exitCode, 2);
+  assert.equal(result.errorLabel, "not_unity_project");
+  assert.match(result.human, /Found a Unity project at Client\/ — run again with --unity-subpath Client\./);
+});
+
+test("a UNITY_PROJECT_PATH naming another project is ignored with a warning", async (t) => {
+  const f = await monorepoFixture(t);
+  const other = await runSetupCommand(
+    setupOpts(f, { dryRun: true, env: { UNITY_PROJECT_PATH: "/somewhere/else" } }),
+  );
+  const report = other.json as SetupReport;
+  assert.equal(report.project, f.project);
+  assert.ok(
+    report.warnings.some((w) => w.includes("UNITY_PROJECT_PATH is set to /somewhere/else")),
+    report.warnings.join("\n"),
+  );
+
+  const same = await runSetupCommand(
+    setupOpts(f, { dryRun: true, env: { UNITY_PROJECT_PATH: f.project } }),
+  );
+  assert.deepEqual((same.json as SetupReport).warnings, []);
+});
+
+// --- repository detection ----------------------------------------------------
+
+test("a Unity project that is a repository root gets the portable form by default", async (t) => {
+  const f = await monorepoFixture(t);
+  await mkdir(join(f.project, ".git"));
+  const result = await runSetupCommand(setupOpts(f, { dryRun: true, env: {} }));
+  const report = result.json as SetupReport;
+  assert.equal(report.portable, true);
+  assert.equal(
+    (report.mcpConfig.entry as { env: Record<string, string> }).env.UNITY_PROJECT_PATH,
+    "${workspaceFolder}",
+  );
+
+  const opted = await runSetupCommand(setupOpts(f, { dryRun: true, env: {}, portable: false }));
+  assert.equal((opted.json as SetupReport).portable, false);
+});
+
+test("running inside the Unity folder of a monorepo warns with the right command", async (t) => {
+  const f = await monorepoFixture(t);
+  await mkdir(join(f.workspace, ".git"));
+  const result = await runSetupCommand(
+    setupOpts(f, { projectPath: undefined, cwd: f.project, dryRun: true, env: {} }),
+  );
+  assert.equal(result.exitCode, 0);
+  const report = result.json as SetupReport;
+  assert.equal(report.workspace, f.project);
+  assert.equal(report.portable, false);
+  const warning = report.warnings.find((w) => w.includes("is inside the repository"));
+  assert.ok(warning, report.warnings.join("\n"));
+  assert.match(warning!, /npx -y unity-open-mcp@1\.2\.3 setup --client cursor --unity-subpath Client$/);
+
+  // An explicit --workspace is a deliberate choice: no second-guessing.
+  const explicit = await runSetupCommand(
+    setupOpts(f, { workspacePath: f.project, dryRun: true, env: {} }),
+  );
+  assert.ok(!(explicit.json as SetupReport).warnings.some((w) => w.includes("is inside the repository")));
+});
+
+test("a repository in the home directory does not count", async (t) => {
+  const f = await monorepoFixture(t);
+  await mkdir(join(f.workspace, ".git"));
+  const result = await runSetupCommand(
+    setupOpts(f, { dryRun: true, env: {}, homeDir: f.workspace }),
+  );
+  const report = result.json as SetupReport;
+  assert.equal(report.portable, false);
+  assert.ok(!report.warnings.some((w) => w.includes("is inside the repository")));
+});
+
+// --- VS Code -----------------------------------------------------------------
+
+test("vscode writes .vscode/mcp.json under servers and keeps siblings", async (t) => {
+  const f = await monorepoFixture(t);
+  const configPath = join(f.project, ".vscode", "mcp.json");
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, JSON.stringify({
+    inputs: [{ id: "token" }],
+    servers: { github: { type: "http", url: "https://example" } },
+  }));
+  const result = await runSetupCommand(setupOpts(f, { client: "vscode", skipSkill: false, env: {} }));
+  assert.equal(result.exitCode, 0);
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  assert.deepEqual(config.inputs, [{ id: "token" }]);
+  assert.deepEqual(config.servers.github, { type: "http", url: "https://example" });
+  assert.deepEqual(config.servers["unity-open-mcp"], {
+    type: "stdio",
+    command: "npx",
+    args: ["-y", "unity-open-mcp@1.2.3"],
+    env: { UNITY_PROJECT_PATH: f.project },
+  });
+  assert.equal(
+    (result.json as SetupReport).skill.path,
+    join(f.project, ".vscode", "skills", "unity-open-mcp", "SKILL.md"),
+  );
+});
+
+test("vscode portable monorepo entry uses ${workspaceFolder}/Client", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(
+    setupOpts(f, { client: "vscode", layout: "monorepo", unitySubpath: "Client", dryRun: true, env: {} }),
+  );
+  const report = result.json as SetupReport;
+  assert.equal(report.mcpConfig.path, join(f.workspace, ".vscode", "mcp.json"));
+  assert.equal(report.configStrategy, "interpolation");
+  assert.deepEqual(report.mcpConfig.entry, {
+    type: "stdio",
+    command: "npx",
+    args: ["-y", "unity-open-mcp@1.2.3"],
+    env: { UNITY_PROJECT_PATH: "${workspaceFolder}/Client" },
+  });
+});
+
+test("a JSONC config is left untouched and the entry is printed instead", async (t) => {
+  const f = await monorepoFixture(t);
+  const configPath = join(f.project, ".vscode", "mcp.json");
+  await mkdir(dirname(configPath), { recursive: true });
+  const jsonc = '{\n  // my servers\n  "servers": {\n    "github": { "type": "http", "url": "https://example" },\n  },\n}\n';
+  await writeFile(configPath, jsonc);
+  const result = await runSetupCommand(setupOpts(f, { client: "vscode", env: {} }));
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.errorLabel, "jsonc_config");
+  assert.match(result.human, /comments or trailing commas/);
+  assert.match(result.human, /"unity-open-mcp"/);
+  assert.equal(await readFile(configPath, "utf8"), jsonc);
+});
+
+// --- Codex -------------------------------------------------------------------
+
+test("codex appends its table and keeps every other byte", async (t) => {
+  const f = await monorepoFixture(t);
+  const configPath = join(f.project, ".codex", "config.toml");
+  await mkdir(dirname(configPath), { recursive: true });
+  const existing = '# mine\n[mcp_servers.fal_ai]\nurl = "https://mcp.fal.ai/mcp"\nhttp_headers = { Authorization = "Bearer x" }\n';
+  await writeFile(configPath, existing);
+  const result = await runSetupCommand(setupOpts(f, { client: "codex", skipSkill: false, env: {} }));
+  assert.equal(result.exitCode, 0);
+  const body = await readFile(configPath, "utf8");
+  assert.ok(body.startsWith(existing));
+  assert.match(body, /\[mcp_servers\.unity-open-mcp\]\nenabled = true\ncommand = "npx"\nargs = \["-y", "unity-open-mcp@1\.2\.3"\]\n/);
+  assert.ok(body.includes(`UNITY_PROJECT_PATH = "${f.project}"`));
+  const report = result.json as SetupReport;
+  assert.equal(report.skill.path, join(f.project, ".agents", "skills", "unity-open-mcp", "SKILL.md"));
+  assert.ok(report.userAction.some((a) => a.includes("Trust")));
+
+  // Idempotent.
+  await runSetupCommand(setupOpts(f, { client: "codex", env: {} }));
+  assert.equal(await readFile(configPath, "utf8"), body);
+});
+
+test("codex portable monorepo entry runs the wrapper", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(
+    setupOpts(f, { client: "codex", layout: "monorepo", unitySubpath: "Client", env: {}, platform: "darwin" }),
+  );
+  assert.equal(result.exitCode, 0);
+  const report = result.json as SetupReport;
+  assert.equal(report.configStrategy, "wrapper");
+  const body = await readFile(join(f.workspace, ".codex", "config.toml"), "utf8");
+  assert.equal(
+    body,
+    renderCodexServer("unity-open-mcp", {
+      command: "bash",
+      args: ["scripts/mcp/unity-open-mcp.sh"],
+      env: {},
+      removeEnv: [],
+    }),
+  );
+  assert.equal(report.wrapper.written, true);
+  assert.ok(!body.includes(f.workspace));
+});
+
+test("codex on Windows falls back to the absolute path unless --portable is explicit", async (t) => {
+  const f = await monorepoFixture(t);
+  const byDefault = await runSetupCommand(
+    setupOpts(f, { client: "codex", unitySubpath: "Client", dryRun: true, env: {}, platform: "win32" }),
+  );
+  const report = byDefault.json as SetupReport;
+  assert.equal(report.portable, false);
+  assert.ok(report.warnings.some((w) => w.includes("Git Bash or WSL")));
+
+  const explicit = await runSetupCommand(
+    setupOpts(f, { client: "codex", unitySubpath: "Client", dryRun: true, env: {}, platform: "win32", portable: true }),
+  );
+  assert.equal((explicit.json as SetupReport).configStrategy, "wrapper");
+  assert.ok((explicit.json as SetupReport).warnings.some((w) => w.includes("Git Bash or WSL")));
+});
+
+test("an unsupported Codex shape fails without touching the file", async (t) => {
+  const f = await monorepoFixture(t);
+  const configPath = join(f.project, ".codex", "config.toml");
+  await mkdir(dirname(configPath), { recursive: true });
+  const dotted = 'mcp_servers.unity-open-mcp.command = "npx"\n';
+  await writeFile(configPath, dotted);
+  const result = await runSetupCommand(setupOpts(f, { client: "codex", env: {} }));
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.errorLabel, "unsupported_codex_config");
+  assert.match(result.human, /Add this entry by hand:\n\[mcp_servers\.unity-open-mcp\]/);
+  assert.equal(await readFile(configPath, "utf8"), dotted);
+});
+
+test("dry-run for the new clients writes nothing", async (t) => {
+  const f = await monorepoFixture(t);
+  for (const client of ["vscode", "codex"]) {
+    const result = await runSetupCommand(setupOpts(f, { client, dryRun: true, skipSkill: false, env: {} }));
+    assert.equal(result.exitCode, 0, client);
+    assert.equal((result.json as SetupReport).mcpConfig.written, false);
+  }
+  await assert.rejects(readFile(join(f.project, ".vscode", "mcp.json")));
+  await assert.rejects(readFile(join(f.project, ".codex", "config.toml")));
+  await assert.rejects(readFile(join(f.project, ".agents", "skills", "unity-open-mcp", "SKILL.md")));
 });

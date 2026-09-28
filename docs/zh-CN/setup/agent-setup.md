@@ -26,17 +26,21 @@
 ## 1）确定项目和客户端
 
 找到 Unity 项目的绝对根目录，即包含 `Assets/`、`Packages/` 和
-`ProjectSettings/` 的目录，并去掉末尾斜杠。
+`ProjectSettings/` 的目录，并去掉末尾斜杠。即使 setup 默认使用当前目录，也请通过
+`--project` 显式传入：你的 shell 工作目录不一定是该项目，且 setup 会忽略
+`UNITY_PROJECT_PATH`。
 
 同时确认该根目录是否就是用户 AI 客户端打开的文件夹。如果 Unity 项目是更大仓库
 的子文件夹（`<repo>/Client`），这就是单体仓库 —— 第 2 步请改用可提交配置的命令。
 
-| 客户端 | `--client` | 写入的项目配置 |
-|---|---|---|
-| Cursor | `cursor` | `.cursor/mcp.json` |
-| Claude Code / 项目级 Claude | `claude` | `.mcp.json` |
-| OpenCode | `opencode` | `opencode.json` |
-| 通用智能体 | `agents` | `.mcp.json` |
+| 客户端 | `--client` | 写入的项目配置 | 技能 |
+|---|---|---|---|
+| Cursor | `cursor` | `.cursor/mcp.json` | `.cursor/skills/` |
+| Claude Code / 项目级 Claude | `claude` | `.mcp.json` | `.claude/skills/` |
+| VS Code Copilot | `vscode` | `.vscode/mcp.json` | `.vscode/skills/` |
+| Codex | `codex` | `.codex/config.toml` | `.agents/skills/` |
+| OpenCode | `opencode` | `opencode.json` | `.opencode/skills/` |
+| 通用智能体 | `agents` | `.mcp.json` | `.agents/skills/` |
 
 如果无法确定客户端，只询问用户一次。其他技能 id 虽可识别，但命令会
 拒绝执行，因为无法安全写入其 MCP 配置；这些客户端请使用
@@ -57,7 +61,8 @@ npx -y unity-open-mcp@latest setup \
 
 - 将 bridge 和 verify 的 Git 锁定合并到 `Packages/manifest.json`；
 - 将 `unity-open-mcp` 服务器合并到项目级 MCP 配置，并保留其他服务器
-  和额外环境变量；
+  和额外环境变量（对 Codex 只修改 `[mcp_servers.unity-open-mcp]` 表，
+  `config.toml` 的其余字节保持不变）；
 - 把内置核心技能逐字节复制到所选客户端路径；
 - 不启动 Unity、不连接 bridge，也不安装领域包。
 
@@ -75,24 +80,29 @@ npx -y unity-open-mcp@latest setup \
 ```
 
 这是单体仓库的首选路径，优于让每位开发者各自修改绝对路径。若 Unity 项目本身
-就是仓库且配置会被提交，请改为在默认命令上加 `--portable`。细节与客户端矩阵见
+就是仓库（`Assets/` 旁有 `.git`），默认命令已会写入可提交形式。细节与客户端矩阵见
 [可移植 MCP 配置](portable-config.md)。
+
+如果报告警告项目位于更大的仓库内，用户的客户端很可能打开在该仓库根目录，
+不会读取刚写入的文件。询问用户一次，然后运行警告中给出的命令。
 
 选项：`--dry-run` 只报告而不写文件；`--skip-skill` 不修改技能；
 `--json` 输出稳定的机器可读报告；`--layout monorepo --unity-subpath <rel>`
-写入上述可提交形式，`--portable` 让单项目仓库也得到该形式，`--no-portable`
-强制写绝对路径；`--workspace <abs>` 显式指定仓库根目录；`--wrapper` 额外写出
-包装脚本；`setup --help` 无需其他必填参数。
-退出码 `0` 表示成功，`2` 表示项目/客户端用法错误，`1` 表示文件读取、
-JSON 解析或写入失败。
+写入上述可提交形式（工作区为 git 仓库根目录时也是默认行为），`--portable`
+在其他情况下强制该形式，`--no-portable` 强制写绝对路径；`--workspace <path>`
+显式指定仓库根目录；`--wrapper` 额外写出包装脚本；`setup --help` 无需其他必填参数。
+退出码 `0` 表示成功，`2` 表示项目/客户端用法错误，`1` 表示文件读取、解析或
+写入失败；`1` 也包括 setup 不会改写的配置（带注释的 `.vscode/mcp.json`、用点号键
+书写的 Codex 条目），此时消息中会给出需手动添加的条目。
 
 ## 3）检查报告
 
 确认报告包含 `VERSION`、同版本的两个 UPM 锁定、MCP 配置路径与
 `unity-open-mcp@VERSION`，以及一个技能路径和字节数（未指定
-`--skip-skill` 时）。单体仓库或使用 `--portable` 时，报告还会给出工作区根目录、
-布局，以及 `Config: portable — safe to commit` 一行。若片段中仍出现绝对路径，
-请如实报告，不要提交。
+`--skip-skill` 时）。`Config:` 一行显示 `portable — safe to commit` 或
+`absolute path — this machine only`；可移植运行还会列出工作区根目录和布局。
+若面向仓库的配置中仍出现绝对路径，请如实报告，不要提交。请把 `Warning:` 行
+转告用户。
 
 ## 4）USER ACTION（用户操作）
 

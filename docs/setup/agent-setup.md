@@ -27,7 +27,10 @@ operation.
 ## 1) Resolve the project and client
 
 Find the absolute Unity project root: the directory containing `Assets/`,
-`Packages/`, and `ProjectSettings/`. Remove any trailing slash.
+`Packages/`, and `ProjectSettings/`. Remove any trailing slash. Pass it with
+`--project` even though setup defaults to the current directory: your shell's
+working directory is not guaranteed to be the project, and setup ignores
+`UNITY_PROJECT_PATH`.
 
 Also note whether that root is the folder the human's AI client is opened on.
 If the Unity project is a subfolder of a larger repository (`<repo>/Client`),
@@ -36,12 +39,14 @@ default one.
 
 Choose one setup client id:
 
-| Client | `--client` | Project config written |
-|---|---|---|
-| Cursor | `cursor` | `.cursor/mcp.json` |
-| Claude Code / project-scoped Claude | `claude` | `.mcp.json` |
-| OpenCode | `opencode` | `opencode.json` |
-| Generic agents | `agents` | `.mcp.json` |
+| Client | `--client` | Project config written | Skill |
+|---|---|---|---|
+| Cursor | `cursor` | `.cursor/mcp.json` | `.cursor/skills/` |
+| Claude Code / project-scoped Claude | `claude` | `.mcp.json` | `.claude/skills/` |
+| VS Code Copilot | `vscode` | `.vscode/mcp.json` | `.vscode/skills/` |
+| Codex | `codex` | `.codex/config.toml` | `.agents/skills/` |
+| OpenCode | `opencode` | `opencode.json` | `.opencode/skills/` |
+| Generic agents | `agents` | `.mcp.json` | `.agents/skills/` |
 
 If the client is unclear, ask the human once. Other skill ids are recognized,
 but this command deliberately refuses them because it cannot safely write their
@@ -65,7 +70,9 @@ The downloaded package pins all three components to **its own version**. It:
 
 - merges bridge and verify Git pins into `Packages/manifest.json`;
 - merges the `unity-open-mcp` server into the project-local MCP config while
-  preserving sibling servers and extra environment variables;
+  preserving sibling servers and extra environment variables (for Codex it
+  edits only the `[mcp_servers.unity-open-mcp]` tables and leaves every other
+  byte of `config.toml` alone);
 - copies its bundled core skill byte-for-byte to the selected client path;
 - does not start Unity, connect to a bridge, or install domain packages.
 
@@ -84,9 +91,13 @@ npx -y unity-open-mcp@latest setup \
 ```
 
 This is the happy path for a monorepo: prefer it over asking every developer to
-edit an absolute path. When the Unity project IS the repository and the config
-will be committed, add `--portable` to the default command instead. Details and
-the per-client matrix: [Portable MCP config](portable-config.md).
+edit an absolute path. When the Unity project IS the repository (a `.git` next
+to `Assets/`), the default command already writes the committable form. Details
+and the per-client matrix: [Portable MCP config](portable-config.md).
+
+If the report warns that the project is inside a larger repository, the
+human's client is probably opened on that root and will not read the file just
+written. Ask once, then rerun with the command the warning prints.
 
 Useful options:
 
@@ -95,17 +106,20 @@ Useful options:
 - `--json` returns a stable report containing the package version, project,
   client, target paths, pins, byte count, and warnings.
 - `--layout monorepo --unity-subpath <rel>` writes the committed form described
-  above; `--portable` does the same for a single-project repository, and
-  `--no-portable` forces the absolute path.
-- `--workspace <abs>` names the repository root explicitly instead of deriving
+  above. It is also the default when the workspace is a git repository root;
+  `--portable` forces it elsewhere and `--no-portable` forces the absolute path.
+- `--workspace <path>` names the repository root explicitly instead of deriving
   it from `--project` minus `--unity-subpath`.
 - `--wrapper` also writes the committed wrapper script, for clients that expand
   neither a workspace variable nor an environment variable.
 - `setup --help` works without the required setup flags.
 
 Exit `0` means success (including dry-run), `2` means a project/client usage
-error, and `1` means a file read, JSON parse, or write failure. On failure,
-report the exact message. Do not silently switch to guessed pins.
+error, and `1` means a file read, parse, or write failure. Exit `1` also covers a
+config setup will not rewrite — a `.vscode/mcp.json` with comments, or a Codex
+entry spelled with dotted keys; the message then contains the entry to add by
+hand. On failure, report the exact message. Do not silently switch to guessed
+pins.
 
 ## 3) Check the report
 
@@ -116,9 +130,11 @@ Before handoff, confirm the report contains:
 - the MCP config target and `unity-open-mcp@VERSION` launch entry;
 - one skill path and its byte count, unless `--skip-skill` was requested;
 - a dry-run marker when applicable;
-- for a monorepo or `--portable` run: the workspace root, the layout, and a
-  `Config: portable — safe to commit` line. If the snippet still contains an
-  absolute path, report that instead of committing it.
+- a `Config:` line: `portable — safe to commit` or `absolute path — this machine
+  only`. For a portable run the workspace root and layout are listed too. If a
+  config meant for the repository still contains an absolute path, report that
+  instead of committing it;
+- any `Warning:` lines, relayed to the human.
 
 ## 4) USER ACTION
 

@@ -2,9 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import { SETUP_CLIENTS } from "../cli/setup-command.js";
+import { loadClientPathsManifest } from "../skill/client-paths.js";
 import {
   PORTABLE_CLIENT_MATRIX,
-  catalogIdForSetupClient,
   portableEnv,
   portableProjectPathValue,
   portableServerArgs,
@@ -17,10 +18,21 @@ import {
 const PIN = "unity-open-mcp@1.2.3";
 
 test("every setup config writer has a portable strategy", () => {
-  for (const setupClient of ["cursor", "claude", "opencode", "agents"]) {
-    const support = portableSupportFor(catalogIdForSetupClient(setupClient));
-    assert.ok(support, `${setupClient} is in the portable catalog`);
+  for (const client of SETUP_CLIENTS) {
+    const support = portableSupportFor(client.catalogId);
+    assert.ok(support, `${client.id} is in the portable catalog`);
     assert.notEqual(support.strategy, "absolute");
+    assert.equal(support.configPath, client.configPath, `${client.id} writes the file the matrix names`);
+  }
+});
+
+test("every setup config writer installs the skill its catalog client maps to", () => {
+  const manifest = loadClientPathsManifest();
+  for (const client of SETUP_CLIENTS) {
+    assert.ok(manifest.clients[client.skillKey], `${client.id} skill key exists`);
+    const mapped = manifest.mcpClientMapping[client.catalogId];
+    // Generic setup ids (claude, agents, opencode) name skill targets directly.
+    if (mapped) assert.ok(mapped.includes(client.skillKey), `${client.id} → ${mapped.join(", ")}`);
   }
 });
 

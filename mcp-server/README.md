@@ -20,12 +20,13 @@ For a first installation, the setup command merges the Unity package pins,
 project MCP config, and bundled core skill without requiring a running Editor:
 
 ```bash
-npx -y unity-open-mcp@latest setup \
-  --project /absolute/path/to/MyGame \
-  --client cursor
+cd MyGame
+npx -y unity-open-mcp@latest setup --client cursor
 ```
 
-Supported project-config ids are `cursor`, `claude`, `opencode`, and `agents`.
+Run it in the Unity project folder, or pass `--project <path>`. Supported
+project-config ids are `cursor`, `claude`, `vscode`, `codex`, `opencode`, and
+`agents`.
 Run `npx -y unity-open-mcp@latest setup --help` for dry-run, skill-skip, JSON,
 and exit-code details.
 

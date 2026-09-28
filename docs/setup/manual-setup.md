@@ -26,6 +26,29 @@ client launches). The steps below cover each in turn.
   any compatible client. Copy-paste snippets live in
   [MCP client configuration](client-configuration.md).
 
+## Fast path: one command (experimental)
+
+The setup command does steps 1 and 2 for you. Open a terminal in the Unity
+project folder (the one with `Assets/`, `Packages/`, and `ProjectSettings/`) and
+run:
+
+```bash
+npx -y unity-open-mcp@1.3.0 setup --client cursor
+```
+
+Use `claude`, `vscode`, `codex`, `opencode`, or `agents` instead of `cursor` for
+another client. When the Unity project is a subfolder of your repository, run it
+from the repository root and name the folder:
+`npx -y unity-open-mcp@1.3.0 setup --client cursor --unity-subpath Client`. Add
+`--dry-run` first to see every file it would change.
+
+The command pins the bridge, verify, and server to one version, merges the MCP
+entry without touching your other servers, and copies the agent skill. When
+the folder is a git repository root, or with `--unity-subpath`, it writes the
+[portable form](portable-config.md), safe to commit. Then go to [step 3](#3-open-unity-and-verify). Every option is described
+in [Agent setup](agent-setup.md#2-run-setup). For other clients, or to edit the
+files yourself, follow steps 1–2.
+
 ## 1) Add the Unity packages
 
 Open `Packages/manifest.json` in your Unity project (for example

@@ -22,7 +22,7 @@
 //                                   [--regression-threshold N]
 //                                   [--platform-profile ...]
 //   unity-open-mcp update [--check] [--json]
-//   unity-open-mcp setup --project <abs> --client <id> [--skip-skill] [--dry-run] [--json]
+//   unity-open-mcp setup --client <id> [--project <path>] [--skip-skill] [--dry-run] [--json]
 //                        [--layout unity-root|monorepo] [--workspace <abs>]
 //                        [--unity-subpath <rel>] [--portable|--no-portable] [--wrapper]
 //   unity-open-mcp --help | -h
@@ -104,7 +104,7 @@ export interface ParsedCli {
   follow: boolean;
   /** update: check availability without changing the active npm install. */
   check: boolean;
-  /** setup: skill client id from skills/client-paths.json. */
+  /** setup: config writer id (cursor, claude, vscode, codex, opencode, agents). */
   setupClient: string | undefined;
   /** setup: do not copy the bundled core skill. */
   skipSkill: boolean;
