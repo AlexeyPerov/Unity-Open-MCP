@@ -748,9 +748,9 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        fs::create_dir_all(project.join(".zcode").join("cli")).unwrap();
+        fs::create_dir_all(project.join(".zcode")).unwrap();
         fs::write(
-            project.join(".zcode").join("cli").join("config.json"),
+            project.join(".zcode").join("config.json"),
             json!({
                 "mcp": { "servers": { "unity-open-mcp": entry(project.to_str().unwrap()) } }
             })
@@ -793,7 +793,7 @@ mod tests {
         assert_eq!(manifest["dependencies"]["com.unity.ugui"], "1.0.0");
 
         let zcode: Value =
-            serde_json::from_str(&fs::read_to_string(project.join(".zcode").join("cli").join("config.json")).unwrap())
+            serde_json::from_str(&fs::read_to_string(project.join(".zcode").join("config.json")).unwrap())
                 .unwrap();
         assert!(zcode["mcp"]["servers"].is_null() || zcode["mcp"].is_null());
 

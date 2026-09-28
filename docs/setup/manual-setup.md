@@ -36,7 +36,7 @@ run:
 npx -y unity-open-mcp@1.3.0 setup --client cursor
 ```
 
-Use `claude`, `vscode`, `codex`, `opencode`, or `agents` instead of `cursor` for
+Use `claude`, `zcode`, `vscode`, `codex`, `opencode`, or `agents` instead of `cursor` for
 another client. When the Unity project is a subfolder of your repository, run it
 from the repository root and name the folder:
 `npx -y unity-open-mcp@1.3.0 setup --client cursor --unity-subpath Client`. Add

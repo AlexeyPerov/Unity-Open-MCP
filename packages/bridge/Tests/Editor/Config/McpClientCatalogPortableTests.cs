@@ -29,7 +29,7 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(PortableStrategy.Args, StrategyOf("opencodeProject"));
             Assert.AreEqual(PortableStrategy.Args, StrategyOf("unityAi"));
             Assert.AreEqual(PortableStrategy.Wrapper, StrategyOf("codex"));
-            Assert.AreEqual(PortableStrategy.Wrapper, StrategyOf("zcodeProject"));
+            Assert.AreEqual(PortableStrategy.Args, StrategyOf("zcodeProject"));
         }
 
         [Test]
@@ -180,12 +180,23 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
-        public void Snippet_ZcodeRunsTheWrapper()
+        public void Snippet_ZcodeResolvesFromTheSessionDirectory()
         {
+            // ZCode starts stdio servers in the session's working directory and
+            // expands no ${...} templates in config files, so the args form fits.
             var snippet = Snippet("zcodeProject");
-            StringAssert.Contains("\"command\": \"bash\"", snippet);
-            StringAssert.Contains("\"scripts/mcp/unity-open-mcp.sh\"", snippet);
+            StringAssert.Contains("\"mcp\": {", snippet);
+            StringAssert.Contains("\"--project-from-cwd\",", snippet);
+            StringAssert.Contains("\"--unity-subpath\",", snippet);
+            StringAssert.DoesNotContain("bash", snippet);
             AssertNoMachineValues(snippet);
+        }
+
+        [Test]
+        public void TargetPath_ZcodeProjectIsTheWorkspaceConfig()
+        {
+            Assert.AreEqual(Repo + "/.zcode/config.json",
+                McpClientCatalog.ResolvePortableTargetPath(Find("zcodeProject"), Placement("zcodeProject")));
         }
 
         [Test]

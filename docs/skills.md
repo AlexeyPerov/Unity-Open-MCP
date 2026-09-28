@@ -74,7 +74,8 @@ to install the playbook. A package test checks that the two files match.
 | Cursor | `.cursor/skills/unity-open-mcp/SKILL.md` |
 | Claude (Desktop / Code) | `.claude/skills/unity-open-mcp/SKILL.md` |
 | OpenCode | `.opencode/skills/unity-open-mcp/SKILL.md` |
-| ZCode / generic `agents` | `.agents/skills/unity-open-mcp/SKILL.md` |
+| ZCode / Codex / generic `agents` | `.agents/skills/unity-open-mcp/SKILL.md` |
+| VS Code Copilot / Visual Studio Copilot | `.github/skills/unity-open-mcp/SKILL.md` |
 
 For the one-command agent flow, see [Agent setup](setup/agent-setup.md). The
 [Wizard setup](setup/wizard-setup.md) and [Manual setup](setup/manual-setup.md)

@@ -76,6 +76,7 @@ my-game/                    <- здесь открыт AI-клиент, здес
 |---|---|---|---|
 | Cursor | `<workspace>/.cursor/mcp.json` | `${workspaceFolder}` | `${workspaceFolder}/Client` |
 | Claude Code | `<workspace>/.mcp.json` | `--project-from-cwd` | `--project-from-cwd --unity-subpath Client` |
+| ZCode | `<workspace>/.zcode/config.json` | `--project-from-cwd` | `--project-from-cwd --unity-subpath Client` |
 | VS Code Copilot | `<workspace>/.vscode/mcp.json` | `${workspaceFolder}` | `${workspaceFolder}/Client` |
 | Visual Studio Copilot | `<workspace>/.vs/mcp.json` | `${workspaceFolder}` | `${workspaceFolder}/Client` |
 | OpenCode | `<workspace>/opencode.json` | `--project-from-cwd` | `--project-from-cwd --unity-subpath Client` |
@@ -86,7 +87,6 @@ my-game/                    <- здесь открыт AI-клиент, здес
 | ZooCode | `<workspace>/.roo/mcp.json` | `--project-from-cwd` | `--project-from-cwd --unity-subpath Client` |
 | Unity AI | `<unity-project>/UserSettings/mcp.json` | `--project-from-cwd` | — (конфигурация лежит в проекте Unity) |
 | Codex | `<workspace>/.codex/config.toml` | [обёртка](#скрипт-обёртка) | [обёртка](#скрипт-обёртка) |
-| ZCode | `<workspace>/.zcode/cli/config.json` | [обёртка](#скрипт-обёртка) | [обёртка](#скрипт-обёртка) |
 | Claude Desktop | OS-глобальная конфигурация | только абсолютный путь | только абсолютный путь |
 | Cline | глобальные настройки MCP клиента | только абсолютный путь | только абсолютный путь |
 | Antigravity | глобальная конфигурация Antigravity | только абсолютный путь | только абсолютный путь |
@@ -145,6 +145,34 @@ claude mcp add --scope project unity-open-mcp -- npx -y unity-open-mcp@1.3.0 --p
 Без `--scope project` запись попадёт в пользовательский конфиг Claude Code и
 не будет общей.
 
+### ZCode
+
+`<repo>/.zcode/config.json` (файл рабочей области; `~/.zcode/cli/config.json` —
+ваш личный):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "unity-open-mcp": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "unity-open-mcp@1.3.0", "--project-from-cwd", "--unity-subpath", "Client"],
+        "env": {}
+      }
+    }
+  }
+}
+```
+
+ZCode запускает stdio-серверы в рабочем каталоге сессии — корне репозитория, на
+котором он открыт, — и не раскрывает `${...}` в конфигах, поэтому переносимая
+форма для него — аргументы. Для раскладки A уберите два последних аргумента.
+Эту запись пишет `setup --client zcode --unity-subpath Client`, запущенный из
+корня репозитория. Одноимённый сервер в `~/.zcode/cli/config.json` важнее
+записи рабочей области, поэтому удалите там старую личную запись
+`unity-open-mcp`.
+
 ### OpenCode
 
 ```json
@@ -202,11 +230,9 @@ npx -y unity-open-mcp@latest setup --client codex --unity-subpath Client
 переопределить через `UNITY_SUBPATH=OtherClient`.
 
 Для Codex команда пишет скрипт и таблицу `[mcp_servers.unity-open-mcp]` в
-`.codex/config.toml`, не меняя остальные байты файла. Для ZCode записи в setup
-нет: `--client cursor --wrapper` пишет скрипт (и запись Cursor, её можно
-удалить), а запись ZCode выше добавьте вручную. Обёртка — bash-скрипт, поэтому на
-Windows ей нужен Git Bash или WSL; там setup пишет абсолютную запись Codex, если
-не передан `--portable`.
+`.codex/config.toml`, не меняя остальные байты файла. Обёртка — bash-скрипт,
+поэтому на Windows ей нужен Git Bash или WSL; там setup пишет абсолютную запись
+Codex, если не передан `--portable`.
 
 ## Запись через setup-CLI
 
@@ -245,11 +271,11 @@ Unity лежит внутри git-репозитория (как подпапк�
 
 - клиенты с `${workspaceFolder}` (проектный конфиг Cursor, VS Code, Visual
   Studio) получают интерполированный `UNITY_PROJECT_PATH`;
-- клиенты «только аргументы» получают `--project-from-cwd [--unity-subpath
-  Client]`; для Claude Code панель показывает команду
-  `claude mcp add --scope project …`;
-- Codex и ZCode (project) получают форму со скриптом-обёрткой и кнопку
-  **Write**, которая создаёт скрипт по показанному пути.
+- клиенты «только аргументы», включая ZCode (project), получают
+  `--project-from-cwd [--unity-subpath Client]`; для Claude Code панель
+  показывает команду `claude mcp add --scope project …`;
+- Codex получает форму со скриптом-обёрткой и кнопку **Write**, которая создаёт
+  скрипт по показанному пути.
 
 Клиенты, читающие только общий для машины конфиг (Claude Desktop, Cline,
 Antigravity, глобальные строки Cursor/OpenCode/ZCode), остаются с абсолютной

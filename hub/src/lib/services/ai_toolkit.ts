@@ -212,7 +212,7 @@ export function mcpClientConfigTarget(
       };
     case "zcode-project":
       return {
-        path: ".zcode/cli/config.json", // resolved relative to project in Step 4
+        path: ".zcode/config.json", // resolved relative to project in Step 4
         scope: "project",
         mergeKey: "mcp.servers.unity-open-mcp",
       };
@@ -336,6 +336,7 @@ export function portableStrategy(
     case "rider":
     case "unity-ai":
     case "zoocode":
+    case "zcode-project":
     case "manual":
     case "custom":
       return "args";

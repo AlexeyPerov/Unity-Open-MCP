@@ -110,7 +110,7 @@ For the contributor / community-pack `file:` workflow, see [Development setup](d
 
 ### Configure AI client
 
-Pick the AI client to connect. The first viewport shows a short **Popular** list (Cursor, Claude Desktop, VS Code Copilot, Claude Code, Manual); the full catalog is behind **Show all clients** with a search box.
+Pick the AI client to connect. The first viewport shows a short **Popular** list (Cursor, Claude Desktop, VS Code Copilot, Codex, ZCode, Claude Code, Manual); the full catalog is behind **Show all clients** with a search box.
 
 Each option shows whether it writes a config file, is CLI-only, or copies a
 snippet, with the target path and format in its tooltip. The complete path and

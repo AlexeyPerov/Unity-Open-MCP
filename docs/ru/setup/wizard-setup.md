@@ -168,7 +168,7 @@ dependencies**) — по одному клику на домен, без ред�
 ### Configure AI client
 
 Выберите ИИ-клиент для подключения. Первый экран показывает короткий список
-**Popular** (Cursor, Claude Desktop, VS Code Copilot, Claude Code, Manual); полный
+**Popular** (Cursor, Claude Desktop, VS Code Copilot, Codex, ZCode, Claude Code, Manual); полный
 каталог — за **Show all clients** с окном поиска.
 
 Каждый вариант показывает, записывает ли он файл конфигурации, является ли

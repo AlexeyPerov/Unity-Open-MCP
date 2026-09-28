@@ -101,7 +101,7 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_gameobject_modify", 1294 },
             { "unity_open_mcp_gameobject_set_parent", 572 },
             { "unity_open_mcp_gate_budget_estimate", 432 },
-            { "unity_open_mcp_generate_skill", 419 },
+            { "unity_open_mcp_generate_skill", 411 },
             { "unity_open_mcp_hub_available_releases", 194 },
             { "unity_open_mcp_hub_get_install_path", 164 },
             { "unity_open_mcp_hub_install_editor", 382 },

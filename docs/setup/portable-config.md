@@ -73,6 +73,7 @@ Three portable shapes, depending on what the client can do:
 |---|---|---|---|
 | Cursor | `<workspace>/.cursor/mcp.json` | `${workspaceFolder}` | `${workspaceFolder}/Client` |
 | Claude Code | `<workspace>/.mcp.json` | `--project-from-cwd` | `--project-from-cwd --unity-subpath Client` |
+| ZCode | `<workspace>/.zcode/config.json` | `--project-from-cwd` | `--project-from-cwd --unity-subpath Client` |
 | VS Code Copilot | `<workspace>/.vscode/mcp.json` | `${workspaceFolder}` | `${workspaceFolder}/Client` |
 | Visual Studio Copilot | `<workspace>/.vs/mcp.json` | `${workspaceFolder}` | `${workspaceFolder}/Client` |
 | OpenCode | `<workspace>/opencode.json` | `--project-from-cwd` | `--project-from-cwd --unity-subpath Client` |
@@ -83,7 +84,6 @@ Three portable shapes, depending on what the client can do:
 | ZooCode | `<workspace>/.roo/mcp.json` | `--project-from-cwd` | `--project-from-cwd --unity-subpath Client` |
 | Unity AI | `<unity-project>/UserSettings/mcp.json` | `--project-from-cwd` | — (config lives in the Unity project) |
 | Codex | `<workspace>/.codex/config.toml` | [wrapper](#wrapper-script) | [wrapper](#wrapper-script) |
-| ZCode | `<workspace>/.zcode/cli/config.json` | [wrapper](#wrapper-script) | [wrapper](#wrapper-script) |
 | Claude Desktop | OS global config | absolute path only | absolute path only |
 | Cline | client global MCP settings | absolute path only | absolute path only |
 | Antigravity | global Antigravity config | absolute path only | absolute path only |
@@ -142,6 +142,33 @@ claude mcp add --scope project unity-open-mcp -- npx -y unity-open-mcp@1.3.0 --p
 Without `--scope project` the entry lands in your user-level Claude Code
 config and is not shared.
 
+### ZCode
+
+`<repo>/.zcode/config.json` (the workspace file; `~/.zcode/cli/config.json` is
+your personal one):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "unity-open-mcp": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "unity-open-mcp@1.3.0", "--project-from-cwd", "--unity-subpath", "Client"],
+        "env": {}
+      }
+    }
+  }
+}
+```
+
+ZCode starts stdio servers in the session's working directory — the repository
+root it was opened on — and does not expand `${...}` in config files, so the
+args form is the portable one. Drop the last two arguments for Layout A.
+`setup --client zcode --unity-subpath Client`, run from the repository root,
+writes this entry. A same-named server in `~/.zcode/cli/config.json` overrides
+the workspace one, so remove an old personal `unity-open-mcp` entry there.
+
 ### OpenCode
 
 ```json
@@ -199,10 +226,8 @@ directory does not matter. Override the Unity subfolder for one run with
 `UNITY_SUBPATH=OtherClient`.
 
 For Codex this writes the script and the `[mcp_servers.unity-open-mcp]` table in
-`.codex/config.toml`, leaving the rest of that file byte for byte. ZCode has no
-setup writer: `--client cursor --wrapper` writes the script (plus a Cursor
-entry you can delete), and the ZCode entry above goes in by hand. The wrapper is
-a bash script, so on Windows it needs Git Bash or WSL; there setup writes the
+`.codex/config.toml`, leaving the rest of that file byte for byte. The wrapper
+is a bash script, so on Windows it needs Git Bash or WSL; there setup writes the
 absolute Codex entry unless you pass `--portable`.
 
 ## Write it with the setup CLI
@@ -242,10 +267,11 @@ machine path and no bridge port:
 
 - `${workspaceFolder}` clients (Cursor project config, VS Code, Visual Studio)
   get the interpolated `UNITY_PROJECT_PATH`.
-- Args clients get `--project-from-cwd [--unity-subpath Client]`; for Claude
-  Code the panel shows the `claude mcp add --scope project …` command.
-- Codex and ZCode (project) get the wrapper form, plus a **Write** button that
-  creates the wrapper script at the path shown.
+- Args clients, ZCode (project) included, get `--project-from-cwd
+  [--unity-subpath Client]`; for Claude Code the panel shows the
+  `claude mcp add --scope project …` command.
+- Codex gets the wrapper form, plus a **Write** button that creates the wrapper
+  script at the path shown.
 
 Clients that only read a machine-wide config (Claude Desktop, Cline,
 Antigravity, the global Cursor/OpenCode/ZCode rows) keep the absolute form, and

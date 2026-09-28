@@ -34,8 +34,6 @@ test("bundled manifest exposes the canonical + extended client keys", () => {
     "roo",
     "agent",
     "junie",
-    "vscode",
-    "vs",
     "github",
   ]) {
     assert.ok(keys.includes(k), `bundled manifest missing client key ${k}`);
@@ -110,8 +108,6 @@ test("knownClientKeys lists the canonical + extended clients", () => {
     "roo",
     "agent",
     "junie",
-    "vscode",
-    "vs",
     "github",
   ]) {
     assert.ok(keys.includes(k), `knownClientKeys missing ${k}`);

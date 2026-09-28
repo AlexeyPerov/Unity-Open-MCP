@@ -1747,7 +1747,7 @@
       "additionalProperties": false,
       "properties": {
         "clients": {
-          "description": "Which client skill directories to write to. Only used when write=true. Defaults to [\"claude\"]. Allowed values: `cursor`, `claude`, `opencode`, `agents`, `cline`, `gemini`, `kilocode`, `roo`, `agent`, `junie`, `vscode`, `vs`, `github`. Each entry writes to the project-relative path declared for that client in skills/client-paths.json.",
+          "description": "Which client skill directories to write to. Only used when write=true. Defaults to [\"claude\"]. Allowed values: `cursor`, `claude`, `opencode`, `agents`, `cline`, `gemini`, `kilocode`, `roo`, `agent`, `junie`, `github`. Each entry writes to the project-relative path declared for that client in skills/client-paths.json.",
           "items": {
             "enum": [
               "cursor",
@@ -1760,8 +1760,6 @@
               "roo",
               "agent",
               "junie",
-              "vscode",
-              "vs",
               "github"
             ]
           },

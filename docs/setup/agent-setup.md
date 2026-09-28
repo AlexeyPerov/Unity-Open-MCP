@@ -43,7 +43,8 @@ Choose one setup client id:
 |---|---|---|---|
 | Cursor | `cursor` | `.cursor/mcp.json` | `.cursor/skills/` |
 | Claude Code / project-scoped Claude | `claude` | `.mcp.json` | `.claude/skills/` |
-| VS Code Copilot | `vscode` | `.vscode/mcp.json` | `.vscode/skills/` |
+| ZCode | `zcode` | `.zcode/config.json` | `.agents/skills/` |
+| VS Code Copilot | `vscode` | `.vscode/mcp.json` | `.github/skills/` |
 | Codex | `codex` | `.codex/config.toml` | `.agents/skills/` |
 | OpenCode | `opencode` | `opencode.json` | `.opencode/skills/` |
 | Generic agents | `agents` | `.mcp.json` | `.agents/skills/` |

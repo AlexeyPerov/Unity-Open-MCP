@@ -37,7 +37,8 @@
 |---|---|---|---|
 | Cursor | `cursor` | `.cursor/mcp.json` | `.cursor/skills/` |
 | Claude Code / 项目级 Claude | `claude` | `.mcp.json` | `.claude/skills/` |
-| VS Code Copilot | `vscode` | `.vscode/mcp.json` | `.vscode/skills/` |
+| ZCode | `zcode` | `.zcode/config.json` | `.agents/skills/` |
+| VS Code Copilot | `vscode` | `.vscode/mcp.json` | `.github/skills/` |
 | Codex | `codex` | `.codex/config.toml` | `.agents/skills/` |
 | OpenCode | `opencode` | `opencode.json` | `.opencode/skills/` |
 | 通用智能体 | `agents` | `.mcp.json` | `.agents/skills/` |

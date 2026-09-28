@@ -199,9 +199,13 @@ test("portableStrategy: Claude Code resolves the project from its spawn cwd", ()
   assert.equal(portableStrategy("claude-code", "none"), "args");
 });
 
-test("portableStrategy: wrapper-only clients fall back to absolute in the Hub", () => {
+test("portableStrategy: the wrapper-only client falls back to absolute in the Hub", () => {
   assert.equal(portableStrategy("codex", "project"), "absolute");
-  assert.equal(portableStrategy("zcode-project", "project"), "absolute");
+});
+
+test("portableStrategy: ZCode's workspace config resolves the project from its session directory", () => {
+  assert.equal(portableStrategy("zcode-project", "project"), "args");
+  assert.equal(portableStrategy("zcode-global", "global"), "absolute");
 });
 
 test("workspaceFolderPath appends the Unity subfolder", () => {

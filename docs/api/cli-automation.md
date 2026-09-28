@@ -61,7 +61,7 @@ current directory is the repository root the config goes to. `setup` ignores
 
 `setup` pins the bridge, verify package, and MCP server to the version of the
 package currently running. It accepts the project-config writers `cursor`,
-`claude`, `vscode`, `codex`, `opencode`, and `agents`. The command preserves unrelated Unity
+`claude`, `zcode`, `vscode`, `codex`, `opencode`, and `agents`. The command preserves unrelated Unity
 dependencies, MCP servers, and environment keys, then byte-copies the core
 skill bundled in the npm package. It never needs a live Editor or bridge and
 does not install optional domain packages.

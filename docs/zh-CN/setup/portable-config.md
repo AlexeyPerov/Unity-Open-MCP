@@ -70,6 +70,7 @@ my-game/                    <- 在这里打开 AI 客户端，配置也放这里
 |---|---|---|---|
 | Cursor | `<workspace>/.cursor/mcp.json` | `${workspaceFolder}` | `${workspaceFolder}/Client` |
 | Claude Code | `<workspace>/.mcp.json` | `--project-from-cwd` | `--project-from-cwd --unity-subpath Client` |
+| ZCode | `<workspace>/.zcode/config.json` | `--project-from-cwd` | `--project-from-cwd --unity-subpath Client` |
 | VS Code Copilot | `<workspace>/.vscode/mcp.json` | `${workspaceFolder}` | `${workspaceFolder}/Client` |
 | Visual Studio Copilot | `<workspace>/.vs/mcp.json` | `${workspaceFolder}` | `${workspaceFolder}/Client` |
 | OpenCode | `<workspace>/opencode.json` | `--project-from-cwd` | `--project-from-cwd --unity-subpath Client` |
@@ -80,7 +81,6 @@ my-game/                    <- 在这里打开 AI 客户端，配置也放这里
 | ZooCode | `<workspace>/.roo/mcp.json` | `--project-from-cwd` | `--project-from-cwd --unity-subpath Client` |
 | Unity AI | `<unity-project>/UserSettings/mcp.json` | `--project-from-cwd` | — （配置就在 Unity 项目内） |
 | Codex | `<workspace>/.codex/config.toml` | [包装脚本](#包装脚本) | [包装脚本](#包装脚本) |
-| ZCode | `<workspace>/.zcode/cli/config.json` | [包装脚本](#包装脚本) | [包装脚本](#包装脚本) |
 | Claude Desktop | 操作系统全局配置 | 只能用绝对路径 | 只能用绝对路径 |
 | Cline | 客户端全局 MCP 设置 | 只能用绝对路径 | 只能用绝对路径 |
 | Antigravity | Antigravity 全局配置 | 只能用绝对路径 | 只能用绝对路径 |
@@ -137,6 +137,31 @@ claude mcp add --scope project unity-open-mcp -- npx -y unity-open-mcp@1.3.0 --p
 
 不加 `--scope project` 时，条目会写入用户级 Claude Code 配置，不会共享。
 
+### ZCode
+
+`<repo>/.zcode/config.json`（工作区文件；`~/.zcode/cli/config.json` 是你的个人配置）：
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "unity-open-mcp": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "unity-open-mcp@1.3.0", "--project-from-cwd", "--unity-subpath", "Client"],
+        "env": {}
+      }
+    }
+  }
+}
+```
+
+ZCode 在会话的工作目录（即打开的仓库根目录）中启动 stdio 服务器，且不会展开配置
+文件中的 `${...}`，因此其可移植形式是命令参数。布局 A 去掉最后两个参数。在仓库
+根目录运行 `setup --client zcode --unity-subpath Client` 即可写入该条目。
+`~/.zcode/cli/config.json` 中的同名服务器优先于工作区条目，请删除那里旧的个人
+`unity-open-mcp` 条目。
+
 ### OpenCode
 
 ```json
@@ -190,10 +215,9 @@ npx -y unity-open-mcp@latest setup --client codex --unity-subpath Client
 可用 `UNITY_SUBPATH=OtherClient` 覆盖 Unity 子文件夹。
 
 对 Codex，该命令会写出脚本，并在 `.codex/config.toml` 中写入
-`[mcp_servers.unity-open-mcp]` 表，文件其余字节保持不变。ZCode 没有 setup 写入器：
-`--client cursor --wrapper` 会写出脚本（外加一个可删除的 Cursor 条目），ZCode 条目
-需按上文手动添加。包装脚本是 bash 脚本，在 Windows 上需要 Git Bash 或 WSL；在
-Windows 上除非传入 `--portable`，setup 会写入绝对路径形式的 Codex 条目。
+`[mcp_servers.unity-open-mcp]` 表，文件其余字节保持不变。包装脚本是 bash 脚本，
+在 Windows 上需要 Git Bash 或 WSL；在 Windows 上除非传入 `--portable`，setup 会
+写入绝对路径形式的 Codex 条目。
 
 ## 用 setup CLI 写入
 
@@ -226,10 +250,10 @@ npx -y unity-open-mcp@latest setup --client cursor --unity-subpath Client
 
 - 支持 `${workspaceFolder}` 的客户端（Cursor 项目配置、VS Code、Visual
   Studio）得到插值后的 `UNITY_PROJECT_PATH`；
-- 仅命令参数的客户端得到 `--project-from-cwd [--unity-subpath Client]`；
-  Claude Code 则显示 `claude mcp add --scope project …` 命令；
-- Codex 与 ZCode（project）得到包装脚本形式，并提供 **Write** 按钮，在显示的
-  路径创建该脚本。
+- 仅命令参数的客户端（包括 ZCode project）得到
+  `--project-from-cwd [--unity-subpath Client]`；Claude Code 则显示
+  `claude mcp add --scope project …` 命令；
+- Codex 得到包装脚本形式，并提供 **Write** 按钮，在显示的路径创建该脚本。
 
 只读取机器级配置的客户端（Claude Desktop、Cline、Antigravity，以及全局的
 Cursor/OpenCode/ZCode）保持绝对路径形式，面板会给出说明。Hub 设置向导中的

@@ -32,7 +32,7 @@ const REPOSITORY_URL = "https://github.com/AlexeyPerov/unity-open-mcp.git";
 const SERVER_KEY = "unity-open-mcp";
 
 /** How a client's config file spells the server entry. */
-type SetupConfigFormat = "mcpServers" | "opencode" | "vscode" | "codex";
+type SetupConfigFormat = "mcpServers" | "opencode" | "vscode" | "zcode" | "codex";
 
 export interface SetupClientSpec {
   /** `--client` value. */
@@ -54,7 +54,8 @@ export interface SetupClientSpec {
 export const SETUP_CLIENTS: readonly SetupClientSpec[] = [
   { id: "cursor", configPath: ".cursor/mcp.json", format: "mcpServers", skillKey: "cursor", catalogId: "cursor" },
   { id: "claude", configPath: ".mcp.json", format: "mcpServers", skillKey: "claude", catalogId: "claude-code" },
-  { id: "vscode", configPath: ".vscode/mcp.json", format: "vscode", skillKey: "vscode", catalogId: "vscode-copilot" },
+  { id: "zcode", configPath: ".zcode/config.json", format: "zcode", skillKey: "agents", catalogId: "zcode" },
+  { id: "vscode", configPath: ".vscode/mcp.json", format: "vscode", skillKey: "github", catalogId: "vscode-copilot" },
   { id: "codex", configPath: ".codex/config.toml", format: "codex", skillKey: "agents", catalogId: "codex" },
   { id: "opencode", configPath: "opencode.json", format: "opencode", skillKey: "opencode", catalogId: "opencode" },
   { id: "agents", configPath: ".mcp.json", format: "mcpServers", skillKey: "agents", catalogId: "agents" },
@@ -725,13 +726,17 @@ function mergeClientConfig(
     return entry;
   }
 
-  // VS Code (and Visual Studio) read `servers`, with an explicit transport.
-  const vscode = client.format === "vscode";
-  const servers = ensureObject(config, vscode ? "servers" : "mcpServers");
+  // VS Code (and Visual Studio) read `servers`, ZCode `mcp.servers`; both
+  // carry an explicit transport.
+  const typed = client.format === "vscode" || client.format === "zcode";
+  const servers =
+    client.format === "zcode"
+      ? ensureObject(ensureObject(config, "mcp"), "servers")
+      : ensureObject(config, client.format === "vscode" ? "servers" : "mcpServers");
   const previous = isRecord(servers[SERVER_KEY]) ? servers[SERVER_KEY] : {};
   const previousEnv = isRecord(previous.env) ? previous.env : {};
   const entry = {
-    ...(vscode ? { type: "stdio" } : {}),
+    ...(typed ? { type: "stdio" } : {}),
     ...previous,
     command: launch.command,
     args: launch.args,

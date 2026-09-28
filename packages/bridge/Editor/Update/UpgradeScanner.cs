@@ -143,7 +143,7 @@ namespace UnityOpenMcpBridge.Update
         internal static readonly string[] SkillClientDirs =
         {
             ".cursor", ".claude", ".opencode", ".agents", ".cline", ".gemini",
-            ".kilocode", ".roo", ".agent", ".junie", ".vscode", ".vs", ".github",
+            ".kilocode", ".roo", ".agent", ".junie", ".github",
         };
 
         internal const string SkillRelativePath = "skills/unity-open-mcp/SKILL.md";

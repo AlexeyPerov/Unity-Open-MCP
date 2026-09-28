@@ -32,6 +32,8 @@ namespace UnityOpenMcpBridge.Config
         {
             new ClientEntry("cursor", "Cursor", "mcpServers", Envelope.McpServersStdio, Scope.Global, "$HOME/.cursor/mcp.json"),
             new ClientEntry("cursor-project", "Cursor (project)", "mcpServers", Envelope.McpServersStdio, Scope.Project, ".cursor/mcp.json"),
+            new ClientEntry("claudeCode", "Claude Code (CLI)", "", Envelope.CliOnly, Scope.None, null),
+            new ClientEntry("zcodeProject", "ZCode (project)", "mcp.servers", Envelope.ZcodeStdio, Scope.Project, ".zcode/config.json"),
             new ClientEntry("claudeDesktop", "Claude Desktop", "mcpServers", Envelope.McpServersStdio, Scope.Global, null, OsPath.ClaudeDesktop),
             new ClientEntry("cline", "Cline (VS Code)", "mcpServers", Envelope.McpServersStdio, Scope.Global, null, OsPath.Cline),
             new ClientEntry("gemini", "Gemini CLI", "mcpServers", Envelope.McpServersStdio, Scope.Project, ".gemini/settings.json"),
@@ -46,9 +48,7 @@ namespace UnityOpenMcpBridge.Config
             new ClientEntry("opencodeGlobal", "OpenCode (global)", "mcp", Envelope.OpenCode, Scope.Global, "$HOME/.config/opencode/opencode.json"),
             new ClientEntry("opencodeProject", "OpenCode (project)", "mcp", Envelope.OpenCode, Scope.Project, "opencode.json"),
             new ClientEntry("zcodeGlobal", "ZCode (global)", "mcp.servers", Envelope.ZcodeStdio, Scope.Global, "$HOME/.zcode/cli/config.json"),
-            new ClientEntry("zcodeProject", "ZCode (project)", "mcp.servers", Envelope.ZcodeStdio, Scope.Project, ".zcode/cli/config.json"),
             new ClientEntry("codex", "Codex", "mcp_servers", Envelope.Codex, Scope.Project, ".codex/config.toml"),
-            new ClientEntry("claudeCode", "Claude Code (CLI)", "", Envelope.CliOnly, Scope.None, null),
             new ClientEntry("manual", "Manual / copy JSON", "", Envelope.Manual, Scope.None, null),
         };
 
@@ -165,7 +165,6 @@ namespace UnityOpenMcpBridge.Config
                 case "vsCopilot":
                     return PortableStrategy.Interpolation;
                 case "codex":
-                case "zcodeProject":
                     return PortableStrategy.Wrapper;
                 default:
                     return PortableStrategy.Args;

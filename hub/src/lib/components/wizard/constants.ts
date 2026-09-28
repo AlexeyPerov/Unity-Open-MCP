@@ -202,7 +202,7 @@ export const MCP_CLIENT_OPTIONS: McpClientOption[] = [
     category: "ide",
     popular: true,
     sharedWith:
-      "Format: mcp.servers + type:stdio JSON (project-local .zcode/cli/config.json). Skill installs to .agents/skills/. Shared by: ZCode.",
+      "Format: mcp.servers + type:stdio JSON (workspace .zcode/config.json). Skill installs to .agents/skills/. Shared by: ZCode.",
   },
   // --- CLI agents ---
   {
@@ -210,7 +210,7 @@ export const MCP_CLIENT_OPTIONS: McpClientOption[] = [
     label: "Claude Code (CLI only)",
     kind: "cli",
     category: "cli",
-    popular: false,
+    popular: true,
     sharedWith:
       "CLI-only: renders a `claude mcp add` command (no config file is written). Skill installs to .claude/skills/.",
   },

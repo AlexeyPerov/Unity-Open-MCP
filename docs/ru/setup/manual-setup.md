@@ -37,7 +37,7 @@ Unity (где лежат `Assets/`, `Packages/` и `ProjectSettings/`) и вып
 npx -y unity-open-mcp@1.3.0 setup --client cursor
 ```
 
-Для другого клиента укажите `claude`, `vscode`, `codex`, `opencode` или `agents`
+Для другого клиента укажите `claude`, `zcode`, `vscode`, `codex`, `opencode` или `agents`
 вместо `cursor`. Если проект Unity — подпапка репозитория, запустите команду из
 корня репозитория и назовите папку:
 `npx -y unity-open-mcp@1.3.0 setup --client cursor --unity-subpath Client`.

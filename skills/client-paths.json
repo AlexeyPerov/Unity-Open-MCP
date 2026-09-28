@@ -14,8 +14,6 @@
     "roo": { "relativePath": ".roo/skills/unity-open-mcp/SKILL.md" },
     "agent": { "relativePath": ".agent/skills/unity-open-mcp/SKILL.md" },
     "junie": { "relativePath": ".junie/skills/unity-open-mcp/SKILL.md" },
-    "vscode": { "relativePath": ".vscode/skills/unity-open-mcp/SKILL.md" },
-    "vs": { "relativePath": ".vs/skills/unity-open-mcp/SKILL.md" },
     "github": { "relativePath": ".github/skills/unity-open-mcp/SKILL.md" }
   },
   "mcpClientMapping": {
@@ -35,8 +33,8 @@
     "kilo-code": ["kilocode"],
     "rider": ["junie"],
     "unity-ai": [],
-    "vscode-copilot": ["vscode"],
-    "vs-copilot": ["vs"],
+    "vscode-copilot": ["github"],
+    "vs-copilot": ["github"],
     "antigravity": ["agent"],
     "custom": ["cursor", "claude", "opencode", "agents"],
     "manual": ["cursor", "claude", "opencode", "agents"]

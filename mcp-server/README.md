@@ -25,8 +25,8 @@ npx -y unity-open-mcp@latest setup --client cursor
 ```
 
 Run it in the Unity project folder, or pass `--project <path>`. Supported
-project-config ids are `cursor`, `claude`, `vscode`, `codex`, `opencode`, and
-`agents`.
+project-config ids are `cursor`, `claude`, `zcode`, `vscode`, `codex`,
+`opencode`, and `agents`.
 Run `npx -y unity-open-mcp@latest setup --help` for dry-run, skill-skip, JSON,
 and exit-code details.
 

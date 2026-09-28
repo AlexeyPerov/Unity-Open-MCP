@@ -30,7 +30,7 @@
 | VS Code Copilot | `<project>/.vscode/mcp.json` | [VS Code](#vs-code-与-visual-studio-copilot) |
 | Visual Studio Copilot | `<project>/.vs/mcp.json` | [VS Code](#vs-code-与-visual-studio-copilot) |
 | OpenCode | `<project>/opencode.json` | [OpenCode](#opencode) |
-| ZCode | `<project>/.zcode/cli/config.json` | [ZCode](#zcode) |
+| ZCode | `<project>/.zcode/config.json`（个人：`~/.zcode/cli/config.json`） | [ZCode](#zcode) |
 | Codex | `<project>/.codex/config.toml` | [Codex](#codex) |
 | Cline | 客户端全局 MCP 设置 | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
 | Gemini CLI | `<project>/.gemini/settings.json` | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
@@ -114,6 +114,10 @@ Code、Rider、Unity AI、ZooCode 和 Antigravity：
 ```
 
 ### ZCode
+
+工作区文件为 `<project>/.zcode/config.json`；相同结构也适用于个人
+`~/.zcode/cli/config.json`，后者优先于工作区中的同名服务器。ZCode 不会展开配置文件中的
+`${...}`；需要提交的文件请使用[可移植 MCP 配置](portable-config.md#zcode)中的命令参数形式。
 
 ```json
 {

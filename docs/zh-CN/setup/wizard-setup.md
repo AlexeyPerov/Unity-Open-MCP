@@ -108,7 +108,7 @@ npm run build
 
 ### Configure AI client
 
-选择要连接的 AI 客户端。首屏显示简短的 **Popular** 列表（Cursor、Claude Desktop、VS Code Copilot、Claude Code、Manual）；完整目录在 **Show all clients** 之后，带搜索框。
+选择要连接的 AI 客户端。首屏显示简短的 **Popular** 列表（Cursor、Claude Desktop、VS Code Copilot、Codex、ZCode、Claude Code、Manual）；完整目录在 **Show all clients** 之后，带搜索框。
 
 每个选项都显示它是写入配置文件、仅 CLI，还是复制片段，并在其工具提示里给出目标路径与格式。完整的路径与片段目录见
 [MCP 客户端配置](client-configuration.md)。

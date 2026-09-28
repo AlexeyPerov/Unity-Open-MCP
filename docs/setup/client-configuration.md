@@ -3,8 +3,8 @@
 Connect an MCP client to one Unity project: find your client, copy the snippet,
 set your project path, save the file, restart the client.
 
-For first-time setup with Cursor, Claude Code, VS Code Copilot, Codex, OpenCode,
-or a generic agent, prefer the merge-safe [`unity-open-mcp setup`](agent-setup.md)
+For first-time setup with Cursor, Claude Code, ZCode, VS Code Copilot, Codex,
+OpenCode, or a generic agent, prefer the merge-safe [`unity-open-mcp setup`](agent-setup.md)
 command.
 Use the catalog below for other clients or manual configuration.
 
@@ -36,7 +36,7 @@ take 10–60 seconds while the package downloads; later launches are fast.
 | VS Code Copilot | `<project>/.vscode/mcp.json` | [VS Code](#vs-code-and-visual-studio-copilot) |
 | Visual Studio Copilot | `<project>/.vs/mcp.json` | [VS Code](#vs-code-and-visual-studio-copilot) |
 | OpenCode | `<project>/opencode.json` | [OpenCode](#opencode) |
-| ZCode | `<project>/.zcode/cli/config.json` | [ZCode](#zcode) |
+| ZCode | `<project>/.zcode/config.json` (personal: `~/.zcode/cli/config.json`) | [ZCode](#zcode) |
 | Codex | `<project>/.codex/config.toml` | [Codex](#codex) |
 | Cline | Client global MCP settings | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
 | Gemini CLI | `<project>/.gemini/settings.json` | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
@@ -122,6 +122,11 @@ Code, Rider, Unity AI, ZooCode, and Antigravity:
 ```
 
 ### ZCode
+
+Workspace file `<project>/.zcode/config.json`; the same shape goes into your
+personal `~/.zcode/cli/config.json`, which wins over a same-named workspace
+server. ZCode does not expand `${...}` in config files; for a committed file use
+the args form from [Portable MCP config](portable-config.md#zcode).
 
 ```json
 {

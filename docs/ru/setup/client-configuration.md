@@ -34,7 +34,7 @@
 | VS Code Copilot | `<project>/.vscode/mcp.json` | [VS Code](#vs-code-и-visual-studio-copilot) |
 | Visual Studio Copilot | `<project>/.vs/mcp.json` | [VS Code](#vs-code-и-visual-studio-copilot) |
 | OpenCode | `<project>/opencode.json` | [OpenCode](#opencode) |
-| ZCode | `<project>/.zcode/cli/config.json` | [ZCode](#zcode) |
+| ZCode | `<project>/.zcode/config.json` (личный: `~/.zcode/cli/config.json`) | [ZCode](#zcode) |
 | Codex | `<project>/.codex/config.toml` | [Codex](#codex) |
 | Cline | Глобальные MCP-настройки клиента | [`mcpServers`](#mcpservers-cursor-и-большинство-клиентов) |
 | Gemini CLI | `<project>/.gemini/settings.json` | [`mcpServers`](#mcpservers-cursor-и-большинство-клиентов) |
@@ -119,6 +119,12 @@ Rider, Unity AI, ZooCode и Antigravity:
 ```
 
 ### ZCode
+
+Файл рабочей области — `<project>/.zcode/config.json`; та же структура подходит
+для личного `~/.zcode/cli/config.json`, который важнее одноимённого сервера
+рабочей области. ZCode не раскрывает `${...}` в конфигах; для закоммиченного
+файла используйте форму с аргументами из
+[Переносимой конфигурации MCP](portable-config.md#zcode).
 
 ```json
 {

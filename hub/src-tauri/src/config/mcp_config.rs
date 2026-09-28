@@ -730,10 +730,11 @@ fn resolve_scope(params: &McpConfigParams) -> Result<ClientScope, McpScopeSkip> 
 /// How a client can be pointed at a Unity project without a machine path.
 ///
 /// Mirrors the catalog the `setup` CLI and the setup docs publish, with one
-/// Hub-specific narrowing: clients whose only portable form is the committed
-/// wrapper script (Codex, ZCode) resolve to [`PortableStrategy::Absolute`]
-/// here, because the Hub writes config files but does not ship that script —
-/// `unity-open-mcp setup --wrapper` does.
+/// Hub-specific narrowing: Codex, whose only portable form is the committed
+/// wrapper script, resolves to [`PortableStrategy::Absolute`] here, because the
+/// Hub writes config files but does not ship that script —
+/// `unity-open-mcp setup --wrapper` does. ZCode starts stdio servers in the
+/// session's working directory, so its workspace config takes the args form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PortableStrategy {
     /// The client expands `${workspaceFolder}` inside env values.
@@ -768,15 +769,15 @@ pub(crate) fn portable_strategy(client: McpClientId, scope: ClientScope) -> Port
         | McpClientId::Rider
         | McpClientId::UnityAi
         | McpClientId::ZooCode
+        | McpClientId::ZcodeProject
         | McpClientId::Manual
         | McpClientId::Custom => PortableStrategy::Args,
-        // Global-only clients, and the two that need the wrapper script.
+        // Global-only clients, and Codex, which needs the wrapper script.
         McpClientId::ClaudeDesktop
         | McpClientId::Cline
         | McpClientId::Antigravity
         | McpClientId::Codex
         | McpClientId::ZcodeGlobal
-        | McpClientId::ZcodeProject
         | McpClientId::OpencodeGlobal => PortableStrategy::Absolute,
     }
 }
@@ -1167,7 +1168,9 @@ fn resolve_target_path(
         }
         McpClientId::OpencodeProject => Some(project.join("opencode.json")),
         McpClientId::ZcodeGlobal => Some(home.join(".zcode").join("cli").join("config.json")),
-        McpClientId::ZcodeProject => Some(project.join(".zcode").join("cli").join("config.json")),
+        // The workspace file is `<repo>/.zcode/config.json`; `cli/config.json`
+        // is the user-scope layout under `~/.zcode`.
+        McpClientId::ZcodeProject => Some(project.join(".zcode").join("config.json")),
         McpClientId::Cline => Some(cline_settings_path(home)),
         McpClientId::Codex => Some(project.join(".codex").join("config.toml")),
         McpClientId::Gemini => Some(project.join(".gemini").join("settings.json")),
@@ -1748,8 +1751,6 @@ pub(crate) const SKILL_REL_PATHS: &[&str] = &[
     ".roo/skills/unity-open-mcp/SKILL.md",
     ".agent/skills/unity-open-mcp/SKILL.md",
     ".junie/skills/unity-open-mcp/SKILL.md",
-    ".vscode/skills/unity-open-mcp/SKILL.md",
-    ".vs/skills/unity-open-mcp/SKILL.md",
     ".github/skills/unity-open-mcp/SKILL.md",
 ];
 
@@ -3470,10 +3471,10 @@ mod tests {
         let params = make_zcode_params(McpClientId::ZcodeProject, home, &project, toolkit.path());
         let plan = plan_mcp_config_at(&params, home).unwrap();
         let target = plan.target_path.expect("zcode project has a target");
-        // Project scope: file under <project>/.zcode/cli/config.json, NOT ~/.zcode.
-        assert!(target.contains("proj/.zcode/cli/config.json"));
+        // Project scope: the workspace file <project>/.zcode/config.json, NOT ~/.zcode.
+        assert!(target.contains("proj/.zcode/config.json"));
         // Project scope writes under the project dir, not the home dir.
-        let proj_zcode = project.join(".zcode").join("cli").join("config.json");
+        let proj_zcode = project.join(".zcode").join("config.json");
         assert_eq!(
             std::path::Path::new(&target),
             proj_zcode.as_path()
@@ -4480,15 +4481,15 @@ mod tests {
             McpClientId::GithubCopilotCli,
             McpClientId::OpencodeProject,
             McpClientId::Gemini,
+            McpClientId::ZcodeProject,
         ] {
             assert!(at_root(client), "{client:?}");
         }
-        // Unity AI keeps its config in the Unity project; wrapper-only and
-        // global clients have no commit-safe form.
+        // Unity AI keeps its config in the Unity project; the wrapper-only
+        // client and global clients have no commit-safe form.
         for client in [
             McpClientId::UnityAi,
             McpClientId::Codex,
-            McpClientId::ZcodeProject,
             McpClientId::ClaudeDesktop,
         ] {
             assert!(!at_root(client), "{client:?}");

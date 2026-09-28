@@ -599,6 +599,52 @@ test("a repository in the home directory does not count", async (t) => {
   assert.ok(!report.warnings.some((w) => w.includes("is inside the repository")));
 });
 
+// --- ZCode -------------------------------------------------------------------
+
+test("zcode writes .zcode/config.json under mcp.servers and keeps siblings", async (t) => {
+  const f = await monorepoFixture(t);
+  const configPath = join(f.project, ".zcode", "config.json");
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, JSON.stringify({
+    hooks: { enabled: true },
+    mcp: { servers: { zread: { type: "http", url: "https://example" } } },
+  }));
+  const result = await runSetupCommand(setupOpts(f, { client: "zcode", skipSkill: false, env: {} }));
+  assert.equal(result.exitCode, 0);
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  assert.deepEqual(config.hooks, { enabled: true });
+  assert.deepEqual(config.mcp.servers.zread, { type: "http", url: "https://example" });
+  assert.deepEqual(config.mcp.servers["unity-open-mcp"], {
+    type: "stdio",
+    command: "npx",
+    args: ["-y", "unity-open-mcp@1.2.3"],
+    env: { UNITY_PROJECT_PATH: f.project },
+  });
+  assert.equal(
+    (result.json as SetupReport).skill.path,
+    join(f.project, ".agents", "skills", "unity-open-mcp", "SKILL.md"),
+  );
+});
+
+test("zcode portable monorepo entry resolves the project from the session directory", async (t) => {
+  const f = await monorepoFixture(t);
+  const result = await runSetupCommand(
+    setupOpts(f, { client: "zcode", projectPath: undefined, unitySubpath: "Client", cwd: f.workspace, env: {} }),
+  );
+  assert.equal(result.exitCode, 0);
+  const report = result.json as SetupReport;
+  assert.equal(report.configStrategy, "args");
+  assert.equal(report.wrapper.path, null, "no wrapper script for ZCode");
+  const body = await readFile(join(f.workspace, ".zcode", "config.json"), "utf8");
+  assert.ok(!body.includes(f.workspace));
+  assert.deepEqual(JSON.parse(body).mcp.servers["unity-open-mcp"], {
+    type: "stdio",
+    command: "npx",
+    args: ["-y", "unity-open-mcp@1.2.3", "--project-from-cwd", "--unity-subpath", "Client"],
+    env: {},
+  });
+});
+
 // --- VS Code -----------------------------------------------------------------
 
 test("vscode writes .vscode/mcp.json under servers and keeps siblings", async (t) => {
@@ -622,7 +668,7 @@ test("vscode writes .vscode/mcp.json under servers and keeps siblings", async (t
   });
   assert.equal(
     (result.json as SetupReport).skill.path,
-    join(f.project, ".vscode", "skills", "unity-open-mcp", "SKILL.md"),
+    join(f.project, ".github", "skills", "unity-open-mcp", "SKILL.md"),
   );
 });
 
@@ -732,11 +778,12 @@ test("an unsupported Codex shape fails without touching the file", async (t) => 
 
 test("dry-run for the new clients writes nothing", async (t) => {
   const f = await monorepoFixture(t);
-  for (const client of ["vscode", "codex"]) {
+  for (const client of ["zcode", "vscode", "codex"]) {
     const result = await runSetupCommand(setupOpts(f, { client, dryRun: true, skipSkill: false, env: {} }));
     assert.equal(result.exitCode, 0, client);
     assert.equal((result.json as SetupReport).mcpConfig.written, false);
   }
+  await assert.rejects(readFile(join(f.project, ".zcode", "config.json")));
   await assert.rejects(readFile(join(f.project, ".vscode", "mcp.json")));
   await assert.rejects(readFile(join(f.project, ".codex", "config.toml")));
   await assert.rejects(readFile(join(f.project, ".agents", "skills", "unity-open-mcp", "SKILL.md")));

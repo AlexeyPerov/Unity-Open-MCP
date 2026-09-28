@@ -15,7 +15,7 @@
 //                  client to spawn the server with cwd = workspace root.
 //   wrapper        a committed shell script resolves the path from its own
 //                  location and execs the server. For clients that support
-//                  neither of the above (Codex, ZCode).
+//                  neither of the above (Codex).
 //   absolute       global/user-level config outside any workspace (Claude
 //                  Desktop, Cline, Antigravity): no portable form exists.
 
@@ -147,9 +147,9 @@ export const PORTABLE_CLIENT_MATRIX: readonly PortableClientSupport[] = [
   {
     id: "zcode",
     label: "ZCode",
-    configPath: ".zcode/cli/config.json",
-    strategy: "wrapper",
-    note: "No workspace interpolation; use the committed wrapper.",
+    configPath: ".zcode/config.json",
+    strategy: "args",
+    note: "Workspace config; stdio servers start in the session's working directory, and config files expand no ${...} templates.",
   },
   {
     id: "claude-desktop",

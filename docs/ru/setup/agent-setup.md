@@ -42,7 +42,8 @@
 |---|---|---|---|
 | Cursor | `cursor` | `.cursor/mcp.json` | `.cursor/skills/` |
 | Claude Code / проектный Claude | `claude` | `.mcp.json` | `.claude/skills/` |
-| VS Code Copilot | `vscode` | `.vscode/mcp.json` | `.vscode/skills/` |
+| ZCode | `zcode` | `.zcode/config.json` | `.agents/skills/` |
+| VS Code Copilot | `vscode` | `.vscode/mcp.json` | `.github/skills/` |
 | Codex | `codex` | `.codex/config.toml` | `.agents/skills/` |
 | OpenCode | `opencode` | `opencode.json` | `.opencode/skills/` |
 | Универсальные агенты | `agents` | `.mcp.json` | `.agents/skills/` |
