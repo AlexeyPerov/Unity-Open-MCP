@@ -162,7 +162,6 @@ function buildSuite() {
   s("mutation_explain", "A", "unity_open_mcp_mutation_explain", {
     resolveArgs: (ctx) => ({
       tool_name: "unity_open_mcp_material_set_property",
-      args: { property: "_Color", type: "color", value: [1, 0, 0, 1] },
       checkpoint_id: ctx.checkpointId,
     }),
   });

@@ -328,6 +328,47 @@ namespace UnityOpenMcpBridge
                 };
             }
 
+            // A rule that threw on EITHER side of the delta makes the delta
+            // unreliable: a rule absent from the checkpoint turns its
+            // pre-existing issues into phantom "new" ones, a rule absent from
+            // validation hides post-mutation issues and fakes "resolved"
+            // counts. VerifyRunner used to swallow the exception with only a
+            // console warning, so a crashing scanner produced a vacuous
+            // `passed` — the exact failure mode ValidateScanFailed exists for.
+            // Deliberately conservative: any failed rule on either side
+            // withholds the delta entirely; the other rules' findings are
+            // still available via validate_edit / scan_paths.
+            var failedRules = new HashSet<string>();
+            if (checkpoint.RulesFailed != null)
+                foreach (var id in checkpoint.RulesFailed) failedRules.Add(id);
+            if (validation.RulesFailed != null)
+                foreach (var id in validation.RulesFailed) failedRules.Add(id);
+            if (failedRules.Count > 0)
+            {
+                gateSw.Stop();
+                var failedList = string.Join(", ", failedRules);
+                return new GateDispatchResult
+                {
+                    Mutation = mutationResult,
+                    GateRan = true,
+                    Outcome = GateOutcome.ValidateScanFailed,
+                    CheckpointId = checkpoint.CheckpointId,
+                    CategoriesRun = validation.CategoriesRun,
+                    CheckpointDurationMs = checkpointMs,
+                    ValidationDurationMs = validation.DurationMs,
+                    TotalGateDurationMs = gateSw.ElapsedMilliseconds,
+                    GateFailed = true,
+                    RulesFailed = failedRules.ToArray(),
+                    AgentNextSteps = new[]
+                    {
+                        $"Mutation committed, but verify rule(s) threw during the gate's " +
+                        $"checkpoint/validate scan ({failedList}) — the delta is unreliable " +
+                        "and was withheld. Run unity_open_mcp_validate_edit (or " +
+                        "unity_open_mcp_scan_paths) on the touched paths to confirm health."
+                    }
+                };
+            }
+
             DeltaData delta;
             try
             {
@@ -360,46 +401,6 @@ namespace UnityOpenMcpBridge
             }
 
             gateSw.Stop();
-
-            // A rule that threw on EITHER side of the delta makes the delta
-            // unreliable: a rule absent from the checkpoint turns its
-            // pre-existing issues into phantom "new" ones, a rule absent from
-            // validation hides post-mutation issues and fakes "resolved"
-            // counts. VerifyRunner used to swallow the exception with only a
-            // console warning, so a crashing scanner produced a vacuous
-            // `passed` — the exact failure mode ValidateScanFailed exists for.
-            // Deliberately conservative: any failed rule on either side
-            // withholds the delta entirely; the other rules' findings are
-            // still available via validate_edit / scan_paths.
-            var failedRules = new HashSet<string>();
-            if (checkpoint.RulesFailed != null)
-                foreach (var id in checkpoint.RulesFailed) failedRules.Add(id);
-            if (validation.RulesFailed != null)
-                foreach (var id in validation.RulesFailed) failedRules.Add(id);
-            if (failedRules.Count > 0)
-            {
-                var failedList = string.Join(", ", failedRules);
-                return new GateDispatchResult
-                {
-                    Mutation = mutationResult,
-                    GateRan = true,
-                    Outcome = GateOutcome.ValidateScanFailed,
-                    CheckpointId = checkpoint.CheckpointId,
-                    CategoriesRun = validation.CategoriesRun,
-                    CheckpointDurationMs = checkpointMs,
-                    ValidationDurationMs = validation.DurationMs,
-                    TotalGateDurationMs = gateSw.ElapsedMilliseconds,
-                    GateFailed = true,
-                    RulesFailed = failedRules.ToArray(),
-                    AgentNextSteps = new[]
-                    {
-                        $"Mutation committed, but verify rule(s) threw during the gate's " +
-                        $"checkpoint/validate scan ({failedList}) — the delta is unreliable " +
-                        "and was withheld. Run unity_open_mcp_validate_edit (or " +
-                        "unity_open_mcp_scan_paths) on the touched paths to confirm health."
-                    }
-                };
-            }
 
             if (gateSw.ElapsedMilliseconds > GateBudgetMs)
             {
@@ -539,14 +540,8 @@ namespace UnityOpenMcpBridge
 
         internal static IssueKeyParts? ParseIssueKey(string key)
         {
-            if (string.IsNullOrEmpty(key)) return null;
-            var parts = key.Split('|');
-            // Match the canonical IssueKey.TryParse contract (IssueKey.cs): a key is
-            // exactly four pipe-separated parts. Fewer is malformed; more means a stray
-            // '|' leaked into one of the fields and the key must be rejected, not
-            // silently truncated — otherwise the truncated key would masquerade as valid.
-            if (parts.Length != 4) return null;
-            return new IssueKeyParts(parts[0], parts[1], parts[2], parts[3]);
+            if (!IssueKey.TryParse(key, out var rule, out _, out var path, out var code)) return null;
+            return new IssueKeyParts(rule, key.Split('|')[1], path, code);
         }
 
         private static string[] BuildNextSteps()

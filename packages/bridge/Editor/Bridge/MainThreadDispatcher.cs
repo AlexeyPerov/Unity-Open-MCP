@@ -43,10 +43,9 @@ namespace UnityOpenMcpBridge
         // indistinguishable from "the tool itself ran long" — so an agent burns
         // 30s per call with no signal a modal is the cause.
         //
-        // To distinguish the two: record when each action was enqueued
-        // (EnqueuedAtUtc) and when ProcessQueue started draining it
-        // (StartedDrainAtUtc). If the timeout fires and the action NEVER started
-        // draining (StartedDrainAtUtc == null), the main thread was blocked the
+        // EnqueuedAtUtc records wait duration; an atomic state distinguishes
+        // pending work from work already claimed by ProcessQueue. If timeout
+        // cancels pending work, the main thread was blocked the
         // entire window — surface main_thread_blocked instead of the generic
         // timeout. If it started but didn't finish, the tool ran long — keep the
         // existing timeout behaviour.
@@ -109,14 +108,12 @@ namespace UnityOpenMcpBridge
         // production call path.
         internal static int OutstandingTimerCount => _pendingDispatches.Count;
 
-        private static void ProcessQueue()
+        internal static void ProcessQueue()
         {
             while (_queue.TryDequeue(out var queued))
             {
+                if (!queued.TryStart()) continue;
                 var waitMs = (DateTime.UtcNow - queued.EnqueuedAtUtc).TotalMilliseconds;
-                // Stamp the drain start so EnqueueAsync's timeout can tell
-                // "never started" (main thread blocked) from "ran long".
-                queued.StartedDrainAtUtc = DateTime.UtcNow;
                 if (waitMs > QueueStallWarnSeconds * 1000)
                 {
                     // The action sat in the queue for seconds before the main
@@ -151,7 +148,7 @@ namespace UnityOpenMcpBridge
 
             // Wrap the typed Func in an Action that resolves the TCS, then
             // track drain timing via the shared QueuedAction envelope. The
-            // timeout callback inspects StartedDrainAtUtc to distinguish
+            // timeout callback claims pending work to distinguish
             // "main thread blocked" (never drained) from "tool ran long".
             var queued = new QueuedAction
             {
@@ -183,7 +180,7 @@ namespace UnityOpenMcpBridge
             // callback can never race ahead of the bookkeeping below.
             var timer = new Timer(_ =>
             {
-                if (!queued.StartedDrainAtUtc.HasValue)
+                if (queued.TryCancel())
                 {
                     tcs.TrySetException(new MainThreadBlockedException(timeoutMs));
                 }
@@ -204,9 +201,12 @@ namespace UnityOpenMcpBridge
             _pendingDispatches.TryAdd(dispatchId, new PendingDispatch
             {
                 Timer = timer,
-                FailPending = () => tcs.TrySetException(new OperationCanceledException(
-                    "The main-thread dispatcher was shut down (domain reload / editor teardown) " +
-                    "before this dispatch ran.")),
+                FailPending = () =>
+                {
+                    queued.TryCancel();
+                    tcs.TrySetException(new OperationCanceledException(
+                        "The main-thread dispatcher was shut down (domain reload / editor teardown)."));
+                },
             });
             try { timer.Change(timeoutMs, Timeout.Infinite); }
             catch (ObjectDisposedException)
@@ -235,24 +235,16 @@ namespace UnityOpenMcpBridge
             public Action FailPending;
         }
 
-        // Holds the queue-wait timing for the stall diagnostic. ProcessQueue
-        // stamps StartedDrainAtUtc when it begins running the Action; the
-        // EnqueueAsync timeout callback reads it to distinguish "main thread
-        // blocked the whole window" (null → MainThreadBlockedException) from
-        // "the work started but ran past the timeout" (set → TimeoutException).
+        // Timeout and dispatch compete for ownership of pending work. Once
+        // cancelled, a queued callback can never start; running Unity work
+        // cannot be interrupted and its timeout still has an unknown outcome.
         private sealed class QueuedAction
         {
             public Action Action;
             public DateTime EnqueuedAtUtc;
-            // Null until ProcessQueue starts draining this action. Set on the
-            // main thread; read by the EnqueueAsync timeout callback on a Timer
-            // thread. Volatile would be the strictly-correct guard, but the
-            // worst case of a stale read is surfacing the generic
-            // TimeoutException instead of MainThreadBlockedException — both are
-            // failures, and the diagnostic intent (point at a likely modal)
-            // only fires when this is null, so a false negative degrades
-            // gracefully. Kept as a plain field for simplicity.
-            public DateTime? StartedDrainAtUtc;
+            private int _state; // 0 pending, 1 running, 2 cancelled
+            public bool TryStart() => Interlocked.CompareExchange(ref _state, 1, 0) == 0;
+            public bool TryCancel() => Interlocked.CompareExchange(ref _state, 2, 0) == 0;
         }
     }
 

@@ -6,6 +6,34 @@ namespace UnityOpenMcpBridge.Tests
 {
     public static class VerifyGateAdapterTests
     {
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        public static void ComputeDelta_IncompleteScan_RejectsComparison(bool beforeFailed, bool afterFailed)
+        {
+            var before = new CheckpointFingerprint("cp_failed", new Dictionary<string, RuleFingerprint>(),
+                beforeFailed ? new[] { "missing_references" } : null);
+            var after = new VerifyResult(new List<VerifyIssue>(), new[] { "missing_references" }, 0,
+                rulesFailed: afterFailed ? new[] { "missing_references" } : null);
+            Assert.Throws<System.InvalidOperationException>(() => VerifyGateAdapter.ComputeDelta(before, after));
+        }
+
+        [Test]
+        public static void ComputeDelta_PipePathAndUnderscorePath_AreDifferentIssues()
+        {
+            var before = new CheckpointFingerprint("cp_paths", new Dictionary<string, RuleFingerprint>
+            {
+                ["missing_references"] = new RuleFingerprint(1, 0, new HashSet<string>
+                { IssueKey.Build("missing_references", VerifySeverity.Error, "Assets/A_B.prefab", "missing_script") })
+            });
+            var after = new VerifyResult(new List<VerifyIssue>
+            {
+                new VerifyIssue("missing_references", VerifySeverity.Error, "Assets/A|B.prefab", "missing_script", "Broken")
+            }, new[] { "missing_references" }, 0);
+            var delta = VerifyGateAdapter.ComputeDelta(before, after);
+            Assert.AreEqual(1, delta.NewErrors);
+            Assert.AreEqual(1, delta.ResolvedErrors);
+        }
+
         [Test]
         public static void ComputeDelta_NoChange_ZeroDeltas()
         {

@@ -908,174 +908,88 @@ test("refresh: LiveClient re-points at the new port after a Unity restart (entry
   }
 });
 
-test("refresh: connection failure (socket reset) RETRIES on unchanged endpoint (entry 2026-07-02-b)", async () => {
-  // A bridge that is UP for /ping (so handleTransientOffline recovers → null)
-  // but whose FIRST /tools/* POST hard-resets the socket (req.socket.destroy),
-  // then succeeds on the next POST. undici throws a TypeError for a socket
-  // reset — a *connection* failure, not a response timeout. Because no bytes
-  // reached the server's dispatch queue on the reset POST, no side effect is
-  // possible and re-POSTing is SAFE even on an unchanged endpoint. The client
-  // must retry and the second POST must succeed.
-  //
-  // This is the regression test for the bug where a burst of parallel /tools/*
-  // calls left a dead connection in the pool: every subsequent POST threw a
-  // TypeError on connect, the old "unchanged endpoint → no retry" guard
-  // wedged the whole typed-editor surface, and the agent saw bridge_offline
-  // even though the bridge was healthy and curl worked fine.
-  const s = makeSandbox();
-  const toolHits: { count: number } = { count: 0 };
-  try {
-    const bridge = await startBridgeStub((req, res) => {
-      if (req.url?.startsWith("/tools/")) {
-        toolHits.count++;
-        if (toolHits.count === 1) {
-          // First POST: hard-reset the socket BEFORE responding. The client's
-          // fetch throws a TypeError ("fetch failed") → connection-class failure.
-          // req.socket.destroy (not res.destroy) reliably aborts the client's
-          // fetch; res.destroy can leave the socket half-open and hang the
-          // client until its timeout.
-          req.socket.destroy();
-          return;
-        }
-        // Second POST: succeed (DIRECT_RESPONSE-style body).
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true }));
-        return;
-      }
-      // /ping answers idle 200 so recovery returns null ("recovered") fast.
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          connected: true,
-          projectPath: REFRESH_PROJECT,
-          unityVersion: "6000.0.0f1",
-          bridgeVersion: "0.1.0",
-          mode: "live",
-          compiling: false,
-          isPlaying: false,
-        }),
-      );
+for (const changeEndpoint of [false, true]) {
+  test(`POST committed then socket reset is not replayed (endpoint change: ${changeEndpoint})`, async () => {
+    const s = makeSandbox();
+    let mutations = 0;
+    let replacementHits = 0;
+    const ping = { connected: true, projectPath: REFRESH_PROJECT, unityVersion: "6000.0.0f1",
+      bridgeVersion: "1.4.0", mode: "live", compiling: false, isPlaying: false };
+    const replacement = await startBridgeStub((req, res) => {
+      if (req.url?.startsWith("/tools/")) replacementHits++;
+      res.end(JSON.stringify(ping));
     });
-    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
-    const client = new LiveClient(
-      bridge.port,
-      new PingCache(),
-      "deadbeef",
-      REFRESH_PROJECT,
-    );
-
-    const result = await client.route("unity_open_mcp_validate_edit", {
-      paths: ["Assets"],
-    });
-    // Exactly two tool POSTs — the first reset, the retry succeeded. Pre-fix
-    // this was 1 POST and a bridge_offline result (the wedge).
-    assert.equal(
-      toolHits.count,
-      2,
-      `expected exactly two tool POSTs (reset then retry), got ${toolHits.count}`,
-    );
-    assert.equal(result.isError, false, "retry against the same endpoint must succeed");
-    await bridge.close();
-  } finally {
-    disposeSandbox(s);
-  }
-});
-
-test("shouldRetryPostAfterFailure: unit cases for the connection-vs-timeout retry policy", () => {
-  // Pure unit test of the retry decision — fast and exhaustive, complementing
-  // the connection-failure integration test above. Driving a real response-
-  // timeout through postTool takes 40s (the fetch timeout is floored at
-  // BRIDGE_DEFAULT_TIMEOUT_MS + slack), so the four discriminating cases are
-  // covered here on the pure helper instead.
-  //
-  // TypeError   = connection failure (socket never connected / reset before the
-  //               body flushed / ECONNREFUSED). No bytes reached the server →
-  //               retry is always safe.
-  // AbortError  = response timeout (connected, server still processing). A side
-  //               effect may have happened → only retry when endpoint changed.
-  const typeErr = new TypeError("fetch failed");
-  const abortErr = new DOMException("The operation was aborted", "AbortError");
-  const otherErr = new Error("something else");
-
-  // Unchanged endpoint: connection failure retries, timeout/other does not.
-  assert.equal(shouldRetryPostAfterFailure(typeErr, false), true);
-  assert.equal(shouldRetryPostAfterFailure(abortErr, false), false);
-  assert.equal(shouldRetryPostAfterFailure(otherErr, false), false);
-
-  // Endpoint changed (Unity restart → new bridge never saw the POST): always
-  // retry regardless of failure class — a restart makes the retry safe even for
-  // a response timeout, because the new listener never received the Work.
-  assert.equal(shouldRetryPostAfterFailure(typeErr, true), true);
-  assert.equal(shouldRetryPostAfterFailure(abortErr, true), true);
-  assert.equal(shouldRetryPostAfterFailure(otherErr, true), true);
-});
-
-test("M10: postTool retry recursion is bounded when POSTs keep failing but /ping answers", async () => {
-  // Regression for the unbounded postTool → handlePostFailure → postTool loop.
-  // shouldRetryPostAfterFailure returns true for every TypeError (a connection
-  // failure is always safe to retry), so a bridge whose /ping answers during
-  // recovery but whose /tools/* POSTs always socket-reset previously re-POSTed
-  // the mutation forever. The fix threads an attempt counter through postTool
-  // and caps the recursion at 1 + transientRetryAttempts (4 by default).
-  //
-  // The stub: /ping answers idle 200 (so handleTransientOffline returns null
-  // — "recovered" — fast, exercising the outer re-POST path), and EVERY /tools/*
-  // POST hard-resets the socket (req.socket.destroy → undici throws TypeError).
-  // We count the POSTs and assert the client stops at the budget and surfaces
-  // bridge_offline instead of looping indefinitely.
-  const s = makeSandbox();
-  const toolHits: { count: number } = { count: 0 };
-  try {
     const bridge = await startBridgeStub((req, res) => {
-      if (req.url?.startsWith("/tools/")) {
-        toolHits.count++;
-        // Every POST resets the socket before any bytes flush → TypeError on
-        // the client → connection-class failure → retried while budget remains.
+      if (!req.url?.startsWith("/tools/")) { res.end(JSON.stringify(ping)); return; }
+      req.resume();
+      req.on("end", () => {
+        mutations++; // Side effect committed before the response was lost.
+        if (changeEndpoint) plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", replacement.port);
         req.socket.destroy();
-        return;
-      }
-      // /ping answers idle 200 so recovery returns null ("recovered") fast and
-      // the outer postTool retry path runs (the path M10 bounds).
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          connected: true,
-          projectPath: REFRESH_PROJECT,
-          unityVersion: "6000.0.0f1",
-          bridgeVersion: "0.1.0",
-          mode: "live",
-          compiling: false,
-          isPlaying: false,
-        }),
-      );
+      });
     });
-    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
-    const client = new LiveClient(
-      bridge.port,
-      new PingCache(),
-      "deadbeef",
-      REFRESH_PROJECT,
-    );
+    try {
+      plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+      const client = new LiveClient(bridge.port, new PingCache(), "deadbeef", REFRESH_PROJECT);
+      const result = await client.route("unity_open_mcp_gameobject_create", {
+        name: "Once", paths_hint: ["Assets/Test.unity"],
+      });
+      assert.equal(mutations, 1);
+      assert.equal(replacementHits, 0);
+      assert.equal(result.isError, true);
+      assert.match(JSON.stringify(result), /verify its effect before retrying/);
+    } finally {
+      await bridge.close();
+      await replacement.close();
+      disposeSandbox(s);
+    }
+  });
+}
 
-    const result = await client.route("unity_open_mcp_validate_edit", {
-      paths: ["Assets"],
-    });
+test("shouldRetryPostAfterFailure only accepts proven pre-connection failures", () => {
+  const failure = (code: string) => Object.assign(new Error(code), { code });
+  for (const code of ["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT"])
+    assert.equal(shouldRetryPostAfterFailure(new TypeError("fetch failed", { cause: failure(code) })), true, code);
+  for (const code of ["ECONNRESET", "EPIPE", "UND_ERR_SOCKET", "UND_ERR_HEADERS_TIMEOUT"])
+    assert.equal(shouldRetryPostAfterFailure(new TypeError("fetch failed", { cause: failure(code) })), false, code);
+  assert.equal(shouldRetryPostAfterFailure(new TypeError("fetch failed")), false);
+  assert.equal(shouldRetryPostAfterFailure(new DOMException("aborted", "AbortError")), false);
+  assert.equal(shouldRetryPostAfterFailure(new Error("other")), false);
+  assert.equal(shouldRetryPostAfterFailure(new TypeError("fetch failed", {
+    cause: new AggregateError([failure("ECONNREFUSED"), failure("ENOTFOUND")]),
+  })), true);
+  assert.equal(shouldRetryPostAfterFailure(new TypeError("fetch failed", {
+    cause: new AggregateError([failure("ECONNREFUSED"), failure("ECONNRESET")]),
+  })), false);
+  assert.equal(shouldRetryPostAfterFailure(new TypeError("fetch failed", { cause: new AggregateError([]) })), false);
+});
 
-    // Budget is 1 initial attempt + transientRetryAttempts (default 3) = 4.
-    // The POST count must equal the budget exactly — more means the loop is
-    // unbounded (the bug); fewer means the bound short-circuits recovery.
-    assert.equal(
-      toolHits.count,
-      4,
-      `expected exactly 4 tool POSTs (1 initial + 3 retries), got ${toolHits.count}`,
-    );
-    // The terminal result is the bridge_offline surface (NOT a hang).
-    assert.equal(result.isError, true, "exhausted retries must surface an error");
-    const body = JSON.parse((result.content[0] as { text: string }).text);
-    assert.equal(body.error.code, "bridge_offline");
-    await bridge.close();
+test("proven connect failures remain bounded when recovery ping succeeds", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousAttempts = process.env.UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS;
+  const previousBackoff = process.env.UNITY_OPEN_MCP_TRANSIENT_BACKOFF_MS;
+  let posts = 0;
+  process.env.UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS = "2";
+  process.env.UNITY_OPEN_MCP_TRANSIENT_BACKOFF_MS = "1";
+  globalThis.fetch = async (_input, init) => {
+    if (init?.method === "POST") {
+      posts++;
+      throw new TypeError("fetch failed", { cause: Object.assign(new Error("refused"), { code: "ECONNREFUSED" }) });
+    }
+    return new Response(JSON.stringify({ connected: true, projectPath: null, unityVersion: "6000.0.0f1",
+      bridgeVersion: "1.4.0", mode: "live", compiling: false, isPlaying: false }));
+  };
+  try {
+    const result = await new LiveClient(29999, new PingCache()).route("unity_open_mcp_validate_edit", { paths: ["Assets"] });
+    assert.equal(posts, 3);
+    assert.equal(result.isError, true);
+    assert.match(JSON.stringify(result), /retry budget/);
   } finally {
-    disposeSandbox(s);
+    globalThis.fetch = originalFetch;
+    if (previousAttempts === undefined) delete process.env.UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS;
+    else process.env.UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS = previousAttempts;
+    if (previousBackoff === undefined) delete process.env.UNITY_OPEN_MCP_TRANSIENT_BACKOFF_MS;
+    else process.env.UNITY_OPEN_MCP_TRANSIENT_BACKOFF_MS = previousBackoff;
   }
 });
 

@@ -129,11 +129,8 @@ namespace UnityOpenMcpBridge
 
         internal static string[] PathsFromIssueId(string issueId)
         {
-            if (string.IsNullOrEmpty(issueId)) return null;
-            var parts = issueId.Split('|');
-            if (parts.Length < 3) return null;
-            var assetPath = parts[2];
-            if (string.IsNullOrEmpty(assetPath)) return null;
+            if (!UnityOpenMcpVerify.IssueKey.TryParse(issueId, out _, out _, out var assetPath, out _))
+                return null;
             return new[] { assetPath };
         }
     }

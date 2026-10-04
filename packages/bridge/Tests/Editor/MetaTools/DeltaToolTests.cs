@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using UnityOpenMcpBridge.MetaTools;
 using UnityOpenMcpVerify;
@@ -15,10 +18,75 @@ namespace UnityOpenMcpBridge.Tests
         // with an explicit `unavailable` warning + recovery guidance.
         // -------------------------------------------------------------------
 
+        private IVerifyRule[] _originalRules;
         [SetUp]
-        public void SetUp() => CheckpointStore.Clear();
+        public void SetUp()
+        {
+            CheckpointStore.Clear();
+            _originalRules = VerifyRunner.Rules.ToArray();
+            VerifyRunner.ClearRules();
+        }
         [TearDown]
-        public void TearDown() => CheckpointStore.Clear();
+        public void TearDown()
+        {
+            CheckpointStore.Clear();
+            VerifyRunner.ClearRules();
+            foreach (var rule in _originalRules) VerifyRunner.RegisterRule(rule);
+        }
+
+        private sealed class DeltaRule : IVerifyRule
+        {
+            public string Id => "delta_test";
+            public bool Throw;
+            public bool EmitPartial;
+            public string Path = "Assets/Test.prefab";
+            public void Scan(VerifyScope scope, VerifyRunMode mode, List<VerifyIssue> sink)
+            {
+                if (EmitPartial) sink.Add(new VerifyIssue(Id, VerifySeverity.Error, Path, "broken", "Broken"));
+                if (Throw) throw new InvalidOperationException("Deliberate scan failure");
+            }
+        }
+
+        [Test]
+        public void ScanAndValidate_EmitCanonicalIssueIdsForFixes()
+        {
+            var rule = new DeltaRule { EmitPartial = true, Path = "Assets/A|B%7C.prefab" };
+            VerifyRunner.RegisterRule(rule);
+            var body = "{\"paths\":[\"Assets\"],\"categories\":[\"delta_test\"]}";
+            var key = IssueKey.Build(rule.Id, VerifySeverity.Error, rule.Path, "broken");
+            foreach (var result in new[] { ScanPathsTool.Execute(body), ValidateEditTool.Execute(body) })
+            {
+                Assert.IsTrue(result.Success);
+                StringAssert.Contains("\"issueId\":\"" + key + "\"", result.Output);
+                CollectionAssert.AreEqual(new[] { rule.Path }, BridgeRequestBody.PathsFromIssueId(key));
+            }
+        }
+
+        [TestCase(false, true, false)]
+        [TestCase(false, true, true)]
+        [TestCase(true, false, false)]
+        [TestCase(true, true, false)]
+        public void Execute_IncompleteCheckpointOrValidation_RefusesDelta(bool beforeFailed, bool afterFailed, bool partial)
+        {
+            var rule = new DeltaRule { Throw = afterFailed, EmitPartial = partial };
+            VerifyRunner.RegisterRule(rule);
+            var fingerprint = new CheckpointFingerprint("cp_test", new Dictionary<string, RuleFingerprint>
+            {
+                [rule.Id] = new RuleFingerprint(1, 0, new HashSet<string>
+                { IssueKey.Build(rule.Id, VerifySeverity.Error, "Assets/Test.prefab", "broken") })
+            }, beforeFailed ? new[] { rule.Id } : null);
+            CheckpointStore.Store(new CheckpointStoreEntry
+            {
+                CheckpointId = "cp_test", Paths = new[] { "Assets/Test.prefab" },
+                Categories = new[] { rule.Id }, Fingerprint = fingerprint,
+            });
+            var result = DeltaTool.Execute("{\"checkpoint_id\":\"cp_test\"}");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("validation_incomplete", result.ErrorCode);
+            StringAssert.Contains("\"rulesFailed\":[\"delta_test\"]", result.ErrorDetailJson);
+            Assert.IsNull(result.Output, "Incomplete results must never report passed or resolved counts.");
+            Assert.IsNotEmpty(result.NextSteps);
+        }
 
         [Test]
         public void Execute_MissingCheckpointIdParameter_StillHardFails()

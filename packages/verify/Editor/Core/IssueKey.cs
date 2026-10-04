@@ -6,21 +6,11 @@ namespace UnityOpenMcpVerify
     {
         public static string Build(string ruleId, VerifySeverity severity, string assetPath, string issueCode)
         {
-            // C8 — '|' is legal in macOS/Linux filenames, so a project can
-            // contain an asset whose PATH carries '|'. Rule mappers pass that
-            // path straight into Build for every issue on the asset, and B-N7
-            // only sanitized issue-code DISCRIMINATORS at the mapper call
-            // sites — a '|' path still made Build throw ArgumentException,
-            // aborting baseline_create/regression_check wholesale and turning
-            // every gated mutation whose scope swept the file into a
-            // checkpoint_validation failure. Sanitize the path and issueCode
-            // HERE, inside Build, so no caller can throw on user-controlled
-            // data; the raw path still flows into the issue's
-            // AssetPath/evidence untouched (only the KEY is sanitized).
-            // ruleId stays strict: it is a code-controlled constant, so a '|'
-            // there is a producer bug that must keep throwing.
-            var keyPath = SanitizeComponent(assetPath);
-            var keyCode = SanitizeComponent(issueCode);
+            // Escape delimiters reversibly: fix providers recover the actual
+            // asset path from this key. '%' is escaped first to avoid aliasing
+            // a literal "%7C" filename with a pipe-bearing filename.
+            var keyPath = EncodeComponent(assetPath);
+            var keyCode = EncodeComponent(issueCode);
             ValidateComponents(ruleId, severity, keyPath, keyCode);
             // feedback-04-08-opus §5 — Info severity token. ComputeDelta counts
             // only ERROR/WARN, so an INFO key never fails the gate; it surfaces
@@ -53,8 +43,8 @@ namespace UnityOpenMcpVerify
 
             ruleId = parts[0];
             var sevStr = parts[1];
-            assetPath = parts[2];
-            issueCode = parts[3];
+            assetPath = DecodeComponent(parts[2]);
+            issueCode = DecodeComponent(parts[3]);
 
             if (string.IsNullOrEmpty(ruleId)) return false;
             // Accept any case of the severity token. scan_paths / validate_edit
@@ -144,6 +134,12 @@ namespace UnityOpenMcpVerify
             return value.IndexOf('|') < 0 ? value : value.Replace('|', '_');
         }
 
+        private static string EncodeComponent(string value)
+            => value?.Replace("%", "%25").Replace("|", "%7C");
+
+        private static string DecodeComponent(string value)
+            => value.Replace("%7C", "|").Replace("%25", "%");
+
         private static void ValidateComponents(string ruleId, VerifySeverity severity, string assetPath, string issueCode)
         {
             if (string.IsNullOrEmpty(ruleId))
@@ -154,7 +150,7 @@ namespace UnityOpenMcpVerify
                 throw new ArgumentException("Issue key issueCode must not be empty.", nameof(issueCode));
             if (ruleId.Contains('|'))
                 throw new ArgumentException($"Issue key ruleId must not contain '|': '{ruleId}'", nameof(ruleId));
-            // C8 — Build sanitizes assetPath/issueCode before validation, so
+            // Build encodes assetPath/issueCode before validation, so
             // the two checks below are unreachable from Build; they stay as a
             // defensive contract for any future caller that skips sanitizing.
             if (assetPath.Contains('|'))

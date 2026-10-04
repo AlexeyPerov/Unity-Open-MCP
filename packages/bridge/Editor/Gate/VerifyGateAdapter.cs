@@ -206,6 +206,8 @@ namespace UnityOpenMcpBridge
 
         public static DeltaData ComputeDelta(CheckpointFingerprint before, VerifyResult after)
         {
+            if (before.RulesFailed.Length > 0 || after.HasFailedRules)
+                throw new System.InvalidOperationException("Cannot compare incomplete verification results.");
             var beforeKeys = new HashSet<string>();
             foreach (var fp in before.Fingerprints.Values)
             {

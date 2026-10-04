@@ -196,46 +196,19 @@ function isCompileRepostSentinel(v: unknown): v is CompileRepostSentinel {
   return typeof v === "object" && v !== null && "__compileRepost" in v;
 }
 
-/**
- * Decide whether {@link LiveClient#postTool}'s catch block should re-POST after
- * a transient fetch failure. Exported so the retry policy is unit-testable in
- * isolation (driving a real response-timeout through postTool takes 40s because
- * the fetch timeout is floored at BRIDGE_DEFAULT_TIMEOUT_MS + slack).
- *
- * undici (Node's fetch) throws a DISTINGUISHABLE error class for the two
- * failure modes that reach this catch:
- *   - `TypeError` ("fetch failed") → CONNECTION failure: the socket never
- *     connected, was reset before the request body flushed, or the listen port
- *     is dead (ECONNREFUSED). No bytes reached the server → no Work was queued
- *     → no side effect is possible. Re-POSTing is ALWAYS safe, even on an
- *     unchanged endpoint (the same live bridge never received the first POST).
- *   - `AbortError` (AbortController timer) → RESPONSE timeout: the request
- *     connected and the server is still processing it. A side effect may have
- *     happened or be queued. Re-POSTing is only safe when the endpoint CHANGED
- *     during recovery (a restart → new bridge that never saw the original POST);
- *     on an unchanged endpoint the original call may still complete there, so
- *     re-POSTing would risk running the mutation a second time.
- *
- * This distinction matters because a burst of parallel /tools/* calls can leave
- * a dead/reset connection in the pool: the next POST throws a TypeError on
- * connect, and the old "unchanged endpoint → no retry" guard wedged the whole
- * typed-editor surface even though the bridge was healthy and idle
- * (specs/feedback.md entry 2026-07-02-b). The bug was that the guard conflated
- * "endpoint unchanged" with "request in flight," which is only true when the
- * fetch actually connected (AbortError), not when it failed to connect
- * (TypeError).
+/** Retry only when the transport proves the POST could not reach a listener.
+ * A socket reset, response timeout, or a changed endpoint cannot rule out an
+ * already committed mutation. Aggregate connect failures must all be safe.
  */
-export function shouldRetryPostAfterFailure(
-  err: unknown,
-  endpointChanged: boolean,
-): boolean {
-  // An endpoint change (Unity restart detected during recovery) always makes a
-  // retry safe regardless of failure class — the new bridge never saw the POST.
-  if (endpointChanged) return true;
-  // Unchanged endpoint: only retry on a connection failure (TypeError). A
-  // response timeout (AbortError or anything else) on the same endpoint means
-  // the request may have reached the bridge → suppress the retry.
-  return err instanceof TypeError;
+export function shouldRetryPostAfterFailure(err: unknown): boolean {
+  if (!(err instanceof TypeError)) return false;
+  const isConnectFailure = (cause: unknown): boolean => {
+    if (cause instanceof AggregateError)
+      return cause.errors.length > 0 && cause.errors.every(isConnectFailure);
+    if (!cause || typeof cause !== "object" || !("code" in cause)) return false;
+    return ["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT"].includes(String(cause.code));
+  };
+  return isConnectFailure(err.cause);
 }
 
 const OFFLINE_HINT =
@@ -896,15 +869,8 @@ export class LiveClient implements Router {
    *      recovers (re-syncing the endpoint, waiting out a reload, or surfacing
    *      the structured offline/dead-bridge error) and re-POSTs only when safe.
    *
-   * The retry/compile contract is unchanged from the former monolithic body
-   * EXCEPT for the recursion bound added in M10 (round-2 review): `attempt`
-   * counts the POST tries so the postTool → handlePostFailure → postTool loop
-   * cannot run forever. `shouldRetryPostAfterFailure` returns true for every
-   * `TypeError`, so if POSTs keep failing at the socket level while `/ping`
-   * answers during recovery, the previous code re-POSTed the mutation each pass
-   * with no depth limit. The bound is `this.retry.transientRetryAttempts + 1`
-   * (1 initial attempt + N retries), matching the documented RETRY_CONFIG
-   * semantics; once exhausted the offline error is surfaced instead of recursing.
+   * The attempt counter caps safe connection retries at one initial POST
+   * plus this.retry.transientRetryAttempts. Ambiguous failures never replay.
    */
   private async postTool(
     toolName: string,
@@ -1322,28 +1288,7 @@ export class LiveClient implements Router {
     };
   }
 
-  /**
-   * Step 3 of {@link postTool}: classify + recover from a transient POST
-   * failure (ECONNREFUSED / timeout during a domain reload). Re-syncs the cached
-   * endpoint from the lock first (so a Unity restart self-heals), waits out a
-   * reload, and re-POSTs ONLY when safe (endpoint changed during recovery, or a
-   * genuine connection failure where no bytes reached the server).
-   *
-   * Re-POST discipline (specs/feedback.md entry 4A — duplicate side-effects):
-   * when the endpoint is unchanged the same live bridge is still processing —
-   * or has queued — the original POST's Work; re-POSTing would run the mutation
-   * a second time. In that case surface the timeout instead of retrying.
-   *
-   * M10 (round-2 review) — `attempt` is the 1-based POST attempt counter. When
-   * it exceeds the configured retry budget (`this.retry.transientRetryAttempts`
-   * retries beyond the initial attempt) the offline error is surfaced instead
-   * of recursing. Without this bound `shouldRetryPostAfterFailure` returning
-   * true for every `TypeError` made the loop unbounded: POSTs failing at the
-   * socket level while `/ping` answers during recovery re-POSTed the mutation
-   * each pass forever. The recovery probe inside `handleTransientOffline` is
-   * itself bounded (`transientRetryAttempts` iterations of `/ping`); this outer
-   * bound caps how many times we re-enter that recovery + re-POST cycle.
-   */
+  /** Recover connectivity, but replay only proven pre-connection failures. */
   private async handlePostFailure(
     toolName: string,
     args: Record<string, unknown>,
@@ -1352,10 +1297,8 @@ export class LiveClient implements Router {
     attempt: number,
     commandLifecycle?: string,
   ): Promise<CallToolResult> {
-    const endpointBefore = this.baseUrl;
     const recovered = await this.handleTransientOffline("post");
     if (recovered !== null) return recovered;
-    const endpointChanged = this.baseUrl !== endpointBefore;
     // M10 — bound the postTool → handlePostFailure → postTool recursion. The
     // budget is the initial attempt plus the configured transient retry count.
     const maxAttempts = 1 + this.retry.transientRetryAttempts;
@@ -1363,7 +1306,7 @@ export class LiveClient implements Router {
     if (
       toolName !== "unity_open_mcp_project_commands" &&
       !attemptsExhausted &&
-      shouldRetryPostAfterFailure(err, endpointChanged)
+      shouldRetryPostAfterFailure(err)
     ) {
       return this.postTool(toolName, args, retryOn503, attempt + 1, commandLifecycle);
     }
@@ -1374,22 +1317,14 @@ export class LiveClient implements Router {
           attempt === 1 ? "" : "s"
         }; the bridge is reachable by /ping but POSTs keep failing.`
       : "";
+    const message =
+      `Tool '${toolName}' did not return a confirmed result. No further POST was sent. ` +
+      `A socket failure, timeout, or endpoint change does not prove the original ` +
+      `operation was not applied; verify its effect before retrying. Endpoint: ${this.baseUrl}.${exhaustedNote}`;
     return makeErrorResult({
       code: "bridge_offline",
-      message:
-        `Tool '${toolName}' did not return from the bridge within the client ` +
-        `timeout. The bridge endpoint did not change (no restart detected) and ` +
-        `the failure was a response timeout (not a connection failure), so ` +
-        `the request was NOT retried — re-POSTing would risk running the ` +
-        `mutation twice on the same bridge. If the editor was briefly slow ` +
-        `(unfocused, GC, a long main-thread op), the original call may still ` +
-        `complete there; verify the effect before retrying. Endpoint: ${this.baseUrl}.${exhaustedNote}`,
-      detail: {
-        error: {
-          code: "bridge_offline",
-          message: `Client timeout against unchanged endpoint ${this.baseUrl}; not retried to avoid duplicate side-effects.`,
-        },
-      },
+      message,
+      detail: { error: { code: "bridge_offline", message } },
     });
   }
 

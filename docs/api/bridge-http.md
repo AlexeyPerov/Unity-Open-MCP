@@ -162,6 +162,14 @@ client then reads `GET /compile-state`. The MCP server asks for it on
 `execute_csharp` and `invoke_method`, the results it qualifies with
 `_compileState`.
 
+## Dispatch timeouts
+
+`main_thread_blocked` means the main-thread dispatcher cancelled the callback
+before it started. Unblocking the Editor will not run that expired callback.
+If dispatch already started, `timeout` cannot interrupt Unity work; inspect the
+operation's post-state before retrying. Timer cleanup still runs on completion,
+domain reload, and Editor shutdown.
+
 ## Effective read-only requests and gate outcomes
 
 The bridge derives request mutability before scope enforcement, queueing, and

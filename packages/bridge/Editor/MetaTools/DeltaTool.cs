@@ -1,4 +1,5 @@
 using System.Text;
+using System.Linq;
 using UnityOpenMcpVerify;
 
 namespace UnityOpenMcpBridge.MetaTools
@@ -47,6 +48,15 @@ namespace UnityOpenMcpBridge.MetaTools
             catch (System.Exception e)
             {
                 return ToolDispatchResult.Fail("validation_error", e.Message);
+            }
+
+            var failedRules = stored.Fingerprint.RulesFailed.Union(currentResult.RulesFailed).ToArray();
+            if (failedRules.Length > 0)
+            {
+                var detail = "{\"rulesFailed\":[" + string.Join(",", failedRules.Select(BridgeJson.EscapeString)) + "]}";
+                return ToolDispatchResult.FailWithDetail("validation_incomplete",
+                    "Delta unavailable because checkpoint or validation rules failed: " + string.Join(", ", failedRules),
+                    detail, new[] { "Resolve the rule failures, create a fresh checkpoint, and validate again before trusting a delta." });
             }
 
             DeltaData delta;

@@ -8,6 +8,19 @@ namespace UnityOpenMcpBridge.Tests
     [TestFixture]
     public class GatePolicyTests
     {
+        [Test]
+        public void EncodedIssueKey_PreservesFixTargetAndGateScope()
+        {
+            const string path = "Assets/A|B%7C.prefab";
+            var key = IssueKey.Build("missing_references", VerifySeverity.Error, path, "missing_script");
+            CollectionAssert.AreEqual(new[] { path }, BridgeRequestBody.PathsFromIssueId(key));
+            var parsed = GatePolicy.ParseIssueKey(key);
+            Assert.IsTrue(parsed.HasValue);
+            Assert.AreEqual(path, parsed.Value.AssetPath);
+            var description = new UnityOpenMcpVerify.Fixes.RemoveMissingScriptFix().Describe(key);
+            Assert.AreEqual(path, description.AssetPath);
+        }
+
         [UnityEngine.TestTools.UnityTest]
         public System.Collections.IEnumerator AsyncGate_ValidatesOnlyAfterTerminalMutation_Once()
         {

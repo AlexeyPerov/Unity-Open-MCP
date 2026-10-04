@@ -38,6 +38,48 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public static void Timeout_CancelsQueuedMutationBeforeNextEditorTick()
+        {
+            int mutations = 0;
+            var task = MainThreadDispatcher.EnqueueAsync(() => ++mutations, 20);
+            var error = Assert.Throws<System.AggregateException>(() => task.Wait(5_000));
+            Assert.IsInstanceOf<MainThreadBlockedException>(error.InnerException);
+            MainThreadDispatcher.ProcessQueue();
+            Assert.AreEqual(0, mutations);
+            Assert.IsTrue(task.IsFaulted);
+        }
+
+        [Test]
+        public static void Timeout_AfterStart_DoesNotReplayOrInterruptRunningMutation()
+        {
+            int mutations = 0;
+            Task<int> task = null;
+            task = MainThreadDispatcher.EnqueueAsync(() =>
+            {
+                mutations++;
+                Assert.IsTrue(SpinWait.SpinUntil(() => task.IsCompleted, 5_000));
+                return mutations;
+            }, 200);
+            MainThreadDispatcher.ProcessQueue();
+            Assert.AreEqual(1, mutations);
+            var error = Assert.Throws<System.AggregateException>(() => task.Wait());
+            Assert.IsInstanceOf<System.TimeoutException>(error.InnerException);
+            MainThreadDispatcher.ProcessQueue();
+            Assert.AreEqual(1, mutations);
+        }
+
+        [Test]
+        public static void Dispatch_BeforeTimeout_RunsExactlyOnce()
+        {
+            int mutations = 0;
+            var task = MainThreadDispatcher.EnqueueAsync(() => ++mutations, 60_000);
+            MainThreadDispatcher.ProcessQueue();
+            MainThreadDispatcher.ProcessQueue();
+            Assert.AreEqual(1, task.Result);
+            Assert.AreEqual(1, mutations);
+        }
+
+        [Test]
         public static void Shutdown_DrainsOutstandingTimersFromPendingDispatches()
         {
             // Enqueue several dispatches with long timeouts. The action returns

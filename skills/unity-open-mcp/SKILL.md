@@ -13,6 +13,7 @@ Use exact schemas, scoped mutations, and gate evidence to work on the selected U
 3. Confirm the target project and live state with `ping` / `bridge_status`; use the instance lock’s port, never a hardcoded port. Offline reads and `read_compile_errors` do not require a live bridge.
 4. Prefer typed tools. Use canonical `asset_path`, `game_object_path`, `component_type`, and `property_path` from the exact schema. Start compact and page reads; expand only the relevant slice.
 5. Scope mutations with nonempty `paths_hint`, then inspect `gate.delta` and `agentNextSteps`. Mutation success does not prove project safety. Validate and test the affected scope.
+6. After a lost response, socket reset, or timeout, inspect post-state before retrying a mutation, even if the bridge restarted. If `delta` returns `validation_incomplete`, resolve `error.rulesFailed` and create a fresh checkpoint. Copy scan `issueId` unchanged into `apply_fix.issue_id`; use `profile: "full"` to retrieve issues.
 
 ## Non-negotiable safety
 

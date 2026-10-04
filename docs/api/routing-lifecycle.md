@@ -214,6 +214,13 @@ pointed at a top-level call it cannot make.
 | `scene_dirty` | A disruptive mutation was refused because a loaded scene has unsaved work, including unsaved additive scenes. | Save/discard first or deliberately opt into the documented risk. |
 | `bridge_response_unparsable` | A substantial bridge response could not be parsed. | Do not trust partial output; check bridge health before retrying. |
 
+A failed tool POST is replayed only for proven pre-connection failures
+(`ECONNREFUSED`, DNS lookup failures, or a connect timeout). A socket reset,
+response timeout, or changed bridge endpoint cannot establish that a mutation
+did not commit. These outcomes are not replayed automatically: inspect the
+post-state before retrying, even if `/ping` succeeds again. Explicit compiling
+503 responses retain their bounded settle-and-retry behavior.
+
 Retry tunables include `UNITY_OPEN_MCP_COMPILE_WAIT_MS`,
 `UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS`,
 `UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS`, and

@@ -193,6 +193,12 @@ verify rule threw, `gate.rulesFailed` lists the rule ids whose findings are
 missing: verify health manually with `validate_edit` / `scan_paths` instead of
 trusting a withheld delta.
 
+The standalone `delta` tool refuses incomplete comparisons with
+`error.code: "validation_incomplete"` and `error.rulesFailed`, covering failures
+in either the stored checkpoint or the current validation. It emits no passing
+verdict or resolved-error counts. Resolve the rule failures and capture a fresh
+checkpoint before comparing again.
+
 `compilePending: true` (next to `settleMs`) is emitted when the editor is still
 compiling after the post-mutation settle wait — the gate's delta then reflects
 the **pre-compile** state, so a `passed` / `newErrors:0` does not verify the new
@@ -244,7 +250,13 @@ Every issue can carry:
 - `fixCandidates` — available fixes and their safety flags;
 - `remediation` — human-readable next action.
 
-Copy `issue_id` verbatim from a scan response when applying a fix.
+`scan_paths` and `validate_edit` include a canonical `issueId` on each issue
+(use `profile: "balanced"` or `"full"` to retrieve issues). Copy it verbatim into
+`apply_fix.issue_id`. Keys have four pipe-separated components; paths and issue
+codes escape `%` as `%25` and `|` as `%7C`, so parsing recovers the exact fix
+target. Do not replace delimiters with underscores or decode a key before
+passing it to a tool. Regenerate checkpoints/baselines after changing the key
+format; stored keys are not migrated.
 
 ## Output shaping
 

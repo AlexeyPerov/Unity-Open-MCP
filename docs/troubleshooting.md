@@ -309,13 +309,16 @@ bridge is down and the log is stale, start the Editor from the Hub and use
 
 See [project command authoring](api/project-commands.md) and [job workflows](api/jobs.md).
 
-## Related docs
+## Incomplete delta or lost mutation response
 
-- [Dialog policy](dialog-policy.md) — startup and steady-state modal handling
-- [Agent setup](setup/agent-setup.md) — AI-driven install procedure
-- [MCP client configuration](setup/client-configuration.md) — client paths and copy-paste snippets
-- [Bridge HTTP API](api/bridge-http.md) — `/ping` and listener contract
-- [Routing and lifecycle](api/routing-lifecycle.md) — route classes and recovery
+- `delta` returns `validation_incomplete`: inspect `error.rulesFailed` and the
+  Editor log. Fix the scanner failure, capture a fresh checkpoint, then validate
+  again. Missing rule results do not mean old errors were resolved.
+- A POST loses its response: inspect the affected objects/assets before repeating
+  the mutation. Socket resets and a restarted bridge do not prove it failed.
+- Fixing an asset whose name contains `%` or `|`: request scan issues with
+  `profile: "full"` and pass their `issueId` unchanged as `apply_fix.issue_id`.
+  The encoded path is decoded internally for both gate scope and fix targeting.
 
 ## Fix refused: `rollback_unavailable`
 
@@ -323,3 +326,11 @@ If a top-level `apply_fix` cannot back up a touched file, it refuses the fix bef
 mutation. Check read permissions on the asset and write permissions/free space in
 the OS temporary directory, then retry. A backup failure never makes rollback
 delete an existing original; file-level restore reports that path as unrestored.
+
+## Related docs
+
+- [Dialog policy](dialog-policy.md) — startup and steady-state modal handling
+- [Agent setup](setup/agent-setup.md) — AI-driven install procedure
+- [MCP client configuration](setup/client-configuration.md) — client paths and copy-paste snippets
+- [Bridge HTTP API](api/bridge-http.md) — `/ping` and listener contract
+- [Routing and lifecycle](api/routing-lifecycle.md) — route classes and recovery
