@@ -36,6 +36,7 @@ import {
   attachPagination,
   isOutputProfile,
 } from "./output-profile.js";
+import { buildGUIDIndex, safeReadMetaGUID } from "./offline/index-builders.js";
 import { normalizeAssetPath } from "./offline/paths.js";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -60,6 +61,7 @@ interface CacheEntry {
    * invalidates the entry even when the path + fieldLimit + depth match.
    */
   mtimeMs: number | null;
+  dependencies?: Array<[string, string | null]>;
 }
 
 /** Session-scoped LRU for the last few AssetModels read by `read_asset`. */
@@ -88,9 +90,27 @@ export class AssetModelCache {
     return entry.model;
   }
 
-  set(key: string, model: AssetModel, mtimeMs: number | null): void {
+  /** Re-resolve referenced GUIDs so moved, deleted, and restored dependencies
+   * cannot leave a cached model stale while the asset itself is unchanged. */
+  async getFresh(key: string, mtimeMs: number | null, projectRoot: string, assetPath: string): Promise<AssetModel | null> {
+    const model = this.get(key, mtimeMs);
+    const entry = this.entries.get(key);
+    if (!model || !entry || entry.dependencies === undefined) return model;
+    const wanted = new Set(entry.dependencies.map(([guid]) => guid));
+    const [index, guid] = await Promise.all([
+      buildGUIDIndex(projectRoot, wanted),
+      safeReadMetaGUID(join(projectRoot, assetPath) + ".meta"),
+    ]);
+    if ((model.guid ?? "") !== guid || entry.dependencies.some(([id, path]) => (index.get(id) ?? null) !== path)) {
+      this.entries.delete(key);
+      return null;
+    }
+    return model;
+  }
+
+  set(key: string, model: AssetModel, mtimeMs: number | null, dependencies?: Array<[string, string | null]>): void {
     if (this.entries.has(key)) this.entries.delete(key);
-    this.entries.set(key, { model, mtimeMs });
+    this.entries.set(key, { model, mtimeMs, dependencies });
     while (this.entries.size > CACHE_LIMIT) {
       const oldest = this.entries.keys().next().value;
       if (oldest === undefined) break;
@@ -190,11 +210,8 @@ async function routeReadAsset(
 
   const fieldLimit = typeof args.field_limit === "number" ? args.field_limit : 0;
   const depth = typeof args.depth === "number" ? args.depth : -1;
-  // M31-optimizations Plan 4 / T4.3 (M6) — normalize the path so the four
-  // documented spellings of one file collapse to one cache entry. The
-  // normalized form is what the cache key is built from; the ORIGINAL
-  // `assetPath` is still passed to the offline parser / live bridge so
-  // downstream behavior is byte-identical (only the cache key changes).
+  // Use the same normalized path for stat, cache, offline parsing and live
+  // fallback so backslash paths work on a cold cache on every platform.
   const normalizedPath = normalizeAssetPath(assetPath);
   // mtime invalidation: stat the absolute file once up-front. A failure
   // (binary-only asset, missing file, permission) yields `null` and the
@@ -204,7 +221,7 @@ async function routeReadAsset(
   const mtimeMs = await measureMtimeMs(projectPath, normalizedPath);
   const cacheKey = `${normalizedPath}|${fieldLimit}|${depth}`;
 
-  let model = cache.get(cacheKey, mtimeMs);
+  let model = await cache.getFresh(cacheKey, mtimeMs, projectPath, normalizedPath);
   let cacheHit = true;
   let source: "offline" | "live" = "offline";
 
@@ -213,10 +230,10 @@ async function routeReadAsset(
 
     if (isOfflineAsset(assetPath)) {
       try {
-        const result = await readAssetOffline(assetPath, { fieldLimit, projectRoot: projectPath });
+        const result = await readAssetOffline(normalizedPath, { fieldLimit, projectRoot: projectPath });
         model = result.model;
         source = "offline";
-        cache.set(cacheKey, model, mtimeMs);
+        cache.set(cacheKey, model, mtimeMs, result.dependencies);
       } catch {
         // Offline parse failed — fall through to live bridge.
         model = null;
@@ -239,7 +256,7 @@ async function routeReadAsset(
           source: "offline",
         });
       }
-      const raw = await live.route("unity_open_mcp_read_asset", args);
+      const raw = await live.route("unity_open_mcp_read_asset", { ...args, asset_path: normalizedPath });
       const parsed = parseContentJson(raw);
       if (parsed === null) {
         return raw.isError

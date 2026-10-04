@@ -104,6 +104,8 @@ export function isOfflineAsset(assetPath: string): boolean {
 export interface OfflineReadResult {
   model: AssetModel;
   source: "offline";
+  /** GUID resolutions used to construct the model, including missing references. */
+  dependencies: Array<[string, string | null]>;
 }
 
 // ===========================================================================
@@ -125,9 +127,10 @@ export async function readAssetOffline(
   // coverage differentiator. vfx is YAML+binary, but its object headers + GUID
   // refs still parse via the YAML path (binary blobs are skipped).
   if (parseKind === "json") {
-    const guidIndex = await buildGUIDIndex(opts.projectRoot, new Set(findGUIDs(data)));
+    const wanted = new Set(findGUIDs(data));
+    const guidIndex = await buildGUIDIndex(opts.projectRoot, wanted);
     const model = buildJsonAssetModel(data, assetPath, kind, guid, guidIndex, opts.fieldLimit);
-    return { model, source: "offline" };
+    return { model, source: "offline", dependencies: [...wanted].map(g => [g, guidIndex.get(g) ?? null]) };
   }
 
   const parsed = parseAsset(data);
@@ -152,6 +155,7 @@ export async function readAssetOffline(
   return {
     model: { ...buildAssetModel(parsed, scriptIndex, guidIndex, opts.fieldLimit), ...(integrity ? { integrity } : {}) },
     source: "offline",
+    dependencies: [...new Set([...wantedScripts, ...wantedGUIDs])].map(g => [g, guidIndex.get(g) ?? null]),
   };
 }
 

@@ -59,6 +59,14 @@ These tools also skip the reload probe: while the instance lock reports a
 compiling or reloading Editor they still reach their handler (and its disk
 fallback) instead of returning `editor_reloading`.
 
+`read_asset` normalizes forward and backward slashes before both disk reads and
+live fallback. Its session cache checks the asset's modification time, its own
+metadata GUID, and the current paths of referenced GUIDs before reusing an
+offline model. Renaming, deleting, or restoring referenced assets invalidates
+that model even if the requested asset did not change. Dependency validation
+re-reads the GUID index for models with references; the cache still avoids
+re-parsing the requested asset. No persistent disk cache is created.
+
 The asset parser supports text-serialized Unity YAML such as scenes, prefabs,
 materials, controllers, animations, presets, SpriteAtlases, TerrainLayers, and
 VFX assets. It also understands JSON-backed asmdef and Shader Graph assets.

@@ -1351,6 +1351,8 @@ export interface HubTemplatesResult {
   templates: HubTemplateEntry[];
 }
 
+/** Creates through an exclusively reserved staging directory; template package
+ * dependencies and registries are preserved when merging the chosen pipeline. */
 export async function createNewProject(
   params: NewProjectParams
 ): Promise<NewProjectResult> {

@@ -15,24 +15,22 @@
 //!     matches the chosen `bundleVersion` param, default `0.1.0`)
 //!   - `ProjectSettings/ProjectSettings.asset` (minimal; carries
 //!     `bundleVersion` so Unity reads it on first open)
-//!   - `Packages/` (with `manifest.json` when a render pipeline other
-//!     than `none` is requested — see [`render_pipeline_package`])
+//!   - `Packages/` with a valid `manifest.json` for the chosen pipeline
 //!
 //! ## Custom / Hub-default template
 //!
 //! Validates the source folder is a Unity project root, recursively
 //! copies it into the new project folder (with overwrite, since the
 //! destination is freshly created and empty), then **rewrites**
-//! `ProjectVersion.txt` to the chosen version. `manifest.json` is
-//! written on top of any template copy so the chosen render pipeline
-//! packages are present even if the template ships without them. The
-//! `ProjectSettings/ProjectManager.asset` `bundleVersion` is refreshed
+//! `ProjectVersion.txt` to the chosen version. `manifest.json` preserves
+//! template dependencies and registries while merging the selected pipeline.
+//! The `ProjectSettings/ProjectManager.asset` `bundleVersion` is refreshed
 //! in-place (the template's value is not preserved).
 //!
 //! ## Atomicity
 //!
 //! The scaffold is staged into a sibling temp directory
-//! (`<parent>/.<name>.hub-creating`) and renamed into place once every
+//! (`<parent>/.<name>.hub-creating-<uuid>`) and renamed into place once every
 //! file has been written. A failure mid-flight triggers a best-effort
 //! recursive removal of the temp directory so the parent never contains
 //! a partial scaffold. Persistence happens *after* the rename so
@@ -278,24 +276,70 @@ fn render_project_settings_asset(bundle_version: &str) -> String {
     )
 }
 
-/// Render a `Packages/manifest.json` body carrying the chosen render
-/// pipeline package. The dependencies block is intentionally
-/// minimal — the user can flesh it out in the Package Manager once
-/// Unity opens the project.
+/// Build the default manifest through the JSON serializer, then add the
+/// selected pipeline using the same merge used for template manifests.
 fn render_manifest_json(pipeline_line: Option<&str>) -> String {
-    let pipeline_block = pipeline_block(pipeline_line);
-    format!(
-        "{{\n  \"dependencies\": {{\n{}{}\n  }}\n}}\n",
-        "    \"com.unity.ide.rider\": \"3.0.27\",\n",
-        pipeline_block,
-    )
+    let mut manifest = serde_json::json!({"dependencies": {"com.unity.ide.rider": "3.0.27"}});
+    merge_pipeline(&mut manifest, pipeline_line).expect("valid default manifest");
+    serde_json::to_string_pretty(&manifest).expect("JSON value is serializable") + "\n"
 }
 
-fn pipeline_block(pipeline_line: Option<&str>) -> String {
-    match pipeline_line {
-        Some(line) => format!("    \"{line}\",\n"),
-        None => String::new(),
+fn merge_pipeline(
+    manifest: &mut serde_json::Value,
+    pipeline_line: Option<&str>,
+) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    let object = manifest
+        .as_object_mut()
+        .ok_or_else(|| Error::new(ErrorKind::InvalidData, "manifest must be a JSON object"))?;
+    let dependencies = object
+        .entry("dependencies")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidData,
+                "manifest dependencies must be an object",
+            )
+        })?;
+    if let Some(line) = pipeline_line {
+        let (name, version) = line
+            .rsplit_once('@')
+            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "invalid pipeline package"))?;
+        dependencies.insert(
+            name.to_string(),
+            serde_json::Value::String(version.to_string()),
+        );
     }
+    Ok(())
+}
+
+fn write_project_manifest(staging: &Path, pipeline_line: Option<&str>) -> std::io::Result<()> {
+    let path = staging.join("Packages/manifest.json");
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => {
+            let mut manifest: serde_json::Value = serde_json::from_str(&content)?;
+            merge_pipeline(&mut manifest, pipeline_line)?;
+            serde_json::to_string_pretty(&manifest)? + "\n"
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => render_manifest_json(pipeline_line),
+        Err(e) => return Err(e),
+    };
+    fs::create_dir_all(staging.join("Packages"))?;
+    fs::write(path, content)
+}
+
+/// Reserve a new directory atomically. Never adopt or remove a pre-existing
+/// sibling: even a directory with a staging-looking name may belong to a user.
+fn create_staging_dir(parent: &Path, name: &str) -> std::io::Result<PathBuf> {
+    let path = parent.join(format!(
+        ".{}{}-{}",
+        name,
+        STAGING_SUFFIX,
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir(&path)?;
+    Ok(path)
 }
 
 /// Mirror of `walk_up_scan::is_unity_project_root` so the template
@@ -309,30 +353,36 @@ fn is_unity_project_root(path: &Path) -> bool {
 /// freshly created and empty in our flow, but overwriting is the safe
 /// default for re-runs after a failed first attempt).
 fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_dir_all(&from, &to)?;
-        } else if file_type.is_symlink() {
-            // Read the link target and re-create as a regular file.
-            // Templates rarely ship symlinks, but the safest default
-            // when they do is to inline the target's bytes so the
-            // copy is self-contained.
-            let target = fs::read_link(&from)?;
-            if target.is_file() {
-                fs::copy(&target, &to)?;
-            } else if target.is_dir() {
-                copy_dir_all(&target, &to)?;
-            }
-        } else {
-            fs::copy(&from, &to)?;
+    fn copy(
+        src: &Path,
+        dst: &Path,
+        ancestors: &mut std::collections::HashSet<PathBuf>,
+    ) -> std::io::Result<()> {
+        let source = fs::canonicalize(src)?;
+        fs::create_dir_all(dst)?;
+        let destination = fs::canonicalize(dst)?;
+        if destination.starts_with(&source) || !ancestors.insert(source.clone()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "template contains a directory cycle or overlaps the destination",
+            ));
         }
+        for entry in fs::read_dir(&source)? {
+            let entry = entry?;
+            // Canonicalize resolves relative symlinks against their own parent,
+            // and reports broken links instead of silently dropping content.
+            let from = fs::canonicalize(entry.path())?;
+            let to = dst.join(entry.file_name());
+            if from.is_dir() {
+                copy(&from, &to, ancestors)?;
+            } else {
+                fs::copy(&from, &to)?;
+            }
+        }
+        ancestors.remove(&source);
+        Ok(())
     }
-    Ok(())
+    copy(src, dst, &mut std::collections::HashSet::new())
 }
 
 /// Recursively remove a directory. Used to clean up a half-scaffolded
@@ -587,17 +637,9 @@ pub fn create_new_project(
     // Stage into a sibling temp dir. Rename is atomic on the same
     // filesystem; if anything in the middle fails, we delete the
     // staging dir so the parent is left untouched.
-    let staging = parent_path.join(format!("{}{}", name, STAGING_SUFFIX));
-    if staging.exists() {
-        // A previous run died mid-scaffold. Remove the partial before
-        // starting a new one.
-        remove_dir_all_best_effort(&staging);
-    }
-    if let Err(e) = fs::create_dir_all(&staging) {
-        return Err(NewProjectError::IoError {
-            message: format!("failed to create staging directory {}: {}", staging.display(), e),
-        });
-    }
+    let staging = create_staging_dir(&parent_path, &name).map_err(|e| NewProjectError::IoError {
+        message: format!("failed to create staging directory: {}", e),
+    })?;
 
     let scaffold_result = scaffold_into(&staging, &params, &version, &bundle_version);
     if let Err(err) = scaffold_result {
@@ -780,16 +822,10 @@ fn scaffold_into(
         }
     }
 
-    // 3. Render pipeline manifest. Always written so URP / HDRP
-    //    selections land on top of any template copy. For the Empty
-    //    template with `pipeline = None` we still drop a minimal
-    //    manifest so Unity does not warn about a missing file on
-    //    first open.
+    // Preserve template dependencies and registries; only the selected
+    // pipeline package is changed. Empty templates get the default manifest.
     let pipeline_line = render_pipeline_package(params.pipeline, version);
-    if let Err(e) = write_file(
-        &staging.join("Packages").join("manifest.json"),
-        &render_manifest_json(pipeline_line.as_deref()),
-    ) {
+    if let Err(e) = write_project_manifest(staging, pipeline_line.as_deref()) {
         return Err(NewProjectError::IoError {
             message: format!("failed to write manifest.json: {}", e),
         });
@@ -880,7 +916,8 @@ mod tests {
     #[test]
     fn render_manifest_json_includes_pipeline() {
         let body = render_manifest_json(Some("com.unity.render-pipelines.universal@17.0.3"));
-        assert!(body.contains("com.unity.render-pipelines.universal@17.0.3"));
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["dependencies"]["com.unity.render-pipelines.universal"], "17.0.3");
         assert!(body.contains("\"dependencies\""));
     }
 
@@ -1087,7 +1124,8 @@ mod tests {
         scaffold_into(dir.path(), &params, &version, &bundle_version).unwrap();
 
         let manifest = fs::read_to_string(dir.path().join("Packages/manifest.json")).unwrap();
-        assert!(manifest.contains("com.unity.render-pipelines.universal@"));
+        let parsed: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+        assert_eq!(parsed["dependencies"]["com.unity.render-pipelines.universal"], "17.0.3");
     }
 
     #[test]
@@ -1255,5 +1293,121 @@ mod tests {
         assert!(json.contains("\"project\""));
         assert!(json.contains("\"projects\""));
         assert!(json.contains("\"frecency\":1"));
+    }
+
+    #[test]
+    fn manifests_are_valid_json_for_every_pipeline() {
+        for pipeline in [
+            RenderPipeline::None,
+            RenderPipeline::URP,
+            RenderPipeline::HDRP,
+        ] {
+            let line = render_pipeline_package(pipeline, "6000.0.1f1");
+            let manifest: serde_json::Value =
+                serde_json::from_str(&render_manifest_json(line.as_deref())).unwrap();
+            assert_eq!(manifest["dependencies"]["com.unity.ide.rider"], "3.0.27");
+            if let Some(line) = line {
+                let (name, version) = line.rsplit_once('@').unwrap();
+                assert_eq!(manifest["dependencies"][name], version);
+            }
+        }
+    }
+
+    #[test]
+    fn template_manifest_preserves_dependencies_and_registries() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("Packages")).unwrap();
+        let path = dir.path().join("Packages/manifest.json");
+        let original = serde_json::json!({
+            "dependencies": {"com.unity.inputsystem": "1.11.0", "com.unity.render-pipelines.universal": "old"},
+            "scopedRegistries": [{"name": "custom", "url": "https://example.com", "scopes": ["com.example"]}],
+            "testables": ["com.example.tests"]
+        });
+        fs::write(&path, original.to_string()).unwrap();
+        write_project_manifest(dir.path(), None).unwrap();
+        let unchanged: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(unchanged, original);
+        write_project_manifest(
+            dir.path(),
+            Some("com.unity.render-pipelines.universal@17.0.3"),
+        )
+        .unwrap();
+        let updated: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let mut expected = original;
+        expected["dependencies"]["com.unity.render-pipelines.universal"] = "17.0.3".into();
+        assert_eq!(updated, expected);
+    }
+
+    #[test]
+    fn invalid_template_manifest_is_not_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("Packages")).unwrap();
+        let path = dir.path().join("Packages/manifest.json");
+        for content in ["broken", "[]", r#"{"dependencies":[]}"#] {
+            fs::write(&path, content).unwrap();
+            assert!(write_project_manifest(dir.path(), Some("package@1.0.0")).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), content);
+        }
+    }
+
+    #[test]
+    fn staging_reservations_preserve_existing_siblings() {
+        let dir = tempfile::tempdir().unwrap();
+        let existing = dir.path().join("Game.hub-creating");
+        fs::create_dir(&existing).unwrap();
+        fs::write(existing.join("sentinel"), "user content").unwrap();
+        let first = create_staging_dir(dir.path(), "Game").unwrap();
+        let second = create_staging_dir(dir.path(), "Game").unwrap();
+        assert_ne!(first, second);
+        fs::write(second.join("sentinel"), "other operation").unwrap();
+        remove_dir_all_best_effort(&first);
+        assert_eq!(
+            fs::read_to_string(existing.join("sentinel")).unwrap(),
+            "user content"
+        );
+        assert_eq!(
+            fs::read_to_string(second.join("sentinel")).unwrap(),
+            "other operation"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn template_copy_resolves_relative_file_and_directory_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("template");
+        let dst = dir.path().join("copy");
+        fs::create_dir_all(src.join("Assets/shared")).unwrap();
+        fs::write(src.join("Assets/shared/data.txt"), "payload").unwrap();
+        std::os::unix::fs::symlink("shared/data.txt", src.join("Assets/file-link")).unwrap();
+        std::os::unix::fs::symlink("shared", src.join("Assets/dir-link")).unwrap();
+        copy_dir_all(&src, &dst).unwrap();
+        assert_eq!(
+            fs::read_to_string(dst.join("Assets/file-link")).unwrap(),
+            "payload"
+        );
+        assert_eq!(
+            fs::read_to_string(dst.join("Assets/dir-link/data.txt")).unwrap(),
+            "payload"
+        );
+        assert!(!fs::symlink_metadata(dst.join("Assets/file-link"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn template_copy_rejects_directory_cycles_and_broken_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("template");
+        fs::create_dir(&src).unwrap();
+        std::os::unix::fs::symlink(".", src.join("loop")).unwrap();
+        assert!(copy_dir_all(&src, &dir.path().join("copy")).is_err());
+        fs::remove_file(src.join("loop")).unwrap();
+        std::os::unix::fs::symlink("absent", src.join("broken")).unwrap();
+        assert!(copy_dir_all(&src, &dir.path().join("copy2")).is_err());
     }
 }

@@ -7,7 +7,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -572,4 +572,50 @@ test("routeSearchAssets falls back to live when offline throws", async () => {
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
+});
+
+
+test("backslash asset paths work with a cold cache and no live bridge", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "comp-cold-path-"));
+  try {
+    await setupProject(tmp);
+    const live = makeFakeLive({ available: false });
+    const result = await routeCompressible("unity_open_mcp_read_asset",
+      { asset_path: "Assets\\Prefabs\\Player.prefab" }, toLive(live), new AssetModelCache(), tmp);
+    assert.equal(result.isError, false);
+    assert.equal(parseBody(result).path, "Assets/Prefabs/Player.prefab");
+    assert.equal(live.routeCalls.length, 0);
+  } finally { await rm(tmp, { recursive: true, force: true }); }
+});
+
+test("cached assets track script renames, deletion and restored missing GUIDs", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "comp-dependency-"));
+  try {
+    await setupProject(tmp);
+    const guid = "aabb0000000000000000000000000001";
+    const cache = new AssetModelCache();
+    const live = makeFakeLive({ available: false });
+    const args = { asset_path: "Assets/Prefabs/Player.prefab", profile: "full" };
+    const read = (c = cache) => routeCompressible("unity_open_mcp_read_asset", args, toLive(live), c, tmp);
+    const freshEqualsCached = async () => {
+      const cached = parseBody(await read());
+      const fresh = parseBody(await read(new AssetModelCache()));
+      assert.equal(cached._cache, "miss");
+      assert.deepEqual(cached, fresh);
+      return cached;
+    };
+    await read(); // Script is initially missing.
+    await writeFile(join(tmp, "Assets/Foo.cs"), "class Foo {}");
+    await writeFile(join(tmp, "Assets/Foo.cs.meta"), `guid: ${guid}\n`);
+    assert.match(JSON.stringify(await freshEqualsCached()), /Foo/);
+    assert.equal(parseBody(await read())._cache, "hit");
+    await rename(join(tmp, "Assets/Foo.cs"), join(tmp, "Assets/Bar.cs"));
+    await rename(join(tmp, "Assets/Foo.cs.meta"), join(tmp, "Assets/Bar.cs.meta"));
+    assert.match(JSON.stringify(await freshEqualsCached()), /Bar/);
+    await rm(join(tmp, "Assets/Bar.cs"));
+    await rm(join(tmp, "Assets/Bar.cs.meta"));
+    assert.doesNotMatch(JSON.stringify(await freshEqualsCached()), /Bar/);
+    await writeFile(join(tmp, "Assets/Prefabs/Player.prefab.meta"), "guid: changed-guid\n");
+    assert.equal((await freshEqualsCached()).guid, "changed-guid");
+  } finally { await rm(tmp, { recursive: true, force: true }); }
 });

@@ -42,6 +42,14 @@ from one UI.
 ### 1) Project management
 
 - Add projects from disk.
+- Create an empty project or copy a template. Template package dependencies,
+  scoped registries, and other manifest settings are preserved; selecting URP or
+  HDRP adds or updates only that pipeline dependency. With no pipeline selected,
+  the template's dependencies remain unchanged.
+- Project creation reserves a unique temporary sibling directory and cleans up
+  only that reservation on failure. Existing directories with staging-like names
+  are left untouched. Relative template symlinks are copied as regular files or
+  directories; broken links and directory cycles fail the copy explicitly.
 - Open project-specific settings.
 - Launch Unity with per-project configuration.
 
