@@ -26,6 +26,7 @@ namespace UnityOpenMcpVerify.Fixes
             public string OriginalPath;   // absolute path the fix may touch
             public string BackupPath;     // temp copy of the pre-fix bytes
             public bool ExistedBefore;    // false => a fix-created file is rolled back by deleting it
+            public bool BackupFailed;
         }
 
         private readonly List<BackupEntry> _entries = new List<BackupEntry>();
@@ -73,7 +74,7 @@ namespace UnityOpenMcpVerify.Fixes
                         // go unrestored. Log and skip — Restore() will report
                         // the unrestored path.
                         Debug.LogWarning($"[FixRollback] Could not back up '{path}': {e.Message}");
-                        entry.ExistedBefore = false; // treat as unrestorable
+                        entry.BackupFailed = true;
                     }
                 }
 
@@ -95,6 +96,12 @@ namespace UnityOpenMcpVerify.Fixes
             {
                 try
                 {
+                    if (entry.BackupFailed)
+                    {
+                        unrestored.Add(entry.OriginalPath);
+                        ok = false;
+                        continue;
+                    }
                     if (entry.ExistedBefore)
                     {
                         // Rewrite / undelete case: copy the backup back over
@@ -156,6 +163,8 @@ namespace UnityOpenMcpVerify.Fixes
         /// <summary>True when Snapshot() has been called with at least one
         /// recorded path.</summary>
         public bool HasSnapshot => _entries.Count > 0;
+
+        public bool HasBackupFailures => _entries.Exists(entry => entry.BackupFailed);
     }
 
     public struct RestoreResult

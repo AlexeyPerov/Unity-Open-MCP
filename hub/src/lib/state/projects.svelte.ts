@@ -34,7 +34,9 @@ async function timedInvoke<T>(label: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-class ProjectsStore {
+export class ProjectsStore {
+  private saveQueue: Promise<void> = Promise.resolve();
+  private saveRevision = 0;
   projects = $state<ProjectEntry[]>([]);
   selectedProjectId = $state<string | null>(null);
   loading = $state(false);
@@ -100,11 +102,11 @@ class ProjectsStore {
   }
 
   async update(updated: ProjectEntry): Promise<void> {
+    const base = this.snapshot();
     const next = this.projects.map((p) =>
       p.id === updated.id ? updated : p
     );
-    this.projects = next;
-    await this.persist(next);
+    await this.persist(next, base);
   }
 
   /**
@@ -127,14 +129,10 @@ class ProjectsStore {
    * Update only the `aiSetupWizard` draft field on a single project,
    * without replacing the `projects` array identity.
    *
-   * The wizard debounces its draft-save on every form field change; routing
-   * that through `update()` reassigns `this.projects` (a new array), which
-   * re-runs every `$derived`/row in ProjectsTab and re-passes a fresh
-   * `project` prop to the wizard mid-interaction — destabilizing its event
-   * bindings (clicks stop having an effect right after preset selection).
-   * No grid row or derived consumes `aiSetupWizard`, so mutating the field
-   * in place persists the draft for crash-recovery without churning the
-   * rest of the UI. `undefined` clears the field (omit from `projects.json`).
+   * The wizard debounces saves on every field change. Keep its row identity
+   * stable while the save is pending and while reconciling the backend result,
+   * so draft persistence does not replace the form's project prop mid-edit.
+   * `undefined` clears the field (omit from `projects.json`).
    */
   async updateDraftOnly(
     id: string,
@@ -142,8 +140,17 @@ class ProjectsStore {
   ): Promise<void> {
     const entry = this.projects.find((p) => p.id === id);
     if (!entry) return;
+    const base = this.snapshot();
+    const revision = this.saveRevision + 1;
     entry.aiSetupWizard = draft;
-    await this.persist();
+    try {
+      await this.persist(this.projects, base);
+    } catch (error) {
+      if (revision === this.saveRevision) {
+        entry.aiSetupWizard = base.projects.find((p) => p.id === id)?.aiSetupWizard;
+      }
+      throw error;
+    }
   }
 
   add(entry: ProjectEntry): void {
@@ -152,22 +159,44 @@ class ProjectsStore {
   }
 
   async remove(id: string): Promise<void> {
+    const base = this.snapshot();
     const next = this.projects.filter((p) => p.id !== id);
-    this.projects = next;
+    await this.persist(next, base);
     if (this.selectedProjectId === id) this.selectedProjectId = null;
-    await this.persist(next);
   }
 
   replaceAll(list: ProjectEntry[]): void {
     this.projects = list;
   }
 
-  async persist(list: ProjectEntry[] = this.projects): Promise<void> {
-    const payload: ProjectsFile = {
+  private snapshot(): ProjectsFile {
+    return JSON.parse(JSON.stringify({ version: 1, projects: this.projects })) as ProjectsFile;
+  }
+
+  async persist(list: ProjectEntry[], base: ProjectsFile): Promise<void> {
+    const payload = JSON.parse(JSON.stringify({
       version: 1,
       projects: list,
-    };
-    await saveProjects(payload);
+    })) as ProjectsFile;
+    const revision = ++this.saveRevision;
+    const write = this.saveQueue.then(() => saveProjects(payload, base));
+    this.saveQueue = write.then(() => {}, () => {});
+    const saved = await write;
+    // A pending edit owns newer local values; let its response reconcile the list.
+    if (revision !== this.saveRevision) return;
+    // Preserve existing row identities while reconciling authoritative fields.
+    const rows = saved.projects.map((savedEntry) => {
+      const existing = this.find(savedEntry.id);
+      if (!existing) return savedEntry;
+      for (const key of Object.keys(existing) as Array<keyof ProjectEntry>) {
+        if (!(key in savedEntry)) delete existing[key];
+      }
+      Object.assign(existing, savedEntry);
+      return existing;
+    });
+    if (rows.length !== this.projects.length || rows.some((row, i) => row !== this.projects[i])) {
+      this.projects.splice(0, this.projects.length, ...rows);
+    }
   }
 }
 

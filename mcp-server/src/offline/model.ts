@@ -139,7 +139,7 @@ export function buildJsonAssetModel(
   fieldLimit: number,
 ): AssetModel {
   const issues: AssetIntegrityIssue[] = [];
-  const objects = parseJsonAsset(data, issues);
+  const objects = parseJsonAsset(data, issues, assetPath.toLowerCase().endsWith(".asmdef"));
 
   const flatObjects: FlatObject[] = [];
   for (const obj of objects) {

@@ -3589,3 +3589,23 @@ test("L8-offline: no inline /\\s+/ regex literal remains in primitives.ts or hie
   assert.ok(prim.includes("WHITESPACE_RE"), "primitives.ts defines WHITESPACE_RE");
   assert.ok(hier.includes("WHITESPACE_RE"), "hierarchy.ts defines WHITESPACE_RE");
 });
+
+for (const [extension, data] of [
+  ["asmdef", '{"name":"Assembly"} garbage'],
+  ["asmdef", '{"name":"Assembly"}\n{"name":"Other"}'],
+  ["shadergraph", '{"m_Type":"UnityEditor.ShaderGraph.GraphData"}\n{"m_Name":'],
+  ["shadergraph", 'garbage\n{"m_Type":"UnityEditor.ShaderGraph.GraphData"}'],
+  ["shadergraph", '{"m_Type":"UnityEditor.ShaderGraph.GraphData"}\ngarbage'],
+  ["shadergraph", '{"m_Type":"UnityEditor.ShaderGraph.GraphData"}\n"garbage"'],
+] as const) {
+  test(`offline JSON rejects unconsumed content: ${extension} ${data}`, async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "offline-json-stream-"));
+    try {
+      await mkdir(join(tmp, "Assets"));
+      const path = `Assets/Test.${extension}`;
+      await writeFile(join(tmp, path), data);
+      const { model } = await readAssetOffline(path, { fieldLimit: 0, projectRoot: tmp });
+      assert.ok(model.integrity?.some(issue => issue.code === "malformed_json" && issue.severity === "error"));
+    } finally { await rm(tmp, { recursive: true, force: true }); }
+  });
+}

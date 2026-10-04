@@ -234,9 +234,10 @@
     const updated: ProjectEntry = { ...project, migrateSourceFolder: migrateSource };
     const nextList = projectsStore.projects.map((p) => (p.id === project.id ? updated : p));
     try {
-      await saveProjects({ version: 1, projects: nextList });
-      projectsStore.replaceAll(nextList);
-      onMutated(updated);
+      const saved = await saveProjects({ version: 1, projects: nextList }, { version: 1, projects: projectsStore.projects });
+      projectsStore.replaceAll(saved.projects);
+      const savedProject = saved.projects.find((p) => p.id === project.id);
+      if (savedProject) onMutated(savedProject);
       S.appendDrawerLog(`saved migration source for ${project.name}: ${migrateSource}`);
     } catch (e) {
       S.appendErrorLog(`save migration source failed: ${describeInvokeError(e)}`);

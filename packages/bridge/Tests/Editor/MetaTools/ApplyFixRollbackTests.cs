@@ -66,6 +66,37 @@ namespace UnityOpenMcpBridge.Tests
         // Rollback fires when the fix fails to apply (mutation !Success)
         // -------------------------------------------------------------------
 
+        [Test]
+        public void BackupFailure_RefusesFixBeforeMutation()
+        {
+            var assetPath = FixtureRoot + "/Unbacked.mat";
+            File.WriteAllText(assetPath, "ORIGINAL");
+            var factory = ApplyFixGateRunner.RollbackFactory;
+            ApplyFixGateRunner.RollbackFactory = () =>
+            {
+                var rollback = new FixRollback();
+                var root = (string)typeof(FixRollback).GetField("_backupRoot",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(rollback);
+                Directory.CreateDirectory(Path.Combine(root, "1"));
+                return rollback;
+            };
+            try
+            {
+                var issueId = IssueKey.Build("materials", VerifySeverity.Error, assetPath, "missing_shader");
+                var result = ApplyFixGateRunner.Execute(BuildBody(TestFixId, issueId, dryRun: false), "enforce", new[] { assetPath });
+                Assert.IsFalse(result.Mutation.Success);
+                Assert.AreEqual("rollback_unavailable", result.Mutation.ErrorCode);
+                Assert.IsFalse(result.GateRan);
+                Assert.IsFalse(ApplyFixGateRunner.RollbackSnapshotActive);
+                Assert.AreEqual("ORIGINAL", File.ReadAllText(assetPath));
+            }
+            finally
+            {
+                ApplyFixGateRunner.RollbackFactory = factory;
+                File.Delete(assetPath);
+            }
+        }
+
         [UnityTest]
         public System.Collections.IEnumerator Rollback_RestoresFile_WhenFixFails()
         {

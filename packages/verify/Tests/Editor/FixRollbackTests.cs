@@ -108,6 +108,29 @@ namespace UnityOpenMcpVerify.Tests
         // -------------------------------------------------------------------
 
         [Test]
+        public void Restore_BackupFailure_PreservesOriginalAndReportsUnrestored()
+        {
+            var path = Path.Combine(_tempRoot, "Unbacked.asset");
+            File.WriteAllText(path, "ORIGINAL");
+            var rollback = new FixRollback();
+            var backupRoot = (string)typeof(FixRollback).GetField("_backupRoot",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .GetValue(rollback);
+            // A directory at the backup filename deterministically rejects File.Copy.
+            Directory.CreateDirectory(Path.Combine(backupRoot, "1"));
+            try
+            {
+                Assert.AreEqual(0, rollback.Snapshot(new[] { path }));
+                var result = rollback.Restore();
+                Assert.IsFalse(result.Success);
+                Assert.That(result.UnrestoredPaths, Does.Contain(path));
+                CollectionAssert.IsEmpty(result.RestoredPaths);
+                Assert.AreEqual("ORIGINAL", File.ReadAllText(path));
+            }
+            finally { rollback.Discard(); }
+        }
+
+        [Test]
         public void Restore_NoOp_WhenFileNeverExistedAndWasNotCreated()
         {
             var path = Path.Combine(_tempRoot, "NeverTouched.asset");

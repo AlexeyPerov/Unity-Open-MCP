@@ -158,6 +158,7 @@ namespace UnityOpenMcpBridge.Tests
                 var body = "{\"fix_id\":\"test_rollback_corruptor\",\"issue_id\":\"" + issueId
                     + "\",\"dry_run\":false}";
 
+                using var provider = new NoopFixScope();
                 var result = ApplyFixGateRunner.Execute(body, "enforce", new[] { assetPath });
 
                 Assert.IsTrue(result.Mutation.Success, result.Mutation.ErrorMessage);

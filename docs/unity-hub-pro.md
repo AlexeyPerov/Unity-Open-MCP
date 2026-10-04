@@ -126,6 +126,13 @@ claim an install succeeded merely because the download completed. Adding
 cryptographically signed updater bundles is a release-pipeline follow-up; the
 app never applies an update silently.
 
+Project edits merge only fields changed from the UI’s base snapshot into the
+current inventory. Independent scan, launch, and project-add updates are retained.
+Conflicting edits to the same field fail without writing; reload the project list
+and retry. Settings choices apply immediately and save sequentially, so rapid
+changes preserve earlier choices. A failed final save restores the last confirmed
+settings and reports the error.
+
 ## For developers (build from source)
 
 If you want to build the Hub yourself — to run a local modification or debug —

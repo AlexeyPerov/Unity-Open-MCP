@@ -3771,8 +3771,8 @@ function flattenSceneBody(body: Record<string, unknown>): Record<string, unknown
   const walk = (node: unknown) => {
     if (!node || typeof node !== "object") return;
     const obj = node as Record<string, unknown>;
-    out.push(obj);
-    const children = obj.children;
+    const { children, ...flatNode } = obj;
+    out.push(flatNode);
     if (Array.isArray(children)) {
       for (const child of children) walk(child);
     }

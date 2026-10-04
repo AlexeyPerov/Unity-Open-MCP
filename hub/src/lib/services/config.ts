@@ -543,8 +543,9 @@ export async function loadProjects(): Promise<ProjectsFile> {
   return invoke<ProjectsFile>("load_projects");
 }
 
-export async function saveProjects(projects: ProjectsFile): Promise<void> {
-  return invoke("save_projects", { projects });
+/** Save the diff from base and return the merged authoritative state. */
+export async function saveProjects(projects: ProjectsFile, base: ProjectsFile): Promise<ProjectsFile> {
+  return invoke<ProjectsFile>("save_projects", { projects, base });
 }
 
 export async function seedFromUnityHub(): Promise<SeedResult> {

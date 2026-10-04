@@ -134,9 +134,9 @@ function finishObject(
 // way YAML field refs are.
 // ===========================================================================
 
-export function parseJsonAsset(data: string, issues: AssetIntegrityIssue[]): JsonParsedObject[] {
+export function parseJsonAsset(data: string, issues: AssetIntegrityIssue[], singleDocument = false): JsonParsedObject[] {
   const ext = "json";
-  const chunks = splitJsonStream(data);
+  const chunks = singleDocument ? [data] : splitJsonStream(data);
   if (chunks.length === 0) {
     issues.push({ code: "malformed_json", detail: "no JSON objects found", severity: "error" });
     return [];
@@ -147,6 +147,9 @@ export function parseJsonAsset(data: string, issues: AssetIntegrityIssue[]): Jso
     let value: unknown;
     try {
       value = JSON.parse(chunks[i]);
+      if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("Expected a JSON object.");
+      }
     } catch (e) {
       issues.push({
         code: "malformed_json",
@@ -201,6 +204,7 @@ export function splitJsonStream(data: string): string[] {
   let inString = false;
   let escape = false;
   let start = -1;
+  let consumed = 0;
 
   for (let i = 0; i < trimmed.length; i++) {
     const ch = trimmed[i];
@@ -212,20 +216,24 @@ export function splitJsonStream(data: string): string[] {
     }
     if (ch === '"') { inString = true; continue; }
     if (ch === "{") {
-      if (depth === 0) start = i;
+      if (depth === 0) {
+        // Preserve non-whitespace between documents so JSON.parse reports it.
+        if (trimmed.slice(consumed, i).trim()) chunks.push(trimmed.slice(consumed, i));
+        start = i;
+      }
       depth++;
     } else if (ch === "}") {
       depth--;
       if (depth === 0 && start >= 0) {
         chunks.push(trimmed.slice(start, i + 1));
         start = -1;
+        consumed = i + 1;
       }
     }
   }
-  // Fallback: if brace tracking found nothing (e.g. a top-level array or a
-  // malformed file), try a single JSON.parse on the whole content so the
-  // malformed_json issue path can report it.
-  if (chunks.length === 0) chunks.push(trimmed);
+  // Keep unfinished documents and trailing garbage; never silently drop bytes.
+  if (chunks.length === 0) return [trimmed];
+  if (trimmed.slice(consumed).trim()) chunks.push(trimmed.slice(consumed));
   return chunks;
 }
 

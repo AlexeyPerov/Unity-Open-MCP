@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use tauri::State;
-use std::sync::Mutex;
 
 use crate::config::discovery::DiscoveryResult;
 use crate::config::persistence;
@@ -9,8 +9,8 @@ use crate::config::schemas::{os_default_hub_paths, ProjectsFile, Settings};
 use crate::config::walk_up_scan::WalkUpRegistry;
 
 pub struct AppState {
-    pub settings: Mutex<Settings>,
-    pub projects: Mutex<ProjectsFile>,
+    pub settings: Arc<Mutex<Settings>>,
+    pub projects: Arc<Mutex<ProjectsFile>>,
     pub discovery_cache: Mutex<Option<DiscoveryResult>>,
     pub walk_up_registry: Mutex<WalkUpRegistry>,
 }
@@ -64,95 +64,148 @@ where
     Ok(next)
 }
 
+/// Merge only fields changed by the caller, keeping independent backend updates.
+/// Same-field conflicts fail before any file or in-memory state is changed.
+fn merge_projects(
+    current: &ProjectsFile,
+    base: &ProjectsFile,
+    desired: &ProjectsFile,
+) -> Result<ProjectsFile, String> {
+    use serde_json::Value;
+    use std::collections::HashSet;
+    for file in [base, desired] {
+        let mut ids = HashSet::new();
+        if file.projects.iter().any(|p| !ids.insert(&p.id)) {
+            return Err("Duplicate project id in save request".into());
+        }
+    }
+    let mut next = current.clone();
+    for before in &base.projects {
+        let after = desired.projects.iter().find(|p| p.id == before.id);
+        let index = next.projects.iter().position(|p| p.id == before.id);
+        let old = serde_json::to_value(before).map_err(|e| e.to_string())?;
+        let Some(after) = after else {
+            if let Some(index) = index {
+                if serde_json::to_value(&next.projects[index]).map_err(|e| e.to_string())? != old {
+                    return Err(format!(
+                        "Project save conflict: {} changed before removal; reload and retry",
+                        before.id
+                    ));
+                }
+                next.projects.remove(index);
+            }
+            continue;
+        };
+        let new = serde_json::to_value(after).map_err(|e| e.to_string())?;
+        if old == new {
+            continue;
+        }
+        let index = index.ok_or_else(|| {
+            format!(
+                "Project save conflict: {} was removed; reload and retry",
+                before.id
+            )
+        })?;
+        let mut live = serde_json::to_value(&next.projects[index]).map_err(|e| e.to_string())?;
+        let old = old.as_object().unwrap();
+        let new = new.as_object().unwrap();
+        let live = live.as_object_mut().unwrap();
+        for key in old.keys().chain(new.keys()).collect::<HashSet<_>>() {
+            if old.get(key) == new.get(key) {
+                continue;
+            }
+            if live.get(key) != old.get(key) && live.get(key) != new.get(key) {
+                return Err(format!(
+                    "Project save conflict: {}.{} changed; reload and retry",
+                    before.id, key
+                ));
+            }
+            if let Some(value) = new.get(key) {
+                live.insert(key.clone(), value.clone());
+            } else {
+                live.remove(key);
+            }
+        }
+        next.projects[index] =
+            serde_json::from_value(Value::Object(live.clone())).map_err(|e| e.to_string())?;
+    }
+    for added in desired
+        .projects
+        .iter()
+        .filter(|p| !base.projects.iter().any(|b| b.id == p.id))
+    {
+        if let Some(existing) = next.projects.iter().find(|p| p.id == added.id) {
+            if serde_json::to_value(existing).map_err(|e| e.to_string())?
+                != serde_json::to_value(added).map_err(|e| e.to_string())?
+            {
+                return Err(format!(
+                    "Project save conflict: {} already exists",
+                    added.id
+                ));
+            }
+        } else {
+            next.projects.push(added.clone());
+        }
+    }
+    Ok(next)
+}
+
+fn merge_and_save_projects(
+    projects: &Mutex<ProjectsFile>,
+    base: &ProjectsFile,
+    desired: &ProjectsFile,
+    persist: impl FnOnce(&ProjectsFile) -> std::io::Result<()>,
+) -> Result<ProjectsFile, String> {
+    let mut guard = projects.lock().unwrap();
+    let next = merge_projects(&guard, base, desired)?;
+    persist(&next).map_err(|e| e.to_string())?;
+    *guard = next.clone();
+    Ok(next)
+}
+
+// Startup initializes these states from disk. IPC reads must not replace live
+// state with a disk snapshot taken before a concurrent mutation completed.
 #[tauri::command]
 pub async fn load_settings(state: State<'_, AppState>) -> Result<Settings, String> {
-    // The `persistence::load_settings` disk read (which can create the
-    // default file on first run) is the only main-thread disk I/O on the
-    // critical launch path — `projectsStore.load()` awaits this before
-    // the path/size/branch scans even start. Offload the read to the
-    // blocking pool so the webview thread never stalls on it. The
-    // Mutex lock+clone stays on the async task (cheap).
-    //
-    // Tauri requires async commands that borrow `State` to return a
-    // `Result` (see `discover_installations`); `Ok(T)` is unwrapped to
-    // `T` on the JS side, so the frontend contract is unchanged.
-    //
-    // Entry/lock/return spans (visible under `RUST_LOG=info`) pinpoint a
-    // hang: no `entered` ⇒ stuck in the Tauri IPC layer; `entered` but
-    // no `lock acquired` ⇒ the Mutex is held elsewhere; both present but
-    // no `returning` ⇒ the disk read is wedged.
-    log::info!("load_settings: entered");
-    let start = std::time::Instant::now();
-    let settings = tauri::async_runtime::spawn_blocking(persistence::load_settings)
+    let settings = Arc::clone(&state.settings);
+    tauri::async_runtime::spawn_blocking(move || settings.lock().unwrap().clone())
         .await
-        .map_err(|e| format!("load_settings task failed: {e}"))?;
-    log::info!(
-        "load_settings: spawn_blocking done in {}ms, awaiting lock",
-        start.elapsed().as_millis()
-    );
-    let mut guard = state.settings.lock().unwrap();
-    log::info!(
-        "load_settings: lock acquired after {}ms total",
-        start.elapsed().as_millis()
-    );
-    *guard = settings.clone();
-    log::info!("load_settings: returning after {}ms", start.elapsed().as_millis());
-    Ok(settings)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), String> {
-    // Mirror `load_settings`: offload the disk write (atomic tmp + `fsync`
-    // + rename) to the blocking pool so a slow/cloud-synced config volume
-    // cannot stall the WebView main thread. The Mutex clone-update stays
-    // on the async task. `spawn_blocking` needs an owned `Settings`; the
-    // caller's value is cloned for the disk write and moved into the guard.
-    let disk = settings.clone();
-    tauri::async_runtime::spawn_blocking(move || persistence::save_settings(&disk))
-        .await
-        .map_err(|e| format!("save_settings task failed: {e}"))?
-        .map_err(|e| e.to_string())?;
-    let mut guard = state.settings.lock().unwrap();
-    *guard = settings;
-    Ok(())
+    let shared = Arc::clone(&state.settings);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut guard = shared.lock().unwrap();
+        persistence::save_settings(&settings).map_err(|e| e.to_string())?;
+        *guard = settings;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn load_projects(state: State<'_, AppState>) -> Result<ProjectsFile, String> {
-    // Entry/lock/return spans mirror `load_settings` — see the comment
-    // there for how to read them under a launch freeze.
-    log::info!("load_projects: entered");
-    let start = std::time::Instant::now();
-    let projects = tauri::async_runtime::spawn_blocking(persistence::load_projects)
+    let projects = Arc::clone(&state.projects);
+    tauri::async_runtime::spawn_blocking(move || projects.lock().unwrap().clone())
         .await
-        .map_err(|e| format!("load_projects task failed: {e}"))?;
-    log::info!(
-        "load_projects: spawn_blocking done in {}ms, awaiting lock",
-        start.elapsed().as_millis()
-    );
-    let mut guard = state.projects.lock().unwrap();
-    log::info!(
-        "load_projects: lock acquired after {}ms total",
-        start.elapsed().as_millis()
-    );
-    *guard = projects.clone();
-    log::info!("load_projects: returning after {}ms", start.elapsed().as_millis());
-    Ok(projects)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn save_projects(state: State<'_, AppState>, projects: ProjectsFile) -> Result<(), String> {
-    // Mirror `save_settings` / `load_projects`: the atomic write (tmp +
-    // `fsync` + rename of projects.json) runs on the blocking pool so the
-    // wizard's draft-persistence path cannot freeze the UI on a slow disk.
-    let disk = projects.clone();
-    tauri::async_runtime::spawn_blocking(move || persistence::save_projects(&disk))
-        .await
-        .map_err(|e| format!("save_projects task failed: {e}"))?
-        .map_err(|e| e.to_string())?;
-    let mut guard = state.projects.lock().unwrap();
-    *guard = projects;
-    Ok(())
+pub async fn save_projects(
+    state: State<'_, AppState>,
+    projects: ProjectsFile,
+    base: ProjectsFile,
+) -> Result<ProjectsFile, String> {
+    let shared = Arc::clone(&state.projects);
+    tauri::async_runtime::spawn_blocking(move || {
+        merge_and_save_projects(&shared, &base, &projects, persistence::save_projects)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Sync helper: one `stat` per path. Runs on the blocking thread pool
@@ -210,10 +263,7 @@ mod tests {
     #[test]
     fn check_paths_exists_returns_false_for_missing() {
         let result = check_paths_exists_inner(vec!["/nonexistent/path/xyz_123".to_string()]);
-        assert_eq!(
-            result.get("/nonexistent/path/xyz_123"),
-            Some(&false)
-        );
+        assert_eq!(result.get("/nonexistent/path/xyz_123"), Some(&false));
     }
 
     #[test]
@@ -230,5 +280,109 @@ mod tests {
         let result = check_paths_exists_inner(vec![existing.clone(), missing.clone()]);
         assert_eq!(result.get(&existing), Some(&true));
         assert_eq!(result.get(&missing), Some(&false));
+    }
+}
+
+#[cfg(test)]
+mod project_save_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn file() -> ProjectsFile {
+        serde_json::from_value(json!({"version":1,"projects":[{"id":"a","name":"A","path":"/a"}]}))
+            .unwrap()
+    }
+
+    #[test]
+    fn stale_save_preserves_backend_fields_and_new_projects() {
+        let base = file();
+        let mut live = base.clone();
+        live.projects[0].frecency = 42;
+        let mut added = live.projects[0].clone();
+        added.id = "b".into();
+        live.projects.push(added);
+        let mut desired = base.clone();
+        desired.projects[0].launch_args = Some("-batchmode".into());
+        let merged = merge_projects(&live, &base, &desired).unwrap();
+        assert_eq!(merged.projects.len(), 2);
+        assert_eq!(merged.projects[0].frecency, 42);
+        assert_eq!(
+            merged.projects[0].launch_args.as_deref(),
+            Some("-batchmode")
+        );
+    }
+
+    #[test]
+    fn changed_field_conflicts_and_removed_projects_are_not_resurrected() {
+        let base = file();
+        let mut live = base.clone();
+        live.projects[0].name = "Backend name".into();
+        let mut desired = base.clone();
+        desired.projects[0].name = "Frontend name".into();
+        assert!(merge_projects(&live, &base, &desired).is_err());
+        live.projects.clear();
+        assert!(merge_projects(&live, &base, &desired).is_err());
+    }
+
+    #[test]
+    fn save_failure_keeps_memory_and_disk_unchanged() {
+        let base = file();
+        let shared = Mutex::new(base.clone());
+        let mut desired = base.clone();
+        desired.projects[0].name = "New name".into();
+        let result = merge_and_save_projects(&shared, &base, &desired, |_| {
+            Err(std::io::Error::other("disk full"))
+        });
+        assert!(result.is_err());
+        assert_eq!(shared.lock().unwrap().projects[0].name, "A");
+    }
+
+    #[test]
+    fn overlapping_saves_publish_the_same_state_to_disk_and_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = Arc::new(dir.path().join("projects.json"));
+        let base = file();
+        let shared = Arc::new(Mutex::new(base.clone()));
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let a = Arc::clone(&shared);
+        let a_path = Arc::clone(&path);
+        let a_base = base.clone();
+        let first = std::thread::spawn(move || {
+            let mut desired = a_base.clone();
+            desired.projects[0].name = "New name".into();
+            merge_and_save_projects(&a, &a_base, &desired, |next| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                persistence::atomic_write_at(&a_path, &serde_json::to_string(next).unwrap())
+            })
+            .unwrap();
+        });
+        entered_rx.recv().unwrap();
+        assert!(
+            shared.try_lock().is_err(),
+            "state stays locked while disk persistence runs"
+        );
+        let b = Arc::clone(&shared);
+        let b_path = Arc::clone(&path);
+        let second = std::thread::spawn(move || {
+            let mut desired = base.clone();
+            desired.projects[0].launch_args = Some("-batchmode".into());
+            merge_and_save_projects(&b, &base, &desired, |next| {
+                persistence::atomic_write_at(&b_path, &serde_json::to_string(next).unwrap())
+            })
+            .unwrap();
+        });
+        release_tx.send(()).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        let disk: ProjectsFile =
+            serde_json::from_str(&std::fs::read_to_string(&*path).unwrap()).unwrap();
+        assert_eq!(disk.projects[0].name, "New name");
+        assert_eq!(disk.projects[0].launch_args.as_deref(), Some("-batchmode"));
+        assert_eq!(
+            serde_json::to_value(&disk).unwrap(),
+            serde_json::to_value(&*shared.lock().unwrap()).unwrap()
+        );
     }
 }

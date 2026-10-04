@@ -13,17 +13,23 @@ import { discoveryStore } from "$lib/state/discovery.svelte";
 import { runningUnityStore } from "$lib/state/running_unity.svelte";
 import { applyTheme } from "$lib/theme.svelte";
 
-class SettingsStore {
+export class SettingsStore {
   current = $state<Settings | null>(null);
   saving = $state(false);
   saveError = $state<string | null>(null);
   lastSavedAt = $state<number | null>(null);
 
   private lastDiscoveryFolders: string[] = [];
+  private saveQueue: Promise<void> = Promise.resolve();
+  private pendingSaves = 0;
+  private saveRevision = 0;
+  private confirmed: Settings | null = null;
 
   async load(): Promise<void> {
+    await this.saveQueue;
     const settings = await loadSettings();
     this.current = settings;
+    this.confirmed = settings;
     this.lastDiscoveryFolders = [...settings.unityDiscovery.parentFolders];
     this.saveError = null;
     // M1.5-10: re-arm the running-Unity polling timer so the cadence
@@ -49,18 +55,28 @@ class SettingsStore {
   }
 
   private async persist(next: Settings): Promise<void> {
+    if (!this.confirmed) this.confirmed = this.current;
+    const revision = ++this.saveRevision;
+    // Make the next edit see this choice immediately, even while IPC is pending.
+    this.current = next;
+    this.pendingSaves++;
     this.saving = true;
     this.saveError = null;
+    const write = this.saveQueue.then(() => saveSettings(next));
+    // A failed save must not prevent later queued edits from being persisted.
+    this.saveQueue = write.catch(() => {});
     try {
-      await saveSettings(next);
-      this.current = next;
+      await write;
+      this.confirmed = next;
+      this.saveError = null;
       this.lastSavedAt = Date.now();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.saveError = msg;
+      if (revision === this.saveRevision) this.current = this.confirmed;
       throw e;
     } finally {
-      this.saving = false;
+      this.saving = --this.pendingSaves > 0;
     }
   }
 

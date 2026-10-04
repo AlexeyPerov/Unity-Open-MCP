@@ -39,6 +39,8 @@ namespace UnityOpenMcpBridge.MetaTools
 
         internal static bool RollbackSnapshotActive => _rollbackSnapshotActive;
 
+        internal static System.Func<FixRollback> RollbackFactory = () => new FixRollback();
+
         public static GateDispatchResult Execute(
             string body, string gateMode, string[] pathsHint)
         {
@@ -49,9 +51,25 @@ namespace UnityOpenMcpBridge.MetaTools
             // gate runs the mutation. predictedPaths is null when the issue id
             // can't be parsed (no snapshot ⇒ no rollback; the gate still runs).
             var predictedPaths = PredictTouchedPaths(issueId);
-            var rollback = new FixRollback();
-            if (predictedPaths != null && predictedPaths.Length > 0)
-                rollback.Snapshot(predictedPaths);
+            var rollback = RollbackFactory();
+            try
+            {
+                if (predictedPaths != null && predictedPaths.Length > 0)
+                    rollback.Snapshot(predictedPaths);
+                if (rollback.HasBackupFailures)
+                    throw new IOException("One or more touched files could not be backed up.");
+            }
+            catch (System.Exception e)
+            {
+                rollback.Discard();
+                return new GateDispatchResult
+                {
+                    Mutation = ToolDispatchResult.Fail("rollback_unavailable", "Fix was not applied: " + e.Message),
+                    Outcome = GateOutcome.Skipped,
+                    SkippedReason = "rollback_unavailable",
+                    AgentNextSteps = new[] { "Check temporary-directory space and file permissions, then retry the fix." }
+                };
+            }
 
             GateDispatchResult result;
             var previousFlag = _rollbackSnapshotActive;

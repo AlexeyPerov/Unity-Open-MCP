@@ -110,3 +110,58 @@ test("replaceAll with an empty list clears it", () => {
   projectsStore.replaceAll([]);
   assert.equal(projectsStore.projects.length, 0);
 });
+
+test("project edits send their base snapshot and reconcile independent backend fields", async () => {
+  const { ProjectsStore } = await import("./projects.svelte.ts");
+  const store = new ProjectsStore();
+  const original = project("a");
+  store.projects = [original];
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "window");
+  Object.defineProperty(globalThis, "window", { configurable: true, value: {
+    __TAURI_INTERNALS__: { async invoke(command: string, args: { projects: { projects: ProjectEntry[] }; base: { projects: ProjectEntry[] } }) {
+      assert.equal(command, "save_projects");
+      assert.equal(args.base.projects[0].launchArgs, undefined);
+      assert.equal(args.projects.projects[0].launchArgs, "-batchmode");
+      return { version: 1, projects: [{ ...args.projects.projects[0], frecency: 42 }, project("b")] };
+    } },
+  } });
+  try {
+    await store.update({ ...original, launchArgs: "-batchmode" });
+    assert.equal(store.projects[0], original, "existing row identity is preserved");
+    assert.equal(store.projects[0].frecency, 42);
+    assert.equal(store.projects[1].id, "b");
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "window", previous);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
+});
+
+test("queued draft saves keep the newest local draft until its response arrives", async () => {
+  const { ProjectsStore } = await import("./projects.svelte.ts");
+  const store = new ProjectsStore();
+  store.projects = [project("a")];
+  const writes: Array<{ payload: { version: number; projects: ProjectEntry[] }; resolve(value: unknown): void }> = [];
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "window");
+  Object.defineProperty(globalThis, "window", { configurable: true, value: {
+    __TAURI_INTERNALS__: { invoke(_command: string, args: { projects: { version: number; projects: ProjectEntry[] } }) {
+      return new Promise(resolve => writes.push({ payload: structuredClone(args.projects), resolve }));
+    } },
+  } });
+  const firstDraft = { presetId: "first" } as unknown as NonNullable<ProjectEntry["aiSetupWizard"]>;
+  const secondDraft = { presetId: "second" } as unknown as NonNullable<ProjectEntry["aiSetupWizard"]>;
+  const tick = () => new Promise<void>(resolve => setImmediate(resolve));
+  try {
+    const first = store.updateDraftOnly("a", firstDraft);
+    const second = store.updateDraftOnly("a", secondDraft);
+    await tick();
+    assert.equal(writes.length, 1);
+    assert.deepEqual(writes[0].payload.projects[0].aiSetupWizard, firstDraft);
+    writes[0].resolve(writes[0].payload); await first; await tick();
+    assert.deepEqual(store.projects[0].aiSetupWizard, secondDraft);
+    writes[1].resolve(writes[1].payload); await second;
+    assert.deepEqual(store.projects[0].aiSetupWizard, secondDraft);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "window", previous);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
+});

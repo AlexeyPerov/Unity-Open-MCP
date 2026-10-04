@@ -1,7 +1,7 @@
 pub mod config;
 
 use config::commands::AppState;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -20,8 +20,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
-            settings: Mutex::new(config::persistence::load_settings()),
-            projects: Mutex::new(config::persistence::load_projects()),
+            settings: Arc::new(Mutex::new(config::persistence::load_settings())),
+            projects: Arc::new(Mutex::new(config::persistence::load_projects())),
             discovery_cache: Mutex::new(None),
             walk_up_registry: Mutex::new(config::walk_up_scan::WalkUpRegistry::default()),
         })

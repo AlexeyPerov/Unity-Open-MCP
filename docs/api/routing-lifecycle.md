@@ -62,7 +62,10 @@ fallback) instead of returning `editor_reloading`.
 The asset parser supports text-serialized Unity YAML such as scenes, prefabs,
 materials, controllers, animations, presets, SpriteAtlases, TerrainLayers, and
 VFX assets. It also understands JSON-backed asmdef and Shader Graph assets.
-Binary content such as PNG, WAV, and FBX data still needs the live bridge.
+Asmdefs are validated as a single JSON document. Shader Graph document streams
+report `malformed_json` for unfinished objects or non-whitespace between or after
+documents, even when preceding objects parsed successfully. Binary content such
+as PNG, WAV, and FBX data still needs the live bridge.
 
 Offline reads can reconstruct GameObject/component trees, prefab variant
 overrides, GUID references, and integrity signals. Project-wide integrity scans

@@ -20,6 +20,7 @@ Use exact schemas, scoped mutations, and gate evidence to work on the selected U
 - Never silently discard dirty scenes or bypass lifecycle guards. Pure `read_only` snippets must not write, refresh, compile, switch scenes, or change play state; this flag is an assertion, not a sandbox.
 - While the Editor is reachable, prefer typed live edits. Never directly edit an open/dirty scene or asset YAML. Explicitly identify necessary file repair as the offline-file route; preserve GUID/fileID links, check the intended scene, then reimport/reserialize and run scoped validation.
 - Run one test request at a time. `run_id` names the started run, not a poll handle. Do not retry an unresolved run or put server-polled tests/recovery tools in a live batch.
+- If a top-level fix reports `rollback_unavailable` because backup failed, repair temporary-directory space or file permissions before retrying; do not bypass the refusal.
 - Batch arguments are validated before step zero. All-read batches need no mutation scope; mixed batches require aggregate scope. A failed mutation with a skipped gate has not passed validation.
 
 ## Load only the reference needed now

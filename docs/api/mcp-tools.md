@@ -233,7 +233,9 @@ new enforced errors; non-dry-run fixes are refused inside `batch_execute`
 because that rollback snapshot is unavailable there. Applying a fix with
 `gate: "off"` commits without rollback protection; the response carries
 `rollbackDisabled: true` so the mutation is visible and the asset health must
-be verified manually afterward.
+be verified manually afterward. If a touched file cannot be backed up, the fix
+is refused with `rollback_unavailable` before mutation; repair temporary-directory
+space or file permissions before retrying.
 
 Every issue can carry:
 
@@ -258,7 +260,9 @@ Profile-aware tools include `read_asset`, `search_assets`, `scene_get_data`,
 page sizes and expected cost bands.
 
 Legacy `detail` and per-tool caps remain aliases when `page_size` is omitted.
-Prefer `profile` plus uniform paging for new callers.
+Prefer `profile` plus uniform paging for new callers. With `scene_get_data`,
+paged `scene.nodes` rows are flat: descendants appear on their own rows, without
+nested `children` payloads.
 
 Mutating responses include compact per-call Unity console entries in `logs[]`.
 Use `unity_senses_read_console` only when the global console buffer and stack

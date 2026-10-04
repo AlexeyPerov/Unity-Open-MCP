@@ -76,7 +76,9 @@ Both JSON files are created with safe defaults on first access. Corrupt or missi
 The TypeScript service at `src/lib/services/config.ts` exposes:
 
 - `loadSettings()` / `saveSettings(settings)`
-- `loadProjects()` / `saveProjects(projects)`
+- `loadProjects()` / `saveProjects(projects, base)` — returns the merged inventory;
+  unchanged fields retain concurrent backend updates, while conflicting changed
+  fields reject the save. Both arguments are complete `ProjectsFile` snapshots.
 
 These call Tauri commands that handle atomic writes (temp file + rename) and corrupt-file recovery.
 

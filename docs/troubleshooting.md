@@ -316,3 +316,10 @@ See [project command authoring](api/project-commands.md) and [job workflows](api
 - [MCP client configuration](setup/client-configuration.md) — client paths and copy-paste snippets
 - [Bridge HTTP API](api/bridge-http.md) — `/ping` and listener contract
 - [Routing and lifecycle](api/routing-lifecycle.md) — route classes and recovery
+
+## Fix refused: `rollback_unavailable`
+
+If a top-level `apply_fix` cannot back up a touched file, it refuses the fix before
+mutation. Check read permissions on the asset and write permissions/free space in
+the OS temporary directory, then retry. A backup failure never makes rollback
+delete an existing original; file-level restore reports that path as unrestored.

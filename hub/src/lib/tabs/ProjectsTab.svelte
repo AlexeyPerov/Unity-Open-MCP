@@ -1098,10 +1098,7 @@
     actionError = null;
     try {
       const updated = await relinkProject(project.id, selected);
-      // Replace the in-memory entry; the store's `update` persists
-      // through to the same `projects.json` the Rust command already
-      // wrote, but keeping the two paths in sync prevents the UI from
-      // showing stale fields if the persistence layer ever drifts.
+      // Reconcile the returned entry without replacing independent backend fields.
       await projectsStore.update(updated);
       // Re-check existence for the new path and the (now stale) old
       // path so the missing chip clears on the next render.
@@ -2312,8 +2309,8 @@
       const nextList = projectsStore.projects.map((p) =>
         p.id === project.id ? updated : p,
       );
-      await saveProjects({ version: 1, projects: nextList });
-      projectsStore.replaceAll(nextList);
+      const saved = await saveProjects({ version: 1, projects: nextList }, { version: 1, projects: projectsStore.projects });
+      projectsStore.replaceAll(saved.projects);
       envVarsSeededFor = project.id;
       envVarsInfo = `saved ${Object.keys(validation.map).length} env var${Object.keys(validation.map).length === 1 ? "" : "s"}`;
       S.appendDrawerLog(
