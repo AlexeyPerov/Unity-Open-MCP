@@ -327,5 +327,14 @@ namespace UnityOpenMcpVerify.Tests
             // The bare code (issue explainability key) is unaffected.
             Assert.AreEqual("duplicate_component", IssueKey.BareIssueCode(parsedCode));
         }
+
+        [Test]
+        public void TryBuild_InvalidIssue_ReturnsNullInsteadOfThrowing()
+        {
+            Assert.IsNull(IssueKey.TryBuild(new VerifyIssue("rule|x", VerifySeverity.Error, "Assets/A.mat", "code", "d")));
+            Assert.IsNull(IssueKey.TryBuild(new VerifyIssue("rule", VerifySeverity.Error, "", "code", "d")));
+            Assert.AreEqual("rule|ERROR|Assets/A.mat|code",
+                IssueKey.TryBuild(new VerifyIssue("rule", VerifySeverity.Error, "Assets/A.mat", "code", "d")));
+        }
     }
 }

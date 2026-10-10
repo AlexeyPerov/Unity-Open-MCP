@@ -62,7 +62,8 @@ CLI 与 CI 流程还提供健康检查、verify 基线和回归门禁。
 
 ### 只发现所需工具
 
-默认仅显示 `core` 与 `gate-and-verify`；其他领域按需激活。运行时 capabilities
+会话默认启用 `core` 与 `gate-and-verify`，另有少量始终可见的元工具；检测到对应包时，
+Shader Graph、VFX Graph 与 Memory Profiler 分组会自动激活，其他领域按需激活。运行时 capabilities
 提供精确 schema、路由与可用性，项目技能则指导智能体执行 mutate → gate → fix 循环。
 
 ### 安装与维护

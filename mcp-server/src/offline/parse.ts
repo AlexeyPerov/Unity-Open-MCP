@@ -136,7 +136,8 @@ function finishObject(
 
 export function parseJsonAsset(data: string, issues: AssetIntegrityIssue[], singleDocument = false): JsonParsedObject[] {
   const ext = "json";
-  const chunks = singleDocument ? [data] : splitJsonStream(data);
+  // JSON.parse rejects a leading BOM, which Unity-shipped asmdefs often carry.
+  const chunks = singleDocument ? [data.replace(/^\uFEFF/, "")] : splitJsonStream(data);
   if (chunks.length === 0) {
     issues.push({ code: "malformed_json", detail: "no JSON objects found", severity: "error" });
     return [];
@@ -158,7 +159,9 @@ export function parseJsonAsset(data: string, issues: AssetIntegrityIssue[], sing
       });
       continue;
     }
-    out.push(jsonParsedObject(value, i));
+    // Name by document ordinal, not chunk index: a garbage chunk between
+    // documents must not shift the fallback names of the ones after it.
+    out.push(jsonParsedObject(value, out.length));
   }
   return out;
 

@@ -53,7 +53,9 @@ namespace UnityOpenMcpBridge.MetaTools
                 if (i > 0) sb.Append(',');
                 var issue = result.Issues[i];
                 sb.Append('{');
-                sb.Append("\"issueId\":\"").Append(Esc(IssueKey.Build(issue))).Append("\",");
+                var issueId = IssueKey.TryBuild(issue);
+                if (issueId == null) sb.Append("\"issueId\":null,");
+                else sb.Append("\"issueId\":\"").Append(Esc(issueId)).Append("\",");
                 // categoryId mirrors ruleId so agents can match the catalog
                 // field (T2.6).
                 sb.Append("\"ruleId\":\"").Append(Esc(issue.RuleId)).Append("\",");

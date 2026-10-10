@@ -26,7 +26,7 @@
 - **Agent skill sync.** `skills/unity-open-mcp/SKILL.md` is agent-facing guidance. The MCP package owns its synchronization with tool/capability/routing changes and the owning page indexed by `docs/api/mcp-tools.md`; follow [MCP server rules — Agent skill sync](mcp-server/AGENTS.md#agent-skill-sync). Skill install paths come from `skills/client-paths.json`, not per-package constants.
 - **Docs layout and ownership.**
   - Root `README.md` stays short: intro, current feature set, quick links, and a **Documentation** section that is the docs index (no separate `docs/README.md`).
-  - `README.md`'s Documentation section is the docs index and must link every top-level doc, **without duplicating** links already provided by other README sections (Quick setup, Key features, Unity Hub Pro, Contributing). When a new top-level doc is added, link it from this section in the same task.
+  - `README.md`'s Documentation section is the docs index and must link every top-level doc, **without duplicating** links already provided by other README sections (Key features, Quick setup, Contributing). When a new top-level doc is added, link it from this section in the same task.
   - `docs/architecture.md` covers repo structure and cross-package boundaries.
   - `docs/api.md` is the index for externally relevant API interfaces and contracts.
 - **Doc update scope rule.** Edit only docs that match the changed area; avoid unrelated rewrites. If a new docs domain is introduced, add it to `README.md`'s Documentation section in the same task.

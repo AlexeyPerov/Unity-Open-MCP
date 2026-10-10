@@ -4489,6 +4489,7 @@ test("scene_get_data pages nested nodes without retaining descendants in page ro
     } } });
     const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
     const names: string[] = [];
+    const paths: string[] = [];
     let cursor: string | undefined;
     do {
       const body = parseBody(await router.route("unity_open_mcp_scene_get_data", {
@@ -4498,9 +4499,11 @@ test("scene_get_data pages nested nodes without retaining descendants in page ro
       assert.equal(nodes.length, 1);
       assert.equal("children" in nodes[0], false);
       names.push(nodes[0].name as string);
+      paths.push(nodes[0].path as string);
       cursor = (body.pagination as { next_cursor: string | null }).next_cursor ?? undefined;
     } while (cursor);
     assert.deepEqual(names, ["Root", "Child", "Leaf"]);
+    assert.deepEqual(paths, ["Root", "Root/Child", "Root/Child/Leaf"]);
   });
 });
 

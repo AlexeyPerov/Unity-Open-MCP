@@ -1,26 +1,22 @@
+# Docs CI — local Markdown links/anchors, heading hierarchy, tables, and index
+# coverage (scripts/check-docs.mjs).
+#
+# Not path-filtered: docs link into screenshots, brand assets, package rules,
+# skills, and source files, so renaming or deleting any tracked file can break a
+# link. The check is a dependency-free Node script that runs in seconds.
+
 name: docs
 
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - "README*.md"
-      - "docs/**"
-      - "assets/brand/**"
-      - "scripts/check-docs.mjs"
-      - "scripts/README.md"
-      - ".github/workflows/docs.yml"
   push:
     branches:
       - master
       - main
-    paths:
-      - "README*.md"
-      - "docs/**"
-      - "assets/brand/**"
-      - "scripts/check-docs.mjs"
-      - "scripts/README.md"
-      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
 
 jobs:
   validate:

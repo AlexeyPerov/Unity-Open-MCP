@@ -3609,3 +3609,15 @@ for (const [extension, data] of [
     } finally { await rm(tmp, { recursive: true, force: true }); }
   });
 }
+
+test("offline asmdef parses with a leading UTF-8 BOM", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-json-bom-"));
+  try {
+    await mkdir(join(tmp, "Assets"));
+    const path = "Assets/Test.asmdef";
+    await writeFile(join(tmp, path), '\uFEFF{"name":"Assembly"}');
+    const { model } = await readAssetOffline(path, { fieldLimit: 0, projectRoot: tmp });
+    assert.equal(model.integrity?.some(issue => issue.code === "malformed_json") ?? false, false);
+    assert.ok((model.flatObjects?.length ?? 0) >= 1);
+  } finally { await rm(tmp, { recursive: true, force: true }); }
+});

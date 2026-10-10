@@ -24,22 +24,22 @@
 
 | 客户端 | 配置文件 | 片段 |
 |---|---|---|
-| Cursor | `<project>/.cursor/mcp.json` | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
-| Claude Desktop | OS 全局配置 | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
+| Cursor | `<project>/.cursor/mcp.json` | [`mcpServers`](#mcpserverscursor-与大多数客户端) |
+| Claude Desktop | OS 全局配置 | [`mcpServers`](#mcpserverscursor-与大多数客户端) |
 | Claude Code | `<project>/.mcp.json`（项目范围）或 CLI | [`Claude Code`](#claude-code) |
 | VS Code Copilot | `<project>/.vscode/mcp.json` | [VS Code](#vs-code-与-visual-studio-copilot) |
 | Visual Studio Copilot | `<project>/.vs/mcp.json` | [VS Code](#vs-code-与-visual-studio-copilot) |
 | OpenCode | `<project>/opencode.json` | [OpenCode](#opencode) |
 | ZCode | `<project>/.zcode/config.json`（个人：`~/.zcode/cli/config.json`） | [ZCode](#zcode) |
 | Codex | `<project>/.codex/config.toml` | [Codex](#codex) |
-| Cline | 客户端全局 MCP 设置 | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
-| Gemini CLI | `<project>/.gemini/settings.json` | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
-| GitHub Copilot CLI | `<project>/.mcp.json` | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
-| Kilo Code | `<project>/.kilocode/mcp.json` | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
-| Rider (Junie) | `<project>/.junie/mcp/mcp.json` | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
-| Unity AI | `<project>/UserSettings/mcp.json` | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
-| ZooCode | `<project>/.roo/mcp.json` | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
-| Antigravity | 全局 Antigravity MCP 配置 | [`mcpServers`](#mcpservers-cursor-与大多数客户端) |
+| Cline | 客户端全局 MCP 设置 | [`mcpServers`](#mcpserverscursor-与大多数客户端) |
+| Gemini CLI | `<project>/.gemini/settings.json` | [`mcpServers`](#mcpserverscursor-与大多数客户端) |
+| GitHub Copilot CLI | `<project>/.mcp.json` | [`mcpServers`](#mcpserverscursor-与大多数客户端) |
+| Kilo Code | `<project>/.kilocode/mcp.json` | [`mcpServers`](#mcpserverscursor-与大多数客户端) |
+| Rider (Junie) | `<project>/.junie/mcp/mcp.json` | [`mcpServers`](#mcpserverscursor-与大多数客户端) |
+| Unity AI | `<project>/UserSettings/mcp.json` | [`mcpServers`](#mcpserverscursor-与大多数客户端) |
+| ZooCode | `<project>/.roo/mcp.json` | [`mcpServers`](#mcpserverscursor-与大多数客户端) |
+| Antigravity | 全局 Antigravity MCP 配置 | [`mcpServers`](#mcpserverscursor-与大多数客户端) |
 
 只要客户端支持，优先使用项目级路径。
 

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../hub/src-tauri/icons/Square310x310Logo.png" alt="MCP for Unity" width="250">
+  <img src="../assets/brand/openmcp-symbol.svg" alt="Unity Open MCP" width="120">
 </p>
 
 # Unity Hub Pro

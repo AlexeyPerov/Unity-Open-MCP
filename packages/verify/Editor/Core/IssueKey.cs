@@ -29,6 +29,18 @@ namespace UnityOpenMcpVerify
             return Build(issue.RuleId, issue.Severity, issue.AssetPath, issue.IssueCode);
         }
 
+        /// <summary>
+        /// Build the key, or null when the issue cannot form a valid key (e.g.
+        /// an extension rule emitting an empty asset path or a '|' in its rule
+        /// id). Read-only listings use this so one non-conforming issue does
+        /// not fail the whole response.
+        /// </summary>
+        public static string TryBuild(VerifyIssue issue)
+        {
+            try { return Build(issue); }
+            catch (ArgumentException) { return null; }
+        }
+
         public static bool TryParse(string key, out string ruleId, out VerifySeverity severity, out string assetPath, out string issueCode)
         {
             ruleId = null;

@@ -97,7 +97,9 @@ namespace UnityOpenMcpBridge.MetaTools
                 if (i > 0) sb.Append(',');
                 var issue = result.Issues[i];
                 sb.Append('{');
-                sb.Append("\"issueId\":\"").Append(Esc(IssueKey.Build(issue))).Append("\",");
+                var issueId = IssueKey.TryBuild(issue);
+                if (issueId == null) sb.Append("\"issueId\":null,");
+                else sb.Append("\"issueId\":\"").Append(Esc(issueId)).Append("\",");
                 // categoryId is the spec-named alias for ruleId (T2.6). Both
                 // are emitted so agents can match either the catalog field or
                 // the issue-key component.

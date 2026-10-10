@@ -24,10 +24,16 @@ namespace UnityOpenMcpBridge.MetaTools
         private static List<object> _cachedReferences;
         private static int _cachedReferenceAssemblyCount = -1;
         // AssemblyMetadata instances owned by the current _cachedReferences
-        // (stream-factory path). Disposed on rebuild / Reinitialize so the
-        // prefetched metadata blobs (native memory) are freed promptly instead
-        // of waiting for finalizers.
+        // (stream-factory path). Disposed on rebuild / Reinitialize / domain
+        // reload so the prefetched metadata blobs (native memory) are freed
+        // promptly instead of waiting for finalizers.
         private static List<IDisposable> _cachedReferenceMetadata;
+        // The cache lives in static fields, so a domain reload drops the list
+        // without disposing it - and the blobs are native memory the old
+        // domain's teardown is not guaranteed to finalize. Every recompile and
+        // play-mode entry would then strand one full set (one per ~400
+        // referenced assemblies). Registered once per domain, on first build.
+        private static bool _reloadDisposeHooked;
         // Test seam: number of full reference-list rebuilds this domain. The
         // fd-exhaustion regression test pins that loading a byte[] snippet
         // assembly between two compiles does NOT trigger a rebuild
@@ -623,6 +629,11 @@ namespace UnityOpenMcpBridge.MetaTools
             _cachedReferences = references;
             _cachedReferenceMetadata = owned;
             _cachedReferenceAssemblyCount = referencable;
+            if (!_reloadDisposeHooked)
+            {
+                _reloadDisposeHooked = true;
+                AssemblyReloadEvents.beforeAssemblyReload += DisposeCachedReferences;
+            }
             FileBackedReferenceCount = fileBacked;
             return references;
         }

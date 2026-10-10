@@ -960,6 +960,22 @@ namespace UnityOpenMcpBridge
                     {
                         var issueId = JsonBody.GetString(body, "issue_id");
                         pathsHint = BridgeRequestBody.PathsFromIssueId(issueId);
+                        if (pathsHint == null)
+                        {
+                            // The scope comes from the issue id, so an unparseable
+                            // id is the real error - not a missing paths_hint.
+                            var refusal = string.IsNullOrEmpty(issueId)
+                                ? ToolDispatchResult.Fail("missing_parameter",
+                                    "'issue_id' is required and must be non-empty.")
+                                : ToolDispatchResult.Fail("invalid_issue_id",
+                                    $"Issue id '{issueId}' is not a valid issue key. Expected format: {{ruleId}}|{{severity}}|{{assetPath}}|{{issueCode}}");
+                            var rejected = GatePolicy.Skipped(refusal, "request_rejected");
+                            contract.Decorate(rejected, sw.ElapsedMilliseconds);
+                            BridgeAuditRecorder.RecordGateRun(toolName, effectiveGateMode, rejected, null);
+                            BridgeActivityRecorder.ApplyToolResultToActivity(activity, rejected, sw.ElapsedMilliseconds);
+                            BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildGateEnvelope(rejected, effectiveGateMode, contract.Lifecycle));
+                            return;
+                        }
                     }
                     else if (toolName == "unity_open_mcp_reserialize")
                     {

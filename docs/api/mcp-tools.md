@@ -256,7 +256,14 @@ Every issue can carry:
 codes escape `%` as `%25` and `|` as `%7C`, so parsing recovers the exact fix
 target. Do not replace delimiters with underscores or decode a key before
 passing it to a tool. Regenerate checkpoints/baselines after changing the key
-format; stored keys are not migrated.
+format; stored keys are not migrated. `issueId` is `null` for an issue that
+cannot form a valid key (for example an extension rule with an empty asset path);
+such an issue is listed but cannot be targeted by `apply_fix`. A non-dry-run
+`apply_fix` with an unparseable `issue_id` fails with `invalid_issue_id`.
+
+`mutation_explain` with a `checkpoint_id` follows the `delta` contract: when the
+checkpoint or the fresh validation has failed rules it returns
+`validation_incomplete` with `rulesFailed` instead of a delta.
 
 ## Output shaping
 
@@ -274,7 +281,8 @@ page sizes and expected cost bands.
 Legacy `detail` and per-tool caps remain aliases when `page_size` is omitted.
 Prefer `profile` plus uniform paging for new callers. With `scene_get_data`,
 paged `scene.nodes` rows are flat: descendants appear on their own rows, without
-nested `children` payloads.
+nested `children` payloads. Each row carries its hierarchy `path`
+(`Root/Child/Leaf`), so rows stay addressable across pages.
 
 Mutating responses include compact per-call Unity console entries in `logs[]`.
 Use `unity_senses_read_console` only when the global console buffer and stack

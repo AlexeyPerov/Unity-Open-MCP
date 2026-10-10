@@ -1317,10 +1317,13 @@ export class LiveClient implements Router {
           attempt === 1 ? "" : "s"
         }; the bridge is reachable by /ping but POSTs keep failing.`
       : "";
+    const ambiguity = shouldRetryPostAfterFailure(err)
+      ? `The connection was refused before the request reached the bridge, so it was not applied.`
+      : `A socket failure, timeout, or endpoint change does not prove the original ` +
+        `operation was not applied; verify its effect before retrying.`;
     const message =
       `Tool '${toolName}' did not return a confirmed result. No further POST was sent. ` +
-      `A socket failure, timeout, or endpoint change does not prove the original ` +
-      `operation was not applied; verify its effect before retrying. Endpoint: ${this.baseUrl}.${exhaustedNote}`;
+      `${ambiguity} Endpoint: ${this.baseUrl}.${exhaustedNote}`;
     return makeErrorResult({
       code: "bridge_offline",
       message,

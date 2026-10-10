@@ -37,6 +37,12 @@ async function timedInvoke<T>(label: string, fn: () => Promise<T>): Promise<T> {
 export class ProjectsStore {
   private saveQueue: Promise<void> = Promise.resolve();
   private saveRevision = 0;
+  /**
+   * Last backend-confirmed `aiSetupWizard` value per project id, from the
+   * most recent load / save response / resync. A failed draft save reverts
+   * to this rather than to its call-time snapshot.
+   */
+  private confirmedDrafts = new Map<string, AiSetupWizardDraft | undefined>();
   projects = $state<ProjectEntry[]>([]);
   selectedProjectId = $state<string | null>(null);
   loading = $state(false);
@@ -80,6 +86,7 @@ export class ProjectsStore {
         timedInvoke("loadSettings", () => settingsStore.load()),
       ]);
       this.projects = projectsFile.projects;
+      this.recordConfirmed(projectsFile.projects);
     } catch (e) {
       this.error = e instanceof Error ? e.message : String(e);
       this.projects = [];
@@ -147,7 +154,16 @@ export class ProjectsStore {
       await this.persist(this.projects, base);
     } catch (error) {
       if (revision === this.saveRevision) {
-        entry.aiSetupWizard = base.projects.find((p) => p.id === id)?.aiSetupWizard;
+        // Revert to the last backend-confirmed draft, never to the call-time
+        // snapshot: that snapshot may hold an earlier draft whose save also
+        // failed, and using it as the next base would conflict forever.
+        const current = this.find(id);
+        if (current) {
+          const confirmed = this.confirmedDrafts.has(id)
+            ? this.confirmedDrafts.get(id)
+            : base.projects.find((p) => p.id === id)?.aiSetupWizard;
+          current.aiSetupWizard = confirmed === undefined ? undefined : structuredClone(confirmed);
+        }
       }
       throw error;
     }
@@ -181,11 +197,46 @@ export class ProjectsStore {
     const revision = ++this.saveRevision;
     const write = this.saveQueue.then(() => saveProjects(payload, base));
     this.saveQueue = write.then(() => {}, () => {});
-    const saved = await write;
+    let saved: ProjectsFile;
+    try {
+      saved = await write;
+    } catch (error) {
+      // The latest save failed: earlier saves may have succeeded with their
+      // responses dropped (superseded), so the local list and the base of the
+      // next edit can be stale. Resync from the backend's in-memory state. A
+      // superseded failure needs no resync here — the newest save's own
+      // response (or failure resync) reconciles the list.
+      if (revision === this.saveRevision) await this.resync(revision);
+      throw error;
+    }
+    this.recordConfirmed(saved.projects);
     // A pending edit owns newer local values; let its response reconcile the list.
     if (revision !== this.saveRevision) return;
-    // Preserve existing row identities while reconciling authoritative fields.
-    const rows = saved.projects.map((savedEntry) => {
+    this.reconcile(saved.projects);
+  }
+
+  /** Reload the authoritative list unless a newer save has started meanwhile. */
+  private async resync(revision: number): Promise<void> {
+    try {
+      const file = await loadProjects();
+      this.recordConfirmed(file.projects);
+      if (revision === this.saveRevision) this.reconcile(file.projects);
+    } catch (e) {
+      S.appendDrawerLog(
+        `[projects] resync after failed save failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  private recordConfirmed(list: ProjectEntry[]): void {
+    this.confirmedDrafts = new Map(
+      list.map((p) => [p.id, p.aiSetupWizard === undefined ? undefined : structuredClone(p.aiSetupWizard)]),
+    );
+  }
+
+  /** Apply an authoritative list while preserving existing row identities. */
+  private reconcile(list: ProjectEntry[]): void {
+    const rows = list.map((savedEntry) => {
       const existing = this.find(savedEntry.id);
       if (!existing) return savedEntry;
       for (const key of Object.keys(existing) as Array<keyof ProjectEntry>) {

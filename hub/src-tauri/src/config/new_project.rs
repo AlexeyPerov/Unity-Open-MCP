@@ -318,7 +318,9 @@ fn write_project_manifest(staging: &Path, pipeline_line: Option<&str>) -> std::i
     let path = staging.join("Packages/manifest.json");
     let content = match fs::read_to_string(&path) {
         Ok(content) => {
-            let mut manifest: serde_json::Value = serde_json::from_str(&content)?;
+            // Unity tolerates a UTF-8 BOM in manifest.json; serde_json does not.
+            let content = content.strip_prefix('\u{FEFF}').unwrap_or(&content);
+            let mut manifest: serde_json::Value = serde_json::from_str(content)?;
             merge_pipeline(&mut manifest, pipeline_line)?;
             serde_json::to_string_pretty(&manifest)? + "\n"
         }
@@ -371,7 +373,12 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
             let entry = entry?;
             // Canonicalize resolves relative symlinks against their own parent,
             // and reports broken links instead of silently dropping content.
-            let from = fs::canonicalize(entry.path())?;
+            let from = fs::canonicalize(entry.path()).map_err(|e| {
+                std::io::Error::new(
+                    e.kind(),
+                    format!("cannot resolve {}: {}", entry.path().display(), e),
+                )
+            })?;
             let to = dst.join(entry.file_name());
             if from.is_dir() {
                 copy(&from, &to, ancestors)?;
@@ -658,16 +665,7 @@ pub fn create_new_project(
     // Register the new project. We register *after* the rename so
     // projects.json never references a path that is not on disk.
     let now_iso = chrono::Utc::now().to_rfc3339();
-    // M15 T6.4: stamp the chosen pipeline onto the row so the Projects
-    // tab shows the right chip from the first paint, before the user
-    // has opened the project. The label mirrors the canonical short
-    // form the SRP detector produces (`URP` / `HDRP` / `BIRP`); `None`
-    // is the Built-in Render Pipeline.
-    let render_pipeline_label = match params.pipeline {
-        RenderPipeline::URP => "URP".to_string(),
-        RenderPipeline::HDRP => "HDRP".to_string(),
-        RenderPipeline::None => "BIRP".to_string(),
-    };
+    let render_pipeline_label = derive_render_pipeline_label(params.pipeline, &target);
     let entry = ProjectEntry {
         id: uuid::Uuid::new_v4().to_string(),
         name: name.clone(),
@@ -745,6 +743,21 @@ fn canonicalize_for_compare(path: &str) -> String {
     fs::canonicalize(Path::new(path))
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| path.to_string())
+}
+
+/// Render-pipeline label stamped onto a freshly created row, so the Projects
+/// tab shows the right chip before the project is first opened. An explicit
+/// URP/HDRP choice wins (the empty scaffold has no GraphicsSettings yet).
+/// With no pipeline selected, a template keeps its own SRP setup, so the
+/// label comes from the same on-disk detector `refresh_all_projects` uses.
+fn derive_render_pipeline_label(pipeline: RenderPipeline, project_dir: &Path) -> String {
+    match pipeline {
+        RenderPipeline::URP => "URP".to_string(),
+        RenderPipeline::HDRP => "HDRP".to_string(),
+        RenderPipeline::None => crate::config::render_pipeline::read_render_pipeline(project_dir)
+            .label()
+            .to_string(),
+    }
 }
 
 fn pipeline_label(p: RenderPipeline) -> &'static str {
@@ -1409,5 +1422,80 @@ mod tests {
         fs::remove_file(src.join("loop")).unwrap();
         std::os::unix::fs::symlink("absent", src.join("broken")).unwrap();
         assert!(copy_dir_all(&src, &dir.path().join("copy2")).is_err());
+    }
+
+    fn urp_template_with_bom_manifest() -> tempfile::TempDir {
+        let tpl = tempfile::tempdir().unwrap();
+        make_dir(&tpl.path().join("Assets"));
+        make_dir(&tpl.path().join("ProjectSettings"));
+        make_dir(&tpl.path().join("Packages"));
+        fs::write(
+            tpl.path().join("ProjectSettings/GraphicsSettings.asset"),
+            "GraphicsSettings:\n  m_SRPDefaultSettings:\n    UnityEngine.Rendering.Universal.UniversalRenderPipeline: {fileID: 11400000, guid: abc, type: 2}\n",
+        )
+        .unwrap();
+        fs::write(
+            tpl.path().join("Packages/manifest.json"),
+            "\u{FEFF}{\"dependencies\":{\"com.unity.render-pipelines.universal\":\"17.0.3\"}}",
+        )
+        .unwrap();
+        tpl
+    }
+
+    fn template_params(tpl: &Path, out: &Path, pipeline: RenderPipeline) -> NewProjectParams {
+        NewProjectParams {
+            parent: out.to_string_lossy().to_string(),
+            name: "P".to_string(),
+            version: "6000.0.1f1".to_string(),
+            pipeline,
+            bundle_version: "1.0.0".to_string(),
+            template: Some(TemplateRef {
+                source: "custom".to_string(),
+                path: tpl.to_string_lossy().to_string(),
+            }),
+            overwrite: false,
+        }
+    }
+
+    #[test]
+    fn scaffold_accepts_template_manifest_with_utf8_bom() {
+        let tpl = urp_template_with_bom_manifest();
+        let out = tempfile::tempdir().unwrap();
+        let params = template_params(tpl.path(), out.path(), RenderPipeline::HDRP);
+        scaffold_into(out.path(), &params, "6000.0.1f1", "1.0.0").unwrap();
+        let manifest = fs::read_to_string(out.path().join("Packages/manifest.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+        assert_eq!(parsed["dependencies"]["com.unity.render-pipelines.universal"], "17.0.3");
+        assert!(parsed["dependencies"]["com.unity.render-pipelines.high-definition"].is_string());
+    }
+
+    #[test]
+    fn render_pipeline_label_for_none_comes_from_the_scaffolded_template() {
+        let tpl = urp_template_with_bom_manifest();
+        let out = tempfile::tempdir().unwrap();
+        let params = template_params(tpl.path(), out.path(), RenderPipeline::None);
+        scaffold_into(out.path(), &params, "6000.0.1f1", "1.0.0").unwrap();
+        assert_eq!(derive_render_pipeline_label(RenderPipeline::None, out.path()), "URP");
+        // An explicit choice is stamped as chosen.
+        assert_eq!(derive_render_pipeline_label(RenderPipeline::HDRP, out.path()), "HDRP");
+
+        // The empty scaffold with no pipeline is the Built-in pipeline.
+        let empty = tempfile::tempdir().unwrap();
+        let mut params = template_params(tpl.path(), empty.path(), RenderPipeline::None);
+        params.template = None;
+        scaffold_into(empty.path(), &params, "6000.0.1f1", "1.0.0").unwrap();
+        assert_eq!(derive_render_pipeline_label(RenderPipeline::None, empty.path()), "BIRP");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_dir_all_names_a_dangling_symlink() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        make_dir(&src.path().join("Assets"));
+        let link = src.path().join("Assets/broken");
+        std::os::unix::fs::symlink(src.path().join("missing"), &link).unwrap();
+        let err = copy_dir_all(src.path(), &dst.path().join("out")).unwrap_err();
+        assert!(err.to_string().contains("broken"), "error names the path: {err}");
     }
 }

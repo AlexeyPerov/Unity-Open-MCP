@@ -664,29 +664,51 @@ namespace UnityOpenMcpBridge.TypedTools
             if (explicitCheckpoint != null)
             {
                 scopePaths = explicitCheckpoint.Paths;
+                VerifyResult current;
                 try
                 {
                     var paths = explicitCheckpoint.Paths ?? Array.Empty<string>();
-                    var current = VerifyGateAdapter.ValidatePaths(
+                    current = VerifyGateAdapter.ValidatePaths(
                         paths, explicitCheckpoint.Categories);
-                    delta = VerifyGateAdapter.ComputeDelta(
-                        explicitCheckpoint.Fingerprint, current);
-                    categoriesRun = current.CategoriesRun;
-                    validationMs = current.DurationMs;
-                    // No recorded outcome for a checkpoint-comparison path; the
-                    // narrative derives the outcome from the delta instead.
-                    outcomeLabel = delta.NewErrors > 0 ? "would_fail" : "clean";
-                    toolName = "checkpoint_compare";
-                }
-                catch (FormatException e)
-                {
-                    return ToolDispatchResult.Fail("delta_error",
-                        $"Delta computation failed: {e.Message}");
                 }
                 catch (Exception e)
                 {
                     return ToolDispatchResult.Fail("validation_error", e.Message);
                 }
+
+                // Same contract as `delta`: ComputeDelta refuses incomplete
+                // verification, so surface the failed rules as a structured
+                // `validation_incomplete` instead of a generic error.
+                var failedRules = new HashSet<string>(explicitCheckpoint.Fingerprint.RulesFailed ?? Array.Empty<string>());
+                failedRules.UnionWith(current.RulesFailed ?? Array.Empty<string>());
+                if (failedRules.Count > 0)
+                {
+                    var ordered = new List<string>(failedRules);
+                    ordered.Sort(StringComparer.Ordinal);
+                    var escaped = new List<string>(ordered.Count);
+                    foreach (var rule in ordered) escaped.Add(BridgeJson.EscapeString(rule));
+                    return ToolDispatchResult.FailWithDetail("validation_incomplete",
+                        "Explain unavailable because checkpoint or validation rules failed: " + string.Join(", ", ordered),
+                        "{\"rulesFailed\":[" + string.Join(",", escaped) + "]}",
+                        new[] { "Resolve the rule failures, create a fresh checkpoint, and validate again before trusting a delta." });
+                }
+
+                try
+                {
+                    delta = VerifyGateAdapter.ComputeDelta(
+                        explicitCheckpoint.Fingerprint, current);
+                }
+                catch (Exception e)
+                {
+                    return ToolDispatchResult.Fail("delta_error",
+                        $"Delta computation failed: {e.Message}");
+                }
+                categoriesRun = current.CategoriesRun;
+                validationMs = current.DurationMs;
+                // No recorded outcome for a checkpoint-comparison path; the
+                // narrative derives the outcome from the delta instead.
+                outcomeLabel = delta.NewErrors > 0 ? "would_fail" : "clean";
+                toolName = "checkpoint_compare";
             }
             else
             {

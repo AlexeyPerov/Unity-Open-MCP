@@ -6,16 +6,16 @@ This file is the index for external interfaces and protocol contracts exposed by
 
 | Document | Covers |
 |---|---|
-| `dialog-policy.md` | Startup/steady-state Unity modal auto-dismiss, `UNITY_OPEN_MCP_DIALOG_POLICY`, and related env vars. |
-| `api/bridge-http.md` | Unity bridge HTTP endpoints (`/ping`, `/tools/*`, `/resources*`), envelopes, and errors. |
-| `api/mcp-tools.md` | MCP tool-family overview, example prompts, and focused-reference index. |
-| `api/tool-groups.md` | Session defaults, group activation, compiled availability, and auto-activation. |
-| `api/routing-lifecycle.md` | Live/batch/offline/local routing, lifecycle recovery, offline coverage, and errors. |
-| `api/cli-automation.md` | CLI command and automation reference; links to canonical CI behavior. |
-| `api/input-simulation.md` | Pointer delivery, keyboard and touch frames, frame stepping, and supported input boundaries. |
-| `api/project-commands.md` | Project-owned command declaration, discovery, invocation, schemas, and safety boundaries. |
-| `api/jobs.md` | Asynchronous job lifecycle, observation, idempotency, cancellation, retention, and adapters. |
-| `api/resources.md` | MCP resource URIs, payload shapes, and resource router behavior. |
+| [`dialog-policy.md`](dialog-policy.md) | Startup/steady-state Unity modal auto-dismiss, `UNITY_OPEN_MCP_DIALOG_POLICY`, and related env vars. |
+| [`api/bridge-http.md`](api/bridge-http.md) | Unity bridge HTTP endpoints (`/ping`, `/tools/*`, `/resources*`), envelopes, and errors. |
+| [`api/mcp-tools.md`](api/mcp-tools.md) | MCP tool-family overview, example prompts, and focused-reference index. |
+| [`api/tool-groups.md`](api/tool-groups.md) | Session defaults, group activation, compiled availability, and auto-activation. |
+| [`api/routing-lifecycle.md`](api/routing-lifecycle.md) | Live/batch/offline/local routing, lifecycle recovery, offline coverage, and errors. |
+| [`api/cli-automation.md`](api/cli-automation.md) | CLI command and automation reference; links to canonical CI behavior. |
+| [`api/input-simulation.md`](api/input-simulation.md) | Pointer delivery, keyboard and touch frames, frame stepping, and supported input boundaries. |
+| [`api/project-commands.md`](api/project-commands.md) | Project-owned command declaration, discovery, invocation, schemas, and safety boundaries. |
+| [`api/jobs.md`](api/jobs.md) | Asynchronous job lifecycle, observation, idempotency, cancellation, retention, and adapters. |
+| [`api/resources.md`](api/resources.md) | MCP resource URIs, payload shapes, and resource router behavior. |
 
 ## Contract boundaries
 

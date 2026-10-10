@@ -3768,13 +3768,21 @@ function pageSceneNodes(
  */
 function flattenSceneBody(body: Record<string, unknown>): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
-  const walk = (node: unknown) => {
+  // Rows are flat (no nested `children`), so each carries its hierarchy
+  // `path` — otherwise same-named nodes on a page cannot be told apart or
+  // addressed once a depth limit or truncation desyncs `childCount`.
+  const walk = (node: unknown, parentPath: string | undefined) => {
     if (!node || typeof node !== "object") return;
     const obj = node as Record<string, unknown>;
     const { children, ...flatNode } = obj;
+    const name = typeof obj.name === "string" ? obj.name : undefined;
+    const path = typeof obj.path === "string"
+      ? obj.path
+      : name === undefined ? undefined : parentPath === undefined ? name : `${parentPath}/${name}`;
+    if (path !== undefined && flatNode.path === undefined) flatNode.path = path;
     out.push(flatNode);
     if (Array.isArray(children)) {
-      for (const child of children) walk(child);
+      for (const child of children) walk(child, path);
     }
   };
 
@@ -3791,7 +3799,7 @@ function flattenSceneBody(body: Record<string, unknown>): Record<string, unknown
   // accept either.
   const rootField = Array.isArray(scene.roots) ? scene.roots : scene.rootGameObjects;
   if (Array.isArray(rootField)) {
-    for (const root of rootField) walk(root);
+    for (const root of rootField) walk(root, undefined);
   }
   return out;
 }

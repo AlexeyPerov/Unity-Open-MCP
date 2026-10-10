@@ -67,8 +67,10 @@ See [Project commands](docs/api/project-commands.md) and
 
 ### Discover only what you need
 
-Only `core` and `gate-and-verify` are visible by default; activate the other
-domains on demand. Runtime capabilities provide exact schemas, routes, and
+Sessions start with `core` and `gate-and-verify`, plus a small set of
+always-visible meta-tools; Shader Graph, VFX Graph, and Memory Profiler groups
+auto-activate when their packages are detected, and every other domain is
+activated on demand. Runtime capabilities provide exact schemas, routes, and
 availability, while project skills teach agents the mutate → gate → fix loop.
 
 ### Install and maintain
