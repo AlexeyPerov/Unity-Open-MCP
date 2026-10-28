@@ -23,7 +23,7 @@ definitions live in `mcp-server/src/tools/`.
 | [CLI and automation](cli-automation.md) | CLI commands, options, JSON output, and links to canonical CI behavior. |
 | [CI templates](../ci/README.md) | Pipeline shape, CLI exit codes, baselines, and provider templates. |
 | [Input simulation](input-simulation.md) | Input backends (legacy Input Manager / Input System), pointer delivery and `raycast_real`, touch, gestures over real frames, target by label (`target_text`), frame stepping, and supported input boundaries. |
-| [Playtest tools](playtest.md) | `ui_snapshot` (uGUI screen as an accessibility tree: text, visibility, occlusion, diagnostics), profiles and paging, the snapshot → tap-by-label loop, `game_view` (Game view resolution, Device Simulator device / orientation, safe area, settle-on-return), `playtest_wait` (wait until a log / UI / object / project-predicate condition holds, timeout, time scale for the wait, fail on exception), `capture_series` (frame-scheduled composed captures, metrics, contact sheet; gesture `capture_at_ms`) and `player_state` (snapshot / diff / restore of PlayerPrefs, `persistentDataPath` and opt-in EditorPrefs; restore overwrites state and removes files not in the snapshot). |
+| [Playtest tools](playtest.md) | `ui_snapshot` (uGUI screen as an accessibility tree: text, visibility, occlusion, diagnostics), profiles and paging, the snapshot → tap-by-label loop, `game_view` (Game view resolution, Device Simulator device / orientation, safe area, settle-on-return), `playtest_wait` (wait until a log / UI / object / project-predicate condition holds, timeout, time scale for the wait, fail on exception), `capture_series` (frame-scheduled composed captures, metrics, contact sheet; gesture `capture_at_ms`), `player_state` (snapshot / diff / restore of PlayerPrefs, `persistentDataPath` and opt-in EditorPrefs; restore overwrites state and removes files not in the snapshot) and `playtest_session` (record a playtest — steps, verdicts, frames, the console errors each step caused — into a Markdown report for a human). The workflow is in the [Playtest guide](../playtest-guide.md). |
 | [Project commands](project-commands.md) | Editor-only authoring, typed list/describe/invoke, schema versions and safety boundaries. |
 | [Asynchronous jobs](jobs.md) | Job lifecycle, observation, idempotency, cancellation, retention and adapter contracts. |
 | [MCP resources](resources.md) | Resource URIs, payloads, and resource routing. |
@@ -66,8 +66,9 @@ definitions live in `mcp-server/src/tools/`.
   (`ui_snapshot`: texts, visibility, overflow / placeholder / touch-size
   diagnostics), tap controls by their on-screen label, wait until the game gets
   somewhere (`playtest_wait`), capture timed frame series of animated content
-  (`capture_series`) and sandbox the player's save around a session
-  (`player_state`).
+  (`capture_series`), sandbox the player's save around a session
+  (`player_state`) and record the session as a reviewable report
+  (`playtest_session`).
 - **Discovery** — capabilities, rules, skill generation, and tool-group
   management.
 - **Unity Hub control** — editor discovery, release listing, installs, modules,

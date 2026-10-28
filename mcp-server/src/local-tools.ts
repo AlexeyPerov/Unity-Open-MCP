@@ -17,6 +17,9 @@ export const LOCAL_TOOL_NAMES: ReadonlySet<string> = new Set([
   "unity_open_mcp_read_compile_errors",
   "unity_open_mcp_jobs",
   "unity_senses_pull_events",
+  // The playtest session log lives in the server; it reads the bridge only
+  // through the normal route of the tools it records.
+  "unity_open_mcp_playtest_session",
 ]);
 
 export function isLocalTool(name: string): boolean {

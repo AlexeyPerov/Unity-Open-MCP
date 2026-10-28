@@ -28,7 +28,8 @@ Pinned exceptions:
 - Always offline: `list_assets`.
 - Live compile snapshot with offline log fallback, never batch: `read_compile_errors`.
 - Always local: `capabilities`, `manage_tools`, `generate_skill`,
-  `bridge_status`, `restart_editor`, `resource_pressure`, `jobs`, `hub_*`, and
+  `bridge_status`, `restart_editor`, `resource_pressure`, `jobs`,
+  `playtest_session` (its bridge reads go through the normal route), `hub_*`, and
   event-pull meta-tools.
 - Always offline when transitive impact is requested: `dependencies` with
   `include_impact=true`.

@@ -307,6 +307,17 @@ export const RECOMMENDED_TOOL_CHAINS: RecommendedToolChain[] = [
     ],
   },
   {
+    name: "playtest-session-report",
+    task: "Run a smoke playtest a human can review afterwards: every step, the frame it showed, the errors it caused and a verdict, in one report.",
+    steps: [
+      "unity_open_mcp_game_view (action set_device or set_resolution) — the device first; captures name it",
+      "unity_open_mcp_playtest_session (action start, name, snapshot true — or invoke the project's playtest.begin hook)",
+      "boot through the project's own commands (unity_open_mcp_project_commands list query playtest), never by reflecting into launchers",
+      "loop: unity_open_mcp_ui_snapshot → act by target_text or inputsim_gesture → unity_open_mcp_playtest_wait on a condition → unity_senses_capture_series → unity_open_mcp_playtest_session (action mark, label, verdict, note)",
+      "unity_open_mcp_playtest_session (action end) — hand the report path to the human; restore the state or invoke playtest.end",
+    ],
+  },
+  {
     name: "device-layout-check",
     task: "Check a screen's layout on a phone (notch / safe area) or at a fixed resolution, with frames a human can compare.",
     steps: [

@@ -90,6 +90,11 @@ export class BridgeEventStream {
   // sees events emitted AFTER its first pull.
   private readonly cursors: Map<string, number> = new Map();
 
+  // Observers that see every event as it arrives without consuming the queue
+  // (the playtest session recorder correlates console errors with the calls
+  // it records). A throwing listener never breaks the reader.
+  private readonly listeners: Set<(evt: BridgeEvent) => void> = new Set();
+
   // baseUrl/authToken are mutable: connect() re-resolves them from the
   // instance lock (resolveRefreshedEndpoint) because the bridge rotates its
   // bearer token on every domain reload / editor restart. projectPath/envPort
@@ -284,6 +289,9 @@ export class BridgeEventStream {
   }
 
   private enqueue(evt: BridgeEvent): void {
+    for (const listener of this.listeners) {
+      try { listener(evt); } catch { /* observers must not break the reader */ }
+    }
     this.queue.push(evt);
     // M31 Plan 6 / T6.1 — single O(n) bulk drop instead of a while+shift loop.
     // `shift()` is O(n) per call because it re-indexes the array; under sustained
@@ -324,6 +332,26 @@ export class BridgeEventStream {
       this.reconnectDelayMs * 2,
       RECONNECT_MAX_DELAY_MS,
     );
+  }
+
+  /** Observe every incoming event (non-consuming). Returns the unsubscribe function. */
+  addListener(listener: (evt: BridgeEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  /**
+   * Skip a pending backoff and reconnect now. Called before a call whose
+   * console output matters (a recorded playtest call): after a domain reload
+   * the backoff can otherwise leave the stream down for up to 30 s while the
+   * bridge is already back. No-op when connected, connecting or stopped.
+   */
+  reconnectNow(): void {
+    if (!this.started || this.stopped || this.connected || !this.reconnectTimer) return;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.abortController = null;
+    this.connect();
   }
 
   /** Drain all queued events. The subscription keeps running. */

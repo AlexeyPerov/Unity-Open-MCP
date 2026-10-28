@@ -68,6 +68,9 @@ registration, transport, gate execution, and the port formula —
 
 - No persistent disk caches in offline/compressible paths. Only allowed cache:
   session `AssetModelCache` (LRU 8).
+- The playtest session recorder (`src/playtest/`) writes a deliberate
+  on-disk record (append-only log + report under platform app data), not a
+  cache; it is never read back to answer tool calls.
 - `src/capabilities/` mirrors verify — see
   [catalog sync](../packages/verify/AGENTS.md#capability-catalog-sync).
 

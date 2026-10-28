@@ -65,6 +65,13 @@ The demo embeds a fixture package at
 project-side C# and a bridge assembly reference. Recompile that package to see
 its command in the catalog; no MCP code changes are necessary.
 
+Commands can also live in an Editor folder of the game itself (they then compile
+into `Assembly-CSharp-Editor` and call game code directly). The demo's playtest
+hooks are written that way — `project.demo.playtest.boot`, `.state_dump`,
+`.begin` and `.end` in `demo/Assets/Fixtures/Playtest/Editor/` — and are the
+pattern for letting an agent boot a game, read its state and isolate its save; see
+the [Playtest guide](../playtest-guide.md#project-commands-a-game-should-expose).
+
 ## Parameter and safety contract
 
 JSON Schema draft 2020-12 is generated from the reflected signature. Property

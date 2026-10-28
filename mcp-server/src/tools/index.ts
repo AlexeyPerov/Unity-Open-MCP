@@ -515,6 +515,8 @@ import { playtestWait } from "./playtest-wait.js";
 import { captureSeries } from "./capture-series.js";
 // Playtest: snapshot / diff / restore the player state a session changes.
 import { playerState } from "./player-state.js";
+// Playtest: the session recorder (server-side log + report).
+import { playtestSession } from "./playtest-session.js";
 
 // M27 Plan 4 — batch_execute ships as a core meta-tool so agents can always
 // discover it. It is the agent ergonomics counterpart to the M26 headless batch
@@ -543,10 +545,11 @@ export const INPUTSIM_TOOLS: Tool[] = [inputsimPointer, inputsimKey, inputsimTou
 // node model also backs `target_text` label targeting on the input tools), the
 // Game view / Device Simulator control that sets what the game renders at, the
 // wait-until (conditions on logs / UI / objects / project predicates), the
-// frame-scheduled capture series (a senses tool, live-only) and the player-state
-// sandbox (snapshot / diff / gated restore of PlayerPrefs and persistentDataPath).
+// frame-scheduled capture series (a senses tool, live-only), the player-state
+// sandbox (snapshot / diff / gated restore of PlayerPrefs and persistentDataPath)
+// and the session recorder (server-local: start / mark / end → report).
 // Group `playtest`; ui_snapshot compiles with com.unity.ugui, the others always.
-export const PLAYTEST_TOOLS: Tool[] = [uiSnapshot, gameView, playtestWait, captureSeries, playerState];
+export const PLAYTEST_TOOLS: Tool[] = [uiSnapshot, gameView, playtestWait, captureSeries, playerState, playtestSession];
 
 export const M2_TOOLS: Tool[] = [
   ping,

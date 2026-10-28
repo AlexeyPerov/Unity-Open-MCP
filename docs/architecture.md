@@ -123,6 +123,26 @@ in-memory copy, copies `persistentDataPath`, and restores only through the
 PlayerPrefs / EditorPrefs API. Its one mutation (an applied restore) is classified
 per request and runs the normal gate with the project-identity asset as scope.
 
+### Playtest session record
+
+`playtest_session` is a local tool: the MCP server sees every call, so the session
+log lives there (`mcp-server/src/playtest/`), not in the bridge. While an agent
+owner (the same project + agent id + per-request port identity `jobs` uses) has an
+open session, the router logs that owner's input / wait / capture /
+project-command calls around their normal dispatch — it never changes a result.
+Console errors are correlated by time from the bridge event stream the server
+already subscribes to (with each response's `logs[]` as a fallback); frames are
+the PNGs the bridge's capture tools wrote, linked or copied into the session
+folder. The log is a deliberate on-disk record, not a cache: one JSON line is
+appended per event to `unity-open-mcp/playtest-sessions/<company>/<product>/<session>/`
+in the platform app-data folder (next to the player-state snapshots), so it
+survives a domain reload and an MCP server restart, and a new server process can
+adopt a session whose owning process is gone. `end` writes a Markdown report with
+thumbnails decoded and downscaled in the server (Node built-ins only), so a
+report can be written with the Editor closed. See
+[Playtest guide](playtest-guide.md) and
+[`playtest_session`](api/playtest.md#unity_open_mcp_playtest_session).
+
 ## Related docs
 
 - [MCP tools API](api/mcp-tools.md)

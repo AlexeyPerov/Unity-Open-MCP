@@ -123,8 +123,9 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "or a Device Simulator device to check layout and the safe area (game_view), wait until a " +
       "log / UI / object / project-predicate condition holds (playtest_wait, optional time_scale), " +
       "capture frame-scheduled series of animated content (capture_series, gesture capture_at_ms) " +
-      "and sandbox the player state a session changes (player_state: snapshot / diff / restore of " +
-      "PlayerPrefs and persistentDataPath).",
+      "sandbox the player state a session changes (player_state: snapshot / diff / restore of " +
+      "PlayerPrefs and persistentDataPath) and record the session for a human (playtest_session: " +
+      "steps, verdicts, frames, the errors each step caused → a Markdown report).",
     keywords: [
       "playtest",
       "playtests",
@@ -167,6 +168,13 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "persistentdatapath",
       "state-sandbox",
       "snapshot-restore",
+      "playtest-session",
+      "playtest-report",
+      "session-recorder",
+      "qa-report",
+      "test-report",
+      "verdict",
+      "repro-steps",
     ],
   },
   {

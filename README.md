@@ -55,6 +55,8 @@ optionally fast-forwarded), then verify visually with captures at the device's
 native resolution and safe area, or frame-scheduled capture series for animated
 content — and snapshot, diff and restore the player's save (PlayerPrefs and
 `persistentDataPath`) so a live session does not spend the developer's progress.
+A playtest can be recorded as it runs — steps, verdicts, frames and the console
+errors each step caused — into a Markdown report a human can review.
 
 ### Live, batch, or offline
 
@@ -143,6 +145,7 @@ For users:
 - [Troubleshooting](docs/troubleshooting.md) — connectivity and recovery guidance.
 - [Dialog policy](docs/dialog-policy.md) — startup modal handling and automation.
 - [Skills](docs/skills.md) — agent playbooks installed into Unity projects.
+- [Playtest guide](docs/playtest-guide.md) — let an agent play the game, record the session and hand back a report.
 - [Version compatibility](docs/versioning.md) — version matching and mismatch recovery.
 - [Updating](docs/updating.md) — Hub, MCP, Unity package, and air-gapped update paths.
 

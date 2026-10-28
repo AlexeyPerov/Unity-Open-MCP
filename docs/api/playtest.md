@@ -5,7 +5,9 @@ Activate the `playtest` group (with `input-simulation` to drive input —
 tools let an agent read and play the running game the way a tester does: put the
 game on a target device or resolution, read what the screen says, tap a control
 by its label, wait for the game to get somewhere, capture what it shows over time,
-check the result — and put the player's save back afterwards.
+check the result — put the player's save back afterwards, and record the whole
+session as a report for a human. The workflow is in the
+[Playtest guide](../playtest-guide.md).
 
 | Tool | Does | Compiles when |
 |---|---|---|
@@ -14,6 +16,7 @@ check the result — and put the player's save back afterwards.
 | `unity_open_mcp_playtest_wait` | Waits in play mode until a condition holds (a log line, a UI query, a GameObject state, the project's own read-only predicate, frames, ms — or all / any of them), with a timeout, an optional time scale for the wait and an early stop on game exceptions | always |
 | `unity_senses_capture_series` | Captures the composed game frame at scheduled play-mode frames (relative to the call or a condition), with an optional crop, per-frame luminance / diff metric and a labelled contact sheet | always (Unity 6; reads the play-mode view) |
 | `unity_open_mcp_player_state` | Snapshots, diffs and restores the player state a session changes — PlayerPrefs, `persistentDataPath` files, opt-in EditorPrefs — in a store outside the project; restore is edit-mode only, a dry run unless confirmed, and gated | always (macOS verified; Windows and Linux readers untested in the field) |
+| `unity_open_mcp_playtest_session` | Records a playtest for a human: the agent's input / wait / capture / project-command calls with their frames and console errors, step verdicts, the state diff — `end` writes a Markdown report | always (server-local; no Unity code) |
 
 `inputsim_gesture` (in `input-simulation`) takes `capture_at_ms`: a tap and the
 frames after it are captured in the same scheduled operation; see
@@ -541,7 +544,8 @@ custom store, a server). Look for them first:
 
 1. `project_commands(action: "list", query: "playtest")` — when `playtest.begin`
    and `playtest.end` exist, invoke `playtest.begin` before playing and
-   `playtest.end` after.
+   `playtest.end` after. The demo's `project.demo.playtest.*` commands are a
+   copyable example ([Playtest guide](../playtest-guide.md#project-commands-a-game-should-expose)).
 2. Otherwise, in edit mode: `player_state {"action":"snapshot","name":"before"}`
    (add `editor_prefs_prefixes` for the project's own dev toggles).
 3. Play the session; `player_state {"action":"diff","name":"before"}` (in play mode
@@ -550,6 +554,144 @@ custom store, a server). Look for them first:
    dry run's `prefs.removed` / `files.removed`.
 5. `player_state {"action":"restore","name":"before","confirm":true}`; check
    `verified: true`. `delete` the snapshot when done.
+
+## `unity_open_mcp_playtest_session`
+
+Records a playtest so a human can review it without replaying the agent's
+context: what was done, the frame it showed, which step caused which error, and
+the verdict. The workflow around it is the [Playtest guide](../playtest-guide.md).
+
+A local tool: the MCP server sees every call, so it keeps the log; the bridge only
+writes the frames (the capture tools' PNGs). Gate-free; it never changes another
+tool's result and never fails one.
+
+| `action` | Arguments | Does |
+|---|---|---|
+| `start` | `name`, `device`, `snapshot` or `use_snapshot` | Opens a session for the calling agent and starts recording. `device` is a free-text summary for the report; the current Game view / Simulator state (`game_view get`) is recorded as well. `snapshot: true` takes a [`player_state`](#unity_open_mcp_player_state) snapshot (`playtest-<session>`) now — the start fails `snapshot_failed` rather than run unisolated; `use_snapshot` names an existing one. Either is diffed against the state at `end` |
+| `mark` | `label`, `verdict` (`ok` default, `bug`, `suspicious`), `note` | Closes a step: the recorded calls since the previous mark belong to it. Answers `since_last_mark` (`calls`, `errors`, `captures`, `failed`) — errors there are findings |
+| `status` | — | Your open session (counts so far), plus `orphaned` sessions of this project whose MCP server process is gone |
+| `end` | `note`, `diff` (default true), `session` | Writes the report and closes the session; returns the report path and a compact `summary` |
+| `resume` | `session` | Re-attaches an orphaned session after an MCP server restart; recording continues, numbering continues |
+| `list` | `limit` (default 10, ≤ 50) | This project's sessions, newest first: `open`, `open_other_agent`, `open_other_process`, `orphaned` or `ended`, with the report path |
+
+### What is recorded
+
+While a session is open, every call **by its owner** in these categories is
+appended to the log when it ends:
+
+| Category | Tools |
+|---|---|
+| input | `inputsim_touch`, `inputsim_pointer`, `inputsim_pointer3d`, `inputsim_key`, `inputsim_gesture`, `inputsim_step` |
+| wait | `playtest_wait` |
+| capture | `unity_senses_screenshot` (and `_window` / `_camera`), `capture_inline`, `capture_series`, `visual_compare` |
+| command | `project_commands` `invoke`; `jobs start` of a project command or a play-mode operation, and the job's terminal result when `jobs wait` / `status` sees it |
+| control | `editor_set_state`, `game_view` `set_resolution` / `set_device` |
+
+Reads (`ui_snapshot`, `inputsim_probe`, `read_console`, …) are not recorded; a
+call reached through `manage_tools(action: "invoke")` is recorded as the inner
+tool; steps nested in a `batch_execute` are not recorded one by one. Each entry holds the tool, the arguments as sent (top-level values equal to
+their schema default are dropped; secrets redacted), status (`ok`, `error` with its
+code, `job_started`), duration, a short result summary (a wait's `fired`, a
+capture's `capturedAt`, a project command's result), the frames it wrote, and the
+console errors / exceptions logged during it.
+
+**Owner.** The owner is the identity [`jobs`](jobs.md) use: project, agent id
+(`_meta.agentId`, else the MCP server process's own id) and a per-request port
+override. One open session per owner — a second `start` answers
+`session_already_open`. Other owners' calls (another MCP server process, another
+`_meta.agentId`) are never recorded into it; they can open their own.
+
+**Errors.** Console errors, exceptions and asserts come from the bridge event
+stream (with stacks) and are matched to calls by time: inside a call's window (±
+50 ms) → **during** that call; between two recorded calls → **after** the earlier
+one (a tap's consequence logged frames later). The call's own `logs[]` and a wait's
+or series' `errors` fill in what the stream missed — it reconnects after a domain
+reload; such entries have no stack. The same message from both sources is one
+error.
+
+**Frames.** File paths a capture reports (`filePath`, a series' frames and contact
+sheet) are hard-linked — or copied — into the session's `report/frames/` when the
+call ends; `capture_inline` images are written there from the response. Full-size
+frames stay files; the report shows downscaled thumbnails.
+
+**Secrets.** Before anything is written: a property whose name reads as a secret
+(`password`, `token`, `api_key`, `authorization`, `client_secret`, `session_id`, …)
+is replaced with `[redacted]` at any depth; inside free text (notes, console
+messages, stacks, results) `Bearer …`, `password=…` and `"token": "…"`-style
+fragments, the bridge auth token and secret-named environment variable values are
+masked; a PlayerPrefs diff entry whose key reads as a secret keeps its type, not
+its value.
+
+### Storage
+
+A deliberate on-disk record (not a cache), outside the project, next to the
+player-state snapshots:
+
+```text
+<app data>/unity-open-mcp/playtest-sessions/<company>/<product>/<session>/
+  session.json        owner, server pid, device, snapshot, state, report path
+  log.jsonl           one JSON line per event, appended as it happens
+  report/
+    report.md         written by end
+    frames/           full-size captures
+    thumbs/           downscaled previews (written by end)
+    state-diff.json   the full player-state diff (when a snapshot was used)
+```
+
+`<app data>` is `~/Library/Application Support` on macOS, `%LOCALAPPDATA%` on
+Windows, `$XDG_DATA_HOME` or `~/.local/share` on Linux; company / product are the
+open project's Player Settings. Session ids are `<UTC yyyyMMdd-HHmmss>-<name
+slug>-<4 hex>`. Nothing deletes sessions; remove old folders by hand.
+
+**Domain reloads and restarts.** Each event is appended with one open-write-close,
+so the log survives a domain reload (the server is not in Unity) and an MCP server
+restart. A call is logged twice — `call_started` before dispatch, `call` after —
+so a call that was in flight when the server process stopped is reported as
+**lost** with its arguments. After a restart the new server's agent id differs:
+`status` lists the session under `orphaned`; `end` or `resume` with `session:
+<id>` adopts it (refused with `session_owned_by_other_agent` while the owning
+process is alive). A session opened with a stable `_meta.agentId` is the same
+owner after a restart.
+
+### Report
+
+`end` waits briefly for in-flight stream events, diffs the snapshot (when there is
+one), and writes `report.md`:
+
+- a header: session, project, start / end, device, snapshot, the project isolation
+  hook seen (`*.playtest.begin` / `*.playtest.end` commands), totals and verdicts;
+- **Findings**: `bug` / `suspicious` steps with notes, each distinct error with its
+  first occurrence (step, call, during / after), failed calls, lost calls;
+- **Steps**: per mark, a table of its calls (time, tool, arguments, result,
+  duration), the errors it caused and its frames — a series shows its contact
+  sheet, other captures a thumbnail, the rest as links;
+- **Errors**: one entry per message, with the first occurrence and its stack;
+- **State diff**: PlayerPrefs / EditorPrefs added / removed / changed and
+  `persistentDataPath` files, from the session's snapshot to the state at `end`;
+- **Editor events**: play-mode transitions, domain reloads and event-stream
+  reconnects seen while recording.
+
+```json
+{
+  "status": "ok", "action": "end", "session": "20261028-155842-demo-smoke-6065",
+  "report": "…/playtest-sessions/DefaultCompany/Unity Open MCP Demo/20261028-155842-demo-smoke-6065/report/report.md",
+  "summary": {
+    "steps": 6, "calls": 12, "failed_calls": 0, "captures": 9, "thumbnails": 3, "duration_ms": 16451,
+    "verdicts": { "ok": 4, "bug": 1, "suspicious": 1 }, "errors": { "unique": 1, "total": 1 },
+    "findings": [ { "step": 6, "label": "Tap Report Bug", "verdict": "bug", "note": "Tapping Report Bug throws InvalidOperationException." } ],
+    "top_errors": [ { "type": "exception", "message": "InvalidOperationException: [PlaytestFixture] Deliberate exception from the Report Bug button",
+                      "first_step": 6, "first_call": 11, "relation": "during", "count": 1 } ],
+    "lost_in_flight": [], "state_diff": { "identical": false, "prefs": { "added": 3, "removed": 0, "changed": 0, "unchanged": 5 } },
+    "hooks": { "begin": "project.demo.playtest.begin" }
+  },
+  "agentNextSteps": [ "Hand the report to the human: …/report.md", "…" ]
+}
+```
+
+**Limits** per session: 500 recorded calls (later ones are counted, not logged),
+200 marks, 300 frames or 512 MB of frames (later ones are referenced by their
+source path), 60 thumbnails (≤ 320 px, a contact sheet ≤ 960 px; 20 s of decoding),
+20 errors per call, 2,000 characters of arguments per call.
 
 ## Snapshot → tap by label
 
@@ -590,3 +732,10 @@ custom store, a server). Look for them first:
 | `prefs_store_unreadable` | `player_state`: the platform PlayerPrefs / EditorPrefs store could not be read (`store` names it) |
 | `editor_internals_unavailable` | `player_state` with EditorPrefs on an Editor without the internal EditorPrefs flush |
 | `restore_incomplete` | `player_state` `restore confirm:true`: some file operations failed; the state is partly restored (`errors`, `residual`) |
+| `session_already_open` | `playtest_session` `start` while this agent has an open session (`session` names it), or `mark` / `end` / `resume` naming a different session than the open one |
+| `no_open_session` | `playtest_session` `mark` / `end` without an open session (`orphaned` lists sessions a stopped server left open) |
+| `session_not_found` / `session_ended` | `playtest_session`: no such session for this project / it already ended (`report`) |
+| `session_owned_by_other_agent` | `playtest_session` `end` / `resume` / `mark` of a session another live agent or MCP server process owns |
+| `snapshot_failed` | `playtest_session` `start` with `snapshot: true`: the player-state snapshot failed (`snapshot_error`); no session was started |
+| `identity_unavailable` | `playtest_session`: neither the Editor nor `ProjectSettings/ProjectSettings.asset` gave the company / product |
+| `limit_reached` | `playtest_session` `mark` beyond 200 marks |

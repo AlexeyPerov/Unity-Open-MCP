@@ -47,6 +47,10 @@ import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
 import { PORT_ENV_VAR, EXPECTED_BRIDGE_WIRE_CONTRACT, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS } from "./constants.js";
 import { findUnityForProject, readProcessCommandLine } from "./running-unity.js";
+import { PlaytestRecorder, PlaytestError, PLAYTEST_SESSION_TOOL, type ToolCaller } from "./playtest/recorder.js";
+import { secretEnvValues } from "./playtest/redact.js";
+import { sessionsRoot, type SessionOwner } from "./playtest/session-store.js";
+import { PLAYTEST_SESSION_ACTION_KEYS } from "./tools/playtest-session.js";
 
 // M31-optimizations Plan 1 / L14 — opt-in route-logging gate. Resolved once at
 // module load into a boolean; the per-dispatch log sites read the boolean
@@ -947,6 +951,9 @@ export class ToolRouter implements Router {
       ["unity_open_mcp_generate_skill", (_l, a) => this.routeGenerateSkill(a)],
       ["unity_open_mcp_manage_tools", (l, a, id) => this.routeManageTools(a, l, id)],
       ["unity_open_mcp_project_commands", (l, a) => this.routeProjectCommands(a, l)],
+      // Playtest session recorder: the log lives here (the server sees every
+      // call); bridge reads go through the normal route as the same owner.
+      [PLAYTEST_SESSION_TOOL, (l, a, id) => this.routePlaytestSession(a, l, id)],
       // Live tool whose release lookups (npm latest, GitHub tag) run HERE so
       // the Editor main thread never blocks on the network.
       ["unity_open_mcp_upgrade", (l, a) => this.routeUpgrade(a, l)],
@@ -1098,7 +1105,114 @@ export class ToolRouter implements Router {
     return this.routeCore(overrideLive, toolName, args, identity);
   }
 
+  /**
+   * Every entry point funnels through here (direct, manage_tools invoke, port
+   * override). While the caller's agent owner has an open playtest session, a
+   * recorded call (input / wait / capture / project command / play-mode and
+   * Game view changes) is logged around its dispatch; everything else — and
+   * every call when no session is open — goes straight through. The recorder
+   * never changes a result and never fails a call.
+   */
   private async routeCore(
+    live: LiveClient,
+    toolName: string,
+    args: Record<string, unknown>,
+    identity: RequestIdentity,
+  ): Promise<CallToolResult> {
+    const recorder = this.playtestRecorder;
+    if (!recorder || recorder.openCount === 0 || toolName === PLAYTEST_SESSION_TOOL) return this.routeDispatch(live, toolName, args, identity);
+    const owner = this.ownerOf(identity);
+    if (!recorder.isRecording(owner)) return this.routeDispatch(live, toolName, args, identity);
+    if (toolName === "unity_open_mcp_jobs" && (args.action === "wait" || args.action === "status")) {
+      const observed = await this.routeDispatch(live, toolName, args, identity);
+      try { recorder.observeJob(owner, args, observed); } catch (error) { console.error("[unity-open-mcp] playtest recorder:", error); }
+      return observed;
+    }
+    let handle: ReturnType<PlaytestRecorder["begin"]> = null;
+    try { handle = recorder.begin(owner, toolName, args); } catch (error) { console.error("[unity-open-mcp] playtest recorder:", error); }
+    if (!handle) return this.routeDispatch(live, toolName, args, identity);
+    (this.eventStream as Partial<BridgeEventStream>).reconnectNow?.call(this.eventStream);
+    let result: CallToolResult;
+    try {
+      result = await this.routeDispatch(live, toolName, args, identity);
+    } catch (error) {
+      try { recorder.finish(handle, args, null, error); } catch (inner) { console.error("[unity-open-mcp] playtest recorder:", inner); }
+      throw error;
+    }
+    try { recorder.finish(handle, args, result); } catch (error) { console.error("[unity-open-mcp] playtest recorder:", error); }
+    return result;
+  }
+
+  /** The owner a request files sessions (and jobs) under. */
+  private ownerOf(identity: RequestIdentity): SessionOwner {
+    return { project: this.projectPath || "default", agent: identity.agent, ...(identity.port === undefined ? {} : { port: identity.port }) };
+  }
+
+  private playtestRecorder?: PlaytestRecorder;
+
+  /** The session recorder, created on first use and fed by the bridge event stream. */
+  get playtest(): PlaytestRecorder {
+    if (!this.playtestRecorder) {
+      this.usePlaytestRecorder(new PlaytestRecorder({
+        root: sessionsRoot(),
+        projectPath: this.projectPath || "default",
+        knownSecrets: [this.projectPath ? resolveAuthToken(this.projectPath) : undefined, ...secretEnvValues()],
+        streamConnected: () => (this.eventStream as Partial<BridgeEventStream>).isConnected === true,
+      }));
+    }
+    return this.playtestRecorder!;
+  }
+
+  /** Install a recorder (tests use a temporary root). */
+  usePlaytestRecorder(recorder: PlaytestRecorder): void {
+    this.playtestRecorder = recorder;
+    (this.eventStream as Partial<BridgeEventStream>).addListener?.call(this.eventStream, event => recorder.onEvent(event));
+  }
+
+  /**
+   * `unity_open_mcp_playtest_session` — local route. Bridge reads the session
+   * needs (company / product, the Game view state, a player-state snapshot or
+   * diff) go through the normal route as the same owner, and only when the
+   * bridge answers /ping; otherwise the recorder falls back to disk.
+   */
+  private async routePlaytestSession(args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity): Promise<CallToolResult> {
+    const action = String(args.action ?? "") as keyof typeof PLAYTEST_SESSION_ACTION_KEYS;
+    const allowed = PLAYTEST_SESSION_ACTION_KEYS[action];
+    if (!allowed) return localError("invalid_arguments", `Unknown action '${action}'.`);
+    const extra = Object.keys(args).filter(key => key !== "action" && !allowed.includes(key));
+    if (extra.length) return localError("invalid_arguments", `Keys not used by ${action}: ${extra.join(", ")}.`);
+    const recorder = this.playtest;
+    const owner = this.ownerOf(identity);
+    let available: boolean | undefined;
+    const call: ToolCaller = async (tool, toolArgs) => {
+      available ??= await live.isLiveAvailable(1_500);
+      if (!available) return localError("bridge_unavailable", "The Unity bridge is not reachable.");
+      const definition = ALL_TOOLS.find(t => t.name === tool);
+      return this.routeDispatch(live, tool, definition ? withSchemaDefaults(definition, toolArgs) : toolArgs, identity);
+    };
+    const sessionArg = typeof args.session === "string" ? args.session : undefined;
+    try {
+      if (action !== "status" || recorder.isRecording(owner) === false) await recorder.prepare(call);
+      if (action === "start" || action === "resume" || action === "end")
+        (this.eventStream as Partial<BridgeEventStream>).ensureSubscription?.call(this.eventStream);
+      let body: Record<string, unknown>;
+      switch (action) {
+        case "start": body = await recorder.start(owner, args, call); break;
+        case "mark": body = recorder.mark(owner, args, sessionArg); break;
+        case "status": body = recorder.status(owner); break;
+        case "resume": body = recorder.resume(owner, sessionArg); break;
+        case "end": body = await recorder.end(owner, args, call); break;
+        default: body = recorder.list(owner, typeof args.limit === "number" ? args.limit : 10);
+      }
+      return sourceResult(body, "local");
+    } catch (error) {
+      if (error instanceof PlaytestError)
+        return sourceResult({ error: { code: error.code, message: error.message }, ...error.detail }, "local", true);
+      return localError("internal_error", error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async routeDispatch(
     live: LiveClient,
     toolName: string,
     args: Record<string, unknown>,

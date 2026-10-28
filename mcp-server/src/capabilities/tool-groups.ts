@@ -370,7 +370,11 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "a labelled contact sheet. Both run on the play-mode scheduler (jobs when long). player_state: " +
       "snapshot / diff / restore the state a session changes (PlayerPrefs from the platform store, " +
       "persistentDataPath files, opt-in EditorPrefs by key prefix), stored outside the project; restore " +
-      "is edit-mode only, a dry run unless confirm:true, and gated. ui_snapshot " +
+      "is edit-mode only, a dry run unless confirm:true, and gated. playtest_session (server-local): " +
+      "start → mark (verdict ok / bug / suspicious) → end records the owner's input / wait / capture / " +
+      "project-command calls with redacted arguments, frames and the console errors logged during them " +
+      "into an append-only log outside the project, and end writes a Markdown report with thumbnails, " +
+      "the error list and the state diff for a human. ui_snapshot " +
       "compiles when com.unity.ugui is present; the compiled subset is reconciled from GET /tools.",
     defaultEnabled: false,
   },
@@ -1030,6 +1034,9 @@ assign("playtest", [
   // delete are read-only for the project; restore with confirm:true is the one
   // gated mutation (request-level classification in the bridge).
   "unity_open_mcp_player_state",
+  // Session recorder: server-local (no bridge tool) — the MCP server sees every
+  // call, so it owns the log; frames are the files the capture tools wrote.
+  "unity_open_mcp_playtest_session",
 ]);
 
 // ---------------------------------------------------------------------------
