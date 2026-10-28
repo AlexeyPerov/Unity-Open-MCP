@@ -361,8 +361,14 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "the loop is snapshot → tap by label → step → screenshot (pair with input-simulation and " +
       "agent-senses). game_view: read or set the Game view resolution (a reused 'Open MCP <w>x<h>' " +
       "size entry) or a Device Simulator device + orientation, with the safe area / notch insets the " +
-      "game sees; set_* waits until the game reports the new size. ui_snapshot compiles when " +
-      "com.unity.ugui is present; the compiled subset is reconciled from GET /tools.",
+      "game sees; set_* waits until the game reports the new size. playtest_wait: wait in play " +
+      "mode until a condition holds (log regex / ui_snapshot query / object exists-active-destroyed / " +
+      "read-only project command / frames / ms, all / any), with timeout, optional time_scale for the " +
+      "wait only and fail_on exception — never poll in a loop of calls. capture_series " +
+      "(unity_senses_*): frame-scheduled composed captures inside the player loop (at_ms / every_ms / " +
+      "at_frames, after an optional start_on condition) with region crop, luminance / diff metric and " +
+      "a labelled contact sheet. Both run on the play-mode scheduler (jobs when long). ui_snapshot " +
+      "compiles when com.unity.ugui is present; the compiled subset is reconciled from GET /tools.",
     defaultEnabled: false,
   },
   {
@@ -1007,9 +1013,16 @@ assign("input-simulation", [
 // model). Read-only, gate-free. game_view lives in the bridge root assembly
 // (Editor internals behind a version-checked adapter); gate-free Editor UI
 // change whose only persistent effect is a reused custom Game view size entry.
+// playtest_wait / capture_series live in the bridge root assembly (Unity 6 for
+// capture_series: it reads the play-mode view through the Game view adapter).
 assign("playtest", [
   "unity_open_mcp_ui_snapshot",
   "unity_open_mcp_game_view",
+  // Wait-until and frame-scheduled capture series: both start an operation on
+  // the bridge's play-mode scheduler that the server polls (jobs when long).
+  // capture_series keeps the unity_senses_* prefix (live-only, never batch).
+  "unity_open_mcp_playtest_wait",
+  "unity_senses_capture_series",
 ]);
 
 // ---------------------------------------------------------------------------

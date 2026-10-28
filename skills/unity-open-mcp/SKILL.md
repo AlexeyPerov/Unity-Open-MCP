@@ -34,6 +34,8 @@ Use exact schemas, scoped mutations, and gate evidence to work on the selected U
 - Before screenshots, event capture, or test runs: [Senses and tests](references/senses-and-tests.md).
 - Before driving gameplay input (taps, drags, multi-second gestures — legacy Input Manager or Input System): activate `input-simulation` and follow its domain skill; read the reported `backend` array and refusals instead of reflecting into game input code.
 - To playtest a screen (read its texts, find "the Buy button"): activate `playtest` with `input-simulation`, read it with `ui_snapshot` (compact, paged), then tap by label with `target_text`; resolve `ambiguous_target` with `index` / `under`, never by guessing names.
+- To wait for the game (a wave ends, a timer fires, a popup closes): one `playtest_wait` with a condition (`log` regex, `ui` query — `matches:false` for "gone", `object` exists/active/destroyed, the project's own read-only `project_command`, `frames`, `ms`, or `all`/`any`) and a `timeout_ms` — never poll in a loop of snapshots, steps or `execute_csharp`. Read `fired` (which condition, `frame`, `play_time`); on `timed_out` read `condition.last` before retrying. `time_scale` fast-forwards for the wait only (restored); `fail_on: ["exception"]` stops on a game exception with its stack. Long waits return a `job_id` → `jobs wait`.
+- For animated content (tweens, popups, pulsing / "breathing" effects) one-shot before/after frames lie: capture a series with `unity_senses_capture_series` (`at_ms` / `every_ms`+`duration_ms` / `at_frames`, optionally `start_on` a condition), add `contact_sheet: true` for one labelled review image and `metric: "diff"` in a `metric_region` to see the change as numbers. For a tap and the frames after it, use `inputsim_gesture` `capture_at_ms`.
 - To check layout on a device or resolution: device first, then capture. `game_view get` (note the state to restore), then `set_device` (Device Simulator device + orientation; read `screen.safe_area` / `insets`) or `set_resolution` (reuses an `Open MCP <w>x<h>` Game view size — its only persistent effect); continue only on `settled: true` (`not_settled` = paused or hidden view). Capture `view: "composed"` without width/height (native size; `overlay: "safe_area"` for notch checks) and quote its `capturedAt`. Restore explicitly afterwards (`set_resolution` with the `size_label` from `get`); input tools never open the Simulator.
 
 ### Project-owned commands
@@ -58,8 +60,9 @@ operations. `start` requires `tool_or_command`, adapter `args`, and an
 `idempotency_key` (optional for read-only targets). Supported targets are
 `unity_senses_run_tests` (ordinary test filters, no caller `run_id`, cancellation
 unsupported), available async project commands (`args: {args: {...}, gate,
-paths_hint}`), and play-mode operations such as `unity_open_mcp_inputsim_gesture`
-(the tool's own args; cancellable — cancel releases held input). Read terminal project-job gate
+paths_hint}`), and play-mode operations (`unity_open_mcp_inputsim_gesture`,
+`unity_open_mcp_playtest_wait`, `unity_senses_capture_series`; the tool's own args;
+cancellable — cancel releases held input and restores a wait's time scale). Read terminal project-job gate
 results even on failure/cancellation. An unsupported target must not be retried as
 an arbitrary background tool.
 

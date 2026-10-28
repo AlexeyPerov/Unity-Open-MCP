@@ -58,7 +58,17 @@ namespace UnityOpenMcpBridge
         //       width/height with scaled_from + content_rect, `size: native`,
         //       `overlay: safe_area`, `capturedAt` on game/composed captures;
         //       batch refusal of game_view set_*.
-        public const int WireContract = 5;
+        //   6 — Waits and capture series: playtest_wait (log / ui / object /
+        //       project_command / frames / ms conditions, all / any, time_scale,
+        //       fail_on; timed_out / exception_thrown / condition_error as
+        //       failed scheduler states with result.error_code),
+        //       capture_series (at_ms / every_ms / at_frames, start_on, region,
+        //       scale, metric, contact_sheet), inputsim_gesture capture_at_ms;
+        //       render_target_unavailable; batch refusal of both new tools;
+        //       registry arguments read from the depth-1 projection when a
+        //       condition / start_on payload is present (playtest_wait's
+        //       timeout_ms is its own parameter, not only the dispatch budget).
+        public const int WireContract = 6;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
         public static string Mode => "live";

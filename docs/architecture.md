@@ -89,7 +89,7 @@ terminal validation. Reload cannot resume project command code; lost ownership i
 orphaned. Job state is not persisted across MCP restarts. [Jobs](api/jobs.md)
 documents these limits.
 
-Work that must span real play-mode frames (gestures today) runs on one shared
+Work that must span real play-mode frames (gestures, waits, capture series) runs on one shared
 bridge-side play-mode scheduler (`packages/bridge/Editor/PlayMode/`): a
 player-loop system at the start of `EarlyUpdate` that owns per-frame timing,
 cancellation, and cleanup on exit-play / domain reload. Tools start an operation
@@ -110,6 +110,12 @@ behind a version table shared with the legacy input adapter
 (`EditorVersionTable`): unverified Editors refuse with
 `unsupported_editor_version`. Its play-mode settle check is a short operation on
 the same play-mode scheduler, polled inline by the MCP server.
+`playtest_wait` and `capture_series` (`Editor/Playtest/`, `Editor/Screenshot/`)
+are operations on that scheduler too: wait conditions (log, uGUI query through a
+probe the uGUI sub-assembly registers, GameObject state, a read-only project
+command, frames, ms) are evaluated inside the player loop, and the series
+recorder reads the play-mode view's render target at scheduled frames (shared
+with `inputsim_gesture` `capture_at_ms`) and encodes PNGs after the last capture.
 
 ## Related docs
 

@@ -17,6 +17,12 @@ contains a minimal copy-pasteable assembly and command example.
    returning invalid JSON or throwing. Expect failed execution with terminal
    validation, not rollback or success.
 
+6. `project.demo.wave_cleared` is a read-only predicate (`{"alive": n, "cleared":
+   bool}` for active objects whose name starts with `prefix`). In play mode on
+   `Assets/Fixtures/Wait/WaitFixture.unity`, `unity_open_mcp_playtest_wait` with
+   `{"project_command": {"id": "project.demo.wave_cleared", "field": "cleared"}}`
+   fires when the fixture's enemy is destroyed (~3 s).
+
 Use only the disposable fixture folder. Preserve any pre-existing fixture files
 when testing and restore them afterward. `reload_fixture` requests compilation;
 run it only when no unrelated Editor work is in progress. Direct synchronous

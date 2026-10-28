@@ -48,8 +48,9 @@ export const batchExecute = makeTool(
     "A step whose terminal result is produced by the SERVER rather than by the Editor dispatch is " +
     "refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns " +
     "`{status:\"started\", runId}` immediately and the server polls a results file to turn that " +
-    "into a real result, which only happens on the top-level route; `unity_open_mcp_inputsim_gesture` " +
-    "likewise only starts a play-mode operation the server polls (and no frame advances while a " +
+    "into a real result, which only happens on the top-level route; `unity_open_mcp_inputsim_gesture`, " +
+    "`unity_open_mcp_playtest_wait` and `unity_senses_capture_series` likewise only start a play-mode " +
+    "operation the server polls (and no frame advances while a " +
     "batch holds the main thread), as do `unity_open_mcp_game_view` set_resolution / set_device " +
     "(get / list_devices stay batchable). Inside a batch nothing polls, " +
     "so the step would be recorded `success` carrying the non-terminal \"started\" body and the " +

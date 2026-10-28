@@ -10,11 +10,18 @@
 // /playmode-operations (inline for short gestures, as a `jobs` playmode
 // operation for long ones). Cancel, exiting play mode and a domain reload all
 // release every held finger (Canceled phase).
+//
+// `capture_at_ms` pairs the gesture with the frames that follow it: the same
+// operation captures the composed game frame at those offsets from the
+// gesture start (the capture_series recorder, in the gesture's time base), so
+// a tap and its follow-up frames come back from one call.
 using System;
 using System.Collections.Generic;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
+using UnityOpenMcpBridge.Playtest;
+using UnityOpenMcpBridge.Screenshot;
 
 namespace UnityOpenMcpBridge.Extensions.InputSimulation
 {
@@ -22,6 +29,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
     public static class GestureTools
     {
         internal const string ToolName = "unity_open_mcp_inputsim_gesture";
+        internal const int MaxCaptures = 30;
 
         [BridgeTool(ToolName,
             Title = "Input Simulation: Gesture Over Real Frames",
@@ -35,12 +43,14 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         [System.ComponentModel.Description(
             "Start a multi-frame touch gesture (keyframed finger paths interpolated every " +
             "play-mode frame) on the shared play-mode scheduler. Returns an operation id; " +
-            "the MCP server polls it to a terminal trace. Play-mode only; gate-free.")]
+            "the MCP server polls it to a terminal trace. Optional capture_at_ms captures the composed " +
+            "frame at those offsets in the same operation. Play-mode only; gate-free.")]
         public static string Gesture(
             string fingers = null,
             string coords = "screen",
             string time = "realtime",
             string backend = "auto",
+            string capture_at_ms = null,
             string operation_id = null)
         {
             if (!EditorApplication.isPlaying)
@@ -50,6 +60,18 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
 
             var plan = GesturePlan.Parse(fingers, coords, time, out var code, out var message);
             if (plan == null) return TouchTools.Error(code, message);
+
+            FrameSchedule captures = null;
+            if (capture_at_ms != null)
+            {
+                captures = ParseCaptures(capture_at_ms, out var captureError);
+                if (captures == null) return TouchTools.Error("invalid_arguments", captureError);
+                if (!GameViewAdapter.IsGameViewAvailable(out var viewCode, out var viewMessage))
+                    return TouchTools.Error(viewCode, "capture_at_ms: " + viewMessage);
+                if (GameViewAdapter.TargetTexture(GameViewAdapter.MainView()) == null)
+                    return TouchTools.Error("render_target_unavailable",
+                        "capture_at_ms: the play-mode view has not rendered a frame (no Game view / Simulator open, or its tab is hidden).");
+            }
 
             var route = InputRouting.Decide(InputEnvironment.Detect(), backend, plan.FingerIds());
             if (!route.Ok) return route.ErrorJson();
@@ -64,7 +86,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                     "\"operationId\":" + BridgeJson.EscapeString(busy));
 
             bool focused = GameViewWindows.EnsureGameViewFocusForInputSystem(route);
-            var op = new GestureOperation(plan, route, focused);
+            var op = new GestureOperation(plan, route, focused, captures);
             var snapshot = PlayModeScheduler.Start(op, operation_id, out var error);
             if (snapshot == null) return error;
 
@@ -74,11 +96,26 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             sb.Append(",\"skipped\":").Append(route.SkippedJson());
             sb.Append(",\"durationMs\":").Append(PlayModeScheduler.Num(plan.DurationMs));
             sb.Append(",\"focusedGameView\":").Append(focused ? "true" : "false");
+            if (captures != null) sb.Append(",\"captures\":").Append(captures.Slots.Count);
             sb.Append(",\"agentNextSteps\":[").Append(BridgeJson.EscapeString(
                 "The gesture runs over real frames. Through MCP this call already waits for the terminal trace " +
                 "(or returns a jobs id for long gestures); a direct bridge caller polls POST /playmode-operations " +
                 "{\"action\":\"status\",\"operation_id\":\"" + op.Id + "\"}.")).Append("]}");
             return sb.ToString();
+        }
+
+        // capture_at_ms: offsets (ms, the gesture's time base) from the gesture start.
+        internal static FrameSchedule ParseCaptures(string raw, out string error)
+        {
+            var schedule = FrameSchedule.Parse(raw, null, null, null, MaxCaptures, "capture_", out error);
+            if (schedule == null) return null;
+            foreach (var slot in schedule.Slots)
+                if (slot.AtMs > GesturePlan.MaxDurationMs)
+                {
+                    error = "capture_at_ms values must be 0.." + GesturePlan.MaxDurationMs + ".";
+                    return null;
+                }
+            return schedule;
         }
 
         private static (bool Ok, Vector2 Point, string TargetJson, string ErrorJson) ResolveText(GestureKeyframe key, string context)
@@ -121,6 +158,9 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         private readonly GesturePlan plan;
         private readonly RouteDecision route;
         private readonly bool focusedGameView;
+        private readonly FrameSeriesRecorder recorder;
+        private ConditionTick? previousTick;
+        private bool gestureFinished;
         private readonly List<FingerRun> runs = new List<FingerRun>();
         private readonly List<TraceEntry> trace = new List<TraceEntry>();
         private readonly List<string> errors = new List<string>();
@@ -129,7 +169,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         private double elapsedMs;
         private bool logging;
 
-        internal GestureOperation(GesturePlan plan, RouteDecision route, bool focusedGameView)
+        internal GestureOperation(GesturePlan plan, RouteDecision route, bool focusedGameView, FrameSchedule captures = null)
         {
             this.plan = plan;
             this.route = route;
@@ -137,12 +177,46 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             TimeBase = plan.Time;
             ExpectedDurationMs = plan.DurationMs;
             foreach (var finger in plan.Fingers) runs.Add(new FingerRun { Finger = finger });
+            if (captures != null)
+            {
+                recorder = new FrameSeriesRecorder(captures, new FrameSeriesOptions { Label = "gesture" }, null);
+                ExpectedDurationMs = Math.Max(plan.DurationMs, captures.LastMs);
+            }
         }
 
         public override string Kind => GestureTools.ToolName;
         public override string ExclusiveResource => TouchTools.InputResource;
+        internal FrameSeriesRecorder Recorder => recorder;
 
         protected internal override bool Tick(PlayModeFrame frame)
+        {
+            if (!gestureFinished && StepGesture(frame)) gestureFinished = true;
+            if (recorder == null) return gestureFinished;
+
+            // Captures run on the same ticks: offset 0 is the gesture's first frame.
+            var now = new ConditionTick
+            {
+                Frame = frame.FrameCount,
+                TickIndex = frame.TickIndex,
+                ElapsedMs = frame.ElapsedMs,
+                RealtimeMs = frame.RealtimeMs,
+                PlayTime = frame.PlayTime,
+            };
+            if (!recorder.Armed)
+            {
+                recorder.OperationId = Id;
+                recorder.Arm(now);
+            }
+            if (!recorder.CapturesDone) recorder.Observe(now, previousTick, frame.ScreenWidth, frame.ScreenHeight);
+            previousTick = now;
+            if (!gestureFinished) return false;
+            if (!recorder.CapturesDone) { Phase = "capturing"; return false; }
+            Phase = "encoding";
+            return recorder.EncodeStep(CaptureSeriesTool.EncodeBudgetMsPerTick);
+        }
+
+        // One gesture step; true once every finger is up and one more frame ran.
+        private bool StepGesture(PlayModeFrame frame)
         {
             if (startFrame < 0)
             {
@@ -254,6 +328,15 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 catch (Exception) { /* backend gone (reload) — the adapter's own reload hook releases */ }
                 run.Up = true;
             }
+            if (recorder != null)
+            {
+                // Keep the frames captured so far when cut short in a live Editor.
+                if (reason == PlayModeEndReason.Cancelled || reason == PlayModeEndReason.PlayModeExited || reason == PlayModeEndReason.Failed)
+                {
+                    try { recorder.FlushPending(); } catch (Exception) { /* best effort */ }
+                }
+                recorder.Release();
+            }
         }
 
         protected internal override string BuildResult(PlayModeEndReason reason, string error)
@@ -309,6 +392,11 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 sb.Append(BridgeJson.EscapeString(errors[i]));
             }
             sb.Append("],\"errorsDropped\":").Append(errorsDropped);
+            if (recorder != null)
+            {
+                sb.Append(",\"captures\":");
+                recorder.AppendJson(sb, plan.Time == PlayModeTimeBase.Gameplay ? "gameplay" : "realtime");
+            }
             sb.Append('}');
             return sb.ToString();
         }

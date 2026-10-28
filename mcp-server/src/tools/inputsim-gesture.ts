@@ -9,7 +9,8 @@
 // Routing matches inputsim_touch: legacy Input Manager touches (+ emulated
 // legacy mouse) and/or Input System Touchscreen events, `backend` reported as an
 // array. Legacy is single-finger (id 0). Cancel / exit play / reload release
-// every held finger.
+// every held finger. `capture_at_ms` captures the composed game frame at those
+// offsets in the same scheduled operation (a tap and the frames after it).
 import { makeTool } from "./schema-fragments.js";
 import { textTargetProps } from "./text-target.js";
 
@@ -17,6 +18,8 @@ import { textTargetProps } from "./text-target.js";
 export const INPUTSIM_GESTURE_INLINE_LIMIT_MS = 40_000;
 /** Hard cap on a gesture's last keyframe (mirrors the bridge's GesturePlan.MaxDurationMs). */
 export const INPUTSIM_GESTURE_MAX_DURATION_MS = 300_000;
+/** Mirrors the bridge's GestureTools.MaxCaptures. */
+export const INPUTSIM_GESTURE_MAX_CAPTURES = 30;
 
 const keyframe = {
   type: "object",
@@ -57,7 +60,10 @@ export const inputsimGesture = makeTool(
     "no reachable backend refuses with input_backend_unavailable (with the detected " +
     "configuration), an unverified Editor with unsupported_editor_version. The call " +
     "waits for the terminal result: a bounded trace (per keyframe: frame, screen point, " +
-    "uGUI top hit) plus console errors raised meanwhile. Gestures longer than " +
+    "uGUI top hit) plus console errors raised meanwhile. capture_at_ms [0, 100, 300, …] also captures the " +
+    "composed game frame at those offsets from the gesture start inside the same operation (the " +
+    "capture_series recorder: native size, files + per-frame frame / play_time under `captures`), so a tap " +
+    "and its follow-up frames come back from one call. Gestures longer than " +
     `${INPUTSIM_GESTURE_INLINE_LIMIT_MS / 1000}s return a job_id instead — wait on it with ` +
     "unity_open_mcp_jobs (you can also start one there directly). Cancel, exiting play " +
     "mode and a domain reload release every held finger. One input gesture at a time " +
@@ -102,6 +108,16 @@ export const inputsimGesture = makeTool(
         description:
           "auto = every enabled, reachable backend (legacy_touch when the legacy Input Manager is " +
           "on; input_system when a Touchscreen device exists). Force one with legacy_touch / input_system.",
+      },
+      capture_at_ms: {
+        type: "array",
+        minItems: 1,
+        maxItems: INPUTSIM_GESTURE_MAX_CAPTURES,
+        items: { type: "number", minimum: 0, maximum: INPUTSIM_GESTURE_MAX_DURATION_MS },
+        description:
+          "Capture the composed game frame at these offsets (ms, the gesture's `time` base) from the gesture " +
+          "start — the call returns when the gesture and the last capture are done. Result `captures.frames[]`: " +
+          "frame, play_time, elapsed_ms, file, `unchanged`. Needs a rendering Game view / Simulator (Unity 6).",
       },
       operation_id: {
         type: "string",

@@ -191,6 +191,21 @@ Read state at the trace's `frame`s (e.g. the controlled object's position) to
 prove the game followed the finger. `time: "gameplay"` follows `Time.timeScale`.
 One gesture at a time (`playmode_operation_busy`); not inside `batch_execute`.
 
+### Recipe: tap and see what follows (one call)
+
+```jsonc
+// inputsim_gesture — tap a label, capture the popup animating in.
+{ "coords": "target",
+  "fingers": [{ "id": 0, "path": [{ "at_ms": 0, "target_text": "Show Popup" }, { "at_ms": 50, "target_text": "Show Popup" }] }],
+  "capture_at_ms": [0, 100, 200, 300, 400] }
+// → { ..., "captures": { "frames": [{ "index":1, "at_ms":100, "frame":168, "play_time":2.8, "elapsed_ms":113.5,
+//       "file":".../gesture-…/frame-001-f168-114ms.png" }, ...] } }
+```
+
+Each capture is the composed frame (native size) of the labelled `frame`; open the
+files (or use `unity_senses_capture_series` with `contact_sheet: true` for a tiled
+review image). Needs a rendering Game view / Simulator; Unity 6.
+
 ### Recipe: is the button really tappable?
 
 ```jsonc

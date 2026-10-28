@@ -23,7 +23,7 @@ definitions live in `mcp-server/src/tools/`.
 | [CLI and automation](cli-automation.md) | CLI commands, options, JSON output, and links to canonical CI behavior. |
 | [CI templates](../ci/README.md) | Pipeline shape, CLI exit codes, baselines, and provider templates. |
 | [Input simulation](input-simulation.md) | Input backends (legacy Input Manager / Input System), pointer delivery and `raycast_real`, touch, gestures over real frames, target by label (`target_text`), frame stepping, and supported input boundaries. |
-| [Playtest tools](playtest.md) | `ui_snapshot` (uGUI screen as an accessibility tree: text, visibility, occlusion, diagnostics), profiles and paging, the snapshot → tap-by-label loop, and `game_view` (Game view resolution, Device Simulator device / orientation, safe area, settle-on-return). |
+| [Playtest tools](playtest.md) | `ui_snapshot` (uGUI screen as an accessibility tree: text, visibility, occlusion, diagnostics), profiles and paging, the snapshot → tap-by-label loop, `game_view` (Game view resolution, Device Simulator device / orientation, safe area, settle-on-return), `playtest_wait` (wait until a log / UI / object / project-predicate condition holds, timeout, time scale for the wait, fail on exception) and `capture_series` (frame-scheduled composed captures, metrics, contact sheet; gesture `capture_at_ms`). |
 | [Project commands](project-commands.md) | Editor-only authoring, typed list/describe/invoke, schema versions and safety boundaries. |
 | [Asynchronous jobs](jobs.md) | Job lifecycle, observation, idempotency, cancellation, retention and adapter contracts. |
 | [MCP resources](resources.md) | Resource URIs, payloads, and resource routing. |
@@ -64,7 +64,9 @@ definitions live in `mcp-server/src/tools/`.
 - **Playtest** — put the game on a target resolution or Device Simulator device
   (`game_view`: safe area and notch insets the game sees), read the uGUI screen
   (`ui_snapshot`: texts, visibility, overflow / placeholder / touch-size
-  diagnostics) and tap controls by their on-screen label.
+  diagnostics), tap controls by their on-screen label, wait until the game gets
+  somewhere (`playtest_wait`) and capture timed frame series of animated content
+  (`capture_series`).
 - **Discovery** — capabilities, rules, skill generation, and tool-group
   management.
 - **Unity Hub control** — editor discovery, release listing, installs, modules,
@@ -329,7 +331,8 @@ immediately and the server polls `test-results-<runId>.json` to turn that into a
 real result — a top-level-route behavior the batch path does not have. Nested, the
 step would be recorded `success` carrying the non-terminal `"started"` body and the
 run's outcome would never reach the caller. Call it top-level.
-`unity_open_mcp_inputsim_gesture` is refused the same way: it starts an operation
+`unity_open_mcp_inputsim_gesture`, `unity_open_mcp_playtest_wait` and
+`unity_senses_capture_series` are refused the same way: each starts an operation
 on the bridge's play-mode scheduler that the server polls, and no frame advances
 while a batch holds the main thread.
 
@@ -452,7 +455,14 @@ queue timeout, scene-dirty guard, deny bypass), so they are valid on any tool
 regardless of its parameter list. Without the exemption the server's
 schema-default injection (`gate: "enforce"`, `timeout_ms: 30000`) made
 registry-dispatched tools with no matching C# parameter (e.g.
-`editor_status`) uncallable with default args.
+`editor_status`) uncallable with default args. `unity_open_mcp_playtest_wait`
+declares `timeout_ms` as its own parameter (the wait's wall-clock limit, up to
+10 minutes): the server forwards it as sent instead of clamping it to the
+host-safe request cap — the call itself only starts the wait and answers at once.
+When a body carries a nested condition payload (`condition`, `start_on`), the
+bridge reads every other parameter from the top level only, so a key inside the
+payload (a project command's argument named `time`) never shadows a top-level
+parameter.
 
 ### `unity_senses_pull_events`
 
@@ -503,6 +513,11 @@ Space Overlay UI.
 
 Set the device or resolution first with
 [`unity_open_mcp_game_view`](playtest.md#unity_open_mcp_game_view), then capture.
+For animated content capture a frame-scheduled series instead of one-shot frames:
+[`unity_senses_capture_series`](playtest.md#unity_senses_capture_series) reads the
+same composed frame inside the player loop at `at_ms` / `every_ms` / `at_frames`
+offsets (optionally after a `start_on` condition) and adds per-frame metrics and a
+contact sheet.
 
 `view: "game"` (Camera.main only) keeps its 1280×720 default; `size: "native"`
 renders it at the game's resolution (`size: "native"` in the response, otherwise

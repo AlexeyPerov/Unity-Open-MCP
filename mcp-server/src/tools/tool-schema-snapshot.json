@@ -11994,7 +11994,7 @@
     }
   },
   "unity_open_mcp_batch_execute": {
-    "description": "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — cuts agent↔Unity latency and token cost for multi-object setup (e.g. spawn N cubes + create materials + assign in one call). Each entry in `commands` carries a full tool id (`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group (always visible). Live-only — NOT headless `batchCapable`; there is no batch spawn fallback when the bridge is down.\n\nNOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". The two are independent axes; nestability is decided by the pre-flight refusals below.\n\nEvery step is schema/lifecycle preflighted before dispatch. All-read batches need no paths_hint, checkpoint, gate, or undo group. Mixed/mutating batches require the explicit union paths_hint. Safety: a mutating batch shares ONE gate cycle (one checkpoint → all steps → one validate/delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step errors are collected. Partial failure semantics: a successful step is NOT rolled back when a later step fails. A partial batch (at least one step committed) propagates `mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its validate/delta on the committed work and waits for the asset/compile settle. Gate outcome describes validation independently of mutation.success; read `batch.results[]` for the breakdown and undo with a single `editor_undo` if needed. A total failure (no step committed) skips the validate/delta with gate.outcome: skipped and skippedReason: mutation_failed. Run `unity_open_mcp_validate_edit` on the touched paths to confirm health after a partial run.\n\nv1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. `batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package / non-dry-run upgrade, scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, settings_set_player, mutating execute_csharp / invoke_method / disruptive execute_menu) is refused up-front with a `batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its default Single mode replaces the active scene stack and can discard unsaved changes in open scenes). Script writes/deletes, undo/redo, play transitions, and non-preview fixes also require their top-level routes. Use those tools as single top-level calls instead.\n\nA step whose terminal result is produced by the SERVER rather than by the Editor dispatch is refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns `{status:\"started\", runId}` immediately and the server polls a results file to turn that into a real result, which only happens on the top-level route; `unity_open_mcp_inputsim_gesture` likewise only starts a play-mode operation the server polls (and no frame advances while a batch holds the main thread), as do `unity_open_mcp_game_view` set_resolution / set_device (get / list_devices stay batchable). Inside a batch nothing polls, so the step would be recorded `success` carrying the non-terminal \"started\" body and the run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
+    "description": "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — cuts agent↔Unity latency and token cost for multi-object setup (e.g. spawn N cubes + create materials + assign in one call). Each entry in `commands` carries a full tool id (`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group (always visible). Live-only — NOT headless `batchCapable`; there is no batch spawn fallback when the bridge is down.\n\nNOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". The two are independent axes; nestability is decided by the pre-flight refusals below.\n\nEvery step is schema/lifecycle preflighted before dispatch. All-read batches need no paths_hint, checkpoint, gate, or undo group. Mixed/mutating batches require the explicit union paths_hint. Safety: a mutating batch shares ONE gate cycle (one checkpoint → all steps → one validate/delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step errors are collected. Partial failure semantics: a successful step is NOT rolled back when a later step fails. A partial batch (at least one step committed) propagates `mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its validate/delta on the committed work and waits for the asset/compile settle. Gate outcome describes validation independently of mutation.success; read `batch.results[]` for the breakdown and undo with a single `editor_undo` if needed. A total failure (no step committed) skips the validate/delta with gate.outcome: skipped and skippedReason: mutation_failed. Run `unity_open_mcp_validate_edit` on the touched paths to confirm health after a partial run.\n\nv1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. `batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package / non-dry-run upgrade, scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, settings_set_player, mutating execute_csharp / invoke_method / disruptive execute_menu) is refused up-front with a `batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its default Single mode replaces the active scene stack and can discard unsaved changes in open scenes). Script writes/deletes, undo/redo, play transitions, and non-preview fixes also require their top-level routes. Use those tools as single top-level calls instead.\n\nA step whose terminal result is produced by the SERVER rather than by the Editor dispatch is refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns `{status:\"started\", runId}` immediately and the server polls a results file to turn that into a real result, which only happens on the top-level route; `unity_open_mcp_inputsim_gesture`, `unity_open_mcp_playtest_wait` and `unity_senses_capture_series` likewise only start a play-mode operation the server polls (and no frame advances while a batch holds the main thread), as do `unity_open_mcp_game_view` set_resolution / set_device (get / list_devices stay batchable). Inside a batch nothing polls, so the step would be recorded `success` carrying the non-terminal \"started\" body and the run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -12589,49 +12589,48 @@
     }
   },
   "unity_open_mcp_jobs": {
-    "description": "Observe session-owned asynchronous jobs: start, status, bounded wait, cooperative cancel, and paged list. Supported targets: unity_senses_run_tests, available async project commands, and play-mode operations (unity_open_mcp_inputsim_gesture; cancellable, cancel releases held input). Other tools are unsupported. Test args are ordinary filters without run_id; project args contain nested args plus scope/gate options; play-mode operation args are the tool's own arguments (the job owns operation_id). Mutating starts require idempotency_key. Records expire 30 minutes after completion; server restart loses all records. Never blindly retry an orphaned job.",
+    "description": "Observe session-owned asynchronous jobs: start, status, bounded wait, cooperative cancel, and paged list. Supported targets: unity_senses_run_tests, available async project commands, and play-mode operations (unity_open_mcp_inputsim_gesture, unity_open_mcp_playtest_wait, unity_senses_capture_series; cancellable — cancel releases held input and restores a wait's time scale). Other tools are unsupported. Test args are ordinary filters without run_id; project args contain nested args plus scope/gate options; play-mode operation args are the tool's own arguments (the job owns operation_id). Mutating starts require idempotency_key. Records expire 30 minutes after completion; server restart loses all records. Never blindly retry an orphaned job.",
     "inputSchema": {
-      "type": "object",
-      "required": [
-        "action"
-      ],
+      "additionalProperties": false,
       "properties": {
         "action": {
-          "type": "string",
           "enum": [
             "start",
             "status",
             "wait",
             "cancel",
             "list"
-          ]
-        },
-        "tool_or_command": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
+          ],
+          "type": "string"
         },
         "args": {
-          "type": "object",
-          "description": "Adapter arguments, including scope/gate intent where applicable."
+          "description": "Adapter arguments, including scope/gate intent where applicable.",
+          "type": "object"
+        },
+        "cursor": {
+          "maxLength": 4096,
+          "type": "string"
         },
         "idempotency_key": {
-          "type": "string",
+          "maxLength": 256,
           "minLength": 1,
-          "maxLength": 256
+          "type": "string"
         },
         "job_id": {
-          "type": "string",
+          "maxLength": 128,
           "minLength": 1,
-          "maxLength": 128
+          "type": "string"
         },
-        "timeout_ms": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 30000
+        "limit": {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "operation": {
+          "maxLength": 256,
+          "type": "string"
         },
         "state": {
-          "type": "string",
           "enum": [
             "queued",
             "running",
@@ -12640,154 +12639,166 @@
             "cancel_requested",
             "cancelled",
             "orphaned"
-          ]
+          ],
+          "type": "string"
         },
-        "operation": {
-          "type": "string",
-          "maxLength": 256
+        "timeout_ms": {
+          "maximum": 30000,
+          "minimum": 0,
+          "type": "integer"
         },
-        "cursor": {
-          "type": "string",
-          "maxLength": 4096
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 100
+        "tool_or_command": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
         }
       },
-      "additionalProperties": false
+      "required": [
+        "action"
+      ],
+      "type": "object"
     }
   },
   "unity_open_mcp_inputsim_gesture": {
-    "description": "Play a touch gesture across REAL play-mode frames: per-finger keyframed paths (down → move/hold → up) interpolated every frame, so polled gameplay input (Input.GetTouch / Input.mousePosition / Touchscreen.current) follows the finger for seconds — hold, drag, trace a curve. `time: gameplay` follows Time.timeScale. Routing like inputsim_touch: legacy Input Manager touches (legacy_touch, also driving the legacy mouse API and StandaloneInputModule) and/or Input System Touchscreen events (input_system); `backend` in the result is an array. Legacy is single-finger (id 0) — more fingers refuse with legacy_multitouch_unsupported; no reachable backend refuses with input_backend_unavailable (with the detected configuration), an unverified Editor with unsupported_editor_version. The call waits for the terminal result: a bounded trace (per keyframe: frame, screen point, uGUI top hit) plus console errors raised meanwhile. Gestures longer than 40s return a job_id instead — wait on it with unity_open_mcp_jobs (you can also start one there directly). Cancel, exiting play mode and a domain reload release every held finger. One input gesture at a time (playmode_operation_busy). Play-mode only; gate-free. Not allowed inside batch_execute.",
+    "description": "Play a touch gesture across REAL play-mode frames: per-finger keyframed paths (down → move/hold → up) interpolated every frame, so polled gameplay input (Input.GetTouch / Input.mousePosition / Touchscreen.current) follows the finger for seconds — hold, drag, trace a curve. `time: gameplay` follows Time.timeScale. Routing like inputsim_touch: legacy Input Manager touches (legacy_touch, also driving the legacy mouse API and StandaloneInputModule) and/or Input System Touchscreen events (input_system); `backend` in the result is an array. Legacy is single-finger (id 0) — more fingers refuse with legacy_multitouch_unsupported; no reachable backend refuses with input_backend_unavailable (with the detected configuration), an unverified Editor with unsupported_editor_version. The call waits for the terminal result: a bounded trace (per keyframe: frame, screen point, uGUI top hit) plus console errors raised meanwhile. capture_at_ms [0, 100, 300, …] also captures the composed game frame at those offsets from the gesture start inside the same operation (the capture_series recorder: native size, files + per-frame frame / play_time under `captures`), so a tap and its follow-up frames come back from one call. Gestures longer than 40s return a job_id instead — wait on it with unity_open_mcp_jobs (you can also start one there directly). Cancel, exiting play mode and a domain reload release every held finger. One input gesture at a time (playmode_operation_busy). Play-mode only; gate-free. Not allowed inside batch_execute.",
     "inputSchema": {
-      "type": "object",
-      "required": [
-        "fingers"
-      ],
+      "additionalProperties": false,
       "properties": {
-        "fingers": {
-          "type": "array",
+        "backend": {
+          "default": "auto",
+          "description": "auto = every enabled, reachable backend (legacy_touch when the legacy Input Manager is on; input_system when a Touchscreen device exists). Force one with legacy_touch / input_system.",
+          "enum": [
+            "auto",
+            "legacy_touch",
+            "input_system"
+          ],
+          "type": "string"
+        },
+        "capture_at_ms": {
+          "description": "Capture the composed game frame at these offsets (ms, the gesture's `time` base) from the gesture start — the call returns when the gesture and the last capture are done. Result `captures.frames[]`: frame, play_time, elapsed_ms, file, `unchanged`. Needs a rendering Game view / Simulator (Unity 6).",
+          "items": {
+            "maximum": 300000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "maxItems": 30,
           "minItems": 1,
-          "maxItems": 10,
+          "type": "array"
+        },
+        "coords": {
+          "default": "screen",
+          "description": "screen = Screen pixels (bottom-left origin, same as Input.mousePosition); normalized = 0..1 of the Game view size; target = each keyframe names a target or a target_text (on-screen label, like inputsim_touch), x/y are pixel offsets.",
+          "enum": [
+            "screen",
+            "normalized",
+            "target"
+          ],
+          "type": "string"
+        },
+        "fingers": {
           "description": "One entry per finger: { id (0-9, default = index), path: [keyframes] }.",
           "items": {
-            "type": "object",
-            "required": [
-              "path"
-            ],
+            "additionalProperties": false,
             "properties": {
               "id": {
-                "type": "integer",
+                "maximum": 9,
                 "minimum": 0,
-                "maximum": 9
+                "type": "integer"
               },
               "path": {
-                "type": "array",
-                "minItems": 2,
-                "maxItems": 256,
                 "items": {
-                  "type": "object",
-                  "required": [
-                    "at_ms"
-                  ],
+                  "additionalProperties": false,
                   "properties": {
                     "at_ms": {
-                      "type": "number",
-                      "minimum": 0,
+                      "description": "Time of this keyframe from the gesture start, in ms (strictly increasing per finger).",
                       "maximum": 300000,
-                      "description": "Time of this keyframe from the gesture start, in ms (strictly increasing per finger)."
-                    },
-                    "x": {
-                      "type": "number",
-                      "description": "Screen X (coords: screen = pixels, bottom-left origin; normalized = 0..1; target = pixel offset from the target center)."
-                    },
-                    "y": {
-                      "type": "number",
-                      "description": "Screen Y, same space as x."
-                    },
-                    "target": {
-                      "type": "string",
-                      "description": "coords: target only — GameObject name or hierarchy path whose visual center is the point."
-                    },
-                    "target_text": {
-                      "type": "string",
-                      "minLength": 1,
-                      "description": "coords: target only — the keyframe point (instead of `target`; x/y stay pixel offsets) by its on-screen text instead of a name: the visible uGUI element (UI.Text / TextMeshPro) whose text matches; a button matches on its label. Default match is exact after normalisation (trim, whitespace collapse, rich-text tags removed, case-insensitive). Ambiguous → ambiguous_target with matches[]; pick with `index` or narrow with `under`. The result reports the resolution (`textTarget`; gestures list `textTargets`). Requires com.unity.ugui."
-                    },
-                    "under": {
-                      "type": "string",
-                      "description": "target_text only: search the subtree of this hierarchy path or trailing path suffix ('Shop')."
+                      "minimum": 0,
+                      "type": "number"
                     },
                     "index": {
-                      "type": "integer",
+                      "description": "target_text only: pick the n-th visible match (hierarchy order, 0-based; see matches[].index).",
                       "minimum": 0,
-                      "description": "target_text only: pick the n-th visible match (hierarchy order, 0-based; see matches[].index)."
-                    },
-                    "text_match": {
-                      "type": "string",
-                      "enum": [
-                        "exact",
-                        "contains",
-                        "regex"
-                      ],
-                      "description": "target_text only: exact (default when omitted) | contains (case-insensitive substring) | regex (.NET, case-insensitive, matched against the normalised text)."
+                      "type": "integer"
                     },
                     "phase": {
-                      "type": "string",
+                      "description": "down = first keyframe (default there): finger touches. move = default in between: interpolate from the previous keyframe. hold = stay at the previous point until at_ms (x/y may be omitted). up = last keyframe (default there): move to this point and lift.",
                       "enum": [
                         "down",
                         "move",
                         "hold",
                         "up"
                       ],
-                      "description": "down = first keyframe (default there): finger touches. move = default in between: interpolate from the previous keyframe. hold = stay at the previous point until at_ms (x/y may be omitted). up = last keyframe (default there): move to this point and lift."
+                      "type": "string"
+                    },
+                    "target": {
+                      "description": "coords: target only — GameObject name or hierarchy path whose visual center is the point.",
+                      "type": "string"
+                    },
+                    "target_text": {
+                      "description": "coords: target only — the keyframe point (instead of `target`; x/y stay pixel offsets) by its on-screen text instead of a name: the visible uGUI element (UI.Text / TextMeshPro) whose text matches; a button matches on its label. Default match is exact after normalisation (trim, whitespace collapse, rich-text tags removed, case-insensitive). Ambiguous → ambiguous_target with matches[]; pick with `index` or narrow with `under`. The result reports the resolution (`textTarget`; gestures list `textTargets`). Requires com.unity.ugui.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "text_match": {
+                      "description": "target_text only: exact (default when omitted) | contains (case-insensitive substring) | regex (.NET, case-insensitive, matched against the normalised text).",
+                      "enum": [
+                        "exact",
+                        "contains",
+                        "regex"
+                      ],
+                      "type": "string"
+                    },
+                    "under": {
+                      "description": "target_text only: search the subtree of this hierarchy path or trailing path suffix ('Shop').",
+                      "type": "string"
+                    },
+                    "x": {
+                      "description": "Screen X (coords: screen = pixels, bottom-left origin; normalized = 0..1; target = pixel offset from the target center).",
+                      "type": "number"
+                    },
+                    "y": {
+                      "description": "Screen Y, same space as x.",
+                      "type": "number"
                     }
                   },
-                  "additionalProperties": false
-                }
+                  "required": [
+                    "at_ms"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 256,
+                "minItems": 2,
+                "type": "array"
               }
             },
-            "additionalProperties": false
-          }
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          },
+          "maxItems": 10,
+          "minItems": 1,
+          "type": "array"
         },
-        "coords": {
-          "type": "string",
-          "enum": [
-            "screen",
-            "normalized",
-            "target"
-          ],
-          "default": "screen",
-          "description": "screen = Screen pixels (bottom-left origin, same as Input.mousePosition); normalized = 0..1 of the Game view size; target = each keyframe names a target or a target_text (on-screen label, like inputsim_touch), x/y are pixel offsets."
+        "operation_id": {
+          "description": "Optional idempotency handle for the bridge operation (8-64 letters, digits, dashes). A retried call with the same id returns the same operation instead of starting another. Omit it normally (the server generates one); jobs always set it to the job id.",
+          "pattern": "^[A-Za-z0-9-]{8,64}$",
+          "type": "string"
         },
         "time": {
-          "type": "string",
+          "default": "realtime",
+          "description": "realtime = unscaled wall time; gameplay = scaled by Time.timeScale (a paused game never advances).",
           "enum": [
             "realtime",
             "gameplay"
           ],
-          "default": "realtime",
-          "description": "realtime = unscaled wall time; gameplay = scaled by Time.timeScale (a paused game never advances)."
-        },
-        "backend": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "legacy_touch",
-            "input_system"
-          ],
-          "default": "auto",
-          "description": "auto = every enabled, reachable backend (legacy_touch when the legacy Input Manager is on; input_system when a Touchscreen device exists). Force one with legacy_touch / input_system."
-        },
-        "operation_id": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9-]{8,64}$",
-          "description": "Optional idempotency handle for the bridge operation (8-64 letters, digits, dashes). A retried call with the same id returns the same operation instead of starting another. Omit it normally (the server generates one); jobs always set it to the job id."
+          "type": "string"
         }
       },
-      "additionalProperties": false
+      "required": [
+        "fingers"
+      ],
+      "type": "object"
     }
   },
   "unity_open_mcp_ui_snapshot": {
@@ -12917,6 +12928,915 @@
       "required": [
         "action"
       ],
+      "type": "object"
+    }
+  },
+  "unity_open_mcp_playtest_wait": {
+    "description": "Wait in play mode until a condition holds — instead of polling in a loop of calls. CONDITION (exactly one key): log {pattern (regex), level} = a console message logged after the start matches; ui {text_contains, path, visible, matches} = a ui_snapshot query matches (matches:false = stops matching, e.g. a popup closed); object {path | object_id, state: exists | active | inactive | destroyed}; project_command {id, args, field} = the project's own read-only predicate returns true (no arbitrary C#); frames N; ms N; all / any [leaves] (one level). The bridge evaluates it inside the player loop every poll_every_frames frames and the call returns the terminal result: `fired` (which condition — e.g. condition.any[1] — at which frame, observed_frame, play_time, elapsed_ms), every leaf's last observed state, frames, and console errors logged meanwhile. timeout_ms is wall-clock: on expiry the call fails with timed_out plus the last observed state. time_scale applies Time.timeScale for the wait only and is restored on every exit (success, timeout, cancel, exit play, domain reload) unless game code changed it meanwhile (reported). fail_on [\"exception\"] stops at the first exception the game logs (exception_thrown, with message and stack); \"error\" also stops on error logs. ms conditions count `time` (gameplay = scaled by Time.timeScale, default; realtime). Waits with timeout_ms over 40s return a job_id instead — wait on it with unity_open_mcp_jobs (cancel there; exiting play mode / a reload end it, time scale restored). Play-mode only; gate-free; one time-scaled wait at a time (playmode_operation_busy). Not allowed inside batch_execute.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "condition": {
+          "additionalProperties": false,
+          "description": "What to wait for: one key — log / ui / object / project_command / frames / ms — or all / any over those, e.g. {\"log\":{\"pattern\":\"Wave \\\\d+ cleared\"}}, {\"ui\":{\"text_contains\":\"Victory\"}}, {\"object\":{\"path\":\"Enemies/Boss\",\"state\":\"destroyed\"}}, {\"any\":[{\"ms\":5000},{\"log\":{\"pattern\":\"Game over\"}}]}.",
+          "properties": {
+            "all": {
+              "description": "Holds when every leaf holds at the same poll (log leaves latch once seen).",
+              "items": {
+                "additionalProperties": false,
+                "description": "Exactly one of log, ui, object, project_command, frames, ms.",
+                "properties": {
+                  "frames": {
+                    "description": "Holds after this many frames have run since the start.",
+                    "maximum": 1000000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "log": {
+                    "additionalProperties": false,
+                    "description": "A console message logged after the wait started matches `pattern` (latched once seen; reports the frame it was logged in).",
+                    "properties": {
+                      "level": {
+                        "description": "any (default) | log | warning | error (Error, Exception, Assert) | exception.",
+                        "enum": [
+                          "any",
+                          "log",
+                          "warning",
+                          "error",
+                          "exception"
+                        ],
+                        "type": "string"
+                      },
+                      "pattern": {
+                        "description": ".NET regex, case-sensitive, matched against the message text.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ],
+                    "type": "object"
+                  },
+                  "ms": {
+                    "description": "Holds after this many ms (the call's `time` base) since the start.",
+                    "maximum": 3600000,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "object": {
+                    "additionalProperties": false,
+                    "description": "A GameObject (loaded scenes + DontDestroyOnLoad, inactive included) by path or object_id is in `state`. Once found it is tracked: destroyed means that object was destroyed.",
+                    "properties": {
+                      "object_id": {
+                        "description": "Instance id (e.g. a ui_snapshot node id). Alternative to path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "Hierarchy path (plain names, 'Root/Child') or a bare name (first match anywhere).",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "description": "exists (default) | active (activeInHierarchy) | inactive | destroyed (absent).",
+                        "enum": [
+                          "exists",
+                          "active",
+                          "inactive",
+                          "destroyed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "project_command": {
+                    "additionalProperties": false,
+                    "description": "The project's own predicate: a synchronous, read-only project command (unity_open_mcp_project_commands) called at each poll holds when it returns JSON true — or, with `field`, an object whose `field` is true. Mutating or async commands are refused (command_not_allowed); there is no arbitrary C# predicate.",
+                    "properties": {
+                      "args": {
+                        "description": "The command's typed arguments (validated against its schema once, at start).",
+                        "type": "object"
+                      },
+                      "field": {
+                        "description": "Top-level field of the command's JSON object result that must be true.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "id": {
+                        "description": "Project command id (project.<owner>.<command>).",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "type": "object"
+                  },
+                  "ui": {
+                    "additionalProperties": false,
+                    "description": "A ui_snapshot query over the uGUI screen model matches (or, with matches:false, stops matching). Needs text_contains and/or path. Requires com.unity.ugui.",
+                    "properties": {
+                      "matches": {
+                        "description": "true (default) = holds while at least one node matches; false = holds while none does (a popup closed).",
+                        "type": "boolean"
+                      },
+                      "path": {
+                        "description": "Node hierarchy path or trailing path suffix ('Popup/Title').",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "text_contains": {
+                        "description": "Node display text contains this (normalised, case-insensitive; a control's text is its label).",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "visible": {
+                        "description": "true (default) = count on-screen nodes only; false = count nodes that exist but are not visible.",
+                        "type": "boolean"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "type": "array"
+            },
+            "any": {
+              "description": "Holds when one leaf holds; the result names it (fired.path, e.g. condition.any[1]).",
+              "items": {
+                "additionalProperties": false,
+                "description": "Exactly one of log, ui, object, project_command, frames, ms.",
+                "properties": {
+                  "frames": {
+                    "description": "Holds after this many frames have run since the start.",
+                    "maximum": 1000000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "log": {
+                    "additionalProperties": false,
+                    "description": "A console message logged after the wait started matches `pattern` (latched once seen; reports the frame it was logged in).",
+                    "properties": {
+                      "level": {
+                        "description": "any (default) | log | warning | error (Error, Exception, Assert) | exception.",
+                        "enum": [
+                          "any",
+                          "log",
+                          "warning",
+                          "error",
+                          "exception"
+                        ],
+                        "type": "string"
+                      },
+                      "pattern": {
+                        "description": ".NET regex, case-sensitive, matched against the message text.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ],
+                    "type": "object"
+                  },
+                  "ms": {
+                    "description": "Holds after this many ms (the call's `time` base) since the start.",
+                    "maximum": 3600000,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "object": {
+                    "additionalProperties": false,
+                    "description": "A GameObject (loaded scenes + DontDestroyOnLoad, inactive included) by path or object_id is in `state`. Once found it is tracked: destroyed means that object was destroyed.",
+                    "properties": {
+                      "object_id": {
+                        "description": "Instance id (e.g. a ui_snapshot node id). Alternative to path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "Hierarchy path (plain names, 'Root/Child') or a bare name (first match anywhere).",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "description": "exists (default) | active (activeInHierarchy) | inactive | destroyed (absent).",
+                        "enum": [
+                          "exists",
+                          "active",
+                          "inactive",
+                          "destroyed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "project_command": {
+                    "additionalProperties": false,
+                    "description": "The project's own predicate: a synchronous, read-only project command (unity_open_mcp_project_commands) called at each poll holds when it returns JSON true — or, with `field`, an object whose `field` is true. Mutating or async commands are refused (command_not_allowed); there is no arbitrary C# predicate.",
+                    "properties": {
+                      "args": {
+                        "description": "The command's typed arguments (validated against its schema once, at start).",
+                        "type": "object"
+                      },
+                      "field": {
+                        "description": "Top-level field of the command's JSON object result that must be true.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "id": {
+                        "description": "Project command id (project.<owner>.<command>).",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "type": "object"
+                  },
+                  "ui": {
+                    "additionalProperties": false,
+                    "description": "A ui_snapshot query over the uGUI screen model matches (or, with matches:false, stops matching). Needs text_contains and/or path. Requires com.unity.ugui.",
+                    "properties": {
+                      "matches": {
+                        "description": "true (default) = holds while at least one node matches; false = holds while none does (a popup closed).",
+                        "type": "boolean"
+                      },
+                      "path": {
+                        "description": "Node hierarchy path or trailing path suffix ('Popup/Title').",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "text_contains": {
+                        "description": "Node display text contains this (normalised, case-insensitive; a control's text is its label).",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "visible": {
+                        "description": "true (default) = count on-screen nodes only; false = count nodes that exist but are not visible.",
+                        "type": "boolean"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "type": "array"
+            },
+            "frames": {
+              "description": "Holds after this many frames have run since the start.",
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "log": {
+              "additionalProperties": false,
+              "description": "A console message logged after the wait started matches `pattern` (latched once seen; reports the frame it was logged in).",
+              "properties": {
+                "level": {
+                  "description": "any (default) | log | warning | error (Error, Exception, Assert) | exception.",
+                  "enum": [
+                    "any",
+                    "log",
+                    "warning",
+                    "error",
+                    "exception"
+                  ],
+                  "type": "string"
+                },
+                "pattern": {
+                  "description": ".NET regex, case-sensitive, matched against the message text.",
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pattern"
+              ],
+              "type": "object"
+            },
+            "ms": {
+              "description": "Holds after this many ms (the call's `time` base) since the start.",
+              "maximum": 3600000,
+              "minimum": 0,
+              "type": "number"
+            },
+            "object": {
+              "additionalProperties": false,
+              "description": "A GameObject (loaded scenes + DontDestroyOnLoad, inactive included) by path or object_id is in `state`. Once found it is tracked: destroyed means that object was destroyed.",
+              "properties": {
+                "object_id": {
+                  "description": "Instance id (e.g. a ui_snapshot node id). Alternative to path.",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Hierarchy path (plain names, 'Root/Child') or a bare name (first match anywhere).",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "state": {
+                  "description": "exists (default) | active (activeInHierarchy) | inactive | destroyed (absent).",
+                  "enum": [
+                    "exists",
+                    "active",
+                    "inactive",
+                    "destroyed"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "project_command": {
+              "additionalProperties": false,
+              "description": "The project's own predicate: a synchronous, read-only project command (unity_open_mcp_project_commands) called at each poll holds when it returns JSON true — or, with `field`, an object whose `field` is true. Mutating or async commands are refused (command_not_allowed); there is no arbitrary C# predicate.",
+              "properties": {
+                "args": {
+                  "description": "The command's typed arguments (validated against its schema once, at start).",
+                  "type": "object"
+                },
+                "field": {
+                  "description": "Top-level field of the command's JSON object result that must be true.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Project command id (project.<owner>.<command>).",
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            },
+            "ui": {
+              "additionalProperties": false,
+              "description": "A ui_snapshot query over the uGUI screen model matches (or, with matches:false, stops matching). Needs text_contains and/or path. Requires com.unity.ugui.",
+              "properties": {
+                "matches": {
+                  "description": "true (default) = holds while at least one node matches; false = holds while none does (a popup closed).",
+                  "type": "boolean"
+                },
+                "path": {
+                  "description": "Node hierarchy path or trailing path suffix ('Popup/Title').",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "text_contains": {
+                  "description": "Node display text contains this (normalised, case-insensitive; a control's text is its label).",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "visible": {
+                  "description": "true (default) = count on-screen nodes only; false = count nodes that exist but are not visible.",
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "fail_on": {
+          "description": "Stop early: exception = the game logs an exception (exception_thrown, with stack); error = any error log (error_logged).",
+          "items": {
+            "enum": [
+              "exception",
+              "error"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "type": "array"
+        },
+        "operation_id": {
+          "description": "Optional idempotency handle for the bridge operation (8-64 letters, digits, dashes); a retried call with the same id returns the same operation. Omit it normally; jobs always set it to the job id.",
+          "pattern": "^[A-Za-z0-9-]{8,64}$",
+          "type": "string"
+        },
+        "poll_every_frames": {
+          "default": 1,
+          "description": "Evaluate the condition every N frames (logs and exceptions are captured every frame regardless). Raise it for expensive ui / project_command conditions; fired.frame then lies within the last N frames.",
+          "maximum": 600,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "time": {
+          "default": "gameplay",
+          "description": "Clock for ms conditions and elapsed_ms: gameplay (scaled by Time.timeScale; a paused game never advances) or realtime (unscaled).",
+          "enum": [
+            "gameplay",
+            "realtime"
+          ],
+          "type": "string"
+        },
+        "time_scale": {
+          "description": "Time.timeScale during the wait only (e.g. 4 finishes a 5 s game timer in ~1.25 s); restored on every exit path.",
+          "exclusiveMinimum": 0,
+          "maximum": 100,
+          "type": "number"
+        },
+        "timeout_ms": {
+          "default": 30000,
+          "description": "Wall-clock limit for the wait (ms). On expiry → timed_out with the last observed state. Over 40000 ms the call runs as a job.",
+          "maximum": 600000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "condition"
+      ],
+      "type": "object"
+    }
+  },
+  "unity_senses_capture_series": {
+    "description": "Capture the composed game frame (every camera + Screen Space Overlay UI, the frame unity_senses_screenshot view 'composed' returns in play mode; native size by default) at SCHEDULED play-mode frames, inside the player loop — no round trip between frames, so a 300 ms tween or a 'breathing' effect is caught. SCHEDULE (one): at_ms [..] | every_ms + duration_ms | at_frames [..], relative to the call or to a start_on condition (the playtest_wait condition shapes: log / ui / object / project_command / frames / ms / all / any; start_timeout_ms bounds it). At most 120 captures. Each frame entry: frame, play_time, elapsed_ms (offset from the series start), file, width/height, `unchanged` when the pixels equal the previous capture (a static screen, or a hidden Game view tab that does not render), and optional metric {luminance (mean Rec. 709, 0..1), diff + changed vs the previous capture} inside metric_region — a breathing artifact shows as numbers. region crops every frame; scale shrinks them; contact_sheet:true adds one tiled PNG labelled '#index F<frame> +<ms>MS' for cheap review. Files go to ~/.unity-open-mcp/screenshots/series-<stamp>-<id>/. The call waits for the terminal result; series estimated over 40s return a job_id (unity_open_mcp_jobs wait / cancel). For a tap and the frames after it use inputsim_gesture capture_at_ms. Play-mode only; needs a rendering Game view / Simulator (render_target_unavailable otherwise); Unity 6 (unsupported_editor_version elsewhere). Not allowed inside batch_execute.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "at_frames": {
+          "description": "Capture these frame offsets from the start (0 = the start frame).",
+          "items": {
+            "maximum": 36000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 120,
+          "minItems": 1,
+          "type": "array"
+        },
+        "at_ms": {
+          "description": "Capture at these offsets (ms, the `time` base) from the start, e.g. [0, 100, 200, 300].",
+          "items": {
+            "maximum": 600000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "maxItems": 120,
+          "minItems": 1,
+          "type": "array"
+        },
+        "contact_sheet": {
+          "default": false,
+          "description": "Also write one tiled PNG of all captures with frame/time labels (contact_sheet.file).",
+          "type": "boolean"
+        },
+        "duration_ms": {
+          "description": "With every_ms: length of the series in ms.",
+          "maximum": 600000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "every_ms": {
+          "description": "With duration_ms: capture every N ms from 0 to duration_ms inclusive (count ≤ 120).",
+          "maximum": 600000,
+          "minimum": 10,
+          "type": "integer"
+        },
+        "metric": {
+          "description": "Per-frame numbers: luminance = mean luminance; diff = luminance + mean absolute luminance change and changed-pixel fraction vs the previous capture.",
+          "enum": [
+            "luminance",
+            "diff"
+          ],
+          "type": "string"
+        },
+        "metric_region": {
+          "description": "Compute the metric inside [x, y, w, h] in screen pixels, bottom-left origin — the space of ui_snapshot rects, so a node's rect can be passed as is.",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "operation_id": {
+          "description": "Optional idempotency handle for the bridge operation; jobs set it to the job id.",
+          "pattern": "^[A-Za-z0-9-]{8,64}$",
+          "type": "string"
+        },
+        "poll_every_frames": {
+          "default": 1,
+          "description": "Evaluate start_on every N frames.",
+          "maximum": 600,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "region": {
+          "description": "Crop every capture to [x, y, w, h] in screen pixels, bottom-left origin — the space of ui_snapshot rects, so a node's rect can be passed as is.",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "scale": {
+          "description": "Downscale every capture (1 = native size, the default).",
+          "maximum": 1,
+          "minimum": 0.05,
+          "type": "number"
+        },
+        "start_on": {
+          "additionalProperties": false,
+          "description": "Start the schedule when this condition holds (same shapes as playtest_wait `condition`); offset 0 is the frame that made it true, e.g. {\"log\":{\"pattern\":\"Popup opening\"}}. Omit to start at the call.",
+          "properties": {
+            "all": {
+              "description": "Holds when every leaf holds at the same poll (log leaves latch once seen).",
+              "items": {
+                "additionalProperties": false,
+                "description": "Exactly one of log, ui, object, project_command, frames, ms.",
+                "properties": {
+                  "frames": {
+                    "description": "Holds after this many frames have run since the start.",
+                    "maximum": 1000000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "log": {
+                    "additionalProperties": false,
+                    "description": "A console message logged after the wait started matches `pattern` (latched once seen; reports the frame it was logged in).",
+                    "properties": {
+                      "level": {
+                        "description": "any (default) | log | warning | error (Error, Exception, Assert) | exception.",
+                        "enum": [
+                          "any",
+                          "log",
+                          "warning",
+                          "error",
+                          "exception"
+                        ],
+                        "type": "string"
+                      },
+                      "pattern": {
+                        "description": ".NET regex, case-sensitive, matched against the message text.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ],
+                    "type": "object"
+                  },
+                  "ms": {
+                    "description": "Holds after this many ms (the call's `time` base) since the start.",
+                    "maximum": 3600000,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "object": {
+                    "additionalProperties": false,
+                    "description": "A GameObject (loaded scenes + DontDestroyOnLoad, inactive included) by path or object_id is in `state`. Once found it is tracked: destroyed means that object was destroyed.",
+                    "properties": {
+                      "object_id": {
+                        "description": "Instance id (e.g. a ui_snapshot node id). Alternative to path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "Hierarchy path (plain names, 'Root/Child') or a bare name (first match anywhere).",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "description": "exists (default) | active (activeInHierarchy) | inactive | destroyed (absent).",
+                        "enum": [
+                          "exists",
+                          "active",
+                          "inactive",
+                          "destroyed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "project_command": {
+                    "additionalProperties": false,
+                    "description": "The project's own predicate: a synchronous, read-only project command (unity_open_mcp_project_commands) called at each poll holds when it returns JSON true — or, with `field`, an object whose `field` is true. Mutating or async commands are refused (command_not_allowed); there is no arbitrary C# predicate.",
+                    "properties": {
+                      "args": {
+                        "description": "The command's typed arguments (validated against its schema once, at start).",
+                        "type": "object"
+                      },
+                      "field": {
+                        "description": "Top-level field of the command's JSON object result that must be true.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "id": {
+                        "description": "Project command id (project.<owner>.<command>).",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "type": "object"
+                  },
+                  "ui": {
+                    "additionalProperties": false,
+                    "description": "A ui_snapshot query over the uGUI screen model matches (or, with matches:false, stops matching). Needs text_contains and/or path. Requires com.unity.ugui.",
+                    "properties": {
+                      "matches": {
+                        "description": "true (default) = holds while at least one node matches; false = holds while none does (a popup closed).",
+                        "type": "boolean"
+                      },
+                      "path": {
+                        "description": "Node hierarchy path or trailing path suffix ('Popup/Title').",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "text_contains": {
+                        "description": "Node display text contains this (normalised, case-insensitive; a control's text is its label).",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "visible": {
+                        "description": "true (default) = count on-screen nodes only; false = count nodes that exist but are not visible.",
+                        "type": "boolean"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "type": "array"
+            },
+            "any": {
+              "description": "Holds when one leaf holds; the result names it (fired.path, e.g. condition.any[1]).",
+              "items": {
+                "additionalProperties": false,
+                "description": "Exactly one of log, ui, object, project_command, frames, ms.",
+                "properties": {
+                  "frames": {
+                    "description": "Holds after this many frames have run since the start.",
+                    "maximum": 1000000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "log": {
+                    "additionalProperties": false,
+                    "description": "A console message logged after the wait started matches `pattern` (latched once seen; reports the frame it was logged in).",
+                    "properties": {
+                      "level": {
+                        "description": "any (default) | log | warning | error (Error, Exception, Assert) | exception.",
+                        "enum": [
+                          "any",
+                          "log",
+                          "warning",
+                          "error",
+                          "exception"
+                        ],
+                        "type": "string"
+                      },
+                      "pattern": {
+                        "description": ".NET regex, case-sensitive, matched against the message text.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ],
+                    "type": "object"
+                  },
+                  "ms": {
+                    "description": "Holds after this many ms (the call's `time` base) since the start.",
+                    "maximum": 3600000,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "object": {
+                    "additionalProperties": false,
+                    "description": "A GameObject (loaded scenes + DontDestroyOnLoad, inactive included) by path or object_id is in `state`. Once found it is tracked: destroyed means that object was destroyed.",
+                    "properties": {
+                      "object_id": {
+                        "description": "Instance id (e.g. a ui_snapshot node id). Alternative to path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "Hierarchy path (plain names, 'Root/Child') or a bare name (first match anywhere).",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "description": "exists (default) | active (activeInHierarchy) | inactive | destroyed (absent).",
+                        "enum": [
+                          "exists",
+                          "active",
+                          "inactive",
+                          "destroyed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "project_command": {
+                    "additionalProperties": false,
+                    "description": "The project's own predicate: a synchronous, read-only project command (unity_open_mcp_project_commands) called at each poll holds when it returns JSON true — or, with `field`, an object whose `field` is true. Mutating or async commands are refused (command_not_allowed); there is no arbitrary C# predicate.",
+                    "properties": {
+                      "args": {
+                        "description": "The command's typed arguments (validated against its schema once, at start).",
+                        "type": "object"
+                      },
+                      "field": {
+                        "description": "Top-level field of the command's JSON object result that must be true.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "id": {
+                        "description": "Project command id (project.<owner>.<command>).",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "type": "object"
+                  },
+                  "ui": {
+                    "additionalProperties": false,
+                    "description": "A ui_snapshot query over the uGUI screen model matches (or, with matches:false, stops matching). Needs text_contains and/or path. Requires com.unity.ugui.",
+                    "properties": {
+                      "matches": {
+                        "description": "true (default) = holds while at least one node matches; false = holds while none does (a popup closed).",
+                        "type": "boolean"
+                      },
+                      "path": {
+                        "description": "Node hierarchy path or trailing path suffix ('Popup/Title').",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "text_contains": {
+                        "description": "Node display text contains this (normalised, case-insensitive; a control's text is its label).",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "visible": {
+                        "description": "true (default) = count on-screen nodes only; false = count nodes that exist but are not visible.",
+                        "type": "boolean"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "type": "array"
+            },
+            "frames": {
+              "description": "Holds after this many frames have run since the start.",
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "log": {
+              "additionalProperties": false,
+              "description": "A console message logged after the wait started matches `pattern` (latched once seen; reports the frame it was logged in).",
+              "properties": {
+                "level": {
+                  "description": "any (default) | log | warning | error (Error, Exception, Assert) | exception.",
+                  "enum": [
+                    "any",
+                    "log",
+                    "warning",
+                    "error",
+                    "exception"
+                  ],
+                  "type": "string"
+                },
+                "pattern": {
+                  "description": ".NET regex, case-sensitive, matched against the message text.",
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pattern"
+              ],
+              "type": "object"
+            },
+            "ms": {
+              "description": "Holds after this many ms (the call's `time` base) since the start.",
+              "maximum": 3600000,
+              "minimum": 0,
+              "type": "number"
+            },
+            "object": {
+              "additionalProperties": false,
+              "description": "A GameObject (loaded scenes + DontDestroyOnLoad, inactive included) by path or object_id is in `state`. Once found it is tracked: destroyed means that object was destroyed.",
+              "properties": {
+                "object_id": {
+                  "description": "Instance id (e.g. a ui_snapshot node id). Alternative to path.",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Hierarchy path (plain names, 'Root/Child') or a bare name (first match anywhere).",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "state": {
+                  "description": "exists (default) | active (activeInHierarchy) | inactive | destroyed (absent).",
+                  "enum": [
+                    "exists",
+                    "active",
+                    "inactive",
+                    "destroyed"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "project_command": {
+              "additionalProperties": false,
+              "description": "The project's own predicate: a synchronous, read-only project command (unity_open_mcp_project_commands) called at each poll holds when it returns JSON true — or, with `field`, an object whose `field` is true. Mutating or async commands are refused (command_not_allowed); there is no arbitrary C# predicate.",
+              "properties": {
+                "args": {
+                  "description": "The command's typed arguments (validated against its schema once, at start).",
+                  "type": "object"
+                },
+                "field": {
+                  "description": "Top-level field of the command's JSON object result that must be true.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Project command id (project.<owner>.<command>).",
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            },
+            "ui": {
+              "additionalProperties": false,
+              "description": "A ui_snapshot query over the uGUI screen model matches (or, with matches:false, stops matching). Needs text_contains and/or path. Requires com.unity.ugui.",
+              "properties": {
+                "matches": {
+                  "description": "true (default) = holds while at least one node matches; false = holds while none does (a popup closed).",
+                  "type": "boolean"
+                },
+                "path": {
+                  "description": "Node hierarchy path or trailing path suffix ('Popup/Title').",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "text_contains": {
+                  "description": "Node display text contains this (normalised, case-insensitive; a control's text is its label).",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "visible": {
+                  "description": "true (default) = count on-screen nodes only; false = count nodes that exist but are not visible.",
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "start_timeout_ms": {
+          "description": "With start_on: wall-clock limit for the trigger (default 30000); on expiry → timed_out, nothing captured. Ignored without start_on.",
+          "maximum": 600000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "time": {
+          "default": "gameplay",
+          "description": "Clock for at_ms / every_ms: gameplay (scaled by Time.timeScale, what animations see) or realtime.",
+          "enum": [
+            "gameplay",
+            "realtime"
+          ],
+          "type": "string"
+        }
+      },
       "type": "object"
     }
   }

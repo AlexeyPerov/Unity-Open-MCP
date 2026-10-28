@@ -98,7 +98,7 @@ export const BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS = 55_000;
  * (`packages/bridge/Editor/Bridge/BridgeSession.cs`), which carries the
  * revision log.
  */
-export const EXPECTED_BRIDGE_WIRE_CONTRACT = 5;
+export const EXPECTED_BRIDGE_WIRE_CONTRACT = 6;
 
 /**
  * Request/response header pair for the compile state that qualifies a tool

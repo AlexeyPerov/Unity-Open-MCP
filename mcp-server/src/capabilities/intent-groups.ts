@@ -119,8 +119,10 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
     reason:
       "Playtest — read the uGUI screen (ui_snapshot: text, roles, visibility, overflow / " +
       "placeholder / touch-size diagnostics), tap by on-screen label (target_text on " +
-      "inputsim_pointer / inputsim_touch / inputsim_gesture), and set the Game view resolution " +
-      "or a Device Simulator device to check layout and the safe area (game_view).",
+      "inputsim_pointer / inputsim_touch / inputsim_gesture), set the Game view resolution " +
+      "or a Device Simulator device to check layout and the safe area (game_view), wait until a " +
+      "log / UI / object / project-predicate condition holds (playtest_wait, optional time_scale) " +
+      "and capture frame-scheduled series of animated content (capture_series, gesture capture_at_ms).",
     keywords: [
       "playtest",
       "playtests",
@@ -141,6 +143,20 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "safe-area",
       "notch",
       "aspect-ratio",
+      "wait-until",
+      "wait-for",
+      "playtest-wait",
+      "timer",
+      "timers",
+      "tween",
+      "tweens",
+      "popup",
+      "animated",
+      "time-scale",
+      "capture-series",
+      "frame-series",
+      "contact-sheet",
+      "breathing",
     ],
   },
   {

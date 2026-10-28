@@ -4,12 +4,19 @@ Activate the `playtest` group (with `input-simulation` to drive input —
 `manage_tools(action: "activate_for", intent: "playtest …")` brings both). These
 tools let an agent read and play the running game the way a tester does: put the
 game on a target device or resolution, read what the screen says, tap a control
-by its label, and check the result.
+by its label, wait for the game to get somewhere, capture what it shows over time,
+and check the result.
 
 | Tool | Does | Compiles when |
 |---|---|---|
 | `unity_open_mcp_ui_snapshot` | Lists the uGUI on screen as a flat accessibility tree with text, visibility and diagnostics | `com.unity.ugui` present; TextMeshPro text when TextMeshPro is installed |
 | `unity_open_mcp_game_view` | Reads or sets the Game view resolution or a Device Simulator device + orientation, and reports the screen, safe area and notch insets the game sees | always (Unity 6; other Editors answer `unsupported_editor_version`) |
+| `unity_open_mcp_playtest_wait` | Waits in play mode until a condition holds (a log line, a UI query, a GameObject state, the project's own read-only predicate, frames, ms — or all / any of them), with a timeout, an optional time scale for the wait and an early stop on game exceptions | always |
+| `unity_senses_capture_series` | Captures the composed game frame at scheduled play-mode frames (relative to the call or a condition), with an optional crop, per-frame luminance / diff metric and a labelled contact sheet | always (Unity 6; reads the play-mode view) |
+
+`inputsim_gesture` (in `input-simulation`) takes `capture_at_ms`: a tap and the
+frames after it are captured in the same scheduled operation; see
+[Tap and capture what follows](#tap-and-capture-what-follows).
 
 Label targeting — `target_text` on `inputsim_pointer`, `inputsim_touch` and
 `inputsim_gesture` keyframes — uses the same screen model; see
@@ -215,6 +222,162 @@ Set the device or resolution first, then capture the composed frame:
    [Composed captures](mcp-tools.md#composed-captures-unity_senses_screenshot--unity_senses_capture_inline)
    for sizes, letterboxing and the overlay.
 
+## `unity_open_mcp_playtest_wait`
+
+Waits in play mode until a condition holds — use it instead of a loop of calls
+that each race the game. The bridge starts the wait on its shared play-mode
+scheduler (a player-loop system at the start of `EarlyUpdate`) and evaluates the
+condition there every `poll_every_frames` frames; the call returns the terminal
+result. Play-mode only (`play_mode_required` otherwise); gate-free; refused inside
+`batch_execute`.
+
+### Conditions
+
+A condition is an object with exactly one key:
+
+| Key | Holds when | Notes |
+|---|---|---|
+| `log` `{pattern, level}` | A console message logged after the wait started matches the .NET regex `pattern` (case-sensitive) | `level`: `any` (default), `log`, `warning`, `error` (Error, Exception, Assert), `exception`. Latches once seen; reports the frame the message was logged in. Main-thread messages |
+| `ui` `{text_contains, path, visible, matches}` | A query over the `ui_snapshot` screen model matches — or, with `matches: false`, stops matching (a popup closed) | Needs `text_contains` and/or `path`. `text_contains` is normalised and case-insensitive over a node's display text (a control's label; a label counts once, as its control); `path` is a node path or trailing path suffix; `visible: true` (default) counts on-screen nodes, `false` nodes that exist but are hidden. Requires `com.unity.ugui` (`ui_unavailable` otherwise) |
+| `object` `{path \| object_id, state}` | A GameObject is `exists` (default), `active` (`activeInHierarchy`), `inactive` or `destroyed` | Loaded scenes plus `DontDestroyOnLoad`, inactive objects included. `path` is a hierarchy path or a bare name; `object_id` an instance id (e.g. a `ui_snapshot` id). Once found the object is tracked: `destroyed` means that object was destroyed |
+| `project_command` `{id, args, field}` | A synchronous, read-only [project command](project-commands.md) returns JSON `true` — or, with `field`, an object whose top-level `field` is `true` | The project's own predicate ("is the wave over"), called at every poll. Arguments are validated once, at start. Mutating or async commands answer `command_not_allowed`; an unknown id `command_unavailable`. There is no arbitrary C# predicate |
+| `frames` N | N frames have run since the start | |
+| `ms` N | N ms have passed in the call's `time` base | `time: gameplay` (default) is the game's clock (`Time.time`, so `time_scale` speeds it up); `realtime` is unscaled |
+| `all` / `any` `[leaves]` | Every / one of the leaves holds at the same poll | One level deep (leaves only), 1–16 leaves |
+
+Frames are reported precisely. A poll at the start of frame F+1 sees the state the
+game left after frame F, so a state condition (`ui`, `object`, `project_command`)
+that turns true there is reported as `frame: F` with `observed_frame: F+1`; a
+`log` reports the frame the message was logged in; `frames` / `ms` the frame they
+elapsed at. `play_time` is that frame's `Time.time`. With `poll_every_frames` N
+the change happened within the N frames before `observed_frame`.
+
+### Arguments
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `condition` | required | See above |
+| `timeout_ms` | 30000 (max 600000) | Wall-clock limit. On expiry the call fails with `timed_out` and every leaf's last observed state |
+| `poll_every_frames` | 1 (max 600) | Evaluate the condition every N frames; logs and exceptions are captured every frame regardless |
+| `time_scale` | — | `Time.timeScale` for the wait only (> 0, ≤ 100). Applied on the first frame, restored on every exit path: success, timeout, cancel, exiting play mode, a domain reload, Editor quit. If game code changed the time scale meanwhile (a pause menu), the game's value is kept and `time_scale.note` says so. One time-scaled wait at a time (`playmode_operation_busy`) |
+| `time` | `gameplay` | Clock for `ms` conditions and `elapsed_ms` |
+| `fail_on` | — | `["exception"]` stops at the first exception the game logs (`exception_thrown`, with message and stack); `"error"` also stops on error logs (`error_logged`) |
+
+Waits whose `timeout_ms` is over 40 s run as a
+[`jobs` play-mode operation](jobs.md#play-mode-operations): the call returns a
+`job_id` to `wait` on (and `cancel`). The tool's own `timeout_ms` is forwarded as
+sent — it is not the request's transport budget.
+
+### Result
+
+```json
+{
+  "status": "ok", "outcome": "fired",
+  "fired": { "path": "condition.all", "type": "all", "frame": 300, "observed_frame": 301,
+             "play_time": 4.9834, "elapsed_ms": 4806.69, "realtime_ms": 4806.69 },
+  "condition": { "path": "condition", "type": "all", "met": true, "last": { "children": [
+    { "path": "condition.all[0]", "type": "ui", "met": true, "fired": { "frame": 300, "…": "…" },
+      "last": { "query": { "text_contains": "Timer done", "visible": true, "matches": true }, "count": 1,
+                "first": { "path": "WaitCanvas/TimerLabel", "role": "text", "text": "Timer done", "visibility": "on_screen" } } },
+    { "path": "condition.all[1]", "type": "object", "met": true, "fired": { "frame": 180, "…": "…" },
+      "last": { "state": "destroyed", "found": false, "ever_found": true, "resolved_path": "WaitCanvas/WaitFixtureEnemy" } },
+    { "path": "condition.all[2]", "type": "project_command", "met": true,
+      "last": { "id": "project.demo.wave_cleared", "field": "cleared", "calls": 291, "output": "{\"alive\":0,\"cleared\":true}" } } ] } },
+  "time": "gameplay", "elapsed_ms": 4823.3, "realtime_ms": 4823.3, "wall_ms": 4830.1, "timeout_ms": 15000,
+  "frames": { "start": 13, "end": 301, "ticks": 289, "polls": 289, "poll_every_frames": 1 },
+  "time_scale": { "requested": 4, "applied": true, "previous": 1, "restored": true, "final": 1 },
+  "errors": [], "errors_dropped": 0,
+  "operation": { "operation_id": "…", "kind": "unity_open_mcp_playtest_wait", "state": "succeeded", "…": "…" }
+}
+```
+
+`fired` names the condition that fired (an `any` names its leaf, e.g.
+`condition.any[1]`). `condition` repeats the tree with every leaf's `met`, `fired`
+and `last` observed state — on a timeout this is what the game showed. `errors`
+lists console errors and exceptions logged meanwhile (at most 20, first stack line;
+`errors_dropped` counts the rest). With `fail_on`, `exception` carries the type,
+message, full stack (≤ 4000 characters), frame and play time. `time_scale` appears
+when one was requested.
+
+## `unity_senses_capture_series`
+
+Captures the composed game frame — every camera plus Screen Space Overlay UI,
+the frame `unity_senses_screenshot` `view: "composed"` returns in play mode, at
+native size by default — at scheduled play-mode frames, inside the player loop,
+without a round trip between frames. A sub-second tween or a "breathing" effect is
+caught as a sequence instead of whatever two one-shot captures happen to hit.
+Play-mode only; needs a rendering Game view or Device Simulator
+(`render_target_unavailable` otherwise); Unity 6 (the play-mode view is read
+through the Game view adapter, `unsupported_editor_version` elsewhere); refused
+inside `batch_execute`. Group `playtest`; live-only like every `unity_senses_*` tool.
+
+| Argument | Meaning |
+|---|---|
+| `at_ms` `[…]` / `every_ms` + `duration_ms` / `at_frames` `[…]` | The schedule — exactly one form; at most 120 captures. `at_ms` / `every_ms` count the `time` base (`gameplay` default, `realtime`); `at_frames` counts frames |
+| `start_on` | Start the schedule when a condition holds (the `playtest_wait` shapes). Offset 0 is the frame that made it true. `start_timeout_ms` (default 30000) bounds it: `timed_out`, nothing captured |
+| `region` `[x, y, w, h]` | Crop every capture; screen pixels, bottom-left origin — a `ui_snapshot` rect can be passed as is |
+| `scale` | 0.05–1; shrink every capture (1 = native, the default) |
+| `metric` | `luminance` = mean Rec. 709 luminance (0..1) per capture; `diff` adds the mean absolute luminance change and the fraction of pixels that changed by more than 10/255 against the previous capture |
+| `metric_region` `[x, y, w, h]` | Where the metric is computed (screen pixels; default the captured area) |
+| `contact_sheet` | Also write one tiled PNG of every capture, each labelled `#index F<frame> +<elapsed>MS` |
+| `poll_every_frames` | Evaluate `start_on` every N frames |
+
+Timing: the scheduler ticks at the start of a frame, when the view holds the frame
+the game rendered last. A capture scheduled at `t` is the first frame whose offset
+from the start reached `t`, read on the next tick and labelled with that frame —
+the image and its `frame` / `play_time` / `elapsed_ms` always describe the same
+frame. `unchanged: true` marks a capture whose pixels equal the previous one (a
+static screen, or a hidden Game view tab, which does not render). Pixels are read
+back at capture time; PNG encoding runs after the last capture, so encoding never
+delays a scheduled frame. At most 512 MB of frames are held before encoding; a
+capture over that budget is reported `dropped: "memory_budget"` (use `scale` or
+`region`). Files go to `~/.unity-open-mcp/screenshots/series-<stamp>-<id>/`.
+
+```json
+{
+  "status": "ok", "outcome": "completed",
+  "series": {
+    "schedule": "at_ms", "time": "gameplay", "requested": 4, "captured": 4,
+    "base": { "frame": 60, "play_time": 0.9877 },
+    "folder": "…/screenshots/series-20261028-165339-498-27e97633", "native": [2422, 1483],
+    "frames": [
+      { "index": 0, "at_ms": 0, "frame": 60, "play_time": 0.9877, "elapsed_ms": 0, "file": "…/frame-000-f60-0ms.png",
+        "width": 2422, "height": 1483, "metric": { "luminance": 0.138 } },
+      { "index": 1, "at_ms": 100, "frame": 66, "play_time": 1.1, "elapsed_ms": 112.28, "file": "…/frame-001-f66-112ms.png",
+        "width": 2422, "height": 1483, "metric": { "luminance": 0.1488, "diff": 0.0182, "changed": 0.0486 } }
+    ],
+    "contact_sheet": { "file": "…/contact-sheet.png", "width": 1310, "height": 228, "columns": 4 }
+  },
+  "start_on": { "fired": { "path": "start_on", "type": "log", "frame": 60, "observed_frame": 61, "…": "…" }, "condition": { "…": "…" } },
+  "capturedAt": { "mode": "game", "size": "Free Aspect", "orientation": "landscape", "screen": [2422, 1483], "playing": true },
+  "errors": []
+}
+```
+
+Series estimated over 40 s (start_on wait + schedule + encoding) run as a
+[`jobs` play-mode operation](jobs.md#play-mode-operations). Cancelling or exiting
+play mode keeps the frames already captured (they are encoded during cleanup); a
+domain reload drops them.
+
+### Tap and capture what follows
+
+`unity_open_mcp_inputsim_gesture` `capture_at_ms: [0, 100, 200, 300]` captures the
+composed frame at those offsets from the gesture start (the gesture's `time` base)
+inside the same scheduled operation, so a tap and the frames after it come back
+from one call under `captures` (same frame fields as a series, native size, at most
+30). The call returns when both the gesture and the last capture are done; the
+gesture's input resource is held until then.
+
+### Recipes
+
+- Wait for a timer instead of polling:
+  `playtest_wait {"condition":{"log":{"pattern":"Wave \\d+ cleared"}},"timeout_ms":60000}`.
+- Fast-forward: add `"time_scale": 4`; the result's `time_scale.restored` confirms the game is back at its own speed.
+- A popup closed: `{"ui":{"text_contains":"Reward","matches":false}}`.
+- Stop on a crash: `"fail_on": ["exception"]` — read `exception.stack`.
+- An animation: `capture_series {"at_ms":[0,100,200,300],"start_on":{"log":{"pattern":"Popup opening"}},"contact_sheet":true}`, then open the contact sheet.
+- A breathing artifact: `capture_series {"every_ms":500,"duration_ms":15000,"scale":0.25,"metric":"diff","metric_region":[…]}` and read `metric.luminance` over time.
+
 ## Snapshot → tap by label
 
 1. `ui_snapshot` — read the screen (compact).
@@ -234,4 +397,14 @@ Set the device or resolution first, then capture the composed frame:
 | `size_not_found` | `set_resolution`: no size entry has that `size_label` (`labels` lists them) |
 | `unsupported_editor_version` | `game_view` on an Editor outside the verified table (Unity 6 line) |
 | `editor_internals_unavailable` | `game_view`: an internal Game view / Simulator member this Editor lacks (`detected.missing`) |
-| `batch_step_requires_server_poll` | `game_view` set_* inside `batch_execute` |
+| `batch_step_requires_server_poll` | `game_view` set_*, `playtest_wait` or `capture_series` inside `batch_execute` |
+| `play_mode_required` | `playtest_wait` / `capture_series` in edit mode |
+| `timed_out` | `playtest_wait`: the condition did not hold within `timeout_ms` (carries `condition` with every leaf's last state); `capture_series`: `start_on` did not hold within `start_timeout_ms` |
+| `exception_thrown` / `error_logged` | `playtest_wait` with `fail_on`: the game logged an exception / error (carries `exception`) |
+| `condition_error` | A leaf cannot be evaluated (a project command threw) |
+| `command_unavailable` / `command_not_allowed` | `project_command`: unknown or disabled id / a mutating or async command |
+| `ui_unavailable` | A `ui` condition without uGUI compiled in |
+| `render_target_unavailable` | `capture_series` / gesture `capture_at_ms`: the play-mode view has not rendered (no Game view / Simulator open, or its tab is hidden) |
+| `capture_failed` | `capture_series`: the first capture could not be read |
+| `playmode_operation_busy` | A second time-scaled wait, or a second capture series, while one runs |
+| `wait_stalled` / `capture_series_stalled` | The operation did not finish inside the call's inline window (a paused Editor); it was cancelled — run it as a job |

@@ -17,6 +17,21 @@ namespace ProjectCommandFixture
             [ProjectCommandParameter(Description = "Maximum entries", Minimum = 1, Maximum = 10, Examples = new[] { "3" })] int limit = 3,
             int? seed = null) => "{\"fixture\":true}";
 
+        // A project-owned predicate for playtest_wait's project_command condition
+        // ("is the wave over"): read-only and synchronous, polled every frame.
+        [ProjectCommand("project.demo.wave_cleared", Title = "Wave cleared fixture",
+            Description = "Read-only predicate: counts active GameObjects whose name starts with a prefix; cleared is true when none is left.",
+            Package = "demo.project-commands", Group = "examples", Tags = new[] { "demo", "playtest" },
+            ReadOnlyHint = true, IdempotentHint = true, Gate = GateMode.Off)]
+        public static string WaveCleared(
+            [ProjectCommandParameter(Description = "Name prefix of the wave's objects", Examples = new[] { "\"WaitFixtureEnemy\"" })] string prefix = "WaitFixtureEnemy")
+        {
+            int alive = 0;
+            foreach (var t in UnityEngine.Object.FindObjectsByType<UnityEngine.Transform>(UnityEngine.FindObjectsSortMode.None))
+                if (t.gameObject.activeInHierarchy && t.name.StartsWith(prefix, System.StringComparison.Ordinal)) alive++;
+            return "{\"alive\":" + alive + ",\"cleared\":" + (alive == 0 ? "true" : "false") + "}";
+        }
+
         [ProjectCommand("project.demo.long_write", Title = "Long write fixture", Description = "Prepare over time, then write one disposable asset; cooperatively cancellable between steps.",
             Package = "demo.project-commands", IsMutating = true, Async = true, Cancellable = true,
             Lifecycle = LifecyclePolicy.EditorSettle, PathsHint = new[] { "Assets/_ProjectCommandFixture" })]

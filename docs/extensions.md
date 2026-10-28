@@ -63,7 +63,7 @@ For group visibility, auto-activation rules, and tool contracts, see
 | VFX Graph | `vfx` | `com.unity.visualeffectgraph` | **Auto** when package installed |
 | Memory Profiler | `memoryprofiler` | `com.unity.memoryprofiler` | **Auto** when package installed |
 | Input Simulation | `input-simulation` | `com.unity.ugui` (pointer, probe, step) + `com.unity.inputsystem` (keyboard, optional); touch and gesture need neither (legacy Input Manager and/or Input System) | Manual |
-| Playtest | `playtest` | `com.unity.ugui` (`ui_snapshot`, label targeting); TextMeshPro text when `com.unity.textmeshpro` ≥ 3.0 or `com.unity.ugui` ≥ 2.0 is installed; `game_view` has no package dependency (Unity 6 Editor) | Manual |
+| Playtest | `playtest` | `com.unity.ugui` (`ui_snapshot`, label targeting); TextMeshPro text when `com.unity.textmeshpro` ≥ 3.0 or `com.unity.ugui` ≥ 2.0 is installed; `game_view`, `playtest_wait` and `capture_series` have no package dependency (`game_view` / `capture_series`: Unity 6 Editor; `playtest_wait`'s `ui` condition needs `com.unity.ugui`) | Manual |
 
 **Manual** — call `manage_tools(action="activate", group="…")` before the
 group's tools appear in `ListTools`.

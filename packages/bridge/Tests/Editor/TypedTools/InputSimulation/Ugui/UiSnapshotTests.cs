@@ -383,6 +383,26 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             StringAssert.Contains("\"invalid_arguments\"", UiSnapshotTools.Snapshot(min_touch_size: 0f));
         }
 
+        // --- playtest_wait `ui` condition probe (same node model) ---------------
+
+        [Test]
+        public void UiConditionProbe_RegisteredAndUsesTheSnapshotModel()
+        {
+            Assert.IsNotNull(UnityOpenMcpBridge.Playtest.PlaytestProbes.Ui, "registered by the uGUI assembly");
+            var probe = UnityOpenMcpBridge.Playtest.PlaytestProbes.Ui;
+            Assert.AreEqual(1, probe.Count("play", canvasName + "/OfferA/Btn", true, out var first));
+            StringAssert.Contains("\"role\":\"button\"", first);
+            StringAssert.Contains("\"text\":\"Play\"", first);
+            Assert.AreEqual(0, probe.Count("close", canvasName + "/HiddenPanel/HiddenClose", true, out _), "transparent is not visible");
+            Assert.AreEqual(1, probe.Count("close", canvasName + "/HiddenPanel/HiddenClose", false, out first));
+            StringAssert.Contains("\"visibility\":\"transparent\"", first);
+            Assert.AreEqual(1, probe.Count(null, "Viewport/Item2", false, out first), "path suffix; clipped");
+            StringAssert.Contains("\"visibility\":\"clipped\"", first);
+            // Without a path a label counts once, as its control.
+            Assert.AreEqual(1, probe.Count("buy now", null, true, out first));
+            StringAssert.Contains(canvasName + "/Btn_A", first);
+        }
+
         // --- input tools: argument contract (play-mode guard comes first) -------
 
         [Test]

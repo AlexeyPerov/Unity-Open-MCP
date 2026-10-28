@@ -253,16 +253,20 @@ test("no tool file inlines the canonical gate enum literal (all use ...GATE_PROP
 // ---------------------------------------------------------------------------
 
 /**
- * The two tools whose `timeout_ms` is NOT the live transport wait, and so
+ * The tools whose `timeout_ms` is NOT the live transport wait, and so
  * legitimately declare a ceiling above the transport cap:
  *  - `compile_check` always runs as a headless batch spawn (no HTTP wait).
  *  - `run_tests` uses it as the server-side results-file poll budget; the value
  *    is stripped from the start POST (see LiveClient.handleRunTests).
+ *  - `playtest_wait` uses it as the wait's own wall-clock limit; the start POST
+ *    returns at once and the live client forwards it unclamped
+ *    (TOOL_OWNED_TIMEOUT_TOOLS); long waits run as jobs.
  */
 const NON_TRANSPORT_TIMEOUT_TOOLS = new Set([
   "unity_open_mcp_jobs", // Local bounded observation, not a bridge POST timeout.
   "unity_open_mcp_compile_check",
   "unity_senses_run_tests",
+  "unity_open_mcp_playtest_wait",
 ]);
 
 test("every timeout_ms declares both a minimum and a maximum", () => {

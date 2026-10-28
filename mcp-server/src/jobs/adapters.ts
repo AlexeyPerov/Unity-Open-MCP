@@ -4,6 +4,8 @@ import { ProjectJobHttpError, type LiveClient } from "../live-client.js";
 import { validateSchema } from "../tool-contract.js";
 import { runTests } from "../tools/run-tests.js";
 import { inputsimGesture } from "../tools/inputsim-gesture.js";
+import { playtestWait, PLAYTEST_WAIT_DEFAULT_TIMEOUT_MS } from "../tools/playtest-wait.js";
+import { captureSeries, CAPTURE_SERIES_DEFAULT_START_TIMEOUT_MS } from "../tools/capture-series.js";
 import { JobManagerError, type JobOperation, type JobOutcome, type JobOwner } from "./job-manager.js";
 
 type ClientFor = (owner: JobOwner) => LiveClient;
@@ -148,7 +150,48 @@ export function projectCommandOperation(id: string, cancellable: boolean, client
 /** Tools served by the generic `playmode_operation` jobs adapter. */
 export const PLAYMODE_OPERATION_TOOLS: ReadonlyMap<string, Record<string, any>> = new Map([
   [inputsimGesture.name, inputsimGesture.inputSchema as Record<string, any>],
+  [playtestWait.name, playtestWait.inputSchema as Record<string, any>],
+  [captureSeries.name, captureSeries.inputSchema as Record<string, any>],
 ]);
+
+/** Encoding cost assumed per captured frame (PNG encode of a native frame) for duration estimates. */
+export const PLAYMODE_ENCODE_ESTIMATE_MS = 250;
+
+const numbers = (v: unknown): number[] => Array.isArray(v) ? v.map(Number).filter(Number.isFinite) : [];
+
+/**
+ * Worst-case duration (ms) of a play-mode operation from its arguments: the
+ * gesture's last keyframe or capture, a wait's timeout, a series' start_on
+ * wait plus its schedule (frames at a conservative 30 fps) plus encoding.
+ * Decides inline-vs-job and sizes the job deadline.
+ */
+export function playmodeEstimateMs(tool: string, args: Record<string, unknown>): number {
+  if (tool === inputsimGesture.name) {
+    const fingers = Array.isArray(args.fingers) ? args.fingers as Array<{ path?: Array<{ at_ms?: unknown }> }> : [];
+    const keyframes = fingers.flatMap(f => Array.isArray(f?.path) ? f.path.map(k => Number(k?.at_ms) || 0) : []);
+    const captures = numbers(args.capture_at_ms);
+    return Math.max(0, ...keyframes, ...captures) + captures.length * PLAYMODE_ENCODE_ESTIMATE_MS;
+  }
+  if (tool === playtestWait.name) return typeof args.timeout_ms === "number" ? args.timeout_ms : PLAYTEST_WAIT_DEFAULT_TIMEOUT_MS;
+  if (tool === captureSeries.name) {
+    const atMs = numbers(args.at_ms), atFrames = numbers(args.at_frames);
+    const every = Number(args.every_ms), duration = Number(args.duration_ms);
+    let last = 0, count = 0;
+    if (atMs.length) { last = Math.max(...atMs); count = atMs.length; }
+    else if (atFrames.length) { last = Math.max(...atFrames) * 1000 / 30; count = atFrames.length; }
+    else if (every > 0 && duration >= 0) { last = duration; count = Math.floor(duration / every) + 1; }
+    const trigger = args.start_on === undefined ? 0
+      : typeof args.start_timeout_ms === "number" ? args.start_timeout_ms : CAPTURE_SERIES_DEFAULT_START_TIMEOUT_MS;
+    return trigger + last + count * PLAYMODE_ENCODE_ESTIMATE_MS;
+  }
+  return 0;
+}
+
+/** Stable failure code of a terminal play-mode snapshot (the operation's own code when it set one). */
+export function playmodeFailureCode(snapshot: Record<string, any>, fallback = "operation_failed"): string {
+  if (snapshot.state === "failed") return typeof snapshot.result?.error_code === "string" ? snapshot.result.error_code : fallback;
+  return String(snapshot.reason ?? snapshot.state ?? fallback);
+}
 export const PLAYMODE_JOB_DEFAULT_DEADLINE_MS = 10 * 60_000;
 export const PLAYMODE_JOB_DEFAULT_UNREACHABLE_MS = 2 * 60_000;
 export interface PlaymodePollOptions { deadlineMs?: number; pollIntervalMs?: number; unreachableMs?: number }
@@ -257,8 +300,10 @@ export function playmodeOperation(tool: string, schema: Record<string, any>, cli
       if (operation.operation_id !== context.jobId) throw new Error("Bridge did not confirm play-mode operation ownership.");
       context.lifecycle("connected", `Bridge play-mode scheduler owns operation ${context.jobId}`, true);
       let phase: string | undefined;
+      // The deadline outlives the operation's own worst case (a 10-minute wait).
+      const deadlineMs = poll.deadlineMs ?? Math.max(PLAYMODE_JOB_DEFAULT_DEADLINE_MS, playmodeEstimateMs(tool, args) + 2 * 60_000);
       const outcome = await pollPlaymodeOperation(live, context.jobId, {
-        ...poll, signal: context.signal,
+        ...poll, deadlineMs, signal: context.signal,
         onSnapshot: snapshot => {
           const expected = Number(snapshot.progress?.expectedMs);
           const elapsed = Number(snapshot.progress?.elapsedMs);
@@ -289,8 +334,9 @@ export function playmodeOperation(tool: string, schema: Record<string, any>, cli
         context.lifecycle("disconnected", `Bridge ended the operation without completing it (${snapshot.reason}).`, false);
         return { state: "failed", error: { code: "operation_lost", message: String(snapshot.reason) }, result };
       }
-      // cancelled without our request = play mode exited; failed = operation error.
-      return { state: "failed", error: { code: snapshot.state === "cancelled" ? String(snapshot.reason ?? "cancelled") : "operation_failed",
+      // cancelled without our request = play mode exited; failed = operation error
+      // (a wait that timed out, a game exception: the operation's own error_code).
+      return { state: "failed", error: { code: playmodeFailureCode(snapshot),
         message: String(snapshot.result?.error ?? snapshot.reason ?? "Play-mode operation did not complete.") }, result };
     },
   };

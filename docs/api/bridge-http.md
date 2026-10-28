@@ -245,8 +245,8 @@ adapter reports as an unknown outcome.
 
 ### Play-mode operations
 
-Tools that must run across real play-mode frames (today
-`unity_open_mcp_inputsim_gesture`) start an operation on the bridge's shared
+Tools that must run across real play-mode frames (`unity_open_mcp_inputsim_gesture`,
+`unity_open_mcp_playtest_wait`, `unity_senses_capture_series`) start an operation on the bridge's shared
 play-mode scheduler and return at once with `operation` (`operation_id`, `kind`,
 `state`, `phase`, `progress`). The scheduler is a player-loop system at the start
 of `EarlyUpdate`; it owns per-frame timing (`realtime` or `gameplay`),
@@ -254,12 +254,17 @@ cancellation, and cleanup. `POST /playmode-operations` takes
 `{"action":"status"|"cancel","operation_id":"…"}` and answers the same snapshot;
 terminal snapshots (`succeeded`, `failed`, `cancelled`, `orphaned`) carry the
 tool's `result` and a `reason` (`completed`, `failed`, `cancelled`,
-`play_mode_exited`, `domain_reload`, `editor_quit`). Every terminal path runs the
-operation's cleanup exactly once, which releases held input. The caller supplies
+`play_mode_exited`, `domain_reload`, `editor_quit`). An operation that ends on its
+own terms without success (a wait that timed out, a game exception under
+`fail_on`) is `failed` with reason `failed` and a stable `result.error_code`
+(`timed_out`, `exception_thrown`, `error_logged`, `condition_error`,
+`capture_failed`). Every terminal path runs the operation's cleanup exactly once,
+which releases held input, restores a wait's `Time.timeScale` and encodes the
+frames a series captured so far (not on reload / quit). The caller supplies
 `operation_id` (8–64 letters, digits, dashes) to make a retried start idempotent;
 the MCP server and its [jobs adapter](jobs.md#play-mode-operations) always do.
-Operations that drive the same resource (input) are exclusive
-(`playmode_operation_busy`). Records are domain-local and retained for 30 minutes
+Operations that drive the same resource (input, the time scale, a capture
+series) are exclusive (`playmode_operation_busy`). Records are domain-local and retained for 30 minutes
 (at most 64); an unknown id answers `operation_not_found`.
 
 `unity_open_mcp_game_view` `set_resolution` / `set_device` in play mode start a

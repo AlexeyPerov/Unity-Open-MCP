@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { testRunOperation, projectCommandOperation, playmodeOperation, pollPlaymodeOperation, playmodeResult, toolOutput, toolResultBody, PLAYMODE_OPERATION_TOOLS } from "./jobs/adapters.js";
-import { INPUTSIM_GESTURE_INLINE_LIMIT_MS } from "./tools/inputsim-gesture.js";
+import { testRunOperation, projectCommandOperation, playmodeOperation, pollPlaymodeOperation, playmodeResult, toolOutput, toolResultBody, PLAYMODE_OPERATION_TOOLS, playmodeEstimateMs, playmodeFailureCode } from "./jobs/adapters.js";
+import { PLAYMODE_ROUTES } from "./playmode-routes.js";
 import { routeGameView as settleGameView } from "./game-view-settle.js";
 import { JobManager, JobManagerError, type JobOwner } from "./jobs/job-manager.js";
 import { handleJobs } from "./jobs/handler.js";
@@ -854,49 +854,58 @@ export class ToolRouter implements Router {
   }
 
   /**
-   * `inputsim_gesture`: the bridge starts the gesture on its shared play-mode
+   * Play-mode operations (`inputsim_gesture`, `playtest_wait`,
+   * `capture_series`): the bridge starts the operation on its shared play-mode
    * scheduler and answers at once; this route polls POST /playmode-operations
-   * until the terminal trace, inside the host-safe window. A gesture whose last
-   * keyframe is beyond the inline budget is started as a `jobs` play-mode
-   * operation instead and the call returns that job id. A gesture that outlives
-   * the inline poll (gameplay time, a paused Editor) is cancelled — which
-   * releases every held finger — and the error points at the jobs route.
+   * until the terminal result, inside the host-safe window. An operation whose
+   * worst case (`playmodeEstimateMs`: last keyframe / capture, the wait's
+   * timeout, a series' start_on wait + schedule + encoding) exceeds the inline
+   * budget is started as a `jobs` play-mode operation instead and the call
+   * returns that job id. One that outlives the inline poll anyway (gameplay
+   * time, a paused Editor) is cancelled — which releases held input and
+   * restores a wait's time scale — and the error points at the jobs route.
    */
-  private async routeInputsimGesture(args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity): Promise<CallToolResult> {
-    const name = "unity_open_mcp_inputsim_gesture";
-    const fingers = Array.isArray(args.fingers) ? args.fingers as Array<{ path?: Array<{ at_ms?: unknown }> }> : [];
-    const durationMs = Math.max(0, ...fingers.flatMap(f => Array.isArray(f?.path) ? f.path.map(k => Number(k?.at_ms) || 0) : []));
-    if (durationMs > INPUTSIM_GESTURE_INLINE_LIMIT_MS) {
+  private async routePlaymodeOperation(name: string, args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity): Promise<CallToolResult> {
+    const spec = PLAYMODE_ROUTES[name];
+    const estimateMs = playmodeEstimateMs(name, args);
+    if (estimateMs > spec.inlineLimitMs) {
       const started = await this.routeJobs({ action: "start", tool_or_command: name, args }, identity);
       const body = toolResultBody(started);
       if (started.isError || typeof body.job_id !== "string") return started;
-      return sourceResult({ ...body, note: `Gesture lasts ${durationMs} ms (> ${INPUTSIM_GESTURE_INLINE_LIMIT_MS} ms inline budget); it runs as a job.`,
-        agentNextSteps: [`Call unity_open_mcp_jobs {"action":"wait","job_id":"${body.job_id}","timeout_ms":30000} until the state is terminal; the result holds the trace.`] }, "local");
+      return sourceResult({ ...body, note: `${spec.label} can take ${Math.round(estimateMs)} ms (> ${spec.inlineLimitMs} ms inline budget); it runs as a job.`,
+        agentNextSteps: [`Call unity_open_mcp_jobs {"action":"wait","job_id":"${body.job_id}","timeout_ms":30000} until the state is terminal; the result holds ${spec.resultHint}.`] }, "local");
     }
     const operationId = typeof args.operation_id === "string" ? args.operation_id : randomUUID();
     const start = await live.route(name, { ...args, operation_id: operationId });
     const started = toolOutput(start);
     if (start.isError || started.error || !started.operation) return injectRouteMeta(start, { route: "live" });
     const outcome = await pollPlaymodeOperation(live, operationId, {
-      deadlineMs: Math.min(durationMs + 15_000, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS - 5_000),
-      pollIntervalMs: durationMs < 2_000 ? 50 : 100,
+      deadlineMs: Math.min(estimateMs + 15_000, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS - 5_000),
+      pollIntervalMs: estimateMs < 2_000 ? 50 : 100,
       unreachableMs: 10_000,
     });
-    const meta = { backend: started.backend, skipped: started.skipped, focusedGameView: started.focusedGameView };
+    const meta = spec.startMeta(started);
+    // The poll's own deadline cancel, acknowledged: the operation stalled (a
+    // paused Editor never ticks it), it did not end by itself.
+    const stalled = outcome.kind === "deadline" || (outcome.kind === "terminal" && outcome.cancelSent && outcome.snapshot.state === "cancelled");
+    if (stalled) {
+      return sourceResult({ error: { code: spec.stalledCode, message: `The ${spec.noun} did not finish inside the inline window (a paused Editor, gameplay time, or a slow frame rate); it was cancelled and its cleanup ${spec.cleanup}.` },
+        operationId, last: outcome.snapshot, agentNextSteps: [`Check that play mode is running (not paused) and the Game view renders, then retry — or run it as a job: unity_open_mcp_jobs {"action":"start","tool_or_command":"${name}","args":{…}}, then wait on the job id.`] }, "live", true);
+    }
     switch (outcome.kind) {
       case "lost":
-        return sourceResult({ error: { code: "operation_lost", message: "The bridge lost the gesture (domain reload or Editor restart); held input was released by that cleanup." }, operationId }, "live", true);
+        return sourceResult({ error: { code: "operation_lost", message: `The bridge lost the ${spec.noun} (domain reload or Editor restart); its cleanup ${spec.cleanup}.` }, operationId }, "live", true);
       case "unreachable":
         return sourceResult({ error: { code: "job_status_unavailable", message: outcome.error }, operationId }, "live", true);
-      case "deadline":
-        return sourceResult({ error: { code: "gesture_timeout", message: "The gesture did not finish inside the inline window (gameplay time, a paused Editor, or a slow frame rate); it was cancelled and every held finger released." },
-          operationId, last: outcome.snapshot, agentNextSteps: ["Run it as a job: unity_open_mcp_jobs {\"action\":\"start\",\"tool_or_command\":\"unity_open_mcp_inputsim_gesture\",\"args\":{…}}, then wait on the job id."] }, "live", true);
     }
+    if (outcome.kind !== "terminal") throw new Error("unreachable play-mode poll outcome");
     const snapshot = outcome.snapshot;
     const result = { ...meta, ...playmodeResult(snapshot) };
     if (snapshot.state === "succeeded") return sourceResult({ status: "ok", ...result }, "live");
-    const code = snapshot.state === "failed" ? "gesture_failed" : String(snapshot.reason ?? snapshot.state);
-    return sourceResult({ error: { code, message: String(snapshot.result?.error ?? `Gesture ended ${snapshot.reason ?? snapshot.state}; held input was released.`) }, ...result }, "live", true);
+    const code = playmodeFailureCode(snapshot, spec.failedCode);
+    // The operation's own `error` (a message string) becomes error.message.
+    return sourceResult({ ...result, error: { code, message: String(snapshot.result?.error ?? `${spec.label} ended ${snapshot.reason ?? snapshot.state}; its cleanup ${spec.cleanup}.`) },
+      ...(spec.failureNextSteps(code) ? { agentNextSteps: spec.failureNextSteps(code) } : {}) }, "live", true);
   }
 
   /**
@@ -946,9 +955,12 @@ export class ToolRouter implements Router {
       // the process agent id, whatever _meta.agentId the call carried. Direct,
       // manage_tools(invoke) and port-override calls therefore share one owner.
       ["unity_open_mcp_jobs", (_l, a, id) => this.routeJobs(a, id)],
-      // Gestures run on the bridge's play-mode scheduler: start, then poll the
-      // operation to its terminal trace here (long gestures become a job).
-      ["unity_open_mcp_inputsim_gesture", (l, a, id) => this.routeInputsimGesture(a, l, id)],
+      // Gestures, waits and capture series run on the bridge's play-mode
+      // scheduler: start, then poll the operation to its terminal result here
+      // (long ones become a job).
+      ["unity_open_mcp_inputsim_gesture", (l, a, id) => this.routePlaymodeOperation("unity_open_mcp_inputsim_gesture", a, l, id)],
+      ["unity_open_mcp_playtest_wait", (l, a, id) => this.routePlaymodeOperation("unity_open_mcp_playtest_wait", a, l, id)],
+      ["unity_senses_capture_series", (l, a, id) => this.routePlaymodeOperation("unity_senses_capture_series", a, l, id)],
       // Game view / Simulator changes settle over play-mode frames: poll the
       // bridge's settle watch here so set_* returns once the game sees the size.
       ["unity_open_mcp_game_view", (l, a) => this.routeGameView(a, l)],

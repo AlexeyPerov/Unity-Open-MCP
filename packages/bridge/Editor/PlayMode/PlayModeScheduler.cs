@@ -2,7 +2,7 @@
 //
 // One bridge-side owner for operations that must run across real play-mode
 // frames instead of inside one main-thread dispatch (a held finger, a gesture
-// that lasts seconds, later: wait-until and timed capture series). A tool starts
+// that lasts seconds, a wait-until, a timed capture series). A tool starts
 // an operation and returns immediately; the scheduler ticks it once per player
 // loop frame from a system inserted at the START of EarlyUpdate — before the
 // legacy Input Manager and the Input System process input — so input injected in
@@ -45,6 +45,7 @@ namespace UnityOpenMcpBridge
         public float TimeScale;
         public int ScreenWidth;
         public int ScreenHeight;
+        public double PlayTime;     // Time.time of this frame (seconds)
     }
 
     internal abstract class PlayModeOperation
@@ -58,6 +59,11 @@ namespace UnityOpenMcpBridge
         public PlayModeTimeBase TimeBase = PlayModeTimeBase.Realtime;
         public double ExpectedDurationMs;
         public string Phase = "running";
+        // Set before Tick returns true to end the operation as `failed` with
+        // this stable code (a wait that timed out, a game exception) while
+        // BuildResult still reports the full terminal state. Null = success.
+        public string FailureCode;
+        public string FailureMessage;
 
         // Called on every player-loop frame while running. Return true when done.
         protected internal abstract bool Tick(PlayModeFrame frame);
@@ -220,10 +226,11 @@ namespace UnityOpenMcpBridge
         private static void TickAll()
         {
             if (!IsPlaying) return;
-            TickAll(Time.frameCount, Time.deltaTime, Time.unscaledDeltaTime, Time.timeScale, Screen.width, Screen.height);
+            TickAll(Time.frameCount, Time.deltaTime, Time.unscaledDeltaTime, Time.timeScale, Screen.width, Screen.height, Time.timeAsDouble);
         }
 
-        internal static void TickAll(int frameCount, float deltaTime, float unscaledDeltaTime, float timeScale, int screenWidth, int screenHeight)
+        internal static void TickAll(int frameCount, float deltaTime, float unscaledDeltaTime, float timeScale, int screenWidth, int screenHeight,
+            double playTime = double.NaN)
         {
             foreach (var entry in entries.Values.ToArray())
             {
@@ -245,6 +252,7 @@ namespace UnityOpenMcpBridge
                     TimeScale = timeScale,
                     ScreenWidth = screenWidth,
                     ScreenHeight = screenHeight,
+                    PlayTime = playTime,
                 };
                 bool done;
                 try { done = op.Tick(frame); }
@@ -253,7 +261,9 @@ namespace UnityOpenMcpBridge
                     Finish(entry, PlayModeEndReason.Failed, ex.GetType().Name + ": " + ex.Message);
                     continue;
                 }
-                if (done) Finish(entry, PlayModeEndReason.Completed, null);
+                if (!done) continue;
+                if (op.FailureCode == null) Finish(entry, PlayModeEndReason.Completed, null);
+                else Finish(entry, PlayModeEndReason.Failed, op.FailureMessage ?? op.FailureCode);
             }
             if (!AnyRunning && installed)
             {

@@ -76,13 +76,16 @@ namespace UnityOpenMcpBridge.MetaTools
         // when the bridge is down" — a different question with a coincidentally
         // similar answer for this tool. Keep the two independent.
         //
-        // inputsim_gesture is the same shape on a different poller: its call only
-        // starts an operation on the play-mode scheduler, and the frames that run
-        // it cannot advance while a batch holds the main thread.
+        // inputsim_gesture, playtest_wait and capture_series are the same shape on
+        // a different poller: their call only starts an operation on the
+        // play-mode scheduler, and the frames that run it cannot advance while a
+        // batch holds the main thread.
         private static readonly HashSet<string> ServerPolledTools = new HashSet<string>
         {
             "unity_senses_run_tests",
             "unity_open_mcp_inputsim_gesture",
+            "unity_open_mcp_playtest_wait",
+            "unity_senses_capture_series",
         };
 
         // specs/feedback.md 2026-08-24 — every pre-flight refusal below tells the
@@ -261,7 +264,7 @@ namespace UnityOpenMcpBridge.MetaTools
                         $"commands[{index}] tool '{tool}' is not invokable inside a batch: its " +
                         "terminal result is produced by the MCP server polling the bridge " +
                         "(a results file under ~/.unity-open-mcp for tests, POST " +
-                        "/playmode-operations for gestures), and the batch route has no poller. " +
+                        "/playmode-operations for gestures, waits and capture series), and the batch route has no poller. " +
                         "The step would be recorded as success carrying a non-terminal " +
                         "started/running body and the outcome would never reach you. Use it as " +
                         "a single top-level call instead — that route polls to a terminal result.",

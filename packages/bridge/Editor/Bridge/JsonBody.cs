@@ -782,7 +782,7 @@ namespace UnityOpenMcpBridge
             return i;
         }
 
-        private static bool IsPatchArrayKey(string key)
+        internal static bool IsPatchArrayKey(string key)
         {
             foreach (var k in PatchArrayKeys)
                 if (k == key) return true;
@@ -792,10 +792,12 @@ namespace UnityOpenMcpBridge
         // Top-level patch-array keys whose contents must be excluded from
         // selector reads. "fields" (component_modify/object_modify),
         // "patches"/"jsonPatches" (gameobject_modify/material), "entries"
-        // (assets_copy/assets_move), "deletes" (assets_delete). component_add's
+        // (assets_copy/assets_move), "deletes" (assets_delete), "condition" /
+        // "start_on" (playtest_wait / capture_series condition trees, whose
+        // project_command args are arbitrary). component_add's
         // "component_types" is a bare-string array (no nested objects), so it
         // cannot shadow a selector and is intentionally not listed.
         private static readonly string[] PatchArrayKeys =
-            { "fields", "entries", "patches", "jsonPatches", "deletes" };
+            { "fields", "entries", "patches", "jsonPatches", "deletes", "condition", "start_on" };
     }
 }

@@ -49,8 +49,11 @@ memory data, and pull events. Input simulation closes the gameplay loop: put the
 game on a target resolution or Device Simulator device, read the screen (uGUI
 text, visibility, layout diagnostics), tap controls by their on-screen label,
 click / drag / swipe, play multi-second gestures over real frames (legacy Input
-Manager and Input System projects alike), advance frames, then verify visually
-with captures at the device's native resolution and safe area.
+Manager and Input System projects alike), advance frames, wait until the game
+gets somewhere (a log line, a label, an object, the project's own predicate —
+optionally fast-forwarded), then verify visually with captures at the device's
+native resolution and safe area, or frame-scheduled capture series for animated
+content.
 
 ### Live, batch, or offline
 

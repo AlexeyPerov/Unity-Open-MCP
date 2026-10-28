@@ -13,7 +13,7 @@ This file is the index for external interfaces and protocol contracts exposed by
 | [`api/routing-lifecycle.md`](api/routing-lifecycle.md) | Live/batch/offline/local routing, lifecycle recovery, offline coverage, and errors. |
 | [`api/cli-automation.md`](api/cli-automation.md) | CLI command and automation reference; links to canonical CI behavior. |
 | [`api/input-simulation.md`](api/input-simulation.md) | Input backends (legacy Input Manager / Input System), pointer delivery and `raycast_real`, touch, gestures over real frames, target by label (`target_text`), keyboard, frame stepping, and supported input boundaries. |
-| [`api/playtest.md`](api/playtest.md) | UI screen snapshot (`ui_snapshot`): nodes, visibility, profiles/paging, diagnostics, and the snapshot → tap-by-label loop; Game view / Device Simulator control (`game_view`): resolution, device, orientation, safe area, settling. |
+| [`api/playtest.md`](api/playtest.md) | UI screen snapshot (`ui_snapshot`): nodes, visibility, profiles/paging, diagnostics, and the snapshot → tap-by-label loop; Game view / Device Simulator control (`game_view`): resolution, device, orientation, safe area, settling; wait-until conditions (`playtest_wait`) and frame-scheduled capture series (`capture_series`, gesture `capture_at_ms`). |
 | [`api/project-commands.md`](api/project-commands.md) | Project-owned command declaration, discovery, invocation, schemas, and safety boundaries. |
 | [`api/jobs.md`](api/jobs.md) | Asynchronous job lifecycle, observation, idempotency, cancellation, retention, and adapters. |
 | [`api/resources.md`](api/resources.md) | MCP resource URIs, payload shapes, and resource router behavior. |

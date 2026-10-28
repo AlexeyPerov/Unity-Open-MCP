@@ -104,6 +104,15 @@ const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   "unity_senses_spatial_query",
 ]);
 
+// Tools whose `timeout_ms` is their OWN parameter (a playtest_wait's wall-clock
+// limit, up to 10 minutes), not the request budget: the value is forwarded as
+// sent — never clamped to the host-safe cap — and the HTTP fetch keeps the
+// default budget, because the call itself only starts an operation on the
+// bridge's play-mode scheduler and answers at once.
+export const TOOL_OWNED_TIMEOUT_TOOLS: ReadonlySet<string> = new Set([
+  "unity_open_mcp_playtest_wait",
+]);
+
 // M4 — compile-reload tools whose PURPOSE is to trigger or observe a domain
 // reload, so a no-op compile is a meaningful signal worth annotating. This is
 // the annotation target set; it is a strict subset of the lifecycle
@@ -910,7 +919,8 @@ export class LiveClient implements Router {
     retryOn503: boolean,
     commandLifecycle?: string,
   ): Promise<CallToolResult | CompileRepostSentinel> {
-    const rawTimeout = args.timeout_ms;
+    const toolOwnedTimeout = TOOL_OWNED_TIMEOUT_TOOLS.has(toolName);
+    const rawTimeout = toolOwnedTimeout ? undefined : args.timeout_ms;
     const explicitTimeout = typeof rawTimeout === "number";
     const requestedTimeoutMs = explicitTimeout ? rawTimeout : 60_000;
     // feedback S2 — clamp below a typical MCP host request timeout (~60s) so the
@@ -924,8 +934,9 @@ export class LiveClient implements Router {
       BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS,
     );
     const wasClamped = requestedTimeoutMs > timeoutMs;
-    // Forward the clamped value so the bridge times out at the same boundary.
-    const forwardedArgs = wasClamped
+    // Forward the clamped value so the bridge times out at the same boundary
+    // (a tool-owned timeout_ms travels unchanged).
+    const forwardedArgs = wasClamped && !toolOwnedTimeout
       ? { ...args, timeout_ms: timeoutMs }
       : args;
     // Floor the client fetch timeout at the bridge's own default wait + slack

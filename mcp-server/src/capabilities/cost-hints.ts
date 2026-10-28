@@ -287,6 +287,15 @@ export const RECOMMENDED_TOOL_CHAINS: RecommendedToolChain[] = [
     ],
   },
   {
+    name: "playtest-wait-and-capture",
+    task: "Let the game reach a state (timer, wave, popup) and check animated content without polling in a loop.",
+    steps: [
+      "unity_open_mcp_playtest_wait (condition log / ui / object / project_command, timeout_ms; time_scale to fast-forward) — read fired, or condition.last on timed_out",
+      "unity_senses_capture_series (at_ms or every_ms + duration_ms, start_on the same condition shapes, contact_sheet true, metric diff for pulsing effects)",
+      "unity_open_mcp_inputsim_gesture with capture_at_ms — a tap and the frames that follow it in one call",
+    ],
+  },
+  {
     name: "device-layout-check",
     task: "Check a screen's layout on a phone (notch / safe area) or at a fixed resolution, with frames a human can compare.",
     steps: [

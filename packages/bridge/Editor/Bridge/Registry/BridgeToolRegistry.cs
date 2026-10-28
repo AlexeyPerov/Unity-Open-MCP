@@ -271,6 +271,11 @@ namespace UnityOpenMcpBridge
                 return Array.Empty<object>();
 
             var args = new object[entry.Parameters.Length];
+            // A nested patch/condition payload (JsonBody.PatchArrayKeys) may carry
+            // keys that share a parameter's name; read the other parameters from
+            // the depth-1 projection so a nested key never shadows a top-level
+            // one. Bodies without such a key are returned unchanged.
+            var scope = JsonBody.SelectorScope(body);
 
             for (int i = 0; i < entry.Parameters.Length; i++)
             {
@@ -281,7 +286,9 @@ namespace UnityOpenMcpBridge
                 var isNullable = !paramType.IsValueType || Nullable.GetUnderlyingType(paramType) != null;
 
                 // JsonBody.GetRawValue wraps the key in quotes itself; pass the bare key.
-                var rawValue = JsonBody.GetRawValue(body, paramName);
+                var rawValue = JsonBody.IsPatchArrayKey(paramName)
+                    ? JsonBody.GetTopLevelRawValue(body, paramName)
+                    : JsonBody.GetRawValue(scope, paramName);
                 if (rawValue == null)
                 {
                     if (hasDefault)

@@ -150,7 +150,17 @@ call returns once the gesture ends. The terminal result holds `backend`,
 `uiTopHit` (top uGUI raycast hit at that point, when uGUI is installed) — and up to
 20 console `errors` raised during the gesture.
 
-Gestures longer than 40 s (by their last keyframe) return a `job_id` instead; wait
+**Capture what follows.** `capture_at_ms: [0, 100, 200, 300]` (at most 30
+offsets, in the gesture's `time` base) captures the composed game frame at those
+offsets from the gesture start inside the same scheduled operation — the
+`capture_series` recorder: native size, read inside the player loop, labelled with
+the frame the image shows. The call returns when the gesture and the last capture
+are done; `captures.frames[]` carries `frame`, `play_time`, `elapsed_ms`, `file`
+and `unchanged`. Needs a rendering Game view / Simulator
+(`render_target_unavailable` otherwise) on Unity 6. See
+[Tap and capture what follows](playtest.md#tap-and-capture-what-follows).
+
+Gestures longer than 40 s (by their last keyframe or capture) return a `job_id` instead; wait
 on it with [`unity_open_mcp_jobs`](jobs.md#play-mode-operations), which can also
 start one directly. A gesture that outlives the inline window (for example
 `time: "gameplay"` at a low time scale) is cancelled and returns `gesture_timeout`.

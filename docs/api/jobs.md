@@ -6,7 +6,8 @@ session; it does not turn synchronous tool calls into background work.
 
 Supported targets are `unity_senses_run_tests`, available project commands
 that declare `Async = true` with the async authoring signature, and play-mode
-operations (`unity_open_mcp_inputsim_gesture`). Other targets return
+operations (`unity_open_mcp_inputsim_gesture`, `unity_open_mcp_playtest_wait`,
+`unity_senses_capture_series`). Other targets return
 `job_operation_unsupported`; builds, imports, package resolution, and baking
 retain their existing contracts.
 
@@ -86,37 +87,47 @@ MCP session owns observation and idempotency. See [authoring](project-commands.m
 ## Play-mode operations
 
 Tools whose work runs across real play-mode frames share one bridge-side
-scheduler and one generic job adapter (`playmode_operation`). Today that is
-`unity_open_mcp_inputsim_gesture`; pass its ordinary arguments as `args`:
+scheduler and one generic job adapter (`playmode_operation`):
+`unity_open_mcp_inputsim_gesture`, `unity_open_mcp_playtest_wait` and
+`unity_senses_capture_series`. Pass the tool's ordinary arguments as `args`:
 
 ```json
 {
   "action": "start",
-  "tool_or_command": "unity_open_mcp_inputsim_gesture",
-  "args": {"fingers": [{"id": 0, "path": [{"at_ms": 0, "x": 400, "y": 300}, {"at_ms": 60000, "x": 900, "y": 300}]}]}
+  "tool_or_command": "unity_open_mcp_playtest_wait",
+  "args": {"condition": {"log": {"pattern": "Wave \\d+ cleared"}}, "time_scale": 2, "timeout_ms": 120000}
 }
 ```
 
-The operation is read-only, so `idempotency_key` is optional (it still
+The operations are read-only, so `idempotency_key` is optional (it still
 deduplicates retries). The job owns `operation_id` (supplying one is rejected):
 the job id is the bridge operation id. The direct tool call starts a job by itself
-when the gesture is longer than its inline budget and returns that job snapshot.
+when the operation's worst case exceeds the 40 s inline budget — a gesture's last
+keyframe or capture, a wait's `timeout_ms`, a capture series' `start_on` wait plus
+its schedule plus encoding — and returns that job snapshot.
 
 The adapter starts the operation through the tool (the bridge validates, routes
 input and refuses as usual — a refusal is a `failed` job carrying the bridge's
 code and `error.detected` configuration), then polls `POST /playmode-operations`.
 Progress reports the scheduler phase and `elapsedMs / expectedMs` as a fraction.
 Operations are cancellable: `cancel` is forwarded once and the job becomes
-`cancelled` after the bridge acknowledges it, having released held input. Terminal
-results keep the operation snapshot under `operation` plus the tool's own result
-(for a gesture: `trace`, `frames`, `errors`, `released`). Exiting play mode ends a
-running operation; the job then fails with code `play_mode_exited`. Records are
-domain-local: after a domain reload the bridge answers `operation_not_found`
-(its cleanup already released held input) and the job becomes `orphaned` — never
-restarted. A status poll that cannot reach the bridge is retried with backoff
-(lifecycle `disconnected` until it answers); after 2 minutes without an answer, or
-10 minutes without a terminal state (a cancel is sent first), the job is
-`orphaned`.
+`cancelled` after the bridge acknowledges it, having released held input and
+restored a wait's time scale. Terminal results keep the operation snapshot under
+`operation` plus the tool's own result (a gesture: `trace`, `frames`, `errors`,
+`released`, `captures`; a wait: `outcome`, `fired`, `condition`, `time_scale`,
+`errors`; a series: `series.frames`, `contact_sheet`). An operation that ends on
+its own terms without success fails with the operation's `error_code` — a wait
+that `timed_out` or stopped on `exception_thrown` / `error_logged`, a series whose
+`start_on` timed out — and keeps the full result (every leaf's last observed
+state). Exiting play mode ends a running operation; the job then fails with code
+`play_mode_exited` (cleanup has run: input released, time scale restored, frames
+captured so far written). Records are domain-local: after a domain reload the
+bridge answers `operation_not_found` (its cleanup already ran) and the job becomes
+`orphaned` — never restarted. A status poll that cannot reach the bridge is retried
+with backoff (lifecycle `disconnected` until it answers); after 2 minutes without
+an answer, or without a terminal state by the deadline — 10 minutes, or the
+operation's worst case plus 2 minutes when longer (a 10-minute wait) — the job is
+`orphaned` (a cancel is sent first).
 
 ## Calls
 
