@@ -233,13 +233,14 @@ export const EMBEDDED_DOMAINS: readonly EmbeddedDomain[] = [
   },
   {
     // Input simulation — play-mode game-testing surface. The pointer tool
-    // (uGUI) compiles with com.unity.ugui (the dependency surfaced here); the
-    // keyboard/touch tools additionally require com.unity.inputsystem (already
-    // surfaced by the inputsystem entry above). Two independent sub-asmdefs.
+    // (uGUI) compiles with com.unity.ugui (the dependency surfaced here); touch
+    // and gesture compile everywhere (legacy Input Manager and/or Input System
+    // backends); the keyboard tool additionally requires com.unity.inputsystem
+    // (already surfaced by the inputsystem entry above).
     domain: "inputsimulation",
     displayName: "Input Simulation",
     description:
-      "Play-mode input simulation: uGUI pointer click/drag + Input System keyboard/touch device events.",
+      "Play-mode input simulation: uGUI pointer click/drag, legacy/Input System touch, real-time gestures, keyboard.",
     upmDependency: "com.unity.ugui",
     defaultVersion: "2.0.0",
     builtin: false,
@@ -250,6 +251,7 @@ export const EMBEDDED_DOMAINS: readonly EmbeddedDomain[] = [
       "unity_open_mcp_inputsim_step",
       "unity_open_mcp_inputsim_probe",
       "unity_open_mcp_inputsim_pointer3d",
+      "unity_open_mcp_inputsim_gesture",
     ],
   },
 ] as const;

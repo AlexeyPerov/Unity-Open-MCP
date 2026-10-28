@@ -32,6 +32,7 @@ Use exact schemas, scoped mutations, and gate evidence to work on the selected U
 - Before batching, interpreting a failed gate, or applying fixes: [Batch and gates](references/batch-and-gates.md).
 - Before file-level repair, YAML edits, or offline asset investigation: [YAML and offline work](references/yaml-and-offline-work.md).
 - Before screenshots, event capture, or test runs: [Senses and tests](references/senses-and-tests.md).
+- Before driving gameplay input (taps, drags, multi-second gestures — legacy Input Manager or Input System): activate `input-simulation` and follow its domain skill; read the reported `backend` array and refusals instead of reflecting into game input code.
 
 ### Project-owned commands
 
@@ -52,9 +53,11 @@ commands in `batch_execute`.
 
 Use the always-visible `unity_open_mcp_jobs` for explicitly supported asynchronous
 operations. `start` requires `tool_or_command`, adapter `args`, and an
-`idempotency_key`. Supported targets are `unity_senses_run_tests` (ordinary test
-filters, no caller `run_id`, cancellation unsupported) and available async project
-commands (`args: {args: {...}, gate, paths_hint}`). Read terminal project-job gate
+`idempotency_key` (optional for read-only targets). Supported targets are
+`unity_senses_run_tests` (ordinary test filters, no caller `run_id`, cancellation
+unsupported), available async project commands (`args: {args: {...}, gate,
+paths_hint}`), and play-mode operations such as `unity_open_mcp_inputsim_gesture`
+(the tool's own args; cancellable — cancel releases held input). Read terminal project-job gate
 results even on failure/cancellation. An unsupported target must not be retried as
 an arbitrary background tool.
 

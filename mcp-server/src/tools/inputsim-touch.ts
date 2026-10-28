@@ -1,34 +1,42 @@
-// Input simulation — Input System touch / swipe device events.
+// Input simulation — backend-aware touch / swipe.
 //
-// Compile-gated on com.unity.inputsystem (UNITY_OPEN_MCP_EXT_INPUTSIM_IS).
-// Queues Touchscreen state events through the new Input System.
+// The bridge routes each call to the project's real input backend(s) and reports
+// them as `backend` (an array): legacy Input Manager touches (`legacy_touch`,
+// which also drive the legacy mouse API through Input.simulateMouseWithTouches
+// and therefore StandaloneInputModule) and/or Input System Touchscreen state
+// events (`input_system`). With activeInputHandler Both, `auto` injects into both.
+// The tool compiles in every project (no com.unity.inputsystem requirement).
 //
 // K2 fix: `swipe` accepts `advance_frames` to advance a frame AFTER each Moved
-// phase, so the swipe genuinely unfolds across frames for polling code (per-frame
-// primaryTouch.delta, distance/velocity gesture recognizers). Without
-// `advance_frames`, all Moved phases collapse into a single dispatch —
-// documented honestly now (previously mis-advertised as "across real frames").
+// phase, so the swipe genuinely unfolds across frames for polling code. The
+// legacy backend always advances at least one frame between phases (its phases
+// collapse otherwise). Real-time gestures that last seconds: inputsim_gesture.
 //
-// Play-mode only. Gate-free. Requires com.unity.inputsystem.
+// Play-mode only. Gate-free.
 import { makeTool } from "./schema-fragments.js";
 
 export const inputsimTouch = makeTool(
   "unity_open_mcp_inputsim_touch",
-  "Queue a touch / swipe event sequence through the Input System " +
-    "(Touchscreen.current) during play mode. `tap` = press+release at a point; " +
-    "`swipe` = press at from_, move across `steps` interpolated points, release " +
-    "at to_; `press`/`release` = single-phase control. POLLING vs CALLBACK: " +
-    "without `advance_frames`, all touch phases process within one " +
-    "dispatch — so polling code (per-frame primaryTouch.delta, gesture " +
-    "recognizers) sees a collapsed jump, not a real swipe. Pass `advance_frames` " +
-    "≥ 1 to advance a frame after each Moved phase so the swipe unfolds across " +
-    "real frames for polling code. Callback-driven InputAction.performed fires " +
-    "either way. The Began phase also advances before the first move. Endpoints " +
+  "Simulate a touch / swipe during play mode through the project's REAL input " +
+    "backend, reported as `backend` (array): legacy Input Manager touches (legacy_touch — " +
+    "Input.GetTouch, plus the legacy mouse API via Input.simulateMouseWithTouches, which " +
+    "StandaloneInputModule reads) and/or Input System Touchscreen events (input_system). " +
+    "`backend: auto` (default) injects into every enabled, reachable backend " +
+    "(activeInputHandler Both → both when a Touchscreen device exists; skipped backends are " +
+    "listed). Refusals: input_backend_unavailable (with the detected configuration and next " +
+    "steps), legacy_multitouch_unsupported (legacy is finger 0 only), " +
+    "unsupported_editor_version, no_device (explicit input_system without a Touchscreen). " +
+    "`tap` = press+release at a point; `swipe` = press at from_, move across `steps` " +
+    "interpolated points, release at to_; `press`/`release` = single-phase control. " +
+    "POLLING vs CALLBACK: with input_system only and no `advance_frames`, all phases process " +
+    "within one dispatch — polling code sees a collapsed jump. Pass `advance_frames` ≥ 1 to " +
+    "advance frames after Began and each Moved phase; legacy_touch always advances at least " +
+    "one frame between phases. For seconds-long holds/drags use inputsim_gesture. Endpoints " +
     "resolve target-first (name/path to visual center) or accept screen coordinates. " +
     "Root-anchored paths win over suffix matches; ambiguous names/paths return " +
     "ambiguous_target with candidate paths. This tool has no object_id parameter; " +
     "use a unique path or screen coordinates. Play-mode only — refuses " +
-    "with `play_mode_required` otherwise. Gate-free. Requires com.unity.inputsystem.",
+    "with `play_mode_required` otherwise. Gate-free.",
   {
     required: ["action"],
     properties: {
@@ -45,7 +53,7 @@ export const inputsimTouch = makeTool(
         default: 0,
         minimum: 0,
         maximum: 9,
-        description: "Touch finger index (0–9) for multi-touch. Default 0.",
+        description: "Touch finger index (0–9). The legacy_touch backend supports finger 0 only. Default 0.",
       },
       target: {
         type: "string",
@@ -83,7 +91,16 @@ export const inputsimTouch = makeTool(
           "Pump this many player-loop frames (EditorApplication.Step) AFTER each " +
           "Moved phase so the swipe unfolds across real frames for polling code " +
           "(per-frame delta, gesture recognizers). 0 (default) collapses all phases " +
-          "into one dispatch — only callback-driven input sees it then. Also advances after Began. Cap 60.",
+          "into one dispatch — only callback-driven input sees it then. Also advances after Began. " +
+          "The legacy_touch backend uses at least 1. Cap 60.",
+      },
+      backend: {
+        type: "string",
+        enum: ["auto", "legacy_touch", "input_system"],
+        default: "auto",
+        description:
+          "auto = every enabled, reachable backend; legacy_touch = legacy Input Manager only; " +
+          "input_system = Input System Touchscreen only (allows fingers 1–9).",
       },
     },
   },

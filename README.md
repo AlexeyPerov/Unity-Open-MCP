@@ -46,7 +46,9 @@ and targeted fixes.
 
 Run Edit/Play Mode tests, inspect the console, capture screenshots, profiler and
 memory data, and pull events. Input simulation closes the gameplay loop: probe
-interactables, click / drag / swipe, advance frames, then verify visually.
+interactables, click / drag / swipe, play multi-second gestures over real frames
+(legacy Input Manager and Input System projects alike), advance frames, then
+verify visually.
 
 ### Live, batch, or offline
 

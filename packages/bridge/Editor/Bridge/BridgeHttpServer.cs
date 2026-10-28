@@ -481,6 +481,19 @@ namespace UnityOpenMcpBridge
                                 () => ProjectCommandJobs.Handle(jobBody, jobOwner), 5000).Result);
                         }
                         break;
+                    case "/playmode-operations":
+                        // Status / cancel for operations owned by the shared
+                        // play-mode scheduler (started through their tool, e.g.
+                        // inputsim_gesture). Main-thread state; bounded wait.
+                        if (context.Request.HttpMethod != "POST")
+                            BridgeHttpResponse.SendJsonError(context, 405, "method_not_allowed", "POST required");
+                        else
+                        {
+                            var operationBody = BridgeRequestBody.ReadRequestBody(context.Request);
+                            BridgeHttpResponse.SendJson(context, 200, MainThreadDispatcher.EnqueueAsync(
+                                () => PlayModeScheduler.Handle(operationBody), 5000).Result);
+                        }
+                        break;
                     case "/compile-state":
                         if (context.Request.HttpMethod != "GET")
                             BridgeHttpResponse.SendJsonError(context, 405, "method_not_allowed", "GET required for /compile-state");

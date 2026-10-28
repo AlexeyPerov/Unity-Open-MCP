@@ -293,6 +293,21 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void Execute_Gesture_RefusedAsServerPolled()
+        {
+            // inputsim_gesture only starts an operation on the play-mode
+            // scheduler; the MCP server polls it to a terminal trace, and no
+            // frame can advance while the batch holds the main thread.
+            var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_inputsim_gesture\",\"params\":" +
+                       "{\"fingers\":[{\"path\":[{\"at_ms\":0,\"x\":1,\"y\":1},{\"at_ms\":10,\"x\":1,\"y\":1}]}]}}]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("batch_step_requires_server_poll", result.ErrorCode);
+            StringAssert.Contains("unity_open_mcp_inputsim_gesture", result.ErrorMessage);
+            StringAssert.Contains("top-level", result.ErrorMessage);
+        }
+
+        [Test]
         public void Execute_RunTests_RefusalNamesAReachableAlternative()
         {
             // The whole point of the field report: "use it as a single top-level

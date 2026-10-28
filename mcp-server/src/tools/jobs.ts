@@ -2,7 +2,7 @@ import { makeTool } from "./schema-fragments.js";
 import { JOB_STATES } from "../jobs/job-manager.js";
 
 export const jobs = makeTool("unity_open_mcp_jobs",
-  "Observe session-owned asynchronous jobs: start, status, bounded wait, cooperative cancel, and paged list. Supported targets: unity_senses_run_tests and available async project commands. Other tools are unsupported. Test args are ordinary filters without run_id; project args contain nested args plus scope/gate options. Mutating starts require idempotency_key. Records expire 30 minutes after completion; server restart loses all records. Never blindly retry an orphaned job.", {
+  "Observe session-owned asynchronous jobs: start, status, bounded wait, cooperative cancel, and paged list. Supported targets: unity_senses_run_tests, available async project commands, and play-mode operations (unity_open_mcp_inputsim_gesture; cancellable, cancel releases held input). Other tools are unsupported. Test args are ordinary filters without run_id; project args contain nested args plus scope/gate options; play-mode operation args are the tool's own arguments (the job owns operation_id). Mutating starts require idempotency_key. Records expire 30 minutes after completion; server restart loses all records. Never blindly retry an orphaned job.", {
     required: ["action"],
     properties: {
       action: { type: "string", enum: ["start", "status", "wait", "cancel", "list"] },

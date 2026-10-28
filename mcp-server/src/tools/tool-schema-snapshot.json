@@ -11970,7 +11970,7 @@
     }
   },
   "unity_open_mcp_batch_execute": {
-    "description": "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — cuts agent↔Unity latency and token cost for multi-object setup (e.g. spawn N cubes + create materials + assign in one call). Each entry in `commands` carries a full tool id (`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group (always visible). Live-only — NOT headless `batchCapable`; there is no batch spawn fallback when the bridge is down.\n\nNOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". The two are independent axes; nestability is decided by the pre-flight refusals below.\n\nEvery step is schema/lifecycle preflighted before dispatch. All-read batches need no paths_hint, checkpoint, gate, or undo group. Mixed/mutating batches require the explicit union paths_hint. Safety: a mutating batch shares ONE gate cycle (one checkpoint → all steps → one validate/delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step errors are collected. Partial failure semantics: a successful step is NOT rolled back when a later step fails. A partial batch (at least one step committed) propagates `mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its validate/delta on the committed work and waits for the asset/compile settle. Gate outcome describes validation independently of mutation.success; read `batch.results[]` for the breakdown and undo with a single `editor_undo` if needed. A total failure (no step committed) skips the validate/delta with gate.outcome: skipped and skippedReason: mutation_failed. Run `unity_open_mcp_validate_edit` on the touched paths to confirm health after a partial run.\n\nv1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. `batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package / non-dry-run upgrade, scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, settings_set_player, mutating execute_csharp / invoke_method / disruptive execute_menu) is refused up-front with a `batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its default Single mode replaces the active scene stack and can discard unsaved changes in open scenes). Script writes/deletes, undo/redo, play transitions, and non-preview fixes also require their top-level routes. Use those tools as single top-level calls instead.\n\nA step whose terminal result is produced by the SERVER rather than by the Editor dispatch is refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns `{status:\"started\", runId}` immediately and the server polls a results file to turn that into a real result, which only happens on the top-level route. Inside a batch nothing polls, so the step would be recorded `success` carrying the non-terminal \"started\" body and the run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
+    "description": "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — cuts agent↔Unity latency and token cost for multi-object setup (e.g. spawn N cubes + create materials + assign in one call). Each entry in `commands` carries a full tool id (`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group (always visible). Live-only — NOT headless `batchCapable`; there is no batch spawn fallback when the bridge is down.\n\nNOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". The two are independent axes; nestability is decided by the pre-flight refusals below.\n\nEvery step is schema/lifecycle preflighted before dispatch. All-read batches need no paths_hint, checkpoint, gate, or undo group. Mixed/mutating batches require the explicit union paths_hint. Safety: a mutating batch shares ONE gate cycle (one checkpoint → all steps → one validate/delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step errors are collected. Partial failure semantics: a successful step is NOT rolled back when a later step fails. A partial batch (at least one step committed) propagates `mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its validate/delta on the committed work and waits for the asset/compile settle. Gate outcome describes validation independently of mutation.success; read `batch.results[]` for the breakdown and undo with a single `editor_undo` if needed. A total failure (no step committed) skips the validate/delta with gate.outcome: skipped and skippedReason: mutation_failed. Run `unity_open_mcp_validate_edit` on the touched paths to confirm health after a partial run.\n\nv1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. `batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package / non-dry-run upgrade, scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, settings_set_player, mutating execute_csharp / invoke_method / disruptive execute_menu) is refused up-front with a `batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its default Single mode replaces the active scene stack and can discard unsaved changes in open scenes). Script writes/deletes, undo/redo, play transitions, and non-preview fixes also require their top-level routes. Use those tools as single top-level calls instead.\n\nA step whose terminal result is produced by the SERVER rather than by the Editor dispatch is refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns `{status:\"started\", runId}` immediately and the server polls a results file to turn that into a real result, which only happens on the top-level route; `unity_open_mcp_inputsim_gesture` likewise only starts a play-mode operation the server polls (and no frame advances while a batch holds the main thread). Inside a batch nothing polls, so the step would be recorded `success` carrying the non-terminal \"started\" body and the run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
     "inputSchema": {
       "type": "object",
       "required": [
@@ -12065,7 +12065,7 @@
     }
   },
   "unity_open_mcp_inputsim_pointer": {
-    "description": "Simulate a uGUI pointer interaction on a named GameObject or screen point during play mode, via the EventSystem + ExecuteEvents. Resolution precedence: object_id (a handle from scene_get_data / inputsim_probe) > target (name or slash-path, with duplicate detection + partial-path match) > screen_x/screen_y (raycasts through EventSystem.current). The response reports `interactable`, `blockedBy`, and (for drag) `dropTarget`/`dropLanded` so a click on a disabled button or behind a modal is never a silent ok. Play-mode only — refuses with `play_mode_required` otherwise; pair with editor_set_state to enter play mode and inputsim_step to advance frames before a screenshot. Gate-free. Requires com.unity.ugui.",
+    "description": "Simulate a uGUI pointer interaction on a named GameObject or screen point during play mode, via the EventSystem + ExecuteEvents. Resolution precedence: object_id (a handle from scene_get_data / inputsim_probe) > target (name or slash-path, with duplicate detection + partial-path match) > screen_x/screen_y (raycasts through EventSystem.current). The response reports `interactable`, `blockedBy`, and (for drag) `dropTarget`/`dropLanded` so a click on a disabled button or behind a modal is never a silent ok. Play-mode only — refuses with `play_mode_required` otherwise; pair with editor_set_state to enter play mode and inputsim_step to advance frames before a screenshot. ROUTING: `dispatch` (default) is the ExecuteEvents path above (reaches IPointer*/IDrag handlers only, bypasses occlusion). `raycast_real` instead injects a real touch at the point through the project's input backend (`backend`: auto | legacy_touch | input_system, reported as an array) so the scene's own EventSystem input module raycasts and dispatches it — whatever is on top receives it; the response reports `topHit`, `targetHit`, `blockedBy`, `inputModule` and `notes` (e.g. module/backend mismatch). raycast_real supports click, double_click, press, release, drag with the left button only and refuses like inputsim_touch (input_backend_unavailable, unsupported_editor_version). Gate-free. Requires com.unity.ugui.",
     "inputSchema": {
       "type": "object",
       "required": [
@@ -12151,6 +12151,25 @@
         "to_y": {
           "type": "number",
           "description": "Drag end — screen Y (alternative to to_target)."
+        },
+        "routing": {
+          "type": "string",
+          "enum": [
+            "dispatch",
+            "raycast_real"
+          ],
+          "default": "dispatch",
+          "description": "dispatch = ExecuteEvents on the resolved object (default). raycast_real = inject a real touch at its screen point so the project's input module decides what is hit (a cover graphic absorbs it); the response still reports the top hit."
+        },
+        "backend": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "legacy_touch",
+            "input_system"
+          ],
+          "default": "auto",
+          "description": "Input backend for routing: raycast_real (ignored by dispatch; must stay auto there)."
         }
       },
       "additionalProperties": false
@@ -12211,87 +12230,97 @@
     }
   },
   "unity_open_mcp_inputsim_touch": {
-    "description": "Queue a touch / swipe event sequence through the Input System (Touchscreen.current) during play mode. `tap` = press+release at a point; `swipe` = press at from_, move across `steps` interpolated points, release at to_; `press`/`release` = single-phase control. POLLING vs CALLBACK: without `advance_frames`, all touch phases process within one dispatch — so polling code (per-frame primaryTouch.delta, gesture recognizers) sees a collapsed jump, not a real swipe. Pass `advance_frames` ≥ 1 to advance a frame after each Moved phase so the swipe unfolds across real frames for polling code. Callback-driven InputAction.performed fires either way. The Began phase also advances before the first move. Endpoints resolve target-first (name/path to visual center) or accept screen coordinates. Root-anchored paths win over suffix matches; ambiguous names/paths return ambiguous_target with candidate paths. This tool has no object_id parameter; use a unique path or screen coordinates. Play-mode only — refuses with `play_mode_required` otherwise. Gate-free. Requires com.unity.inputsystem.",
+    "description": "Simulate a touch / swipe during play mode through the project's REAL input backend, reported as `backend` (array): legacy Input Manager touches (legacy_touch — Input.GetTouch, plus the legacy mouse API via Input.simulateMouseWithTouches, which StandaloneInputModule reads) and/or Input System Touchscreen events (input_system). `backend: auto` (default) injects into every enabled, reachable backend (activeInputHandler Both → both when a Touchscreen device exists; skipped backends are listed). Refusals: input_backend_unavailable (with the detected configuration and next steps), legacy_multitouch_unsupported (legacy is finger 0 only), unsupported_editor_version, no_device (explicit input_system without a Touchscreen). `tap` = press+release at a point; `swipe` = press at from_, move across `steps` interpolated points, release at to_; `press`/`release` = single-phase control. POLLING vs CALLBACK: with input_system only and no `advance_frames`, all phases process within one dispatch — polling code sees a collapsed jump. Pass `advance_frames` ≥ 1 to advance frames after Began and each Moved phase; legacy_touch always advances at least one frame between phases. For seconds-long holds/drags use inputsim_gesture. Endpoints resolve target-first (name/path to visual center) or accept screen coordinates. Root-anchored paths win over suffix matches; ambiguous names/paths return ambiguous_target with candidate paths. This tool has no object_id parameter; use a unique path or screen coordinates. Play-mode only — refuses with `play_mode_required` otherwise. Gate-free.",
     "inputSchema": {
-      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "action"
+      ],
       "properties": {
         "action": {
-          "description": "tap = press+release at one point; swipe = press at from_, move across `steps` interpolated points, release at to_; press = touch down only; release = touch up only.",
+          "type": "string",
           "enum": [
             "tap",
             "swipe",
             "press",
             "release"
           ],
-          "type": "string"
-        },
-        "advance_frames": {
-          "default": 0,
-          "description": "Pump this many player-loop frames (EditorApplication.Step) AFTER each Moved phase so the swipe unfolds across real frames for polling code (per-frame delta, gesture recognizers). 0 (default) collapses all phases into one dispatch — only callback-driven input sees it then. Also advances after Began. Cap 60.",
-          "maximum": 60,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "duration_ms": {
-          "default": 200,
-          "description": "Swipe total duration in milliseconds (recorded). Default 200.",
-          "type": "integer"
+          "description": "tap = press+release at one point; swipe = press at from_, move across `steps` interpolated points, release at to_; press = touch down only; release = touch up only."
         },
         "finger": {
+          "type": "integer",
           "default": 0,
-          "description": "Touch finger index (0–9) for multi-touch. Default 0.",
-          "maximum": 9,
           "minimum": 0,
-          "type": "integer"
-        },
-        "from_target": {
-          "description": "Swipe start — target name/path (alternative to from_x/from_y).",
-          "type": "string"
-        },
-        "from_x": {
-          "description": "Swipe start — screen X (alternative to from_target).",
-          "type": "number"
-        },
-        "from_y": {
-          "description": "Swipe start — screen Y (alternative to from_target).",
-          "type": "number"
-        },
-        "screen_x": {
-          "description": "Screen X (pixels) for tap/press/release. Pair with screen_y.",
-          "type": "number"
-        },
-        "screen_y": {
-          "description": "Screen Y (pixels) for tap/press/release. Pair with screen_x.",
-          "type": "number"
-        },
-        "steps": {
-          "default": 10,
-          "description": "Number of interpolated move events in a swipe. Capped at 100 to bound main-thread cost (each step can run advance_frames × Step). Default 10.",
-          "maximum": 100,
-          "minimum": 1,
-          "type": "integer"
+          "maximum": 9,
+          "description": "Touch finger index (0–9). The legacy_touch backend supports finger 0 only. Default 0."
         },
         "target": {
-          "description": "GameObject to tap/press/release — name or hierarchy path. Resolved to a screen point via the active camera. Omit when using screen_x/screen_y.",
-          "type": "string"
+          "type": "string",
+          "description": "GameObject to tap/press/release — name or hierarchy path. Resolved to a screen point via the active camera. Omit when using screen_x/screen_y."
+        },
+        "screen_x": {
+          "type": "number",
+          "description": "Screen X (pixels) for tap/press/release. Pair with screen_y."
+        },
+        "screen_y": {
+          "type": "number",
+          "description": "Screen Y (pixels) for tap/press/release. Pair with screen_x."
+        },
+        "from_target": {
+          "type": "string",
+          "description": "Swipe start — target name/path (alternative to from_x/from_y)."
+        },
+        "from_x": {
+          "type": "number",
+          "description": "Swipe start — screen X (alternative to from_target)."
+        },
+        "from_y": {
+          "type": "number",
+          "description": "Swipe start — screen Y (alternative to from_target)."
         },
         "to_target": {
-          "description": "Swipe end — target name/path (alternative to to_x/to_y).",
-          "type": "string"
+          "type": "string",
+          "description": "Swipe end — target name/path (alternative to to_x/to_y)."
         },
         "to_x": {
-          "description": "Swipe end — screen X (alternative to to_target).",
-          "type": "number"
+          "type": "number",
+          "description": "Swipe end — screen X (alternative to to_target)."
         },
         "to_y": {
-          "description": "Swipe end — screen Y (alternative to to_target).",
-          "type": "number"
+          "type": "number",
+          "description": "Swipe end — screen Y (alternative to to_target)."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "default": 200,
+          "description": "Swipe total duration in milliseconds (recorded). Default 200."
+        },
+        "steps": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Number of interpolated move events in a swipe. Capped at 100 to bound main-thread cost (each step can run advance_frames × Step). Default 10."
+        },
+        "advance_frames": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 60,
+          "description": "Pump this many player-loop frames (EditorApplication.Step) AFTER each Moved phase so the swipe unfolds across real frames for polling code (per-frame delta, gesture recognizers). 0 (default) collapses all phases into one dispatch — only callback-driven input sees it then. Also advances after Began. The legacy_touch backend uses at least 1. Cap 60."
+        },
+        "backend": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "legacy_touch",
+            "input_system"
+          ],
+          "default": "auto",
+          "description": "auto = every enabled, reachable backend; legacy_touch = legacy Input Manager only; input_system = Input System Touchscreen only (allows fingers 1–9)."
         }
       },
-      "required": [
-        "action"
-      ],
-      "type": "object"
+      "additionalProperties": false
     }
   },
   "unity_open_mcp_inputsim_step": {
@@ -12490,7 +12519,7 @@
     }
   },
   "unity_open_mcp_jobs": {
-    "description": "Observe session-owned asynchronous jobs: start, status, bounded wait, cooperative cancel, and paged list. Supported targets: unity_senses_run_tests and available async project commands. Other tools are unsupported. Test args are ordinary filters without run_id; project args contain nested args plus scope/gate options. Mutating starts require idempotency_key. Records expire 30 minutes after completion; server restart loses all records. Never blindly retry an orphaned job.",
+    "description": "Observe session-owned asynchronous jobs: start, status, bounded wait, cooperative cancel, and paged list. Supported targets: unity_senses_run_tests, available async project commands, and play-mode operations (unity_open_mcp_inputsim_gesture; cancellable, cancel releases held input). Other tools are unsupported. Test args are ordinary filters without run_id; project args contain nested args plus scope/gate options; play-mode operation args are the tool's own arguments (the job owns operation_id). Mutating starts require idempotency_key. Records expire 30 minutes after completion; server restart loses all records. Never blindly retry an orphaned job.",
     "inputSchema": {
       "type": "object",
       "required": [
@@ -12555,6 +12584,114 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "unity_open_mcp_inputsim_gesture": {
+    "description": "Play a touch gesture across REAL play-mode frames: per-finger keyframed paths (down → move/hold → up) interpolated every frame, so polled gameplay input (Input.GetTouch / Input.mousePosition / Touchscreen.current) follows the finger for seconds — hold, drag, trace a curve. `time: gameplay` follows Time.timeScale. Routing like inputsim_touch: legacy Input Manager touches (legacy_touch, also driving the legacy mouse API and StandaloneInputModule) and/or Input System Touchscreen events (input_system); `backend` in the result is an array. Legacy is single-finger (id 0) — more fingers refuse with legacy_multitouch_unsupported; no reachable backend refuses with input_backend_unavailable (with the detected configuration), an unverified Editor with unsupported_editor_version. The call waits for the terminal result: a bounded trace (per keyframe: frame, screen point, uGUI top hit) plus console errors raised meanwhile. Gestures longer than 40s return a job_id instead — wait on it with unity_open_mcp_jobs (you can also start one there directly). Cancel, exiting play mode and a domain reload release every held finger. One input gesture at a time (playmode_operation_busy). Play-mode only; gate-free. Not allowed inside batch_execute.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "fingers"
+      ],
+      "properties": {
+        "fingers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "description": "One entry per finger: { id (0-9, default = index), path: [keyframes] }.",
+          "items": {
+            "type": "object",
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9
+              },
+              "path": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 256,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "at_ms"
+                  ],
+                  "properties": {
+                    "at_ms": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 300000,
+                      "description": "Time of this keyframe from the gesture start, in ms (strictly increasing per finger)."
+                    },
+                    "x": {
+                      "type": "number",
+                      "description": "Screen X (coords: screen = pixels, bottom-left origin; normalized = 0..1; target = pixel offset from the target center)."
+                    },
+                    "y": {
+                      "type": "number",
+                      "description": "Screen Y, same space as x."
+                    },
+                    "target": {
+                      "type": "string",
+                      "description": "coords: target only — GameObject name or hierarchy path whose visual center is the point."
+                    },
+                    "phase": {
+                      "type": "string",
+                      "enum": [
+                        "down",
+                        "move",
+                        "hold",
+                        "up"
+                      ],
+                      "description": "down = first keyframe (default there): finger touches. move = default in between: interpolate from the previous keyframe. hold = stay at the previous point until at_ms (x/y may be omitted). up = last keyframe (default there): move to this point and lift."
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "coords": {
+          "type": "string",
+          "enum": [
+            "screen",
+            "normalized",
+            "target"
+          ],
+          "default": "screen",
+          "description": "screen = Screen pixels (bottom-left origin, same as Input.mousePosition); normalized = 0..1 of the Game view size; target = each keyframe names a target, x/y are pixel offsets."
+        },
+        "time": {
+          "type": "string",
+          "enum": [
+            "realtime",
+            "gameplay"
+          ],
+          "default": "realtime",
+          "description": "realtime = unscaled wall time; gameplay = scaled by Time.timeScale (a paused game never advances)."
+        },
+        "backend": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "legacy_touch",
+            "input_system"
+          ],
+          "default": "auto",
+          "description": "auto = every enabled, reachable backend (legacy_touch when the legacy Input Manager is on; input_system when a Touchscreen device exists). Force one with legacy_touch / input_system."
+        },
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]{8,64}$",
+          "description": "Optional idempotency handle for the bridge operation (8-64 letters, digits, dashes). A retried call with the same id returns the same operation instead of starting another. Omit it normally (the server generates one); jobs always set it to the job id."
         }
       },
       "additionalProperties": false

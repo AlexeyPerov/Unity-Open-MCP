@@ -328,21 +328,25 @@ export const TOOL_GROUPS: ToolGroup[] = [
   {
     id: "input-simulation",
     description:
-      "Play-mode input simulation surface — uGUI pointer dispatch " +
-      "(inputsim_pointer: click / drag / hover / submit on a named GameObject " +
-      "or screen point via EventSystem + ExecuteEvents) + Input System device " +
-      "events (inputsim_key keyboard, inputsim_touch touch / swipe) + frame " +
-      "advance (inputsim_step) + interactable discovery (inputsim_probe) + " +
-      "3D / legacy world-space pointer (inputsim_pointer3d, OnMouseDown + " +
-      "Physics.Raycast). The workhorse for 'click/swipe/drag a named object' " +
-      "while testing a game in the Editor. The intended loop: probe → click by " +
-      "object_id → step → screenshot. The uGUI tools compile when com.unity.ugui " +
-      "is present (UNITY_OPEN_MCP_EXT_INPUTSIM_UGUI); the keyboard/touch tools " +
-      "compile when com.unity.inputsystem is present (UNITY_OPEN_MCP_EXT_INPUTSIM_IS). " +
-      "All gate-free (input writes no assets — same model as editor_set_state) " +
-      "and play-mode-only except probe (read-only, works in edit mode too). Pair " +
-      "with editor_set_state (enter play mode) and the agent-senses screenshot / " +
-      "visual_compare / read_console surface to close the loop.",
+      "Play-mode input simulation surface — uGUI pointer (inputsim_pointer: " +
+      "click / drag / hover / submit on a named GameObject or screen point, via " +
+      "EventSystem + ExecuteEvents, or routing: raycast_real to send a real touch " +
+      "through the project's own input module) + backend-aware touch " +
+      "(inputsim_touch: legacy Input Manager touches and/or Input System " +
+      "Touchscreen, `backend` reported as an array) + keyframed gestures over " +
+      "real frames (inputsim_gesture: hold / drag / trace for seconds; long ones " +
+      "run as jobs) + Input System keyboard (inputsim_key) + frame advance " +
+      "(inputsim_step) + interactable discovery (inputsim_probe) + 3D / legacy " +
+      "world-space pointer (inputsim_pointer3d, OnMouseDown + Physics.Raycast). " +
+      "The workhorse for 'tap/swipe/drag like a finger' while testing a game in " +
+      "the Editor, including polled legacy input (Input.GetTouch / " +
+      "Input.mousePosition). The intended loop: probe → tap → step → screenshot. " +
+      "The uGUI tools compile when com.unity.ugui is present; touch and gesture " +
+      "compile everywhere; the keyboard tool compiles when com.unity.inputsystem " +
+      "is present. All gate-free (input writes no assets — same model as " +
+      "editor_set_state) and play-mode-only except probe (read-only, works in " +
+      "edit mode too). Pair with editor_set_state (enter play mode) and the " +
+      "agent-senses screenshot / visual_compare / read_console surface to close the loop.",
     defaultEnabled: false,
   },
   {
@@ -967,8 +971,9 @@ assign("unity-hub-control", [
 ]);
 
 // --- input-simulation (play-mode game-testing surface) ----------------------
-// uGUI pointer dispatch (com.unity.ugui-gated in the bridge) + Input System
-// keyboard/touch device events (com.unity.inputsystem-gated). All gate-free,
+// uGUI pointer dispatch (com.unity.ugui-gated in the bridge), backend-aware
+// touch + gesture (bridge root: legacy Input Manager and/or Input System), and
+// Input System keyboard (com.unity.inputsystem-gated). All gate-free,
 // play-mode-only. The compiled subset is reconciled from GET /tools.
 assign("input-simulation", [
   "unity_open_mcp_inputsim_pointer",
@@ -977,6 +982,7 @@ assign("input-simulation", [
   "unity_open_mcp_inputsim_step",
   "unity_open_mcp_inputsim_probe",
   "unity_open_mcp_inputsim_pointer3d",
+  "unity_open_mcp_inputsim_gesture",
 ]);
 
 // ---------------------------------------------------------------------------

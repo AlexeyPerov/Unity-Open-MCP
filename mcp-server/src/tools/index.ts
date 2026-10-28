@@ -502,6 +502,9 @@ import { inputsimTouch } from "./inputsim-touch.js";
 import { inputsimStep } from "./inputsim-step.js";
 import { inputsimProbe } from "./inputsim-probe.js";
 import { inputsimPointer3d } from "./inputsim-pointer3d.js";
+// Keyframed gestures over real play-mode frames (shared play-mode scheduler);
+// the server polls the bridge operation to a terminal trace.
+import { inputsimGesture } from "./inputsim-gesture.js";
 
 // M27 Plan 4 — batch_execute ships as a core meta-tool so agents can always
 // discover it. It is the agent ergonomics counterpart to the M26 headless batch
@@ -516,13 +519,14 @@ export const M27_PLAN4_TOOLS: Tool[] = [batchExecute];
 // Both are always-visible meta-tools (no group assignment); local-routed.
 export const M31_PLAN3_TOOLS: Tool[] = [restartEditor, resourcePressure];
 
-// Input simulation — play-mode game-testing surface (uGUI pointer dispatch +
-// Input System keyboard/touch device events). Three tools sharing the
-// `input-simulation` group. The pointer tool compiles when com.unity.ugui is
-// present; the key/touch tools compile when com.unity.inputsystem is present
-// (the bridge surfaces the compiled subset via GET /tools). All gate-free,
-// play-mode-only.
-export const INPUTSIM_TOOLS: Tool[] = [inputsimPointer, inputsimKey, inputsimTouch, inputsimStep, inputsimProbe, inputsimPointer3d];
+// Input simulation — play-mode game-testing surface (uGUI pointer dispatch,
+// backend-aware touch/gesture injection, Input System keyboard). Seven tools
+// sharing the `input-simulation` group. pointer/pointer3d/step/probe compile
+// with com.unity.ugui; touch and gesture compile everywhere (legacy Input
+// Manager and/or Input System backends); key compiles with
+// com.unity.inputsystem (the bridge surfaces the compiled subset via GET
+// /tools). All gate-free, play-mode-only except probe.
+export const INPUTSIM_TOOLS: Tool[] = [inputsimPointer, inputsimKey, inputsimTouch, inputsimStep, inputsimProbe, inputsimPointer3d, inputsimGesture];
 
 export const M2_TOOLS: Tool[] = [
   ping,

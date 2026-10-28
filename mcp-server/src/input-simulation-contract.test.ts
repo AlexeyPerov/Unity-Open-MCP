@@ -36,3 +36,30 @@ test('live timeout schemas agree with the bridge host ceiling', () => {
   for (const suffix of ['editor_status', 'memory_snapshot_capture'])
     assert.equal(property(suffix, 'timeout_ms').maximum, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS);
 });
+test('touch, gesture and raycast_real pointer share the backend contract', () => {
+  for (const suffix of ['inputsim_touch', 'inputsim_gesture', 'inputsim_pointer'])
+    assert.deepEqual(property(suffix, 'backend').enum, ['auto', 'legacy_touch', 'input_system']);
+  assert.deepEqual(property('inputsim_pointer', 'routing').enum, ['dispatch', 'raycast_real']);
+  assert.equal(property('inputsim_pointer', 'routing').default, 'dispatch');
+  for (const suffix of ['inputsim_touch', 'inputsim_gesture']) {
+    const description = tool(suffix).description!;
+    assert.match(description, /input_backend_unavailable/);
+    assert.match(description, /legacy_multitouch_unsupported/);
+    assert.match(description, /unsupported_editor_version/);
+  }
+  assert.doesNotMatch(tool('inputsim_touch').description!, /Requires com\.unity\.inputsystem/);
+});
+test('gesture schema bounds fingers and keyframes and validates the operation id handle', () => {
+  const fingers = property('inputsim_gesture', 'fingers') as Record<string, any>;
+  assert.equal(fingers.minItems, 1);
+  assert.equal(fingers.maxItems, 10);
+  assert.equal(fingers.items.properties.path.minItems, 2);
+  assert.equal(fingers.items.properties.path.maxItems, 256);
+  assert.deepEqual(fingers.items.properties.path.items.properties.phase.enum, ['down', 'move', 'hold', 'up']);
+  assert.equal(fingers.items.properties.path.items.additionalProperties, false);
+  assert.deepEqual(property('inputsim_gesture', 'coords').enum, ['screen', 'normalized', 'target']);
+  assert.deepEqual(property('inputsim_gesture', 'time').enum, ['realtime', 'gameplay']);
+  assert.equal(property('inputsim_gesture', 'operation_id').pattern, '^[A-Za-z0-9-]{8,64}$');
+  assert.match(tool('inputsim_gesture').description!, /job_id/);
+  assert.match(tool('inputsim_gesture').description!, /batch_execute/);
+});

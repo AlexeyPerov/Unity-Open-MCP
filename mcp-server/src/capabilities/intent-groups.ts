@@ -115,10 +115,11 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
     tag: "input-simulation",
     groups: ["input-simulation"],
     reason:
-      "Play-mode input simulation — uGUI pointer click/drag (inputsim_pointer) + " +
-      "Input System keyboard/touch (inputsim_key, inputsim_touch) + frame advance " +
-      "(inputsim_step) + interactable discovery (inputsim_probe) + 3D/legacy " +
-      "(inputsim_pointer3d).",
+      "Play-mode input simulation — uGUI pointer click/drag (inputsim_pointer, " +
+      "dispatch or raycast_real) + legacy Input Manager / Input System touch " +
+      "(inputsim_touch) + real-time gestures (inputsim_gesture) + Input System " +
+      "keyboard (inputsim_key) + frame advance (inputsim_step) + interactable " +
+      "discovery (inputsim_probe) + 3D/legacy (inputsim_pointer3d).",
     keywords: [
       "input-simulation",
       "inputsimulation",
@@ -152,6 +153,12 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "advance-frame",
       "occluded",
       "occlusion",
+      "gesture",
+      "gestures",
+      "hold",
+      "follow-finger",
+      "legacy-input",
+      "input-manager",
     ],
   },
   {

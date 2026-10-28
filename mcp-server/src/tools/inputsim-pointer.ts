@@ -18,6 +18,12 @@
 // feature for reaching things a raycast would miss); the fields let the agent
 // judge whether the interaction was actually possible.
 //
+// routing: "raycast_real" skips ExecuteEvents and injects a real touch through
+// the project's input backend (legacy touches and/or Input System Touchscreen),
+// so the scene's own EventSystem input module raycasts and decides what is hit —
+// a cover graphic absorbs the tap like it would a finger. The response reports
+// the top hit, whether it is the target, the input module and the backend.
+//
 // Play-mode only (play_mode_required otherwise). Gate-free (writes no assets).
 // Pair with inputsim_step to advance frames between the interaction and a
 // screenshot so tweens/animations settle before you look.
@@ -33,8 +39,16 @@ export const inputsimPointer = makeTool(
     "`blockedBy`, and (for drag) `dropTarget`/`dropLanded` so a click on a disabled " +
     "button or behind a modal is never a silent ok. Play-mode only — refuses with " +
     "`play_mode_required` otherwise; pair with editor_set_state to enter play mode " +
-    "and inputsim_step to advance frames before a screenshot. Gate-free. Requires " +
-    "com.unity.ugui.",
+    "and inputsim_step to advance frames before a screenshot. ROUTING: `dispatch` " +
+    "(default) is the ExecuteEvents path above (reaches IPointer*/IDrag handlers only, " +
+    "bypasses occlusion). `raycast_real` instead injects a real touch at the point " +
+    "through the project's input backend (`backend`: auto | legacy_touch | input_system, " +
+    "reported as an array) so the scene's own EventSystem input module raycasts and " +
+    "dispatches it — whatever is on top receives it; the response reports `topHit`, " +
+    "`targetHit`, `blockedBy`, `inputModule` and `notes` (e.g. module/backend mismatch). " +
+    "raycast_real supports click, double_click, press, release, drag with the left " +
+    "button only and refuses like inputsim_touch (input_backend_unavailable, " +
+    "unsupported_editor_version). Gate-free. Requires com.unity.ugui.",
   {
     required: ["action"],
     properties: {
@@ -128,6 +142,21 @@ export const inputsimPointer = makeTool(
       },
       to_x: { type: "number", description: "Drag end — screen X (alternative to to_target)." },
       to_y: { type: "number", description: "Drag end — screen Y (alternative to to_target)." },
+      routing: {
+        type: "string",
+        enum: ["dispatch", "raycast_real"],
+        default: "dispatch",
+        description:
+          "dispatch = ExecuteEvents on the resolved object (default). raycast_real = inject a real " +
+          "touch at its screen point so the project's input module decides what is hit (a cover " +
+          "graphic absorbs it); the response still reports the top hit.",
+      },
+      backend: {
+        type: "string",
+        enum: ["auto", "legacy_touch", "input_system"],
+        default: "auto",
+        description: "Input backend for routing: raycast_real (ignored by dispatch; must stay auto there).",
+      },
     },
   },
 );

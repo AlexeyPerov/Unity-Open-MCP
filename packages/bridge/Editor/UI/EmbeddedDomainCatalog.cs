@@ -158,16 +158,17 @@ namespace UnityOpenMcpBridge
                 builtin: false),
             // Input simulation — play-mode game-testing surface. The pointer
             // tool (uGUI EventSystem + ExecuteEvents) compiles with com.unity.ugui
-            // (the dependency surfaced here); the keyboard/touch tools
-            // additionally require com.unity.inputsystem (whose presence is
-            // already surfaced by the input-system authoring entry above). Two
-            // independent sub-asmdefs ship the halves; the bridge reconciles
-            // the compiled subset via GET /tools.
+            // (the dependency surfaced here); touch and gesture live in the
+            // bridge root and route to the legacy Input Manager and/or the Input
+            // System; the keyboard tool additionally requires
+            // com.unity.inputsystem (whose presence is already surfaced by the
+            // input-system authoring entry above). The bridge reconciles the
+            // compiled subset via GET /tools.
             new EmbeddedDomain(
                 group: "input-simulation",
                 domain: "inputsimulation",
                 displayName: "Input Simulation",
-                description: "Play-mode input simulation: uGUI pointer click/drag, 3D/legacy physics pointer, probe, frame step, and Input System keyboard/touch device events.",
+                description: "Play-mode input simulation: uGUI pointer click/drag (dispatched or through the real input module), legacy Input Manager / Input System touch and real-time gestures, 3D/legacy physics pointer, probe, frame step, and Input System keyboard.",
                 upmDependency: "com.unity.ugui",
                 typeProbe: "UnityEngine.EventSystems.EventSystem, UnityEngine.UI",
                 builtin: false),

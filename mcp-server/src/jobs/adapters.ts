@@ -1,8 +1,10 @@
 import { setTimeout as delay } from "node:timers/promises";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ProjectJobHttpError, type LiveClient } from "../live-client.js";
 import { validateSchema } from "../tool-contract.js";
 import { runTests } from "../tools/run-tests.js";
-import { JobManagerError, type JobOperation, type JobOwner } from "./job-manager.js";
+import { inputsimGesture } from "../tools/inputsim-gesture.js";
+import { JobManagerError, type JobOperation, type JobOutcome, type JobOwner } from "./job-manager.js";
 
 type ClientFor = (owner: JobOwner) => LiveClient;
 function invalid(errors: string[]): void {
@@ -129,6 +131,167 @@ export function projectCommandOperation(id: string, cancellable: boolean, client
           }
         }
       }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Play-mode operations — one generic adapter for every tool whose work runs on
+// the bridge's shared play-mode scheduler (a player-loop tick that owns timing,
+// cancellation and reload / exit-play cleanup). The tool call starts the
+// operation with the job id as its operation_id and returns at once; status and
+// cancel go through POST /playmode-operations. Records are domain-local: a
+// reload drops them (after releasing held input), which surfaces here as
+// `operation_not_found` and orphans the job — never a restart.
+// ---------------------------------------------------------------------------
+
+/** Tools served by the generic `playmode_operation` jobs adapter. */
+export const PLAYMODE_OPERATION_TOOLS: ReadonlyMap<string, Record<string, any>> = new Map([
+  [inputsimGesture.name, inputsimGesture.inputSchema as Record<string, any>],
+]);
+export const PLAYMODE_JOB_DEFAULT_DEADLINE_MS = 10 * 60_000;
+export const PLAYMODE_JOB_DEFAULT_UNREACHABLE_MS = 2 * 60_000;
+export interface PlaymodePollOptions { deadlineMs?: number; pollIntervalMs?: number; unreachableMs?: number }
+
+const PLAYMODE_TERMINAL = new Set(["succeeded", "failed", "cancelled", "orphaned"]);
+
+/** Parsed JSON body of a tool result ({} when it is not JSON). */
+export function toolResultBody(result: CallToolResult): Record<string, any> {
+  const text = result.content.find(item => item.type === "text");
+  if (text?.type !== "text") return {};
+  try { return JSON.parse(text.text) as Record<string, any>; } catch { return {}; }
+}
+
+/**
+ * The tool's own output: registry tools answer inside the gate envelope
+ * (`mutation.output` / `mutation.error`); other shapes are returned as-is.
+ */
+export function toolOutput(result: CallToolResult): Record<string, any> {
+  const body = toolResultBody(result);
+  const mutation = body.mutation;
+  if (mutation && typeof mutation === "object") {
+    if (mutation.output && typeof mutation.output === "object") return mutation.output as Record<string, any>;
+    if (mutation.error) return { error: mutation.error };
+  }
+  return body;
+}
+
+export type PlaymodePollOutcome =
+  | { kind: "terminal"; snapshot: Record<string, any>; cancelSent: boolean }
+  | { kind: "lost"; detail: Record<string, any> }
+  | { kind: "deadline"; snapshot: Record<string, any> | null; cancelSent: boolean }
+  | { kind: "unreachable"; error: string };
+
+/**
+ * Poll a scheduler operation to a terminal state. An abort of `signal` sends one
+ * cancel and keeps polling for its acknowledgement; at the deadline a cancel is
+ * sent once (the bridge then releases held input) before giving up.
+ */
+export async function pollPlaymodeOperation(live: LiveClient, operationId: string, options: PlaymodePollOptions & {
+  signal?: AbortSignal;
+  onSnapshot?: (snapshot: Record<string, any>) => void;
+  onTransport?: (connected: boolean, detail: string) => void;
+} = {}): Promise<PlaymodePollOutcome> {
+  const deadlineMs = options.deadlineMs ?? PLAYMODE_JOB_DEFAULT_DEADLINE_MS;
+  const pollIntervalMs = options.pollIntervalMs ?? 250;
+  const unreachableMs = options.unreachableMs ?? PLAYMODE_JOB_DEFAULT_UNREACHABLE_MS;
+  const startedAt = Date.now();
+  let lastAnswer = Date.now();
+  let failures = 0;
+  let cancelSent = false;
+  let last: Record<string, any> | null = null;
+  while (true) {
+    const overdue = Date.now() - startedAt >= deadlineMs;
+    const wantCancel = !cancelSent && (overdue || options.signal?.aborted === true);
+    if (!wantCancel) {
+      try {
+        await delay(pollIntervalMs * 2 ** Math.min(failures, 3), undefined,
+          cancelSent || !options.signal ? undefined : { signal: options.signal });
+      } catch { /* aborted: send the cancel now */ }
+    }
+    const action = !cancelSent && (overdue || options.signal?.aborted === true) ? "cancel" : "status";
+    if (action === "cancel") cancelSent = true;
+    let answer: Record<string, any>;
+    try {
+      answer = await live.playmodeOperation({ action, operation_id: operationId });
+      if (failures) options.onTransport?.(true, `Bridge answered again for operation ${operationId}.`);
+      failures = 0;
+      lastAnswer = Date.now();
+    } catch (error) {
+      if (error instanceof ProjectJobHttpError && error.status < 500) return { kind: "unreachable", error: String(error) };
+      if (failures++ === 0) options.onTransport?.(false, `Operation poll failed (${String(error).slice(0, 200)}); retrying.`);
+      if (Date.now() - lastAnswer >= unreachableMs) return { kind: "unreachable", error: `No answer for ${unreachableMs} ms.` };
+      continue;
+    }
+    if (answer.error?.code === "operation_not_found") return { kind: "lost", detail: answer };
+    if (answer.error) return { kind: "unreachable", error: `${answer.error.code}: ${answer.error.message}` };
+    last = answer;
+    options.onSnapshot?.(answer);
+    if (PLAYMODE_TERMINAL.has(String(answer.state))) return { kind: "terminal", snapshot: answer, cancelSent };
+    // A cancel sent at the deadline gets a short grace window for its acknowledgement.
+    if (overdue && cancelSent && Date.now() - startedAt >= deadlineMs + 5_000) return { kind: "deadline", snapshot: last, cancelSent };
+  }
+}
+
+/** Flatten a terminal scheduler snapshot into a job/tool result. */
+export function playmodeResult(snapshot: Record<string, any>): Record<string, unknown> {
+  const { result, ...meta } = snapshot;
+  return { operation: meta, ...(result && typeof result === "object" ? result : {}) };
+}
+
+export function playmodeOperation(tool: string, schema: Record<string, any>, client: ClientFor, poll: PlaymodePollOptions = {}): JobOperation {
+  return {
+    mutating: false, cancellable: true,
+    validate(args) {
+      if (args.operation_id !== undefined) throw new JobManagerError("invalid_arguments", "Jobs own operation_id; use idempotency_key to retry.");
+      invalid(validateSchema(args, schema));
+    },
+    async run(args, context): Promise<JobOutcome> {
+      const live = client(context.owner);
+      context.report({ phase: "starting" });
+      // Start is idempotent per operation id: a retried POST returns the same record.
+      const started = toolOutput(await live.route(tool, { ...args, operation_id: context.jobId }));
+      const operation = started.operation as Record<string, any> | undefined;
+      if (started.error || !operation)
+        return { state: "failed", error: { code: started.error?.code ?? "operation_rejected", message: started.error?.message ?? "Bridge did not start the play-mode operation." }, result: started };
+      if (operation.operation_id !== context.jobId) throw new Error("Bridge did not confirm play-mode operation ownership.");
+      context.lifecycle("connected", `Bridge play-mode scheduler owns operation ${context.jobId}`, true);
+      let phase: string | undefined;
+      const outcome = await pollPlaymodeOperation(live, context.jobId, {
+        ...poll, signal: context.signal,
+        onSnapshot: snapshot => {
+          const expected = Number(snapshot.progress?.expectedMs);
+          const elapsed = Number(snapshot.progress?.elapsedMs);
+          const fraction = expected > 0 && Number.isFinite(elapsed) ? Math.min(1, Math.max(0, elapsed / expected)) : undefined;
+          if (snapshot.phase !== phase || fraction !== undefined) {
+            phase = String(snapshot.phase);
+            context.report({ phase, ...(fraction === undefined ? {} : { fraction }) });
+          }
+        },
+        onTransport: (connected, detail) => context.lifecycle(connected ? "connected" : "disconnected", detail, true),
+      });
+      switch (outcome.kind) {
+        case "lost":
+          context.lifecycle("disconnected", "Bridge lost the play-mode operation (domain reload or Editor restart); its held input was released by that cleanup.", false);
+          return { state: "failed", error: { code: "operation_lost", message: "The bridge no longer knows this operation." }, result: outcome.detail };
+        case "unreachable":
+          context.lifecycle("disconnected", `Play-mode operation status unavailable: ${outcome.error}`, false);
+          return { state: "failed", error: { code: "job_status_unavailable", message: outcome.error } };
+        case "deadline":
+          context.lifecycle("disconnected", "Play-mode operation reported no terminal state before the deadline; cancel sent.", false);
+          return { state: "failed", error: { code: "job_deadline_exceeded", message: "No terminal state before the deadline." }, ...(outcome.snapshot ? { result: outcome.snapshot } : {}) };
+      }
+      const snapshot = outcome.snapshot;
+      const result = playmodeResult(snapshot);
+      if (snapshot.state === "succeeded") return { state: "succeeded", result };
+      if (snapshot.state === "cancelled" && context.signal.aborted) return { state: "cancelled", result };
+      if (snapshot.state === "orphaned") {
+        context.lifecycle("disconnected", `Bridge ended the operation without completing it (${snapshot.reason}).`, false);
+        return { state: "failed", error: { code: "operation_lost", message: String(snapshot.reason) }, result };
+      }
+      // cancelled without our request = play mode exited; failed = operation error.
+      return { state: "failed", error: { code: snapshot.state === "cancelled" ? String(snapshot.reason ?? "cancelled") : "operation_failed",
+        message: String(snapshot.result?.error ?? snapshot.reason ?? "Play-mode operation did not complete.") }, result };
     },
   };
 }

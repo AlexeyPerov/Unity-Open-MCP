@@ -82,11 +82,22 @@ entries remain outside built-in dispatch and session groups. See [Project comman
 ### Asynchronous operation ownership
 
 The MCP job manager owns scheduling, idempotency keys and bounded session-local
-observations. Explicit adapters connect it to domain-local project commands and
-the native test runner's run-id file handoff. The bridge owns execution, Unity
-main-thread access, mutation exclusion, checkpoint and terminal validation.
-Reload cannot resume project command code; lost ownership is orphaned. Job state
-is not persisted across MCP restarts. [Jobs](api/jobs.md) documents these limits.
+observations. Explicit adapters connect it to domain-local project commands, the
+native test runner's run-id file handoff, and play-mode operations. The bridge
+owns execution, Unity main-thread access, mutation exclusion, checkpoint and
+terminal validation. Reload cannot resume project command code; lost ownership is
+orphaned. Job state is not persisted across MCP restarts. [Jobs](api/jobs.md)
+documents these limits.
+
+Work that must span real play-mode frames (gestures today) runs on one shared
+bridge-side play-mode scheduler (`packages/bridge/Editor/PlayMode/`): a
+player-loop system at the start of `EarlyUpdate` that owns per-frame timing,
+cancellation, and cleanup on exit-play / domain reload. Tools start an operation
+and return; the MCP server polls `POST /playmode-operations` inline for short
+operations or through the generic `playmode_operation` jobs adapter for long ones.
+Device input injection is routed per call to the project's backends (legacy Input
+Manager, Input System) from the bridge root assembly, so it compiles in projects
+without the Input System package; see [Input simulation](api/input-simulation.md).
 
 ## Related docs
 

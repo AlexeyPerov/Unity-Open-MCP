@@ -22,7 +22,7 @@ definitions live in `mcp-server/src/tools/`.
 | [Routing, offline, and lifecycle contracts](routing-lifecycle.md) | Live/batch/offline/local selection, offline coverage, lifecycle recovery, batch behavior, errors, and multi-agent scheduling. |
 | [CLI and automation](cli-automation.md) | CLI commands, options, JSON output, and links to canonical CI behavior. |
 | [CI templates](../ci/README.md) | Pipeline shape, CLI exit codes, baselines, and provider templates. |
-| [Input simulation](input-simulation.md) | Pointer delivery, device events, frame stepping, and supported input boundaries. |
+| [Input simulation](input-simulation.md) | Input backends (legacy Input Manager / Input System), pointer delivery and `raycast_real`, touch, gestures over real frames, frame stepping, and supported input boundaries. |
 | [Project commands](project-commands.md) | Editor-only authoring, typed list/describe/invoke, schema versions and safety boundaries. |
 | [Asynchronous jobs](jobs.md) | Job lifecycle, observation, idempotency, cancellation, retention and adapter contracts. |
 | [MCP resources](resources.md) | Resource URIs, payloads, and resource routing. |
@@ -322,6 +322,9 @@ immediately and the server polls `test-results-<runId>.json` to turn that into a
 real result — a top-level-route behavior the batch path does not have. Nested, the
 step would be recorded `success` carrying the non-terminal `"started"` body and the
 run's outcome would never reach the caller. Call it top-level.
+`unity_open_mcp_inputsim_gesture` is refused the same way: it starts an operation
+on the bridge's play-mode scheduler that the server polls, and no frame advances
+while a batch holds the main thread.
 
 Pre-flight refusals (`batch_tool_not_invokable`, `batch_nested_reload_unsafe`,
 `batch_step_requires_server_poll`, `batch_too_many_commands`,

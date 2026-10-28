@@ -19,6 +19,10 @@
 //   P7 — target-wins precedence on both drag endpoints; both_endpoint_forms
 //        error when a caller supplies both forms for one endpoint.
 //
+// routing: "dispatch" (default) is the ExecuteEvents path above. "raycast_real"
+// (RaycastRealPointer.cs) instead injects a real touch through the project's
+// input backend so its own EventSystem input module decides what is hit.
+//
 // Parameter names are snake_case to match the JSON-schema keys (the registry
 // lowercases each C# parameter name's first char to derive its JSON key).
 using System.Collections.Generic;
@@ -59,7 +63,9 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             float? from_y = null,
             string to_target = null,
             float? to_x = null,
-            float? to_y = null)
+            float? to_y = null,
+            string routing = "dispatch",
+            string backend = "auto")
         {
             _ = view; // reserved for a future scene-view path; game view only today.
 
@@ -78,6 +84,16 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             if (!inputButton.HasValue)
                 return InputSimulationJson.Error("invalid_button",
                     $"Unknown button '{button}'. Valid: left, right, middle.");
+
+            if (routing == "raycast_real")
+                return RaycastRealPointer.Run(action, inputButton.Value, drag_steps, object_id, target,
+                    screen_x, screen_y, from_target, from_x, from_y, to_target, to_x, to_y, backend);
+            if (!string.IsNullOrEmpty(routing) && routing != "dispatch")
+                return InputSimulationJson.Error("invalid_routing",
+                    $"Unknown routing '{routing}'. Valid: dispatch, raycast_real.");
+            if (!string.IsNullOrEmpty(backend) && backend != "auto")
+                return InputSimulationJson.Error("invalid_backend",
+                    "backend applies to routing: raycast_real only (dispatch always uses ExecuteEvents).");
 
             if (action == "drag")
                 return DoDrag(inputButton.Value, drag_steps, object_id,

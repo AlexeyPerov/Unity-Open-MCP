@@ -1,4 +1,6 @@
-import { testRunOperation, projectCommandOperation } from "./jobs/adapters.js";
+import { randomUUID } from "node:crypto";
+import { testRunOperation, projectCommandOperation, playmodeOperation, pollPlaymodeOperation, playmodeResult, toolOutput, toolResultBody, PLAYMODE_OPERATION_TOOLS } from "./jobs/adapters.js";
+import { INPUTSIM_GESTURE_INLINE_LIMIT_MS } from "./tools/inputsim-gesture.js";
 import { JobManager, JobManagerError, type JobOwner } from "./jobs/job-manager.js";
 import { handleJobs } from "./jobs/handler.js";
 import { PROCESS_AGENT_ID, PROCESS_IDENTITY, type RequestIdentity } from "./agent-identity.js";
@@ -42,7 +44,7 @@ import { generateSkill } from "./skill/generate-skill.js";
 import { getKnownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
-import { PORT_ENV_VAR, EXPECTED_BRIDGE_WIRE_CONTRACT } from "./constants.js";
+import { PORT_ENV_VAR, EXPECTED_BRIDGE_WIRE_CONTRACT, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS } from "./constants.js";
 import { findUnityForProject, readProcessCommandLine } from "./running-unity.js";
 
 // M31-optimizations Plan 1 / L14 — opt-in route-logging gate. Resolved once at
@@ -818,6 +820,9 @@ export class ToolRouter implements Router {
         const name = args.tool_or_command, key = args.idempotency_key;
         if (name === "unity_senses_run_tests") {
           if (!this.jobs.hasOperation(name)) this.jobs.register(name, testRunOperation(clientFor));
+        } else if (PLAYMODE_OPERATION_TOOLS.has(name)) {
+          // One generic adapter for every tool on the bridge's shared play-mode scheduler.
+          if (!this.jobs.hasOperation(name)) this.jobs.register(name, playmodeOperation(name, PLAYMODE_OPERATION_TOOLS.get(name)!, clientFor));
         } else if (name.startsWith("project.") && !(typeof key === "string" && this.jobs.hasKey(owner, key))) {
           // A retry whose key already names a job gets that job (or
           // idempotency_conflict) from start() without the catalog, which may
@@ -845,6 +850,52 @@ export class ToolRouter implements Router {
     catch (error) {
       return localError(error instanceof JobManagerError ? error.code : "invalid_arguments", error instanceof Error ? error.message : String(error));
     }
+  }
+
+  /**
+   * `inputsim_gesture`: the bridge starts the gesture on its shared play-mode
+   * scheduler and answers at once; this route polls POST /playmode-operations
+   * until the terminal trace, inside the host-safe window. A gesture whose last
+   * keyframe is beyond the inline budget is started as a `jobs` play-mode
+   * operation instead and the call returns that job id. A gesture that outlives
+   * the inline poll (gameplay time, a paused Editor) is cancelled — which
+   * releases every held finger — and the error points at the jobs route.
+   */
+  private async routeInputsimGesture(args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity): Promise<CallToolResult> {
+    const name = "unity_open_mcp_inputsim_gesture";
+    const fingers = Array.isArray(args.fingers) ? args.fingers as Array<{ path?: Array<{ at_ms?: unknown }> }> : [];
+    const durationMs = Math.max(0, ...fingers.flatMap(f => Array.isArray(f?.path) ? f.path.map(k => Number(k?.at_ms) || 0) : []));
+    if (durationMs > INPUTSIM_GESTURE_INLINE_LIMIT_MS) {
+      const started = await this.routeJobs({ action: "start", tool_or_command: name, args }, identity);
+      const body = toolResultBody(started);
+      if (started.isError || typeof body.job_id !== "string") return started;
+      return sourceResult({ ...body, note: `Gesture lasts ${durationMs} ms (> ${INPUTSIM_GESTURE_INLINE_LIMIT_MS} ms inline budget); it runs as a job.`,
+        agentNextSteps: [`Call unity_open_mcp_jobs {"action":"wait","job_id":"${body.job_id}","timeout_ms":30000} until the state is terminal; the result holds the trace.`] }, "local");
+    }
+    const operationId = typeof args.operation_id === "string" ? args.operation_id : randomUUID();
+    const start = await live.route(name, { ...args, operation_id: operationId });
+    const started = toolOutput(start);
+    if (start.isError || started.error || !started.operation) return injectRouteMeta(start, { route: "live" });
+    const outcome = await pollPlaymodeOperation(live, operationId, {
+      deadlineMs: Math.min(durationMs + 15_000, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS - 5_000),
+      pollIntervalMs: durationMs < 2_000 ? 50 : 100,
+      unreachableMs: 10_000,
+    });
+    const meta = { backend: started.backend, skipped: started.skipped, focusedGameView: started.focusedGameView };
+    switch (outcome.kind) {
+      case "lost":
+        return sourceResult({ error: { code: "operation_lost", message: "The bridge lost the gesture (domain reload or Editor restart); held input was released by that cleanup." }, operationId }, "live", true);
+      case "unreachable":
+        return sourceResult({ error: { code: "job_status_unavailable", message: outcome.error }, operationId }, "live", true);
+      case "deadline":
+        return sourceResult({ error: { code: "gesture_timeout", message: "The gesture did not finish inside the inline window (gameplay time, a paused Editor, or a slow frame rate); it was cancelled and every held finger released." },
+          operationId, last: outcome.snapshot, agentNextSteps: ["Run it as a job: unity_open_mcp_jobs {\"action\":\"start\",\"tool_or_command\":\"unity_open_mcp_inputsim_gesture\",\"args\":{…}}, then wait on the job id."] }, "live", true);
+    }
+    const snapshot = outcome.snapshot;
+    const result = { ...meta, ...playmodeResult(snapshot) };
+    if (snapshot.state === "succeeded") return sourceResult({ status: "ok", ...result }, "live");
+    const code = snapshot.state === "failed" ? "gesture_failed" : String(snapshot.reason ?? snapshot.state);
+    return sourceResult({ error: { code, message: String(snapshot.result?.error ?? `Gesture ended ${snapshot.reason ?? snapshot.state}; held input was released.`) }, ...result }, "live", true);
   }
 
   private readonly modelCache = new AssetModelCache();
@@ -882,6 +933,9 @@ export class ToolRouter implements Router {
       // the process agent id, whatever _meta.agentId the call carried. Direct,
       // manage_tools(invoke) and port-override calls therefore share one owner.
       ["unity_open_mcp_jobs", (_l, a, id) => this.routeJobs(a, id)],
+      // Gestures run on the bridge's play-mode scheduler: start, then poll the
+      // operation to its terminal trace here (long gestures become a job).
+      ["unity_open_mcp_inputsim_gesture", (l, a, id) => this.routeInputsimGesture(a, l, id)],
       ["unity_open_mcp_bridge_status", (l, a) => this.routeBridgeStatus(a, l)],
       // M31 Plan 3 — Editor fd-exhaustion operator surfaces. restart_editor
       // is the reactive kill half (acts AFTER the Editor is hung);

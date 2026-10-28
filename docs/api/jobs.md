@@ -4,10 +4,11 @@
 available when Unity is offline or reloading. It owns jobs in one MCP server
 session; it does not turn synchronous tool calls into background work.
 
-Supported targets are `unity_senses_run_tests` and available project commands
-that declare `Async = true` with the async authoring signature. Other targets
-return `job_operation_unsupported`; builds, imports, package resolution, and
-baking retain their existing contracts.
+Supported targets are `unity_senses_run_tests`, available project commands
+that declare `Async = true` with the async authoring signature, and play-mode
+operations (`unity_open_mcp_inputsim_gesture`). Other targets return
+`job_operation_unsupported`; builds, imports, package resolution, and baking
+retain their existing contracts.
 
 ## Adopted operations
 
@@ -81,6 +82,41 @@ polls show whether it was acknowledged. The job becomes `orphaned` when the brid
 answers no poll for 5 minutes or reports no terminal state within 30 minutes of
 start. The bridge retains at most 256 records for 30 minutes after completion; the
 MCP session owns observation and idempotency. See [authoring](project-commands.md#asynchronous-authoring).
+
+## Play-mode operations
+
+Tools whose work runs across real play-mode frames share one bridge-side
+scheduler and one generic job adapter (`playmode_operation`). Today that is
+`unity_open_mcp_inputsim_gesture`; pass its ordinary arguments as `args`:
+
+```json
+{
+  "action": "start",
+  "tool_or_command": "unity_open_mcp_inputsim_gesture",
+  "args": {"fingers": [{"id": 0, "path": [{"at_ms": 0, "x": 400, "y": 300}, {"at_ms": 60000, "x": 900, "y": 300}]}]}
+}
+```
+
+The operation is read-only, so `idempotency_key` is optional (it still
+deduplicates retries). The job owns `operation_id` (supplying one is rejected):
+the job id is the bridge operation id. The direct tool call starts a job by itself
+when the gesture is longer than its inline budget and returns that job snapshot.
+
+The adapter starts the operation through the tool (the bridge validates, routes
+input and refuses as usual — a refusal is a `failed` job carrying the bridge's
+code and `error.detected` configuration), then polls `POST /playmode-operations`.
+Progress reports the scheduler phase and `elapsedMs / expectedMs` as a fraction.
+Operations are cancellable: `cancel` is forwarded once and the job becomes
+`cancelled` after the bridge acknowledges it, having released held input. Terminal
+results keep the operation snapshot under `operation` plus the tool's own result
+(for a gesture: `trace`, `frames`, `errors`, `released`). Exiting play mode ends a
+running operation; the job then fails with code `play_mode_exited`. Records are
+domain-local: after a domain reload the bridge answers `operation_not_found`
+(its cleanup already released held input) and the job becomes `orphaned` — never
+restarted. A status poll that cannot reach the bridge is retried with backoff
+(lifecycle `disconnected` until it answers); after 2 minutes without an answer, or
+10 minutes without a terminal state (a cancel is sent first), the job is
+`orphaned`.
 
 ## Calls
 

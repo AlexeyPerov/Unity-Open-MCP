@@ -1852,6 +1852,19 @@ export class LiveClient implements Router {
     return await response.json() as Record<string, any>;
   }
 
+  /**
+   * Status / cancel for an operation owned by the bridge's shared play-mode
+   * scheduler (started through its tool, e.g. inputsim_gesture). One bounded
+   * request; a non-2xx answer throws so callers can retry or give up.
+   */
+  async playmodeOperation(args: { action: "status" | "cancel"; operation_id: string }): Promise<Record<string, any>> {
+    const response = await this.fetchWithTimeout("/playmode-operations", {
+      method: "POST", body: JSON.stringify(args), headers: { "Content-Type": "application/json" },
+    }, 10_000);
+    if (!response.ok) throw new ProjectJobHttpError(response.status);
+    return await response.json() as Record<string, any>;
+  }
+
   /** Fresh authenticated bounded catalog read; no disk/session cache can hide a reload. */
   async projectCommands(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const query = new URLSearchParams({ catalog: "project_commands" });

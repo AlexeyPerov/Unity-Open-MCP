@@ -48,7 +48,9 @@ export const batchExecute = makeTool(
     "A step whose terminal result is produced by the SERVER rather than by the Editor dispatch is " +
     "refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns " +
     "`{status:\"started\", runId}` immediately and the server polls a results file to turn that " +
-    "into a real result, which only happens on the top-level route. Inside a batch nothing polls, " +
+    "into a real result, which only happens on the top-level route; `unity_open_mcp_inputsim_gesture` " +
+    "likewise only starts a play-mode operation the server polls (and no frame advances while a " +
+    "batch holds the main thread). Inside a batch nothing polls, " +
     "so the step would be recorded `success` carrying the non-terminal \"started\" body and the " +
     "run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also " +
     "names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for " +

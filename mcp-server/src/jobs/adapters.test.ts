@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { setImmediate as tick } from "node:timers/promises";
 import { ProjectJobHttpError, type LiveClient } from "../live-client.js";
 import { JobManager } from "./job-manager.js";
-import { projectCommandOperation, testRunOperation } from "./adapters.js";
+import { projectCommandOperation, testRunOperation, playmodeOperation, pollPlaymodeOperation, PLAYMODE_OPERATION_TOOLS } from "./adapters.js";
 const owner = { project: "/project", agent: "test" };
 const catalog = { command: { available: true, async: true, cancellable: true, schemaVersion: "v1", inputSchema: { type: "object" } } };
 
@@ -221,4 +221,118 @@ test("project job forwards a cancel while sleeping between polls, not after the 
   const done = await manager.wait(owner, job.job_id, 600);
   assert.equal(done.state, "cancelled");
   assert.equal(cancels, 1);
+});
+
+// --- generic play-mode operation adapter -----------------------------------
+
+const GESTURE = "unity_open_mcp_inputsim_gesture";
+const gestureArgs = { fingers: [{ id: 0, path: [{ at_ms: 0, x: 10, y: 10 }, { at_ms: 2000, x: 50, y: 50 }] }] };
+const text = (body: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(body) }] });
+
+/** Fake bridge: the tool call starts the operation, /playmode-operations answers from `states`. */
+function playmodeLive(states: Array<Record<string, unknown>>, options: { startError?: Record<string, unknown>; cancelState?: Record<string, unknown> } = {}) {
+  const calls = { starts: [] as Array<Record<string, unknown>>, status: 0, cancel: 0 };
+  let index = 0;
+  const live = {
+    route: async (tool: string, args: Record<string, unknown>) => {
+      assert.equal(tool, GESTURE);
+      calls.starts.push(args);
+      if (options.startError) return { ...text(options.startError), isError: true };
+      // Registry tools answer inside the gate envelope.
+      return text({ mutation: { success: true, output: { status: "ok", operation: { operation_id: args.operation_id, kind: GESTURE, state: "running", phase: "running" }, backend: ["legacy_touch"] }, error: null }, gate: { skipped: true } });
+    },
+    playmodeOperation: async (args: { action: string; operation_id: string }) => {
+      if (args.action === "cancel") { calls.cancel++; return { operation_id: args.operation_id, ...(options.cancelState ?? { state: "cancelled", reason: "cancelled", result: { released: true } }) }; }
+      calls.status++;
+      const next = states[Math.min(index++, states.length - 1)];
+      return { operation_id: args.operation_id, ...next };
+    },
+  } as unknown as LiveClient;
+  return { live, calls };
+}
+
+test("play-mode adapter is registered for the gesture tool and validates its own schema", () => {
+  const schema = PLAYMODE_OPERATION_TOOLS.get(GESTURE);
+  assert.ok(schema, "gesture is served by the generic play-mode adapter");
+  const op = playmodeOperation(GESTURE, schema!, () => { throw new Error("unused"); });
+  assert.equal(op.mutating, false);
+  assert.equal(op.cancellable, true);
+  assert.throws(() => op.validate({ ...gestureArgs, operation_id: "x" }), /own operation_id/);
+  assert.throws(() => op.validate({ fingers: [] }), /minItems/);
+  op.validate(gestureArgs);
+});
+
+test("play-mode job owns operation_id, reports progress and returns the terminal trace", async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  const { live, calls } = playmodeLive([
+    { state: "running", phase: "running", progress: { elapsedMs: 500, expectedMs: 2000 } },
+    { state: "succeeded", phase: "succeeded", reason: "completed", result: { trace: [{ keyframe: 0, frame: 10 }], released: true } },
+  ]);
+  manager.register(GESTURE, playmodeOperation(GESTURE, PLAYMODE_OPERATION_TOOLS.get(GESTURE)!, () => live, { pollIntervalMs: 1 }));
+  const job = manager.start(owner, GESTURE, gestureArgs);
+  const done = await manager.wait(owner, job.job_id, 2000);
+  assert.equal(done.state, "succeeded");
+  assert.equal(calls.starts.length, 1);
+  assert.equal(calls.starts[0].operation_id, job.job_id, "the job id is the bridge operation id");
+  const result = done.result as Record<string, any>;
+  assert.equal(result.operation.state, "succeeded");
+  assert.deepEqual(result.trace, [{ keyframe: 0, frame: 10 }]);
+  assert.ok(done.events.some(e => e.kind === "progress"));
+});
+
+test("play-mode job cancel is forwarded and acknowledged as cancelled", async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  const { live, calls } = playmodeLive([{ state: "running", phase: "running" }]);
+  manager.register(GESTURE, playmodeOperation(GESTURE, PLAYMODE_OPERATION_TOOLS.get(GESTURE)!, () => live, { pollIntervalMs: 5 }));
+  const job = manager.start(owner, GESTURE, gestureArgs);
+  await tick(); await tick();
+  assert.equal(manager.cancel(owner, job.job_id).state, "cancel_requested");
+  const done = await manager.wait(owner, job.job_id, 2000);
+  assert.equal(done.state, "cancelled");
+  assert.equal(calls.cancel, 1);
+  assert.equal((done.result as Record<string, any>).released, true);
+});
+
+test("play-mode job whose bridge record vanished (reload) is orphaned, never restarted", async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  const { live, calls } = playmodeLive([{ error: { code: "operation_not_found", message: "reloaded" } }]);
+  manager.register(GESTURE, playmodeOperation(GESTURE, PLAYMODE_OPERATION_TOOLS.get(GESTURE)!, () => live, { pollIntervalMs: 1 }));
+  const job = manager.start(owner, GESTURE, gestureArgs);
+  const done = await manager.wait(owner, job.job_id, 2000);
+  assert.equal(done.state, "orphaned");
+  assert.match(done.lifecycle.evidence ?? "", /released/);
+  assert.equal(calls.starts.length, 1);
+});
+
+test("play-mode job ended by exiting play mode fails with that reason", async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  const { live } = playmodeLive([{ state: "cancelled", phase: "cancelled", reason: "play_mode_exited", result: { released: true } }]);
+  manager.register(GESTURE, playmodeOperation(GESTURE, PLAYMODE_OPERATION_TOOLS.get(GESTURE)!, () => live, { pollIntervalMs: 1 }));
+  const done = await manager.wait(owner, manager.start(owner, GESTURE, gestureArgs).job_id, 2000);
+  assert.equal(done.state, "failed");
+  assert.equal(done.error?.code, "play_mode_exited");
+});
+
+test("play-mode start refusal keeps the bridge's code and detected configuration", async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  const refusal = { error: { code: "input_backend_unavailable", message: "none", detected: { activeInputHandler: 1 } } };
+  const { live, calls } = playmodeLive([], { startError: refusal });
+  manager.register(GESTURE, playmodeOperation(GESTURE, PLAYMODE_OPERATION_TOOLS.get(GESTURE)!, () => live, { pollIntervalMs: 1 }));
+  const done = await manager.wait(owner, manager.start(owner, GESTURE, gestureArgs).job_id, 2000);
+  assert.equal(done.state, "failed");
+  assert.equal(done.error?.code, "input_backend_unavailable");
+  assert.deepEqual((done.result as Record<string, any>).error.detected, { activeInputHandler: 1 });
+  assert.equal(calls.status, 0);
+});
+
+test("play-mode poll cancels once at the deadline so held input is released", async () => {
+  const { live, calls } = playmodeLive([{ state: "running", phase: "running" }],
+    { cancelState: { state: "cancelled", reason: "cancelled", result: { released: true } } });
+  const outcome = await pollPlaymodeOperation(live, "op-1234-5678", { deadlineMs: 20, pollIntervalMs: 2 });
+  assert.equal(outcome.kind, "terminal");
+  assert.equal(calls.cancel, 1);
+  if (outcome.kind === "terminal") {
+    assert.equal(outcome.snapshot.state, "cancelled");
+    assert.equal(outcome.cancelSent, true);
+  }
 });

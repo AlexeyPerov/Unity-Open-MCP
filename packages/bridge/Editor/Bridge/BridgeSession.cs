@@ -40,7 +40,11 @@ namespace UnityOpenMcpBridge
         //       refusal (run_id_in_flight).
         //   2 — source-aware /compile-state (also as an opt-in tool-response
         //       header) and request-correlated atomic JSON replies.
-        public const int WireContract = 2;
+        //   3 — input backends: inputsim_touch `backend`, inputsim_pointer
+        //       `routing`/`backend`, inputsim_gesture + POST /playmode-operations
+        //       (shared play-mode scheduler), input_backend_unavailable /
+        //       legacy_multitouch_unsupported / unsupported_editor_version.
+        public const int WireContract = 3;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
         public static string Mode => "live";
