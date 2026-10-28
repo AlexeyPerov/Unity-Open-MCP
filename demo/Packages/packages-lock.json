@@ -5,7 +5,7 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.alexeyperov.unity-open-mcp-verify": "1.2.3"
+        "com.alexeyperov.unity-open-mcp-verify": "1.5.0"
       }
     },
     "com.alexeyperov.unity-open-mcp-verify": {
@@ -13,6 +13,14 @@
       "depth": 0,
       "source": "local",
       "dependencies": {}
+    },
+    "com.unity-open-mcp.project-command-fixture": {
+      "version": "file:com.unity-open-mcp.project-command-fixture",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {
+        "com.alexeyperov.unity-open-mcp-bridge": "1.2.3"
+      }
     },
     "com.unity.ai.navigation": {
       "version": "2.0.14",
@@ -298,14 +306,6 @@
         "com.unity.modules.jsonserialize": "1.0.0",
         "com.unity.modules.hierarchycore": "1.0.0",
         "com.unity.modules.physics": "1.0.0"
-      }
-    },
-    "com.unity-open-mcp.project-command-fixture": {
-      "version": "file:com.unity-open-mcp.project-command-fixture",
-      "depth": 0,
-      "source": "embedded",
-      "dependencies": {
-        "com.alexeyperov.unity-open-mcp-bridge": "1.2.3"
       }
     }
   }
