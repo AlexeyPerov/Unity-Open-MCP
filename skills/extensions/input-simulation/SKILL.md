@@ -53,6 +53,8 @@ legacy `Input` and the Input System in the same frame.
   (usually absent in the Editor); the tool focuses the Game view inside Unity
   when the Input System requires it (`focusedGameView: true`).
 - Never open the Device Simulator or rewrite input settings to make a call work.
+  When a check needs the Simulator (a device screen, safe area, a `Touchscreen`),
+  open it explicitly with `game_view set_device` (`playtest` group) first.
   Read the refusal instead: `input_backend_unavailable` (with `error.detected`
   configuration and `agentNextSteps`), `legacy_multitouch_unsupported`,
   `unsupported_editor_version`.

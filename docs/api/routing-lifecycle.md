@@ -179,11 +179,12 @@ per-tool `batchCapable` capability flag (that flag is about the headless
 batch-spawn fallback above — a different axis). Every pre-flight refusal happens
 before the dispatch loop, so `batch.results[]` is empty and nothing was
 committed; `agentNextSteps` says exactly that rather than offering the
-partial-failure/`editor_undo` guidance. `unity_senses_run_tests` and
-`unity_open_mcp_inputsim_gesture` are refused with
+partial-failure/`editor_undo` guidance. `unity_senses_run_tests`,
+`unity_open_mcp_inputsim_gesture` and `unity_open_mcp_game_view` with
+`set_resolution` / `set_device` are refused with
 `batch_step_requires_server_poll` — their terminal result comes from the server
 polling (a results file, or the play-mode operation), which only the top-level
-route does. Where a concrete
+route does (`game_view` `get` / `list_devices` stay batchable). Where a concrete
 meta-tool equivalent exists the refusal names it, so a client that ignores
 `tools/list_changed` (and therefore cannot see a freshly activated tool) is not
 pointed at a top-level call it cannot make.
@@ -212,7 +213,7 @@ pointed at a top-level call it cannot make.
 | `batch_in_progress` | Another headless operation owns the project: one this MCP server is driving, or a `-batchmode` Unity another process (a second MCP server, CI) has open on it. Checked before the Editor-ownership checks, so a headless Unity is never reported as `editor_instance_locked`; the message names the foreign process when there is one. | Wait for it to finish. |
 | `markers_missing` | A non-compile batch operation exited 0 without its report. | Inspect the captured output tail and the operation's post-state before repeating a mutation. |
 | `batch_spawn_failed` | Headless Unity produced no classifiable result (non-zero exit, no markers). | Inspect compile errors, package state, project lock, and path. |
-| `batch_step_requires_server_poll` | A `batch_execute` step's terminal result is produced by the server polling a results file, which the batch route does not do (today: `unity_senses_run_tests`, `unity_open_mcp_inputsim_gesture`). | Call the tool as a single top-level call. The message also names a reachable `execute_csharp` / `invoke_method` equivalent for clients that cannot see the tool. |
+| `batch_step_requires_server_poll` | A `batch_execute` step's terminal result is produced by the server polling a results file, which the batch route does not do (today: `unity_senses_run_tests`, `unity_open_mcp_inputsim_gesture`, `unity_open_mcp_game_view` set actions). | Call the tool as a single top-level call. The message also names a reachable `execute_csharp` / `invoke_method` equivalent for clients that cannot see the tool. |
 | `scene_dirty` | A disruptive mutation was refused because a loaded scene has unsaved work, including unsaved additive scenes. | Save/discard first or deliberately opt into the documented risk. |
 | `bridge_response_unparsable` | A substantial bridge response could not be parsed. | Do not trust partial output; check bridge health before retrying. |
 

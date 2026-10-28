@@ -93,7 +93,7 @@ namespace UnityOpenMcpBridge.Screenshot
             if (err != null) return err;
 
             var info = ImageCompareService.SaveReference(name, png);
-            return BuildSaveJson(info);
+            return BuildSaveJson(info, ContextJson(view));
         }
 
         // ============================ compare ============================
@@ -115,7 +115,7 @@ namespace UnityOpenMcpBridge.Screenshot
 
             float sens = sensitivity < 0f ? 0f : (sensitivity > 1f ? 1f : sensitivity);
             var result = ImageCompareService.Compare(refPng, curPng, sens, includeDiffImage);
-            return BuildCompareJson(name, view, width, height, result, includeDiffImage);
+            return BuildCompareJson(name, view, width, height, result, includeDiffImage, ContextJson(view));
         }
 
         // ============================ list ============================
@@ -194,7 +194,16 @@ namespace UnityOpenMcpBridge.Screenshot
 
         // ============================ response builders ============================
 
-        private static string BuildSaveJson(ImageCompareService.ReferenceInfo info)
+        // Which Game view size / Simulator device a `game` capture was taken at.
+        private static string ContextJson(string view)
+        {
+            if (!string.Equals(view ?? "game", "game", StringComparison.OrdinalIgnoreCase)) return null;
+            var sb = new StringBuilder(160);
+            ScreenshotService.AppendContext(sb, ScreenshotService.DescribeGameView());
+            return sb.ToString();
+        }
+
+        private static string BuildSaveJson(ImageCompareService.ReferenceInfo info, string context)
         {
             var sb = new StringBuilder(256);
             sb.Append('{');
@@ -204,12 +213,13 @@ namespace UnityOpenMcpBridge.Screenshot
             sb.Append("\"resolution\":\"").Append(info.Width).Append('x').Append(info.Height).Append("\",");
             sb.Append("\"aHash\":\"").Append(info.AHash.ToString("X16", CultureInfo.InvariantCulture)).Append("\",");
             sb.Append("\"capturedAtUtc\":").Append(Esc(info.CapturedAtUtc ?? ""));
+            if (context != null) sb.Append(",\"capturedAt\":").Append(context);
             sb.Append('}');
             return sb.ToString();
         }
 
         private static string BuildCompareJson(string name, string view, int width, int height,
-            ImageCompareService.CompareResult result, bool includeDiffImage)
+            ImageCompareService.CompareResult result, bool includeDiffImage, string context)
         {
             var sb = new StringBuilder(384 + (result.DiffImageBytes?.Length ?? 0) * 2);
             sb.Append('{');
@@ -222,6 +232,7 @@ namespace UnityOpenMcpBridge.Screenshot
             sb.Append("\"mismatchedPixels\":").Append(result.MismatchedPixels).Append(',');
             sb.Append("\"totalPixels\":").Append(result.TotalPixels).Append(',');
             sb.Append("\"perceptualDistance\":").Append(result.PerceptualDistance);
+            if (context != null) sb.Append(",\"capturedAt\":").Append(context);
 
             if (includeDiffImage && result.DiffImageBytes != null && result.DiffImageBytes.Length > 0)
             {

@@ -50,7 +50,15 @@ namespace UnityOpenMcpBridge
         //       in their results; ambiguous_target `matches`, target_not_found
         //       `hidden_matches`, conflicting_targets / index_out_of_range /
         //       under_not_found / ui_text_unavailable.
-        public const int WireContract = 4;
+        //   5 — Game view and Device Simulator: game_view (get / set_resolution /
+        //       set_device / list_devices, play-mode settle on the scheduler,
+        //       not_settled / device_not_found / size_not_found /
+        //       editor_internals_unavailable); composed captures at native size
+        //       by default, letterboxed (never stretched) to a different
+        //       width/height with scaled_from + content_rect, `size: native`,
+        //       `overlay: safe_area`, `capturedAt` on game/composed captures;
+        //       batch refusal of game_view set_*.
+        public const int WireContract = 5;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
         public static string Mode => "live";

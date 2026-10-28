@@ -1071,7 +1071,7 @@
     }
   },
   "unity_senses_screenshot": {
-    "description": "Capture a screenshot from the Unity Editor. Supports four views: 'scene' (the Scene view), 'game' (renders Camera.main only — NOT the full Game view; Screen-Space Overlay UI and multi-camera compositions are NOT included), 'composed' (the player's full composite frame — every camera by depth plus Screen-Space Overlay canvases; use this to verify UI edits), and 'isolated' (a clean 2x2 composite — Front/Right/Back/Top — of a single GameObject with layer culling and background choice). Returns the saved PNG file path. Requires a live Unity Editor connection.",
+    "description": "Capture a screenshot from the Unity Editor. Supports four views: 'scene' (the Scene view), 'game' (renders Camera.main only — NOT the full Game view; Screen-Space Overlay UI and multi-camera compositions are NOT included), 'composed' (the player's full composite frame — every camera by depth plus Screen-Space Overlay canvases; use this to verify UI edits), and 'isolated' (a clean 2x2 composite — Front/Right/Back/Top — of a single GameObject with layer culling and background choice). 'composed' without width/height returns the frame at the game's own resolution (the Game view size or the Device Simulator screen — set it first with unity_open_mcp_game_view); in play mode it is the frame the game rendered, without Editor chrome or the Simulator's device bezel. A width/height of another aspect is padded (letterbox), never stretched, and reported as scaled_from + content_rect. Game/composed responses name what they were taken at in `capturedAt` (mode, device or size entry, orientation, screen). Returns the saved PNG file path. Requires a live Unity Editor connection.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1086,8 +1086,7 @@
           "type": "string"
         },
         "height": {
-          "default": 720,
-          "description": "Capture height in pixels. For 'isolated', this is per-quadrant (full image is 2x).",
+          "description": "Capture height in pixels (with width). Omitted: 720 for scene/game/isolated; native for 'composed'. For 'isolated', per quadrant (full image is 2x).",
           "maximum": 4096,
           "minimum": 64,
           "type": "integer"
@@ -1096,9 +1095,23 @@
           "description": "Required for 'isolated' view. Hierarchy path of the target GameObject (e.g. \"Player\" or \"Enemies/Goblin\").",
           "type": "string"
         },
+        "overlay": {
+          "description": "[composed] 'safe_area' tints the unsafe band (outside Screen.safeArea: notch, home indicator, cutouts) and outlines the safe rect on the returned image, for review. The response repeats safe_area [x, y, w, h] in screen pixels (bottom-left origin).",
+          "enum": [
+            "safe_area"
+          ],
+          "type": "string"
+        },
+        "size": {
+          "description": "'native' = the game's own resolution (the Game view size or the simulated device screen), no scaling. Implied for 'composed' when width/height are omitted; also valid for 'game' (Camera.main rendered at that size). Do not combine with width/height.",
+          "enum": [
+            "native"
+          ],
+          "type": "string"
+        },
         "view": {
           "default": "scene",
-          "description": "Capture target. 'scene' = Scene view camera, 'game' = Camera.main only (Overlay canvases and other cameras are NOT rendered — prefer 'composed' to verify UI), 'composed' = the player's full frame (all cameras by depth + Screen-Space Overlay UI; in play mode uses ScreenCapture, in edit mode composites enabled cameras by depth), 'isolated' = clean 2x2 composite of one GameObject.",
+          "description": "Capture target. 'scene' = Scene view camera, 'game' = Camera.main only (Overlay canvases and other cameras are NOT rendered — prefer 'composed' to verify UI), 'composed' = the player's full frame (all cameras by depth + Screen-Space Overlay UI; in play mode the play-mode view's rendered frame, in edit mode enabled cameras composited by depth — Overlay canvases do not render in edit mode), 'isolated' = clean 2x2 composite of one GameObject.",
           "enum": [
             "scene",
             "game",
@@ -1108,8 +1121,7 @@
           "type": "string"
         },
         "width": {
-          "default": 1280,
-          "description": "Capture width in pixels. For 'isolated', this is per-quadrant (full image is 2x).",
+          "description": "Capture width in pixels (with height). Omitted: 1280 for scene/game/isolated; 'composed' returns the game's native resolution. For 'isolated', per quadrant (full image is 2x). For 'composed', a width/height of another aspect than the game is fitted and padded (letterbox), never stretched — the response then carries scaled_from [w, h] and content_rect [x, y, w, h] (top-left origin).",
           "maximum": 4096,
           "minimum": 64,
           "type": "integer"
@@ -1445,7 +1457,7 @@
     }
   },
   "unity_senses_capture_inline": {
-    "description": "Capture a screenshot and return it as an inline base64 PNG image (no temp file written), so an agent that doesn't read the filesystem can still view it. Supports three views: 'scene' (the Scene view), 'game' (the main camera / Game view), and 'isolated' (a clean 2x2 composite — Front/Right/Back/Top — of a single GameObject with layer culling and background choice). Returns an MCP image content block plus metadata. Requires a live Unity Editor connection.",
+    "description": "Capture a screenshot and return it as an inline base64 PNG image (no temp file written), so an agent that doesn't read the filesystem can still view it. Views: 'scene' (the Scene view), 'game' (Camera.main only), 'composed' (the player's full frame — all cameras + Screen-Space Overlay UI — at the game's own resolution unless width/height are passed; another aspect is padded, never stretched, and reported as scaled_from + content_rect; overlay 'safe_area' draws the safe area), and 'isolated' (a clean 2x2 composite — Front/Right/Back/Top — of a single GameObject with layer culling and background choice). Game/composed responses name the device or Game view size they were taken at (`capturedAt`). Returns an MCP image content block plus metadata. Requires a live Unity Editor connection.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1460,14 +1472,27 @@
           "type": "string"
         },
         "height": {
-          "default": 720,
-          "description": "Capture height in pixels. For 'isolated', this is per-quadrant (full image is 2x).",
+          "description": "Capture height in pixels (with width). Omitted: 720 for scene/game/isolated; native for 'composed'. For 'isolated', per quadrant (full image is 2x).",
           "maximum": 4096,
           "minimum": 64,
           "type": "integer"
         },
         "object_path": {
           "description": "Required for 'isolated' view. Hierarchy path of the target GameObject (e.g. \"Player\" or \"Enemies/Goblin\").",
+          "type": "string"
+        },
+        "overlay": {
+          "description": "[composed] 'safe_area' tints the unsafe band (outside Screen.safeArea: notch, home indicator, cutouts) and outlines the safe rect on the returned image, for review. The response repeats safe_area [x, y, w, h] in screen pixels (bottom-left origin).",
+          "enum": [
+            "safe_area"
+          ],
+          "type": "string"
+        },
+        "size": {
+          "description": "'native' = the game's own resolution (the Game view size or the simulated device screen), no scaling. Implied for 'composed' when width/height are omitted; also valid for 'game' (Camera.main rendered at that size). Do not combine with width/height.",
+          "enum": [
+            "native"
+          ],
           "type": "string"
         },
         "view": {
@@ -1482,8 +1507,7 @@
           "type": "string"
         },
         "width": {
-          "default": 1280,
-          "description": "Capture width in pixels. For 'isolated', this is per-quadrant (full image is 2x).",
+          "description": "Capture width in pixels (with height). Omitted: 1280 for scene/game/isolated; 'composed' returns the game's native resolution. For 'isolated', per quadrant (full image is 2x). For 'composed', a width/height of another aspect than the game is fitted and padded (letterbox), never stretched — the response then carries scaled_from [w, h] and content_rect [x, y, w, h] (top-left origin).",
           "maximum": 4096,
           "minimum": 64,
           "type": "integer"
@@ -11970,63 +11994,63 @@
     }
   },
   "unity_open_mcp_batch_execute": {
-    "description": "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — cuts agent↔Unity latency and token cost for multi-object setup (e.g. spawn N cubes + create materials + assign in one call). Each entry in `commands` carries a full tool id (`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group (always visible). Live-only — NOT headless `batchCapable`; there is no batch spawn fallback when the bridge is down.\n\nNOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". The two are independent axes; nestability is decided by the pre-flight refusals below.\n\nEvery step is schema/lifecycle preflighted before dispatch. All-read batches need no paths_hint, checkpoint, gate, or undo group. Mixed/mutating batches require the explicit union paths_hint. Safety: a mutating batch shares ONE gate cycle (one checkpoint → all steps → one validate/delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step errors are collected. Partial failure semantics: a successful step is NOT rolled back when a later step fails. A partial batch (at least one step committed) propagates `mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its validate/delta on the committed work and waits for the asset/compile settle. Gate outcome describes validation independently of mutation.success; read `batch.results[]` for the breakdown and undo with a single `editor_undo` if needed. A total failure (no step committed) skips the validate/delta with gate.outcome: skipped and skippedReason: mutation_failed. Run `unity_open_mcp_validate_edit` on the touched paths to confirm health after a partial run.\n\nv1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. `batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package / non-dry-run upgrade, scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, settings_set_player, mutating execute_csharp / invoke_method / disruptive execute_menu) is refused up-front with a `batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its default Single mode replaces the active scene stack and can discard unsaved changes in open scenes). Script writes/deletes, undo/redo, play transitions, and non-preview fixes also require their top-level routes. Use those tools as single top-level calls instead.\n\nA step whose terminal result is produced by the SERVER rather than by the Editor dispatch is refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns `{status:\"started\", runId}` immediately and the server polls a results file to turn that into a real result, which only happens on the top-level route; `unity_open_mcp_inputsim_gesture` likewise only starts a play-mode operation the server polls (and no frame advances while a batch holds the main thread). Inside a batch nothing polls, so the step would be recorded `success` carrying the non-terminal \"started\" body and the run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
+    "description": "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — cuts agent↔Unity latency and token cost for multi-object setup (e.g. spawn N cubes + create materials + assign in one call). Each entry in `commands` carries a full tool id (`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group (always visible). Live-only — NOT headless `batchCapable`; there is no batch spawn fallback when the bridge is down.\n\nNOTE on `batchCapable`: that per-tool capability flag answers \"does this tool have a HEADLESS batch-spawn fallback when the bridge is down?\" — NOT \"can this tool be a nested step here\". The two are independent axes; nestability is decided by the pre-flight refusals below.\n\nEvery step is schema/lifecycle preflighted before dispatch. All-read batches need no paths_hint, checkpoint, gate, or undo group. Mixed/mutating batches require the explicit union paths_hint. Safety: a mutating batch shares ONE gate cycle (one checkpoint → all steps → one validate/delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step errors are collected. Partial failure semantics: a successful step is NOT rolled back when a later step fails. A partial batch (at least one step committed) propagates `mutation.success: false` with error code `batch_partial_failure`; the gate STILL runs its validate/delta on the committed work and waits for the asset/compile settle. Gate outcome describes validation independently of mutation.success; read `batch.results[]` for the breakdown and undo with a single `editor_undo` if needed. A total failure (no step committed) skips the validate/delta with gate.outcome: skipped and skippedReason: mutation_failed. Run `unity_open_mcp_validate_edit` on the touched paths to confirm health after a partial run.\n\nv1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. `batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested tool with the `restart_then_settle` lifecycle (package_add / package_remove / reimport_package / non-dry-run upgrade, scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, settings_set_player, mutating execute_csharp / invoke_method / disruptive execute_menu) is refused up-front with a `batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its default Single mode replaces the active scene stack and can discard unsaved changes in open scenes). Script writes/deletes, undo/redo, play transitions, and non-preview fixes also require their top-level routes. Use those tools as single top-level calls instead.\n\nA step whose terminal result is produced by the SERVER rather than by the Editor dispatch is refused with `batch_step_requires_server_poll`: `unity_senses_run_tests` returns `{status:\"started\", runId}` immediately and the server polls a results file to turn that into a real result, which only happens on the top-level route; `unity_open_mcp_inputsim_gesture` likewise only starts a play-mode operation the server polls (and no frame advances while a batch holds the main thread), as do `unity_open_mcp_game_view` set_resolution / set_device (get / list_devices stay batchable). Inside a batch nothing polls, so the step would be recorded `success` carrying the non-terminal \"started\" body and the run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for clients that cannot see a newly activated tool because they ignore `tools/list_changed`.",
     "inputSchema": {
-      "type": "object",
-      "required": [
-        "commands"
-      ],
+      "additionalProperties": false,
       "properties": {
         "commands": {
-          "type": "array",
-          "minItems": 1,
+          "description": "Ordered list of tool calls to run sequentially. Default cap 25, hard max 100 (`batchExecuteMaxCommands`).",
           "items": {
-            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "params": {
+                "description": "The tool's input object (its normal `args`); omitted means an empty object. Omit the outer `paths_hint` / `gate` — the batch supplies those for the whole sequence.",
+                "type": "object"
+              },
+              "tool": {
+                "description": "Full MCP tool id (`unity_open_mcp_gameobject_create`, etc.). Must be a live-bridge typed tool; not `batch_execute`, `compile_check`, or a meta-tool.",
+                "type": "string"
+              }
+            },
             "required": [
               "tool"
             ],
-            "properties": {
-              "tool": {
-                "type": "string",
-                "description": "Full MCP tool id (`unity_open_mcp_gameobject_create`, etc.). Must be a live-bridge typed tool; not `batch_execute`, `compile_check`, or a meta-tool."
-              },
-              "params": {
-                "type": "object",
-                "description": "The tool's input object (its normal `args`); omitted means an empty object. Omit the outer `paths_hint` / `gate` — the batch supplies those for the whole sequence."
-              }
-            },
-            "additionalProperties": false
+            "type": "object"
           },
-          "description": "Ordered list of tool calls to run sequentially. Default cap 25, hard max 100 (`batchExecuteMaxCommands`)."
+          "minItems": 1,
+          "type": "array"
         },
         "fail_fast": {
-          "type": "boolean",
           "default": true,
-          "description": "Stop on the first step failure and mark later entries `skipped` (default true). Set false to run every step and collect per-step errors."
+          "description": "Stop on the first step failure and mark later entries `skipped` (default true). Set false to run every step and collect per-step errors.",
+          "type": "boolean"
         },
         "gate": {
+          "default": "enforce",
+          "description": "Gate mode applied to the WHOLE batch (one checkpoint → N steps → one validate/delta). Default `enforce`.",
           "enum": [
             "enforce",
             "warn",
             "off"
-          ],
-          "default": "enforce",
-          "description": "Gate mode applied to the WHOLE batch (one checkpoint → N steps → one validate/delta). Default `enforce`."
+          ]
+        },
+        "parallel": {
+          "default": false,
+          "description": "Accepted but ignored in v1 — Unity's API is main-thread, so execution is always sequential. The response reports that sequential execution was used.",
+          "type": "boolean"
         },
         "paths_hint": {
-          "type": "array",
+          "description": "Mutation scope for the whole batch — the union of all paths the nested commands may touch (scene paths, asset paths). Required when any nested command is mutating.",
           "items": {
             "type": "string"
           },
-          "description": "Mutation scope for the whole batch — the union of all paths the nested commands may touch (scene paths, asset paths). Required when any nested command is mutating."
-        },
-        "parallel": {
-          "type": "boolean",
-          "default": false,
-          "description": "Accepted but ignored in v1 — Unity's API is main-thread, so execution is always sequential. The response reports that sequential execution was used."
+          "type": "array"
         }
       },
-      "additionalProperties": false
+      "required": [
+        "commands"
+      ],
+      "type": "object"
     }
   },
   "unity_open_mcp_restart_editor": {
@@ -12819,6 +12843,81 @@
         }
       },
       "additionalProperties": false
+    }
+  },
+  "unity_open_mcp_game_view": {
+    "description": "Read or set what the game renders at: the Game view resolution or a Device Simulator device. ACTIONS: get = mode (game | simulator | none), the selected size entry or device, window size in logical points and pixels (HiDPI), scale, focused, render_texture, and `screen` = what the game sees (width, height, aspect, safe_area [x, y, w, h] bottom-left origin, insets {top, bottom, left, right} — the notch is insets.top in portrait — cutouts, dpi, orientation); set_resolution = fixed width × height in pixels via a custom Game view size entry named 'Open MCP <w>x<h>' (created once, reused by name, never deleted — the only persistent effect, stored in the Editor's Game view size list), or an existing entry by size_label (e.g. 'Free Aspect' to restore what get reported); switches the Simulator back to the Game view when needed; set_device = the ONLY action that opens the Device Simulator: swaps the Game view tab for the Simulator (or opens one), selects `device` (an id from list_devices) and rotates it to `orientation` (default portrait), then reports the resulting safe area; orientation_applied is false when the project's orientation settings keep the game in another orientation; both set actions bring the Game view / Simulator tab to the front inside Unity (a hidden tab does not render and the game falls back to 640x480; the Unity application itself is not raised); list_devices = the Simulator's device catalog (id, screen, dpi, portrait safe area, insets, notch, orientations), paged. SETTLE: in play mode set_* returns once Screen.width/height inside the game and the view's render target report the new size for two frames, else error not_settled (paused Editor, hidden Game view tab) with what was observed. Nothing is restored implicitly: call get first and set back explicitly. Then capture with unity_senses_screenshot / capture_inline view 'composed' (native size by default; overlay 'safe_area' draws the safe area). Editor UI only, gate-free. Unity 6; other Editors answer unsupported_editor_version.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "description": "get: read the current view, size/device and screen. set_resolution: width + height (or size_label). set_device: device (+ orientation). list_devices: the Simulator catalog (query, page_size, cursor).",
+          "enum": [
+            "get",
+            "set_resolution",
+            "set_device",
+            "list_devices"
+          ],
+          "type": "string"
+        },
+        "cursor": {
+          "description": "[list_devices] Opaque cursor from a previous response's pagination.next_cursor.",
+          "type": "string"
+        },
+        "device": {
+          "description": "[set_device] Device id from list_devices (exact, case-insensitive), or a substring that matches exactly one device. Unknown → device_not_found; several → ambiguous_device with candidates.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "height": {
+          "description": "[set_resolution] Game render height in pixels (with width).",
+          "maximum": 8192,
+          "minimum": 16,
+          "type": "integer"
+        },
+        "orientation": {
+          "description": "[set_device] Device orientation (the Simulator's rotate buttons). Default portrait.",
+          "enum": [
+            "portrait",
+            "portrait_upside_down",
+            "landscape_left",
+            "landscape_right"
+          ],
+          "type": "string"
+        },
+        "page_size": {
+          "default": 25,
+          "description": "[list_devices] Devices per page. Default 25, cap 100. Follow pagination.next_cursor.",
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "query": {
+          "description": "[list_devices] Keep devices whose id contains this (case-insensitive).",
+          "type": "string"
+        },
+        "settle_timeout_ms": {
+          "description": "[set_resolution / set_device, play mode] How long to wait for the game to report the new size. Default 5000.",
+          "maximum": 20000,
+          "minimum": 100,
+          "type": "integer"
+        },
+        "size_label": {
+          "description": "[set_resolution] Select an existing Game view size entry by its label instead of width/height (e.g. 'Free Aspect', '16:9 Aspect', or get's size.label to restore). Unknown → size_not_found with the available labels.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "width": {
+          "description": "[set_resolution] Game render width in pixels (with height).",
+          "maximum": 8192,
+          "minimum": 16,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
     }
   }
 }

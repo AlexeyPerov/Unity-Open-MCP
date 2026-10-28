@@ -262,6 +262,14 @@ Operations that drive the same resource (input) are exclusive
 (`playmode_operation_busy`). Records are domain-local and retained for 30 minutes
 (at most 64); an unknown id answers `operation_not_found`.
 
+`unity_open_mcp_game_view` `set_resolution` / `set_device` in play mode start a
+short settle watch of kind `unity_open_mcp_game_view` (bridge-assigned id, carried
+in the response's `settle.operation`): it ends `succeeded` with
+`result.settled: true` once the game's `Screen.width`/`height` and the view's
+render target report the new size for two consecutive frames, or with
+`settled: false` at its time limit. A newer set call cancels the previous watch.
+The MCP server polls it inline; a direct caller polls the same endpoint.
+
 ## Related docs
 
 - [Routing and lifecycle](routing-lifecycle.md)

@@ -21,16 +21,24 @@ namespace UnityOpenMcpBridge.Screenshot
         [BridgeTool("unity_senses_screenshot", Title = "Screenshot",
             IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.None)]
         [System.ComponentModel.Description(
-            "Capture a screenshot from the Scene view, Game view, or an isolated " +
-            "2x2 composite of a single GameObject. Returns the saved PNG file path.")]
+            "Capture a screenshot from the Scene view, Game view (Camera.main), the composed " +
+            "player frame (native game resolution by default; width/height of another aspect are " +
+            "padded, never stretched; optional safe-area overlay), or an isolated 2x2 composite of " +
+            "a single GameObject. Returns the saved PNG file path and the device/resolution it was taken at.")]
         public string Screenshot(
             string view = "scene",
-            int width = 1280,
-            int height = 720,
+            int? width = null,
+            int? height = null,
             string object_path = null,
-            string background = "skybox")
+            string background = "skybox",
+            string size = null,
+            string overlay = null)
         {
             view = (view ?? "scene").ToLowerInvariant();
+            var argError = ScreenshotService.ValidateFrameArgs(view, width, height, size, overlay);
+            if (argError != null) return ErrorJson("validation_error", argError);
+            // scene / game / isolated keep their 1280x720 default; composed defaults to native.
+            int w = width ?? 1280, h = height ?? 720;
 
             try
             {
@@ -39,18 +47,20 @@ namespace UnityOpenMcpBridge.Screenshot
                 switch (view)
                 {
                     case "scene":
-                        filePath = ScreenshotService.CaptureSceneView(width, height);
+                        filePath = ScreenshotService.CaptureSceneView(w, h);
                         break;
                     case "game":
-                        filePath = ScreenshotService.CaptureGameView(width, height);
-                        break;
-                    // feedback #5 (2026-08-07) — the player's composite frame:
-                    // every camera by depth + Screen-Space Overlay canvases (in
-                    // play mode). Use this to verify UI edits; `game` renders
-                    // only Camera.main and silently omits Overlay UI.
+                        if (size == "native" && !ScreenshotService.TryNativeSize(out w, out h))
+                            return ErrorJson("native_size_unavailable", "The Game view reports no size yet; open the Game view or pass width/height.");
+                        var game = ScreenshotService.CaptureGameViewFrame(w, h);
+                        game.FilePath = ScreenshotService.SavePng(game.Png, "game");
+                        return BuildFrameJson(view, game);
+                    // The player's composite frame: every camera by depth +
+                    // Screen-Space Overlay canvases (in play mode, the play-mode
+                    // view's own render target). Native size unless width/height
+                    // are passed; another aspect is padded, never stretched.
                     case "composed":
-                        filePath = ScreenshotService.CaptureComposedView(width, height);
-                        break;
+                        return BuildFrameJson(view, ScreenshotService.CaptureComposedView(width, height, overlay == "safe_area"));
                     case "isolated":
                         if (string.IsNullOrEmpty(object_path))
                             return ErrorJson("missing_parameter",
@@ -61,14 +71,14 @@ namespace UnityOpenMcpBridge.Screenshot
                             return ErrorJson("asset_not_found",
                                 $"No active GameObject found at path '{object_path}'.");
 
-                        filePath = ScreenshotService.CaptureIsolated(target, width, height, background ?? "skybox");
+                        filePath = ScreenshotService.CaptureIsolated(target, w, h, background ?? "skybox");
                         break;
                     default:
                         return ErrorJson("validation_error",
                             $"Unknown view '{view}'. Use 'scene', 'game', 'composed', or 'isolated'.");
                 }
 
-                return BuildSuccessJson(view, width, height, filePath);
+                return BuildSuccessJson(view, w, h, filePath);
             }
             catch (System.Exception e)
             {
@@ -123,6 +133,17 @@ namespace UnityOpenMcpBridge.Screenshot
             else
                 sb.Append("\"resolution\":\"").Append(width).Append('x').Append(height).Append("\",");
             sb.Append("\"filePath\":").Append(Esc(filePath));
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static string BuildFrameJson(string view, FrameCapture capture)
+        {
+            var sb = new StringBuilder(512);
+            sb.Append("{\"status\":\"ok\",\"view\":").Append(Esc(view));
+            sb.Append(",\"resolution\":\"").Append(capture.Width).Append('x').Append(capture.Height).Append('"');
+            ScreenshotService.AppendCaptureFields(sb, capture);
+            sb.Append(",\"filePath\":").Append(Esc(capture.FilePath));
             sb.Append('}');
             return sb.ToString();
         }

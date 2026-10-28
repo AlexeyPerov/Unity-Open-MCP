@@ -50,7 +50,8 @@ export const batchExecute = makeTool(
     "`{status:\"started\", runId}` immediately and the server polls a results file to turn that " +
     "into a real result, which only happens on the top-level route; `unity_open_mcp_inputsim_gesture` " +
     "likewise only starts a play-mode operation the server polls (and no frame advances while a " +
-    "batch holds the main thread). Inside a batch nothing polls, " +
+    "batch holds the main thread), as do `unity_open_mcp_game_view` set_resolution / set_device " +
+    "(get / list_devices stay batchable). Inside a batch nothing polls, " +
     "so the step would be recorded `success` carrying the non-terminal \"started\" body and the " +
     "run's outcome would never reach the caller. Call it top-level. Every pre-flight refusal also " +
     "names a reachable alternative where one exists (e.g. the `execute_csharp` equivalent), for " +

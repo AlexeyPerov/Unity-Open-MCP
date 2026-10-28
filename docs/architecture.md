@@ -103,6 +103,13 @@ lives in the uGUI input-simulation sub-assembly and registers a resolver into th
 root for touch and gesture; TextMeshPro text comes from a separate optional
 sub-assembly (versionDefines on `com.unity.textmeshpro` ≥ 3.0 or `com.unity.ugui`
 ≥ 2.0) that registers a text reader. See [Playtest tools](api/playtest.md).
+Game view and Device Simulator control (`game_view`, and the native-size composed
+capture that reads the play-mode view's render target) reaches internal Editor
+types through one adapter in the bridge root (`packages/bridge/Editor/Playtest/`)
+behind a version table shared with the legacy input adapter
+(`EditorVersionTable`): unverified Editors refuse with
+`unsupported_editor_version`. Its play-mode settle check is a short operation on
+the same play-mode scheduler, polled inline by the MCP server.
 
 ## Related docs
 

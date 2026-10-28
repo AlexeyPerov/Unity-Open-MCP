@@ -507,6 +507,8 @@ import { inputsimPointer3d } from "./inputsim-pointer3d.js";
 import { inputsimGesture } from "./inputsim-gesture.js";
 // Playtest: read the uGUI screen (text, visibility, diagnostics).
 import { uiSnapshot } from "./ui-snapshot.js";
+// Playtest: Game view resolution / Device Simulator device and safe area.
+import { gameView } from "./game-view.js";
 
 // M27 Plan 4 — batch_execute ships as a core meta-tool so agents can always
 // discover it. It is the agent ergonomics counterpart to the M26 headless batch
@@ -532,9 +534,10 @@ export const INPUTSIM_TOOLS: Tool[] = [inputsimPointer, inputsimKey, inputsimTou
 
 // Playtest — tools that let an agent read and play the running game like a
 // tester: the uGUI screen snapshot (role, text, visibility, diagnostics; its
-// node model also backs `target_text` label targeting on the input tools).
-// Group `playtest`; ui_snapshot compiles with com.unity.ugui.
-export const PLAYTEST_TOOLS: Tool[] = [uiSnapshot];
+// node model also backs `target_text` label targeting on the input tools) and
+// the Game view / Device Simulator control that sets what the game renders at.
+// Group `playtest`; ui_snapshot compiles with com.unity.ugui, game_view always.
+export const PLAYTEST_TOOLS: Tool[] = [uiSnapshot, gameView];
 
 export const M2_TOOLS: Tool[] = [
   ping,

@@ -45,11 +45,12 @@ and targeted fixes.
 ### Test and observe
 
 Run Edit/Play Mode tests, inspect the console, capture screenshots, profiler and
-memory data, and pull events. Input simulation closes the gameplay loop: read
-the screen (uGUI text, visibility, layout diagnostics), tap controls by their
-on-screen label, click / drag / swipe, play multi-second gestures over real frames
-(legacy Input Manager and Input System projects alike), advance frames, then
-verify visually.
+memory data, and pull events. Input simulation closes the gameplay loop: put the
+game on a target resolution or Device Simulator device, read the screen (uGUI
+text, visibility, layout diagnostics), tap controls by their on-screen label,
+click / drag / swipe, play multi-second gestures over real frames (legacy Input
+Manager and Input System projects alike), advance frames, then verify visually
+with captures at the device's native resolution and safe area.
 
 ### Live, batch, or offline
 

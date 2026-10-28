@@ -23,7 +23,7 @@ definitions live in `mcp-server/src/tools/`.
 | [CLI and automation](cli-automation.md) | CLI commands, options, JSON output, and links to canonical CI behavior. |
 | [CI templates](../ci/README.md) | Pipeline shape, CLI exit codes, baselines, and provider templates. |
 | [Input simulation](input-simulation.md) | Input backends (legacy Input Manager / Input System), pointer delivery and `raycast_real`, touch, gestures over real frames, target by label (`target_text`), frame stepping, and supported input boundaries. |
-| [Playtest tools](playtest.md) | `ui_snapshot` (uGUI screen as an accessibility tree: text, visibility, occlusion, diagnostics), profiles and paging, and the snapshot → tap-by-label loop. |
+| [Playtest tools](playtest.md) | `ui_snapshot` (uGUI screen as an accessibility tree: text, visibility, occlusion, diagnostics), profiles and paging, the snapshot → tap-by-label loop, and `game_view` (Game view resolution, Device Simulator device / orientation, safe area, settle-on-return). |
 | [Project commands](project-commands.md) | Editor-only authoring, typed list/describe/invoke, schema versions and safety boundaries. |
 | [Asynchronous jobs](jobs.md) | Job lifecycle, observation, idempotency, cancellation, retention and adapter contracts. |
 | [MCP resources](resources.md) | Resource URIs, payloads, and resource routing. |
@@ -61,9 +61,10 @@ definitions live in `mcp-server/src/tools/`.
   splines, lighting, audio, UI, constraints, terrain, Cinemachine, Timeline,
   Tilemap, Shader Graph, VFX Graph, Memory Profiler, 2D art, and input
   simulation (play-mode click/swipe/drag).
-- **Playtest** — read the uGUI screen (`ui_snapshot`: texts, visibility,
-  overflow / placeholder / touch-size diagnostics) and tap controls by their
-  on-screen label.
+- **Playtest** — put the game on a target resolution or Device Simulator device
+  (`game_view`: safe area and notch insets the game sees), read the uGUI screen
+  (`ui_snapshot`: texts, visibility, overflow / placeholder / touch-size
+  diagnostics) and tap controls by their on-screen label.
 - **Discovery** — capabilities, rules, skill generation, and tool-group
   management.
 - **Unity Hub control** — editor discovery, release listing, installs, modules,
@@ -88,6 +89,7 @@ a multi-step workflow. For session groups, see [Tool groups](tool-groups.md).
 | Agent senses | Run Play Mode tests for the Combat assembly and capture a Game-view screenshot on failure. |
 | Game testing | Probe the UI for interactables, enter play mode, click the Start button by id, advance a few frames, then screenshot to confirm the level loaded. |
 | Playtest | Snapshot the shop screen, tap "Buy" by its label, then check the coin counter text and report any overflowing or placeholder texts. |
+| Device check | Switch the Device Simulator to a notched phone in portrait, then capture the composed frame with the safe-area overlay and check nothing sits under the notch. |
 | Tool groups | Reset tool groups, then activate only `core` and `gate-and-verify`. |
 | Batch mutations | In one batch: create ten empty GameObjects named `Enemy_1`…`Enemy_10` under an `Enemies` parent. |
 | Verify / CI | Create a verify baseline for this project, then report any new blocking issues since the last baseline. |
@@ -465,6 +467,55 @@ cap, reset after a successful connect. While the bridge is unreachable the
 tool surfaces `bridge_unavailable` (with the last reconnect failure in
 `lastError`); once the bridge returns, the next reconnect resumes the stream
 without any agent action.
+
+### Composed captures (`unity_senses_screenshot` / `unity_senses_capture_inline`)
+
+`view: "composed"` is the player's frame: every camera by depth plus Screen
+Space Overlay UI.
+
+- **Size.** Without `width`/`height` the frame comes back at the game's own
+  resolution — the Game view size, or the simulated screen of the Device
+  Simulator device (`size: "native"` is implied and may be passed explicitly;
+  it cannot be combined with width/height). With a `width`/`height` of another
+  size the frame is fitted with its aspect kept and padded with black
+  (letterbox), never stretched; the response then says `size: "fitted"`,
+  `scaled_from: [w, h]` (the native frame) and `content_rect: [x, y, w, h]`
+  (where the frame sits in the image, top-left origin).
+- **Source.** In play mode the frame is the one the play-mode view rendered
+  (`source: "play_mode_view"`): no Editor toolbar or tabs, and no device bezel in
+  the Device Simulator. In edit mode the enabled cameras are composited by depth
+  at the game's resolution (`source: "cameras"`; Overlay canvases do not render
+  in edit mode). When the view's render target cannot be reached (an Editor
+  without the Game view adapter), the frame falls back to `ScreenCapture`
+  (`source: "screen_capture"`) with a `warning` that it may include Editor
+  chrome. A `warning` also appears when the view's last rendered frame differs
+  from the game's screen size (the size just changed, or the view's tab is not
+  in front).
+- **Safe area.** `overlay: "safe_area"` (composed only) tints the band outside
+  the safe area — notch, home indicator, cutouts — and outlines the safe rect;
+  the response repeats `safe_area` `[x, y, w, h]` in screen pixels (bottom-left
+  origin). In the Game view the safe area is the whole screen.
+- **What it was taken at.** Game and composed captures carry `capturedAt`:
+  `mode` (`game` / `simulator`), the Game view `size` label or the Simulator
+  `device`, `orientation`, `screen` `[w, h]`, the Simulator `safe_area`, and
+  `playing`. `unity_senses_visual_compare` adds the same block for `view: "game"`.
+  On an Editor without the Game view adapter `mode` is `unknown` with a `note`.
+
+Set the device or resolution first with
+[`unity_open_mcp_game_view`](playtest.md#unity_open_mcp_game_view), then capture.
+
+`view: "game"` (Camera.main only) keeps its 1280×720 default; `size: "native"`
+renders it at the game's resolution (`size: "native"` in the response, otherwise
+`"requested"`). `scene` and `isolated` are unchanged.
+
+> **Capture-scaling fix.** Composed captures used to be scaled to the requested
+> width/height (default 1280×720) — stretched whenever the aspect differed — and
+> in play mode were read from whichever Editor panel was current, which could add
+> Editor chrome, letterbox bars or the Simulator's device frame. Both were bugs.
+> A composed capture without width/height is now the native frame, and a
+> width/height of another aspect is padded instead of stretched; callers that pass
+> width/height still get an image of exactly that size. This is a fix, not a
+> breaking change.
 
 ### `unity_senses_visual_compare`
 

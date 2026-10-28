@@ -102,6 +102,16 @@ test("recommendGroups: a playtest intent brings playtest + input-simulation", ()
   assert.ok(ids.includes("input-simulation"), JSON.stringify(ids));
 });
 
+test("recommendGroups: a device / safe-area intent brings the playtest group", () => {
+  for (const intent of [
+    "switch the device simulator to a notched phone and check the safe area",
+    "set the game view resolution to 1080x1920 and capture the layout",
+  ]) {
+    const ids = recommendGroups({ intent }).groups.map((g) => g.id);
+    assert.ok(ids.includes("playtest"), `${intent}: ${JSON.stringify(ids)}`);
+  }
+});
+
 test("recommendGroups: explicit tags activate the implied groups", () => {
   const rec = recommendGroups({ tags: ["audio", "lighting"] });
   const ids = rec.groups.map((g) => g.id);

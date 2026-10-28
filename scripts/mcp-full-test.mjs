@@ -285,6 +285,8 @@ function buildSuite() {
 
   // --- playtest reads (live-only, read-only; edit mode is fine) ---
   s("ui_snapshot", "B", "unity_open_mcp_ui_snapshot", { page_size: 5 });
+  // get / list_devices are reads; set_* changes the Editor's Game view (manual checklist).
+  s("game_view_get", "B", "unity_open_mcp_game_view", { action: "get" });
 
   // --- agent-senses reads (live-only, read-only) ---
   // read_console has a LogEntries reflection bug on Unity 6 (see

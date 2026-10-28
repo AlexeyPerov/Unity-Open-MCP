@@ -36,7 +36,10 @@ is listed in `skipped` with a reason (`no_touchscreen`, `input_system_disabled`,
 
 `auto` never opens or focuses the Device Simulator. In the Editor there is usually
 no `Touchscreen` device unless the Simulator is the active view or one was added
-(`InputSystem.AddDevice<Touchscreen>()`).
+(`InputSystem.AddDevice<Touchscreen>()`). Opening the Simulator is an explicit
+step: [`game_view set_device`](playtest.md#unity_open_mcp_game_view). With the
+Simulator active, `auto` routes to both backends, and `target` / `target_text`
+resolve in the simulated screen's pixels.
 
 ### Refusals
 

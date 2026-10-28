@@ -268,6 +268,22 @@ namespace UnityOpenMcpBridge.MetaTools
                         tool));
             }
 
+            // game_view set_resolution / set_device in play mode return once the
+            // game reports the new size, which the MCP server polls on the
+            // play-mode scheduler — and no frame advances while a batch holds the
+            // main thread. get / list_devices are plain reads and stay allowed.
+            if (tool == "unity_open_mcp_game_view")
+            {
+                var gameViewAction = JsonBody.GetString(paramsBody, "action");
+                if (gameViewAction == "set_resolution" || gameViewAction == "set_device")
+                    return ToolDispatchResult.Fail(
+                        "batch_step_requires_server_poll",
+                        $"commands[{index}] tool '{tool}' action '{gameViewAction}' is not invokable inside a batch: " +
+                        "it returns once the game reports the new size, which the MCP server polls on the " +
+                        "play-mode scheduler, and no frame advances while a batch holds the main thread. " +
+                        "Use it as a single top-level call instead (get and list_devices work inside a batch).");
+            }
+
             // B-N9 — scene_create's safety depends on its `mode` param
             // (additive preserves the scene stack; Single replaces it). Run
             // this param-aware check BEFORE the lifecycle-derived reload

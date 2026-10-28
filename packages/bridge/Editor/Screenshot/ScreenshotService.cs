@@ -5,6 +5,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge.Config;
 using UnityOpenMcpBridge.ObjectRefs;
+using UnityOpenMcpBridge.Playtest;
 using Object = UnityEngine.Object;
 
 namespace UnityOpenMcpBridge.Screenshot
@@ -49,6 +50,8 @@ namespace UnityOpenMcpBridge.Screenshot
             return RenderCameraToPng(sv.camera, width, height);
         }
 
+        public static string SavePng(byte[] png, string label) => WritePng(png, PathStamp(label));
+
         public static string CaptureGameView(int width, int height)
         {
             var cam = ResolveMainCamera();
@@ -75,33 +78,390 @@ namespace UnityOpenMcpBridge.Screenshot
         // Overlay canvases do not render at all (no player loop), so we fall back
         // to depth-ordered camera compositing — still strictly better than
         // Camera.main-only for multi-camera scenes.
-        public static string CaptureComposedView(int width, int height)
+        public static FrameCapture CaptureComposedView(int? width, int? height, bool safeAreaOverlay)
         {
-            return WritePng(CaptureComposedViewBytes(width, height), PathStamp("composed"));
+            var capture = CaptureComposed(width, height, safeAreaOverlay);
+            capture.FilePath = WritePng(capture.Png, PathStamp("composed"));
+            return capture;
         }
 
-        public static byte[] CaptureComposedViewBytes(int width, int height)
+        // The game's composed frame (all cameras + Screen Space Overlay UI).
+        //
+        // Size: without width/height the frame comes back at the game's own
+        // resolution (the Game view size or the simulated device screen) — no
+        // scaling, no Editor letterbox. With width/height of another size the
+        // frame is scaled to fit and padded (black) — never stretched — and the
+        // result reports `scaled_from` + `content_rect`.
+        //
+        // play mode: the main play-mode view's render target — exactly the frame
+        // the game rendered (Overlay canvases included; no Editor chrome; no
+        // Device Simulator bezel). ScreenCapture.CaptureScreenshotAsTexture()
+        // called from the bridge dispatch reads whichever Editor panel is current
+        // (tabs, toolbar, the Simulator's device frame), which is why it is only
+        // the fallback when the view's render target is unreachable.
+        // edit mode: no player loop, so Overlay canvases do not render; every
+        // enabled camera is composited by depth at the game's resolution.
+        public static FrameCapture CaptureComposed(int? width, int? height, bool safeAreaOverlay)
         {
-            if (Application.isPlaying)
+            var context = DescribeGameView();
+            Texture2D frame = null;
+            try
             {
-                // CaptureScreenshotAsTexture grabs the last rendered frame's
-                // backbuffer (all cameras + Overlay UI). The overload taking a
-                // resolution scales the capture; passing the exact size avoids a
-                // resize. Reads back synchronously from the GPU backbuffer.
-                var captured = ScreenCapture.CaptureScreenshotAsTexture();
-                try
+                string source;
+                if (Application.isPlaying)
                 {
-                    return TextureToPngScaled(captured, width, height);
+                    var rt = context.View != null ? GameViewAdapter.TargetTexture(context.View) : null;
+                    if (rt != null)
+                    {
+                        frame = ReadRenderTarget(rt, SystemInfo.graphicsUVStartsAtTop);
+                        source = "play_mode_view";
+                    }
+                    else
+                    {
+                        frame = ScreenCapture.CaptureScreenshotAsTexture();
+                        source = "screen_capture";
+                    }
                 }
-                finally
+                else
                 {
-                    Object.DestroyImmediate(captured);
+                    int nw = context.ScreenWidth > 0 ? context.ScreenWidth : 1280;
+                    int nh = context.ScreenHeight > 0 ? context.ScreenHeight : 720;
+                    frame = RenderAllCamerasByDepthTexture(nw, nh);
+                    source = "cameras";
+                }
+                if (frame == null)
+                    throw new InvalidOperationException("Captured frame was empty.");
+
+                var capture = new FrameCapture
+                {
+                    Source = source,
+                    NativeWidth = frame.width,
+                    NativeHeight = frame.height,
+                    Context = context,
+                };
+                if (safeAreaOverlay)
+                {
+                    var safe = ScaleRect(context.SafeArea, context.ScreenWidth, context.ScreenHeight, frame.width, frame.height);
+                    DrawSafeAreaOverlay(frame, safe);
+                    capture.SafeAreaOverlay = true;
+                    capture.SafeArea = context.SafeArea;
+                }
+                FinishCapture(capture, frame, width, height);
+                return capture;
+            }
+            finally
+            {
+                if (frame != null) Object.DestroyImmediate(frame);
+            }
+        }
+
+        // Camera.main capture (`view: game`) at native size when size is native.
+        public static FrameCapture CaptureGameViewFrame(int width, int height)
+        {
+            var context = DescribeGameView();
+            var png = RenderCameraToPng(ResolveMainCamera(), width, height);
+            return new FrameCapture
+            {
+                Png = png,
+                Width = width,
+                Height = height,
+                NativeWidth = width,
+                NativeHeight = height,
+                // Camera.main renders straight at the requested size: native when
+                // that is the game's resolution, otherwise "requested" (no fit).
+                Native = width == context.ScreenWidth && height == context.ScreenHeight,
+                Source = "main_camera",
+                Context = context,
+            };
+        }
+
+        // The game's resolution for `size: native` (the simulated screen in the
+        // Device Simulator, the Game view render size otherwise).
+        public static bool TryNativeSize(out int width, out int height)
+        {
+            var context = DescribeGameView();
+            width = context.ScreenWidth;
+            height = context.ScreenHeight;
+            return width > 0 && height > 0;
+        }
+
+        // Encode `frame` as is (native) or fitted into width×height (letterbox).
+        private static void FinishCapture(FrameCapture capture, Texture2D frame, int? width, int? height)
+        {
+            if (!width.HasValue || !height.HasValue || (width.Value == frame.width && height.Value == frame.height))
+            {
+                capture.Png = ImageConversion.EncodeToPNG(frame);
+                capture.Width = frame.width;
+                capture.Height = frame.height;
+                capture.Native = true;
+                return;
+            }
+            var fit = FitRect(frame.width, frame.height, width.Value, height.Value);
+            var canvas = Letterbox(frame, width.Value, height.Value, fit);
+            try
+            {
+                capture.Png = ImageConversion.EncodeToPNG(canvas);
+                capture.Width = width.Value;
+                capture.Height = height.Value;
+                capture.Native = false;
+                capture.Content = fit;
+            }
+            finally
+            {
+                Object.DestroyImmediate(canvas);
+            }
+        }
+
+        // Where a srcW×srcH frame lands when fitted (aspect kept) into dstW×dstH,
+        // centred: [x, y, w, h] with a TOP-LEFT origin (image convention).
+        internal static RectInt FitRect(int srcW, int srcH, int dstW, int dstH)
+        {
+            if (srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0) return new RectInt(0, 0, Mathf.Max(dstW, 0), Mathf.Max(dstH, 0));
+            double scale = Math.Min((double)dstW / srcW, (double)dstH / srcH);
+            int w = Math.Max(1, Math.Min(dstW, (int)Math.Round(srcW * scale, MidpointRounding.AwayFromZero)));
+            int h = Math.Max(1, Math.Min(dstH, (int)Math.Round(srcH * scale, MidpointRounding.AwayFromZero)));
+            return new RectInt((dstW - w) / 2, (dstH - h) / 2, w, h);
+        }
+
+        // Scale `frame` into `fit` on a black dstW×dstH canvas.
+        private static Texture2D Letterbox(Texture2D frame, int dstW, int dstH, RectInt fit)
+        {
+            var canvas = new Texture2D(dstW, dstH, CaptureFormat, CaptureMipChain);
+            var black = new Color32[dstW * dstH];
+            for (int i = 0; i < black.Length; i++) black[i] = new Color32(0, 0, 0, 255);
+            canvas.SetPixels32(black);
+            var rt = RenderTexture.GetTemporary(fit.width, fit.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Default);
+            var prevActive = RenderTexture.active;
+            try
+            {
+                frame.filterMode = FilterMode.Bilinear;
+                Graphics.Blit(frame, rt);
+                RenderTexture.active = rt;
+                // Texture rows run bottom-up: the top-left fit.y becomes a bottom offset.
+                int bottom = dstH - fit.y - fit.height;
+                canvas.ReadPixels(new Rect(0, 0, fit.width, fit.height), fit.x, bottom);
+                canvas.Apply();
+                return canvas;
+            }
+            catch
+            {
+                Object.DestroyImmediate(canvas);
+                throw;
+            }
+            finally
+            {
+                RenderTexture.active = prevActive;
+                RenderTexture.ReleaseTemporary(rt);
+            }
+        }
+
+        // Read a render target into a CPU texture, upright. The play-mode view's
+        // target is stored top-down on APIs whose UV origin is at the top (Metal,
+        // D3D, Vulkan) — the Game view draws it flipped there — so it is flipped
+        // back while copying.
+        internal static Texture2D ReadRenderTarget(RenderTexture source, bool flip)
+        {
+            var tmp = RenderTexture.GetTemporary(source.width, source.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Default);
+            var prevActive = RenderTexture.active;
+            var tex = new Texture2D(source.width, source.height, CaptureFormat, CaptureMipChain);
+            try
+            {
+                if (flip) Graphics.Blit(source, tmp, new Vector2(1f, -1f), new Vector2(0f, 1f));
+                else Graphics.Blit(source, tmp);
+                RenderTexture.active = tmp;
+                tex.ReadPixels(new Rect(0, 0, source.width, source.height), 0, 0);
+                tex.Apply();
+                return tex;
+            }
+            catch
+            {
+                Object.DestroyImmediate(tex);
+                throw;
+            }
+            finally
+            {
+                RenderTexture.active = prevActive;
+                RenderTexture.ReleaseTemporary(tmp);
+            }
+        }
+
+        internal static Rect ScaleRect(Rect r, int fromW, int fromH, int toW, int toH)
+        {
+            if (fromW <= 0 || fromH <= 0 || (fromW == toW && fromH == toH)) return r;
+            float sx = (float)toW / fromW, sy = (float)toH / fromH;
+            return new Rect(r.x * sx, r.y * sy, r.width * sx, r.height * sy);
+        }
+
+        // Tint everything outside the safe area (the unsafe band) and outline the
+        // safe rect. `safe` is in the frame's pixels, bottom-left origin (the
+        // Screen.safeArea convention).
+        internal static void DrawSafeAreaOverlay(Texture2D frame, Rect safe)
+        {
+            int w = frame.width, h = frame.height;
+            var px = frame.GetPixels32();
+            int x0 = Mathf.Clamp(Mathf.RoundToInt(safe.xMin), 0, w), x1 = Mathf.Clamp(Mathf.RoundToInt(safe.xMax), 0, w);
+            int y0 = Mathf.Clamp(Mathf.RoundToInt(safe.yMin), 0, h), y1 = Mathf.Clamp(Mathf.RoundToInt(safe.yMax), 0, h);
+            int line = Mathf.Max(2, Mathf.RoundToInt(Mathf.Min(w, h) / 360f));
+            var band = new Color32(255, 0, 80, 255);
+            var edge = new Color32(0, 255, 120, 255);
+            const float bandAlpha = 0.4f;
+            for (int y = 0; y < h; y++)
+            {
+                bool rowInside = y >= y0 && y < y1;
+                for (int x = 0; x < w; x++)
+                {
+                    int i = y * w + x;
+                    bool inside = rowInside && x >= x0 && x < x1;
+                    if (!inside)
+                    {
+                        var c = px[i];
+                        px[i] = new Color32(
+                            (byte)(c.r + (band.r - c.r) * bandAlpha),
+                            (byte)(c.g + (band.g - c.g) * bandAlpha),
+                            (byte)(c.b + (band.b - c.b) * bandAlpha), 255);
+                        continue;
+                    }
+                    if (x < x0 + line || x >= x1 - line || y < y0 + line || y >= y1 - line)
+                        px[i] = edge;
                 }
             }
+            frame.SetPixels32(px);
+            frame.Apply();
+        }
 
-            // edit mode — no player loop, so Overlay canvases cannot render.
-            // Composite every enabled camera in ascending depth order.
-            return RenderAllCamerasByDepth(width, height);
+        // ---- capture context (which device / resolution a frame was taken at) ----
+
+        internal sealed class GameViewContext
+        {
+            public EditorWindow View;
+            public string Mode = "unknown";       // game | simulator | none | unknown
+            public string SizeLabel;               // Game view size entry
+            public string Device;                  // Simulator device id
+            public string Orientation;
+            public int ScreenWidth, ScreenHeight;
+            public Rect SafeArea;
+            public string Note;
+        }
+
+        internal static GameViewContext DescribeGameView()
+        {
+            var ctx = new GameViewContext();
+            try
+            {
+                if (!GameViewAdapter.IsGameViewAvailable(out var code, out var message))
+                {
+                    var size = Handles.GetMainGameViewSize();
+                    ctx.ScreenWidth = (int)size.x;
+                    ctx.ScreenHeight = (int)size.y;
+                    ctx.SafeArea = new Rect(0, 0, ctx.ScreenWidth, ctx.ScreenHeight);
+                    ctx.Note = code + ": " + message;
+                    return ctx;
+                }
+                if (GameViewAdapter.TryGameScreen(out var view, out var kind, out int w, out int h, out var safe, out var sim))
+                {
+                    ctx.ScreenWidth = w;
+                    ctx.ScreenHeight = h;
+                    ctx.SafeArea = safe;
+                }
+                ctx.View = view;
+                ctx.Mode = GameViewAdapter.KindName(kind);
+                if (kind == PlayModeViewKind.Game)
+                {
+                    ctx.SizeLabel = GameViewAdapter.SelectedSize(view)?.Label;
+                    ctx.Orientation = GameViewAdapter.ShapeOrientation(w, h);
+                }
+                else if (sim != null)
+                {
+                    ctx.Device = sim.Device?.Id;
+                    ctx.Orientation = GameViewAdapter.OrientationName(sim.Orientation);
+                }
+            }
+            catch (Exception ex)
+            {
+                ctx.Note = "Game view state unavailable: " + ex.Message;
+            }
+            return ctx;
+        }
+
+        internal static void AppendContext(System.Text.StringBuilder sb, GameViewContext ctx)
+        {
+            sb.Append("{\"mode\":").Append(BridgeJson.EscapeString(ctx.Mode));
+            if (ctx.Device != null) sb.Append(",\"device\":").Append(BridgeJson.EscapeString(ctx.Device));
+            if (ctx.SizeLabel != null) sb.Append(",\"size\":").Append(BridgeJson.EscapeString(ctx.SizeLabel));
+            if (ctx.Orientation != null) sb.Append(",\"orientation\":").Append(BridgeJson.EscapeString(ctx.Orientation));
+            sb.Append(",\"screen\":[").Append(ctx.ScreenWidth).Append(',').Append(ctx.ScreenHeight).Append(']');
+            if (ctx.Mode == "simulator")
+            {
+                sb.Append(",\"safe_area\":");
+                AppendRect(sb, ctx.SafeArea);
+            }
+            sb.Append(",\"playing\":").Append(Application.isPlaying ? "true" : "false");
+            if (ctx.Note != null) sb.Append(",\"note\":").Append(BridgeJson.EscapeString(ctx.Note));
+            sb.Append('}');
+        }
+
+        // Response fields for a frame capture (no surrounding braces, leading comma).
+        internal static void AppendCaptureFields(System.Text.StringBuilder sb, FrameCapture c)
+        {
+            sb.Append(",\"width\":").Append(c.Width).Append(",\"height\":").Append(c.Height);
+            // native: the game's own resolution, unscaled; fitted: a frame scaled
+            // into width x height (padded when the aspect differs); requested:
+            // Camera.main rendered directly at width x height.
+            string sizeMode = c.Native ? "native" : c.Source == "main_camera" ? "requested" : "fitted";
+            sb.Append(",\"size\":").Append(BridgeJson.EscapeString(sizeMode));
+            if (sizeMode == "fitted")
+            {
+                sb.Append(",\"scaled_from\":[").Append(c.NativeWidth).Append(',').Append(c.NativeHeight).Append(']');
+                sb.Append(",\"content_rect\":[").Append(c.Content.x).Append(',').Append(c.Content.y).Append(',')
+                  .Append(c.Content.width).Append(',').Append(c.Content.height).Append(']');
+            }
+            sb.Append(",\"source\":").Append(BridgeJson.EscapeString(c.Source));
+            if (c.SafeAreaOverlay)
+            {
+                sb.Append(",\"overlay\":\"safe_area\",\"safe_area\":");
+                AppendRect(sb, c.SafeArea);
+            }
+            if (c.Context != null)
+            {
+                if (c.Source == "play_mode_view" && c.Context.ScreenWidth > 0 &&
+                    (c.NativeWidth != c.Context.ScreenWidth || c.NativeHeight != c.Context.ScreenHeight))
+                    sb.Append(",\"warning\":").Append(BridgeJson.EscapeString(
+                        "The view's last rendered frame (" + c.NativeWidth + "x" + c.NativeHeight + ") differs from the game's screen (" +
+                        c.Context.ScreenWidth + "x" + c.Context.ScreenHeight + "): the size changed and has not rendered yet, or the view is not visible."));
+                if (c.Source == "screen_capture")
+                    sb.Append(",\"warning\":").Append(BridgeJson.EscapeString(
+                        "The play-mode view's render target was unreachable; this frame is the Editor panel ScreenCapture saw and may include Editor chrome."));
+                sb.Append(",\"capturedAt\":");
+                AppendContext(sb, c.Context);
+            }
+        }
+
+        private static void AppendRect(System.Text.StringBuilder sb, Rect r)
+        {
+            sb.Append('[').Append(Fmt(r.x)).Append(',').Append(Fmt(r.y)).Append(',')
+              .Append(Fmt(r.width)).Append(',').Append(Fmt(r.height)).Append(']');
+        }
+
+        private static string Fmt(float v) => Math.Round(v, 2).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+        // Argument rules shared by screenshot / capture_inline. Null when valid.
+        internal static string ValidateFrameArgs(string view, int? width, int? height, string size, string overlay)
+        {
+            bool sizeNative = false;
+            if (!string.IsNullOrEmpty(size))
+            {
+                if (size != "native") return "size must be \"native\" (or omitted).";
+                sizeNative = true;
+            }
+            if (width.HasValue != height.HasValue) return "Pass width and height together (or neither).";
+            if (sizeNative && width.HasValue) return "size: \"native\" returns the game's own resolution; drop width/height or drop size.";
+            if (sizeNative && view != "composed" && view != "game") return "size: \"native\" applies to the composed and game views.";
+            if (!string.IsNullOrEmpty(overlay) && overlay != "none")
+            {
+                if (overlay != "safe_area") return "overlay must be \"safe_area\" (or omitted).";
+                if (view != "composed") return "overlay: \"safe_area\" applies to the composed view.";
+            }
+            return null;
         }
 
         // M20 Plan 1 / T20.1.1 — render from an arbitrary camera pose without
@@ -255,65 +615,12 @@ namespace UnityOpenMcpBridge.Screenshot
             return outPath;
         }
 
-        // feedback #5 — encode a captured Texture2D to PNG, scaling it to the
-        // requested size when the backbuffer resolution differs (ScreenCapture
-        // returns the screen's native resolution). Uses RenderTexture + a
-        // scaled Graphics.Blit so the output matches the caller's width/height.
-        private static byte[] TextureToPngScaled(Texture src, int width, int height)
-        {
-            if (src == null)
-                throw new InvalidOperationException("Captured frame was empty.");
-
-            // Fast path: native size already matches.
-            if (src.width == width && src.height == height)
-            {
-                var tmp = new Texture2D(width, height, CaptureFormat, CaptureMipChain);
-                var prevActive = RenderTexture.active;
-                try
-                {
-                    var rt = RenderTexture.GetTemporary(width, height, 0);
-                    Graphics.Blit(src, rt);
-                    RenderTexture.active = rt;
-                    tmp.ReadPixels(new Rect(0, 0, width, height), 0, 0);
-                    tmp.Apply();
-                    var png = ImageConversion.EncodeToPNG(tmp);
-                    RenderTexture.ReleaseTemporary(rt);
-                    return png;
-                }
-                finally
-                {
-                    Object.DestroyImmediate(tmp);
-                    RenderTexture.active = prevActive;
-                }
-            }
-
-            // Scale path.
-            var scaled = new Texture2D(width, height, CaptureFormat, CaptureMipChain);
-            var prevActiveScale = RenderTexture.active;
-            try
-            {
-                var rt = RenderTexture.GetTemporary(width, height, 0);
-                Graphics.Blit(src, rt);
-                RenderTexture.active = rt;
-                scaled.ReadPixels(new Rect(0, 0, width, height), 0, 0);
-                scaled.Apply();
-                var png = ImageConversion.EncodeToPNG(scaled);
-                RenderTexture.ReleaseTemporary(rt);
-                return png;
-            }
-            finally
-            {
-                Object.DestroyImmediate(scaled);
-                RenderTexture.active = prevActiveScale;
-            }
-        }
-
         // feedback #5 — render every enabled Camera in ascending depth order
         // into a single RenderTexture, mirroring how Unity composites the frame.
         // The first camera clears; subsequent cameras render on top (depth test
         // resolves overlaps by depth). Each camera's targetTexture is swapped and
         // restored, so the scene's cameras are left untouched.
-        private static byte[] RenderAllCamerasByDepth(int width, int height)
+        private static Texture2D RenderAllCamerasByDepthTexture(int width, int height)
         {
             var cameras = SceneQuery.FindAllOfType<Camera>();
             if (cameras == null || cameras.Length == 0)
@@ -348,9 +655,7 @@ namespace UnityOpenMcpBridge.Screenshot
                 var tex = new Texture2D(width, height, CaptureFormat, CaptureMipChain);
                 tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
                 tex.Apply();
-                var png = ImageConversion.EncodeToPNG(tex);
-                Object.DestroyImmediate(tex);
-                return png;
+                return tex;
             }
             finally
             {
@@ -526,5 +831,20 @@ namespace UnityOpenMcpBridge.Screenshot
             var name = $"screenshot-{label}-{stamp}.png";
             return Path.Combine(OutputDir, name);
         }
+    }
+
+    // One frame capture and what it was taken at.
+    internal sealed class FrameCapture
+    {
+        public byte[] Png;
+        public string FilePath;
+        public int Width, Height;               // the returned image
+        public int NativeWidth, NativeHeight;   // the frame before any fit
+        public bool Native;                     // returned at native size (no scaling)
+        public RectInt Content;                 // fitted frame inside the image, top-left origin
+        public string Source;                   // play_mode_view | cameras | screen_capture | main_camera
+        public bool SafeAreaOverlay;
+        public Rect SafeArea;                   // game screen pixels, bottom-left origin
+        public ScreenshotService.GameViewContext Context;
     }
 }

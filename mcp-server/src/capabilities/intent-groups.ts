@@ -118,8 +118,9 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
     groups: ["playtest", "input-simulation"],
     reason:
       "Playtest — read the uGUI screen (ui_snapshot: text, roles, visibility, overflow / " +
-      "placeholder / touch-size diagnostics) and tap by on-screen label (target_text on " +
-      "inputsim_pointer / inputsim_touch / inputsim_gesture).",
+      "placeholder / touch-size diagnostics), tap by on-screen label (target_text on " +
+      "inputsim_pointer / inputsim_touch / inputsim_gesture), and set the Game view resolution " +
+      "or a Device Simulator device to check layout and the safe area (game_view).",
     keywords: [
       "playtest",
       "playtests",
@@ -133,6 +134,13 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "offscreen",
       "touch-target",
       "accessibility",
+      "game-view",
+      "resolution",
+      "device-simulator",
+      "simulator",
+      "safe-area",
+      "notch",
+      "aspect-ratio",
     ],
   },
   {

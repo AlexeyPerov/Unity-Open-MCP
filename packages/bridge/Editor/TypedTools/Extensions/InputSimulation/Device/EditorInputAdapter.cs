@@ -19,7 +19,6 @@
 // releases it (Canceled) — a deliberate `inputsim_touch press` never outlives
 // the play session.
 using System;
-using System.Globalization;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
@@ -31,22 +30,11 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
     [InitializeOnLoad]
     internal static class EditorInputAdapter
     {
-        internal sealed class VersionRule
-        {
-            public readonly int FromMajor, FromMinor, ToMajorExclusive;
-            public readonly string VerifiedOn;
-            public VersionRule(int fromMajor, int fromMinor, int toMajorExclusive, string verifiedOn)
-            {
-                FromMajor = fromMajor; FromMinor = fromMinor; ToMajorExclusive = toMajorExclusive; VerifiedOn = verifiedOn;
-            }
-        }
-
         // Unity 6 line: verified on 6000.3.21f1 (macOS). The signature probe below
         // still guards every call. Add 2022.3 here only after a walkthrough there.
-        internal static readonly VersionRule[] Table =
-        {
-            new VersionRule(6000, 0, 7000, "6000.3.21f1 (macOS)"),
-        };
+        internal static readonly EditorVersionTable Versions = new EditorVersionTable(
+            "legacy input injection",
+            new EditorVersionTable.Rule(6000, 0, 7000, "6000.3.21f1 (macOS)"));
 
         // Test seam: overrides Application.unityVersion.
         internal static string UnityVersionOverride;
@@ -71,38 +59,11 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         internal static string UnityVersion => UnityVersionOverride ?? Application.unityVersion;
 
         // "6000.3.21f1" → (6000, 3). False for anything unparsable.
-        internal static bool TryParseVersion(string version, out int major, out int minor)
-        {
-            major = minor = 0;
-            if (string.IsNullOrEmpty(version)) return false;
-            var parts = version.Split('.');
-            if (parts.Length < 2) return false;
-            if (!int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out major)) return false;
-            int digits = 0;
-            while (digits < parts[1].Length && char.IsDigit(parts[1][digits])) digits++;
-            return digits > 0 && int.TryParse(parts[1].Substring(0, digits), NumberStyles.None, CultureInfo.InvariantCulture, out minor);
-        }
+        internal static bool TryParseVersion(string version, out int major, out int minor) =>
+            EditorVersionTable.TryParse(version, out major, out minor);
 
-        internal static bool IsVersionSupported(string version, out string detail)
-        {
-            if (!TryParseVersion(version, out var major, out var minor))
-            {
-                detail = "Unrecognised Unity version '" + version + "'.";
-                return false;
-            }
-            foreach (var rule in Table)
-            {
-                bool atLeast = major > rule.FromMajor || (major == rule.FromMajor && minor >= rule.FromMinor);
-                if (atLeast && major < rule.ToMajorExclusive)
-                {
-                    detail = "Unity " + version + " is in the verified range (verified on " + rule.VerifiedOn + ").";
-                    return true;
-                }
-            }
-            detail = "Unity " + version + " is not in the legacy input injection version table (supported: Unity 6 line, verified on " +
-                     Table[0].VerifiedOn + "). 2022.3 and other lines stay disabled until verified.";
-            return false;
-        }
+        internal static bool IsVersionSupported(string version, out string detail) =>
+            Versions.IsSupported(version, out detail);
 
         // Resolve + signature-probe the internal entry point. Cached per domain.
         internal static bool TryResolve(out string error)

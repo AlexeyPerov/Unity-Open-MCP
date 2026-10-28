@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { testRunOperation, projectCommandOperation, playmodeOperation, pollPlaymodeOperation, playmodeResult, toolOutput, toolResultBody, PLAYMODE_OPERATION_TOOLS } from "./jobs/adapters.js";
 import { INPUTSIM_GESTURE_INLINE_LIMIT_MS } from "./tools/inputsim-gesture.js";
+import { routeGameView as settleGameView } from "./game-view-settle.js";
 import { JobManager, JobManagerError, type JobOwner } from "./jobs/job-manager.js";
 import { handleJobs } from "./jobs/handler.js";
 import { PROCESS_AGENT_ID, PROCESS_IDENTITY, type RequestIdentity } from "./agent-identity.js";
@@ -898,6 +899,18 @@ export class ToolRouter implements Router {
     return sourceResult({ error: { code, message: String(snapshot.result?.error ?? `Gesture ended ${snapshot.reason ?? snapshot.state}; held input was released.`) }, ...result }, "live", true);
   }
 
+  /**
+   * `game_view`: set_resolution / set_device in play mode return once the game
+   * reports the new size — the bridge starts a settle watch on its play-mode
+   * scheduler and this route polls it (then re-reads `get`), or answers
+   * `not_settled`. get / list_devices and edit-mode changes pass through.
+   */
+  private async routeGameView(args: Record<string, unknown>, live: LiveClient): Promise<CallToolResult> {
+    const outcome = await settleGameView(live, args);
+    if (outcome.kind === "passthrough") return injectRouteMeta(outcome.result, { route: "live" });
+    return sourceResult(outcome.body, "live", outcome.isError);
+  }
+
   private readonly modelCache = new AssetModelCache();
 
   /**
@@ -936,6 +949,9 @@ export class ToolRouter implements Router {
       // Gestures run on the bridge's play-mode scheduler: start, then poll the
       // operation to its terminal trace here (long gestures become a job).
       ["unity_open_mcp_inputsim_gesture", (l, a, id) => this.routeInputsimGesture(a, l, id)],
+      // Game view / Simulator changes settle over play-mode frames: poll the
+      // bridge's settle watch here so set_* returns once the game sees the size.
+      ["unity_open_mcp_game_view", (l, a) => this.routeGameView(a, l)],
       ["unity_open_mcp_bridge_status", (l, a) => this.routeBridgeStatus(a, l)],
       // M31 Plan 3 — Editor fd-exhaustion operator surfaces. restart_editor
       // is the reactive kill half (acts AFTER the Editor is hung);

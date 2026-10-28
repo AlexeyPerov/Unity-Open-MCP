@@ -25,7 +25,7 @@ Every other group is hidden until activated with
 | `gate-intelligence` | off | Impact preview, gate-budget estimate, and mutation explanation. |
 | `build-settings` | off | Build pipeline, project settings, render/quality settings, and preferences. |
 | `agent-senses` | off | Tests, screenshots, Frame Debugger, console, profiler captures, memory/rendering reads, and spatial queries. |
-| `playtest` | off | Read and play the game like a tester: `ui_snapshot` (uGUI text, visibility, diagnostics); pairs with `input-simulation` for tap by label. `ui_snapshot` needs `com.unity.ugui`. See [Playtest tools](playtest.md). |
+| `playtest` | off | Read and play the game like a tester: `ui_snapshot` (uGUI text, visibility, diagnostics) and `game_view` (Game view resolution, Device Simulator device and orientation, safe area); pairs with `input-simulation` for tap by label. `ui_snapshot` needs `com.unity.ugui`; `game_view` needs Unity 6. See [Playtest tools](playtest.md). |
 | `unity-hub-control` | off | Local Unity Hub editor discovery, install, module, and install-path tools. |
 | `navigation` | off | NavMesh; package-gated on `com.unity.ai.navigation`. |
 | `input-system` | off | Input System; package-gated on `com.unity.inputsystem`. |

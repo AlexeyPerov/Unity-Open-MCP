@@ -173,13 +173,22 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         private static void AppendScreen(StringBuilder sb, Vector2 screen)
         {
             int w = Mathf.RoundToInt(screen.x), h = Mathf.RoundToInt(screen.y);
-            // Screen.safeArea read from Editor code describes the current GUIView;
-            // trust it only when it fits the Game view size, else report the full view.
-            var safe = Screen.safeArea;
-            bool fits = safe.width > 0 && safe.height > 0 && safe.xMin >= 0 && safe.yMin >= 0
-                        && safe.xMax <= w + 0.5f && safe.yMax <= h + 0.5f
-                        && Screen.width == w && Screen.height == h;
-            if (!fits) safe = new Rect(0, 0, w, h);
+            Rect safe;
+            // The Game view / Simulator adapter knows the safe area the game sees
+            // (the Device Simulator's, or the whole view in the Game view).
+            if (UnityOpenMcpBridge.Playtest.GameViewAdapter.TryGameScreen(out _, out _, out int gw, out int gh, out var gameSafe, out _)
+                && gw == w && gh == h)
+                safe = gameSafe;
+            else
+            {
+                // Screen.safeArea read from Editor code describes the current GUIView;
+                // trust it only when it fits the Game view size, else report the full view.
+                safe = Screen.safeArea;
+                bool fits = safe.width > 0 && safe.height > 0 && safe.xMin >= 0 && safe.yMin >= 0
+                            && safe.xMax <= w + 0.5f && safe.yMax <= h + 0.5f
+                            && Screen.width == w && Screen.height == h;
+                if (!fits) safe = new Rect(0, 0, w, h);
+            }
             sb.Append(",\"screen\":{\"w\":").Append(w).Append(",\"h\":").Append(h);
             sb.Append(",\"safe_area\":");
             AppendRect(sb, safe);

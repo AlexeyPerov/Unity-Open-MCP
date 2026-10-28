@@ -34,6 +34,7 @@ Use exact schemas, scoped mutations, and gate evidence to work on the selected U
 - Before screenshots, event capture, or test runs: [Senses and tests](references/senses-and-tests.md).
 - Before driving gameplay input (taps, drags, multi-second gestures — legacy Input Manager or Input System): activate `input-simulation` and follow its domain skill; read the reported `backend` array and refusals instead of reflecting into game input code.
 - To playtest a screen (read its texts, find "the Buy button"): activate `playtest` with `input-simulation`, read it with `ui_snapshot` (compact, paged), then tap by label with `target_text`; resolve `ambiguous_target` with `index` / `under`, never by guessing names.
+- To check layout on a device or resolution: device first, then capture. `game_view get` (note the state to restore), then `set_device` (Device Simulator device + orientation; read `screen.safe_area` / `insets`) or `set_resolution` (reuses an `Open MCP <w>x<h>` Game view size — its only persistent effect); continue only on `settled: true` (`not_settled` = paused or hidden view). Capture `view: "composed"` without width/height (native size; `overlay: "safe_area"` for notch checks) and quote its `capturedAt`. Restore explicitly afterwards (`set_resolution` with the `size_label` from `get`); input tools never open the Simulator.
 
 ### Project-owned commands
 

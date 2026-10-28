@@ -359,8 +359,10 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "minimum touch size on request); edit and play mode, read-only, paged. Its node model backs " +
       "`target_text` label targeting on inputsim_pointer / inputsim_touch / inputsim_gesture, so " +
       "the loop is snapshot → tap by label → step → screenshot (pair with input-simulation and " +
-      "agent-senses). ui_snapshot compiles when com.unity.ugui is present; the compiled subset is " +
-      "reconciled from GET /tools.",
+      "agent-senses). game_view: read or set the Game view resolution (a reused 'Open MCP <w>x<h>' " +
+      "size entry) or a Device Simulator device + orientation, with the safe area / notch insets the " +
+      "game sees; set_* waits until the game reports the new size. ui_snapshot compiles when " +
+      "com.unity.ugui is present; the compiled subset is reconciled from GET /tools.",
     defaultEnabled: false,
   },
   {
@@ -1002,9 +1004,12 @@ assign("input-simulation", [
 // --- playtest (read and play the game like a tester) ------------------------
 // ui_snapshot is com.unity.ugui-gated in the bridge (it shares the uGUI
 // sub-assembly with inputsim_pointer, whose label targeting uses the same node
-// model). Read-only, gate-free.
+// model). Read-only, gate-free. game_view lives in the bridge root assembly
+// (Editor internals behind a version-checked adapter); gate-free Editor UI
+// change whose only persistent effect is a reused custom Game view size entry.
 assign("playtest", [
   "unity_open_mcp_ui_snapshot",
+  "unity_open_mcp_game_view",
 ]);
 
 // ---------------------------------------------------------------------------

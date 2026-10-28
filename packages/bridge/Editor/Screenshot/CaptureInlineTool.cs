@@ -24,18 +24,25 @@ namespace UnityOpenMcpBridge.Screenshot
             IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.None,
             Group = "agent-senses")]
         [System.ComponentModel.Description(
-            "Capture a screenshot from the Scene view, Game view, or an " +
+            "Capture a screenshot from the Scene view, Game view (Camera.main), the " +
+            "composed player frame (native game resolution by default), or an " +
             "isolated 2x2 composite of a single GameObject and return it as an " +
             "inline base64 PNG image (no temp file written). Useful for agents " +
             "that don't read the filesystem.")]
         public string CaptureInline(
             string view = "scene",
-            int width = 1280,
-            int height = 720,
+            int? width = null,
+            int? height = null,
             string object_path = null,
-            string background = "skybox")
+            string background = "skybox",
+            string size = null,
+            string overlay = null)
         {
             view = (view ?? "scene").ToLowerInvariant();
+            var argError = ScreenshotService.ValidateFrameArgs(view, width, height, size, overlay);
+            if (argError != null) return ErrorJson("validation_error", argError);
+            // scene / game / isolated keep their 1280x720 default; composed defaults to native.
+            int w = width ?? 1280, h = height ?? 720;
 
             try
             {
@@ -44,15 +51,16 @@ namespace UnityOpenMcpBridge.Screenshot
                 switch (view)
                 {
                     case "scene":
-                        png = ScreenshotService.CaptureSceneViewBytes(width, height);
+                        png = ScreenshotService.CaptureSceneViewBytes(w, h);
                         break;
                     case "game":
-                        png = ScreenshotService.CaptureGameViewBytes(width, height);
-                        break;
-                    // feedback #5 — composed view: full player frame (all cameras + Overlay UI).
+                        if (size == "native" && !ScreenshotService.TryNativeSize(out w, out h))
+                            return ErrorJson("native_size_unavailable", "The Game view reports no size yet; open the Game view or pass width/height.");
+                        return BuildFrameJson(view, ScreenshotService.CaptureGameViewFrame(w, h));
+                    // Composed view: the full player frame (all cameras + Overlay
+                    // UI) at native size unless width/height are passed.
                     case "composed":
-                        png = ScreenshotService.CaptureComposedViewBytes(width, height);
-                        break;
+                        return BuildFrameJson(view, ScreenshotService.CaptureComposed(width, height, overlay == "safe_area"));
                     case "isolated":
                         if (string.IsNullOrEmpty(object_path))
                             return ErrorJson("missing_parameter",
@@ -63,14 +71,14 @@ namespace UnityOpenMcpBridge.Screenshot
                             return ErrorJson("asset_not_found",
                                 $"No active GameObject found at path '{object_path}'.");
 
-                        png = ScreenshotService.CaptureIsolatedBytes(target, width, height, background ?? "skybox");
+                        png = ScreenshotService.CaptureIsolatedBytes(target, w, h, background ?? "skybox");
                         break;
                     default:
                         return ErrorJson("validation_error",
                             $"Unknown view '{view}'. Use 'scene', 'game', 'composed', or 'isolated'.");
                 }
 
-                return BuildSuccessJson(view, width, height, png);
+                return BuildSuccessJson(view, w, h, png);
             }
             catch (Exception e)
             {
@@ -127,6 +135,19 @@ namespace UnityOpenMcpBridge.Screenshot
             sb.Append("\"mimeType\":\"image/png\",");
             sb.Append("\"byteLength\":").Append(png.Length).Append(',');
             sb.Append("\"inlineImage\":\"").Append(Convert.ToBase64String(png)).Append('"');
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static string BuildFrameJson(string view, FrameCapture capture)
+        {
+            var sb = new StringBuilder(capture.Png.Length * 2 + 512);
+            sb.Append("{\"status\":\"ok\",\"view\":").Append(Esc(view));
+            sb.Append(",\"resolution\":\"").Append(capture.Width).Append('x').Append(capture.Height).Append('"');
+            ScreenshotService.AppendCaptureFields(sb, capture);
+            sb.Append(",\"mimeType\":\"image/png\"");
+            sb.Append(",\"byteLength\":").Append(capture.Png.Length);
+            sb.Append(",\"inlineImage\":\"").Append(Convert.ToBase64String(capture.Png)).Append('"');
             sb.Append('}');
             return sb.ToString();
         }

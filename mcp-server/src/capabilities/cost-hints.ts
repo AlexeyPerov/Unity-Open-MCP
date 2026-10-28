@@ -287,6 +287,16 @@ export const RECOMMENDED_TOOL_CHAINS: RecommendedToolChain[] = [
     ],
   },
   {
+    name: "device-layout-check",
+    task: "Check a screen's layout on a phone (notch / safe area) or at a fixed resolution, with frames a human can compare.",
+    steps: [
+      "unity_open_mcp_game_view (action get) — note the current size or device to restore later",
+      "unity_open_mcp_game_view (action set_device with a list_devices id, or set_resolution) — continue only on settled: true",
+      "unity_senses_screenshot (view composed, no width/height, overlay safe_area) — native frame; quote capturedAt",
+      "unity_open_mcp_game_view (action set_resolution with the size_label from get) — restore explicitly",
+    ],
+  },
+  {
     name: "batch-setup",
     task:
       "Bundle multi-step setup (create objects + materials + assignments) into one round trip.",
