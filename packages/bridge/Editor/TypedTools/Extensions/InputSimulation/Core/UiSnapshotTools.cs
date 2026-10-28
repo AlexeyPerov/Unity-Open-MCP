@@ -14,7 +14,9 @@
 // node except folded labels, plus sprite/depth; full = every active node in any
 // visibility state with every key. Paging: page_size + cursor (prefix
 // "ui_snapshot"). Diagnostics are computed over the whole `under` scope and
-// emitted on the first page only.
+// emitted on the first page only; a placeholder_pattern that times out refuses
+// the call with regex_timeout. `reason` accompanies a visibility geometry does
+// not explain (no_camera).
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -86,8 +88,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             {
                 try
                 {
-                    placeholder = new Regex(placeholder_pattern, RegexOptions.CultureInvariant,
-                        System.TimeSpan.FromMilliseconds(100));
+                    placeholder = new Regex(placeholder_pattern, RegexOptions.CultureInvariant, UiRegexRun.PerText);
                 }
                 catch (System.ArgumentException ex)
                 {
@@ -126,6 +127,14 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             int remaining = total - end;
             bool occlusion = UiOcclusion.Available;
 
+            Diagnostics diagnostics = null;
+            if (offset == 0)
+            {
+                diagnostics = Diagnose(inScope, placeholder, min_touch_size);
+                if (diagnostics.Placeholder != null && diagnostics.Placeholder.TimedOut)
+                    return diagnostics.Placeholder.ErrorJson("", "placeholder_pattern");
+            }
+
             var sb = new StringBuilder(4096);
             sb.Append("{\"status\":\"ok\"");
             sb.Append(",\"mode\":").Append(EditorApplication.isPlaying ? "\"play\"" : "\"edit\"");
@@ -150,10 +159,10 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 AppendNode(sb, selected[i], profile, occlusion);
             }
             sb.Append(']');
-            if (offset == 0)
+            if (diagnostics != null)
             {
                 sb.Append(",\"diagnostics\":");
-                AppendDiagnostics(sb, inScope, placeholder, placeholder_pattern, min_touch_size);
+                AppendDiagnostics(sb, diagnostics, placeholder_pattern, min_touch_size);
             }
             AppendPagination(sb, offset, page_size, remaining);
             sb.Append('}');
@@ -210,6 +219,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             AppendRect(sb, n.ScreenRect);
             sb.Append(",\"visible\":").Append(n.Visible ? "true" : "false");
             sb.Append(",\"visibility\":").Append(InputSimulationJson.Esc(n.Visibility));
+            if (n.Reason != null) sb.Append(",\"reason\":").Append(InputSimulationJson.Esc(n.Reason));
             if (n.Interactive) sb.Append(",\"interactable\":").Append(n.Interactable ? "true" : "false");
             else if (full) sb.Append(",\"interactable\":false");
             string occluder = occlusion ? UiOcclusion.OccluderPath(n) : null;
@@ -230,23 +240,42 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             sb.Append('}');
         }
 
-        private static void AppendDiagnostics(StringBuilder sb, List<UiNode> nodes, Regex placeholder,
-            string pattern, float? minTouch)
+        private sealed class Diagnostics
         {
-            var overflow = new List<UiNode>();
-            var zero = new List<UiNode>();
-            var placeholders = new List<UiNode>();
-            var small = new List<UiNode>();
+            public readonly List<UiNode> Overflow = new List<UiNode>();
+            public readonly List<UiNode> Zero = new List<UiNode>();
+            public readonly List<UiNode> Placeholders = new List<UiNode>();
+            public readonly List<UiNode> Small = new List<UiNode>();
+            public UiRegexRun Placeholder;   // null unless placeholder_pattern was passed
+        }
+
+        // Stops matching the placeholder pattern at its first timeout
+        // (Placeholder.TimedOut); the caller refuses with regex_timeout.
+        private static Diagnostics Diagnose(List<UiNode> nodes, Regex placeholder, float? minTouch)
+        {
+            var d = new Diagnostics { Placeholder = placeholder == null ? null : new UiRegexRun(placeholder) };
             foreach (var n in nodes)
             {
-                if (n.OwnText.HasValue && n.OwnText.Value.Overflowing && !string.IsNullOrEmpty(n.OwnTextDisplay)) overflow.Add(n);
-                if (n.Control && n.Visibility == "zero_size") zero.Add(n);
-                if (placeholder != null && n.OwnText.HasValue && !string.IsNullOrEmpty(n.OwnTextDisplay) && SafeMatch(placeholder, n.OwnTextDisplay))
-                    placeholders.Add(n);
+                if (n.OwnText.HasValue && n.OwnText.Value.Overflowing && !string.IsNullOrEmpty(n.OwnTextDisplay)) d.Overflow.Add(n);
+                if (n.Control && n.Visibility == "zero_size") d.Zero.Add(n);
+                if (d.Placeholder != null && n.OwnText.HasValue && !string.IsNullOrEmpty(n.OwnTextDisplay))
+                {
+                    if (d.Placeholder.IsMatch(n.OwnTextDisplay)) d.Placeholders.Add(n);
+                    if (d.Placeholder.TimedOut) return d;
+                }
                 if (minTouch.HasValue && n.Control && n.Visible
                     && (n.ScreenRect.width < minTouch.Value || n.ScreenRect.height < minTouch.Value))
-                    small.Add(n);
+                    d.Small.Add(n);
             }
+            return d;
+        }
+
+        private static void AppendDiagnostics(StringBuilder sb, Diagnostics d, string pattern, float? minTouch)
+        {
+            var overflow = d.Overflow;
+            var zero = d.Zero;
+            var placeholders = d.Placeholders;
+            var small = d.Small;
 
             sb.Append("{\"overflow\":");
             AppendDiagnosticList(sb, overflow, (b, n) =>
@@ -264,7 +293,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 b.Append(",\"rect\":");
                 AppendRect(b, n.ScreenRect);
             }, null);
-            if (placeholder != null)
+            if (d.Placeholder != null)
             {
                 sb.Append(",\"placeholder\":");
                 AppendDiagnosticList(sb, placeholders, (b, n) =>
@@ -285,12 +314,6 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 });
             }
             sb.Append('}');
-        }
-
-        private static bool SafeMatch(Regex rx, string s)
-        {
-            try { return rx.IsMatch(s); }
-            catch (RegexMatchTimeoutException) { return false; }
         }
 
         private static void AppendDiagnosticList(StringBuilder sb, List<UiNode> list,

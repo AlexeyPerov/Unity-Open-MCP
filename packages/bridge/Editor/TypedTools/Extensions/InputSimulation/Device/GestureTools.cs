@@ -161,6 +161,12 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         private readonly FrameSeriesRecorder recorder;
         private ConditionTick? previousTick;
         private bool gestureFinished;
+        // Captures in gameplay time stop advancing while Time.timeScale is 0:
+        // wall-clock bound from the first tick (infinite otherwise).
+        private readonly double captureLimitMs = double.PositiveInfinity;
+        private readonly System.Diagnostics.Stopwatch wall = new System.Diagnostics.Stopwatch();
+        // Test seam: wall-clock ms since the first tick.
+        internal Func<double> WallClockOverride;
         private readonly List<FingerRun> runs = new List<FingerRun>();
         private readonly List<TraceEntry> trace = new List<TraceEntry>();
         private readonly List<string> errors = new List<string>();
@@ -181,6 +187,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             {
                 recorder = new FrameSeriesRecorder(captures, new FrameSeriesOptions { Label = "gesture" }, null);
                 ExpectedDurationMs = Math.Max(plan.DurationMs, captures.LastMs);
+                if (plan.Time == PlayModeTimeBase.Gameplay) captureLimitMs = CaptureSeriesTool.CaptureWallLimitMs(ExpectedDurationMs);
             }
         }
 
@@ -206,9 +213,21 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             {
                 recorder.OperationId = Id;
                 recorder.Arm(now);
+                wall.Start();
             }
             if (!recorder.CapturesDone) recorder.Observe(now, previousTick, frame.ScreenWidth, frame.ScreenHeight);
             previousTick = now;
+            if ((!gestureFinished || !recorder.CapturesDone) &&
+                (WallClockOverride?.Invoke() ?? wall.Elapsed.TotalMilliseconds) >= captureLimitMs)
+            {
+                // Cleanup releases held fingers and writes the frames captured so far.
+                recorder.StopCaptures("timed_out");
+                FailureCode = "timed_out";
+                FailureMessage = "The gameplay-time gesture and its captures did not finish within " +
+                                 PlaytestJson.Num(captureLimitMs, 0) + " ms of wall-clock time (Time.timeScale 0?); " +
+                                 "fingers were released and the frames captured so far kept. Use time: realtime for a paused game.";
+                return true;
+            }
             if (!gestureFinished) return false;
             if (!recorder.CapturesDone) { Phase = "capturing"; return false; }
             Phase = "encoding";
@@ -238,9 +257,11 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 {
                     // Began at the down keyframe's point, whatever the frame timing.
                     var downPoint = run.Finger.Path[0].Point;
-                    Inject(run.Finger.Id, DeviceTouchPhase.Began, downPoint);
+                    // Down before Inject: if one backend throws after another took
+                    // the Began, Cleanup still cancels this finger.
                     run.Down = true;
                     run.Last = downPoint;
+                    Inject(run.Finger.Id, DeviceTouchPhase.Began, downPoint);
                     TraceKeyframes(run, 0, frame, downPoint, "began");
                     // One phase per finger per frame: a second SimulateTouch in
                     // the same frame would overwrite Began. Later keyframes (even
@@ -330,7 +351,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             }
             if (recorder != null)
             {
-                // Keep the frames captured so far when cut short in a live Editor.
+                // Keep the frames captured so far when cut short in a live Editor,
+                // within the recorder's flush budget.
                 if (reason == PlayModeEndReason.Cancelled || reason == PlayModeEndReason.PlayModeExited || reason == PlayModeEndReason.Failed)
                 {
                     try { recorder.FlushPending(); } catch (Exception) { /* best effort */ }
@@ -344,6 +366,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             var sb = new StringBuilder(1024);
             sb.Append("{\"kind\":").Append(BridgeJson.EscapeString(Kind));
             sb.Append(",\"reason\":").Append(BridgeJson.EscapeString(PlayModeScheduler.ReasonName(reason)));
+            if (FailureCode != null && reason == PlayModeEndReason.Failed)
+                sb.Append(",\"error_code\":").Append(BridgeJson.EscapeString(FailureCode));
             if (error != null) sb.Append(",\"error\":").Append(BridgeJson.EscapeString(error));
             sb.Append(",\"backend\":").Append(route.BackendJson());
             sb.Append(",\"skipped\":").Append(route.SkippedJson());
@@ -369,6 +393,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                       .Append(",\"target\":").Append(key.TextTargetJson).Append('}');
                 }
             if (anyText) sb.Append(']');
+            if (plan.TextTargetsOmitted > 0) sb.Append(",\"textTargetsOmitted\":").Append(plan.TextTargetsOmitted);
             sb.Append(",\"trace\":[");
             for (int i = 0; i < trace.Count; i++)
             {

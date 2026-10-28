@@ -54,6 +54,13 @@ namespace UnityOpenMcpBridge.Playtest
         internal const int MaxSettleTimeoutMs = 20000;
         private static readonly string[] Actions = { "get", "set_resolution", "set_device", "list_devices" };
 
+        // A play-mode view behind another tab does not render: its render target
+        // and its configured size describe the last frame it drew, not the game.
+        internal const string HiddenViewWarning =
+            "The play-mode view is not the front tab of its dock area, so the running game does not render into it: " +
+            "render_texture is the last frame it drew and screen is the view's configured size, not what the game sees now. " +
+            "game_view set_resolution / set_device bring it to the front.";
+
         [BridgeTool(ToolName,
             Title = "Playtest: Game View and Device Simulator",
             IsMutating = false,
@@ -136,6 +143,10 @@ namespace UnityOpenMcpBridge.Playtest
             }
 
             sb.Append(",\"focused\":").Append(view.hasFocus ? "true" : "false");
+            var front = GameViewAdapter.IsFrontTab(view);
+            if (front.HasValue) sb.Append(",\"visible\":").Append(front.Value ? "true" : "false");
+            if (front == false && EditorApplication.isPlaying)
+                sb.Append(",\"warning\":").Append(BridgeJson.EscapeString(HiddenViewWarning));
             float backing = GameViewAdapter.BackingScale(view);
             var pos = view.position;
             sb.Append(",\"window\":{\"logical\":[").Append(Num(pos.width)).Append(',').Append(Num(pos.height)).Append(']');
@@ -156,8 +167,11 @@ namespace UnityOpenMcpBridge.Playtest
                         sb.Append(",\"width\":").Append(size.Width).Append(",\"height\":").Append(size.Height);
                     sb.Append('}');
                 }
-                sb.Append(",\"scale\":").Append(Num(GameViewAdapter.Zoom(view)));
-                sb.Append(",\"low_resolution_aspect_ratios\":").Append(GameViewAdapter.LowResolution(view) ? "true" : "false");
+                float zoom = GameViewAdapter.Zoom(view);
+                if (zoom > 0) sb.Append(",\"scale\":").Append(Num(zoom));
+                var lowResolution = GameViewAdapter.LowResolution(view);
+                if (lowResolution.HasValue)
+                    sb.Append(",\"low_resolution_aspect_ratios\":").Append(lowResolution.Value ? "true" : "false");
             }
             else if (kind == PlayModeViewKind.Simulator && GameViewAdapter.IsSimulatorAvailable(out _, out _))
             {
@@ -361,10 +375,14 @@ namespace UnityOpenMcpBridge.Playtest
             extra.Append('}');
             if (switched != null) extra.Append(",\"switched\":").Append(BridgeJson.EscapeString(switched));
             extra.Append(",\"brought_to_front\":").Append(focusedView ? "true" : "false");
+            // A clamped size is still applied: the game renders (and the settle
+            // watches) the clamped render size.
             if (clamped)
                 extra.Append(",\"clamped\":{\"requested\":[").Append(entry.Width).Append(',').Append(entry.Height)
-                     .Append("],\"render\":[").Append(ew).Append(',').Append(eh).Append("]}");
-            return Finish("set_resolution", view, ew, eh, clamped, timeoutMs, extra.ToString());
+                     .Append("],\"render\":[").Append(ew).Append(',').Append(eh).Append("],\"note\":")
+                     .Append(BridgeJson.EscapeString("The Editor clamps this size (GPU texture limit or the 8K cap); the game renders at the clamped size."))
+                     .Append('}');
+            return Finish("set_resolution", view, ew, eh, timeoutMs, extra.ToString());
         }
 
         // ------------------------------------------------------------------
@@ -442,7 +460,7 @@ namespace UnityOpenMcpBridge.Playtest
                     "Orientation / allowed auto-rotation, or Screen.orientation set by game code) decide, as on a device."));
             if (switched != null) extra.Append(",\"switched\":").Append(BridgeJson.EscapeString(switched));
             extra.Append(",\"brought_to_front\":").Append(focusedView ? "true" : "false");
-            return Finish("set_device", view, sim.Width, sim.Height, false, timeoutMs, extra.ToString());
+            return Finish("set_device", view, sim.Width, sim.Height, timeoutMs, extra.ToString());
         }
 
         // A docked tab that is not in front does not render, and the game then
@@ -460,7 +478,7 @@ namespace UnityOpenMcpBridge.Playtest
         // Settle
         // ------------------------------------------------------------------
 
-        private static string Finish(string action, EditorWindow view, int expectedW, int expectedH, bool clamped, int timeoutMs, string extra)
+        private static string Finish(string action, EditorWindow view, int expectedW, int expectedH, int timeoutMs, string extra)
         {
             var sb = new StringBuilder(1536);
             sb.Append("{\"status\":\"ok\",\"action\":").Append(BridgeJson.EscapeString(action)).Append(',');
@@ -472,13 +490,6 @@ namespace UnityOpenMcpBridge.Playtest
             var running = PlayModeScheduler.RunningWithResource(GameViewSettleOperation.Resource);
             if (running != null) PlayModeScheduler.Cancel(running);
 
-            if (clamped)
-            {
-                sb.Append(",\"settled\":false,\"settle\":{\"state\":\"clamped\",\"reason\":")
-                  .Append(BridgeJson.EscapeString("The Editor clamps this size (GPU texture limit or the 8K cap); the game renders at the clamped size."))
-                  .Append("}}");
-                return sb.ToString();
-            }
             if (!EditorApplication.isPlaying)
             {
                 // Edit mode: the view's size is set synchronously; no game is running.
@@ -574,6 +585,7 @@ namespace UnityOpenMcpBridge.Playtest
         private bool settled;
         private int lastWidth, lastHeight, lastFrame;
         private int textureWidth, textureHeight;
+        private bool lastVisible = true;
 
         public GameViewSettleOperation(int width, int height, double limitMs)
         {
@@ -590,20 +602,23 @@ namespace UnityOpenMcpBridge.Playtest
 
         protected internal override bool Tick(PlayModeFrame frame)
         {
-            var rt = GameViewAdapter.TargetTexture(GameViewAdapter.MainView());
+            var view = GameViewAdapter.MainView();
+            var rt = GameViewAdapter.TargetTexture(view);
             return Observe(frame.ScreenWidth, frame.ScreenHeight, rt != null ? rt.width : 0, rt != null ? rt.height : 0,
-                frame.RealtimeMs, frame.FrameCount);
+                frame.RealtimeMs, frame.FrameCount, GameViewAdapter.IsFrontTab(view) != false);
         }
 
-        // Pure step (unit-tested): true when done (settled or out of time).
-        internal bool Observe(int screenWidth, int screenHeight, int rtWidth, int rtHeight, double elapsedMs, int frameCount = 0)
+        // Pure step (unit-tested): true when done (settled or out of time). A
+        // view behind another tab never counts: its render target is a stale frame.
+        internal bool Observe(int screenWidth, int screenHeight, int rtWidth, int rtHeight, double elapsedMs, int frameCount = 0, bool viewVisible = true)
         {
             lastWidth = screenWidth;
             lastHeight = screenHeight;
             lastFrame = frameCount;
             textureWidth = rtWidth;
             textureHeight = rtHeight;
-            bool ok = screenWidth == expectedWidth && screenHeight == expectedHeight &&
+            lastVisible = viewVisible;
+            bool ok = viewVisible && screenWidth == expectedWidth && screenHeight == expectedHeight &&
                       rtWidth == expectedWidth && rtHeight == expectedHeight;
             matched = ok ? matched + 1 : 0;
             if (matched >= RequiredFrames)
@@ -625,7 +640,9 @@ namespace UnityOpenMcpBridge.Playtest
             sb.Append(",\"expected\":[").Append(expectedWidth).Append(',').Append(expectedHeight).Append(']');
             sb.Append(",\"observed\":{\"screen\":[").Append(lastWidth).Append(',').Append(lastHeight).Append(']');
             sb.Append(",\"render_texture\":[").Append(textureWidth).Append(',').Append(textureHeight).Append(']');
-            sb.Append(",\"frame\":").Append(lastFrame).Append('}');
+            sb.Append(",\"frame\":").Append(lastFrame);
+            if (!lastVisible) sb.Append(",\"visible\":false");
+            sb.Append('}');
             if (!settled)
                 sb.Append(",\"reason\":").Append(BridgeJson.EscapeString(
                     reason == PlayModeEndReason.Completed

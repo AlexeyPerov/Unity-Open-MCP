@@ -148,6 +148,7 @@ namespace UnityOpenMcpBridge.Playtest
         private double elapsedMs, realtimeMs;
         private readonly bool gameplayTime;
         private double startPlayTime = double.NaN;
+        private double startWallMs;
 
         // Test seam: wall-clock milliseconds since the call (null = Stopwatch).
         internal Func<double> WallClockOverride;
@@ -162,8 +163,9 @@ namespace UnityOpenMcpBridge.Playtest
             TimeoutMs = timeoutMs;
             requestedScale = timeScale;
             // The scheduler clock is realtime so progress reads as wall time
-            // against timeout_ms; gameplay time for `ms` conditions is the
-            // game's own clock (Time.time since the first tick).
+            // against timeout_ms. For `ms` conditions, gameplay time is the
+            // game's own clock (Time.time since the first tick) and realtime the
+            // wall clock since the first tick (a hitch counts in full).
             TimeBase = PlayModeTimeBase.Realtime;
             gameplayTime = timeBase == PlayModeTimeBase.Gameplay;
             ExpectedDurationMs = timeoutMs;
@@ -184,6 +186,7 @@ namespace UnityOpenMcpBridge.Playtest
             {
                 startFrame = frame.FrameCount;
                 startPlayTime = frame.PlayTime;
+                startWallMs = WallMs;
                 watcher.Attach();
                 if (requestedScale.HasValue)
                 {
@@ -194,8 +197,8 @@ namespace UnityOpenMcpBridge.Playtest
             }
             lastFrame = frame.FrameCount;
             ticks++;
-            realtimeMs = frame.RealtimeMs;
-            elapsedMs = !gameplayTime ? frame.RealtimeMs
+            realtimeMs = WallMs - startWallMs;
+            elapsedMs = !gameplayTime ? realtimeMs
                 : double.IsNaN(frame.PlayTime) || double.IsNaN(startPlayTime) ? frame.RealtimeMs * frame.TimeScale
                 : (frame.PlayTime - startPlayTime) * 1000.0;
 
@@ -204,7 +207,7 @@ namespace UnityOpenMcpBridge.Playtest
                 Frame = frame.FrameCount,
                 TickIndex = frame.TickIndex,
                 ElapsedMs = elapsedMs,
-                RealtimeMs = frame.RealtimeMs,
+                RealtimeMs = realtimeMs,
                 PlayTime = frame.PlayTime,
             });
 

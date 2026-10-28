@@ -265,6 +265,7 @@ review image). Needs a rendering Game view / Simulator; Unity 6.
 | `both_endpoint_forms` | Both target and screen coords supplied for one drag endpoint | Pass one form per endpoint (target wins; this error makes it explicit) |
 | `conflicting_targets` | `target_text` together with `object_id` / `target` / screen coords (or the drag/swipe start forms) | Pass one form |
 | `index_out_of_range` / `under_not_found` | `index` past the visible label matches / `under` matches no path | Re-read `matches[]` or the snapshot paths |
+| `regex_timeout` | A `text_match: "regex"` pattern took over 100 ms on one text or 2 s for the whole screen (the pattern and text are named) | Simplify the pattern (no nested quantifiers) or use `contains` |
 | `ui_text_unavailable` | `target_text` on touch/gesture in a project without uGUI | Use `target` or coordinates |
 | `no_target_or_screen_point` | Neither object_id, target, nor screen point given | Provide one |
 | `no_camera` | `Camera.main` is null (pointer3d) | Tag a MainCamera in the scene |

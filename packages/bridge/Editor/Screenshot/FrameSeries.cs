@@ -7,15 +7,17 @@
 // previous frame reached the slot's time / frame offset from the series base,
 // and is labelled with THAT frame (number, Time.time, elapsed) — the image
 // and its label always describe the same frame. `unchanged` marks a capture
-// whose pixels equal the previous capture's (a static screen — or a hidden
-// Game view tab, which does not render).
+// whose every pixel equals the previous capture's (a static screen — or a
+// hidden Game view tab, which does not render).
 //
 // Cost. A capture is a GPU blit + synchronous read-back of the native frame
 // (optionally scaled / cropped) into managed memory; PNG encoding happens after
 // the last capture, spread over later ticks (so encoding never delays a
-// scheduled capture). Bounded: at most MaxFrames captures and MaxRawBytes of
-// pixels held at once; files go to the capture folder
-// (~/.unity-open-mcp/screenshots/series-<stamp>-<id>/).
+// scheduled capture). A cut-short series (cancel, exit play, failure) encodes
+// what it holds for at most FlushBudgetMs on the main thread; frames not
+// written by then are reported `dropped: "flush_budget"`. Bounded: at most
+// MaxFrames captures and MaxRawBytes of pixels held at once; files go to the
+// capture folder (~/.unity-open-mcp/screenshots/series-<stamp>-<id>/).
 //
 // Metric (optional, per capture, inside `metric_region` or the captured area):
 // mean Rec. 709 luminance (0..1) and, against the previous capture, the mean
@@ -204,6 +206,8 @@ namespace UnityOpenMcpBridge.Screenshot
         internal const double ChangedThreshold = 10.0 / 255.0;
         internal const int ThumbMaxWidth = 320;
         internal const int MetricMaxSamples = 250_000;
+        // Main-thread time a cut-short series may spend writing held frames.
+        internal const double FlushBudgetMs = 1000;
 
         public readonly FrameSchedule Schedule;
         public readonly FrameSeriesOptions Options;
@@ -214,8 +218,7 @@ namespace UnityOpenMcpBridge.Screenshot
         private ConditionTick baseTick;
         private int next;                 // next slot to consider
         private long heldBytes;
-        private ulong lastHash;
-        private bool hasHash;
+        private int lastImage = -1;       // the previous capture, for `unchanged`
         private int encoded;
         private bool sheetDone;
         private string folder;
@@ -326,13 +329,12 @@ namespace UnityOpenMcpBridge.Screenshot
                 return -1;
             }
             heldBytes += bytes;
-            var hash = SampleHash(g.Rgba, g.Width, g.Height);
-            slot.Unchanged = hasHash && hash == lastHash;
-            lastHash = hash;
-            hasHash = true;
+            // Captures stay held until encoding starts, so the previous one's pixels are here.
+            slot.Unchanged = lastImage >= 0 && SamePixels(images[lastImage], g.Rgba, g.Width, g.Height);
             images.Add(new FrameImage { Rgba = g.Rgba, Width = g.Width, Height = g.Height });
             slot.Taken = true;
             slot.Image = images.Count - 1;
+            lastImage = slot.Image;
             if (Options.Luminance || Options.Diff) Measure(slot, g.Rgba, g.Width, g.Height);
             return slot.Image;
         }
@@ -350,22 +352,11 @@ namespace UnityOpenMcpBridge.Screenshot
             return (rgba, w, h);
         }
 
-        // FNV-1a over a sparse pixel sample plus the size: equal for identical
-        // frames, and cheap enough to run on every capture.
-        internal static ulong SampleHash(byte[] rgba, int width, int height)
+        // True only when the size and every byte of every pixel match.
+        internal static bool SamePixels(FrameImage previous, byte[] rgba, int width, int height)
         {
-            ulong hash = 14695981039346656037UL;
-            void Mix(uint v) { hash ^= v; hash *= 1099511628211UL; }
-            Mix((uint)width);
-            Mix((uint)height);
-            int pixels = width * height;
-            int step = Math.Max(1, pixels / 65_536);
-            for (int p = 0; p < pixels; p += step)
-            {
-                int i = p * 4;
-                Mix((uint)(rgba[i] | rgba[i + 1] << 8 | rgba[i + 2] << 16));
-            }
-            return hash;
+            if (previous?.Rgba == null || rgba == null || previous.Width != width || previous.Height != height) return false;
+            return new ReadOnlySpan<byte>(previous.Rgba).SequenceEqual(new ReadOnlySpan<byte>(rgba));
         }
 
         // The region (screen pixels) mapped into render-target pixels, clipped.
@@ -520,14 +511,36 @@ namespace UnityOpenMcpBridge.Screenshot
             return true;
         }
 
-        // Encode whatever is pending now (cancel / exit play). No contact sheet.
-        internal void FlushPending()
+        // Encode what is pending now (cancel / exit play / failure) for at most
+        // `budgetMs` of main-thread time (the first frame always); frames left
+        // over are reported `dropped: "flush_budget"`. No contact sheet.
+        internal void FlushPending(double budgetMs = FlushBudgetMs)
         {
-            while (encoded < images.Count)
+            var clock = Stopwatch.StartNew();
+            for (int written = 0; encoded < images.Count; written++)
             {
+                if (written > 0 && clock.Elapsed.TotalMilliseconds >= budgetMs) break;
                 try { EncodeOne(encoded); } catch (Exception) { /* best effort */ }
                 encoded++;
             }
+            int unwritten = 0;
+            for (; encoded < images.Count; encoded++)
+            {
+                if (images[encoded].Rgba == null) continue;
+                unwritten++;
+                foreach (var slot in Schedule.Slots)
+                    if (slot.Image == encoded) slot.Dropped = "flush_budget";
+            }
+            if (unwritten > 0 && warnings.Count < 5)
+                warnings.Add(unwritten + " captured frame(s) were not written: the series was cut short and cleanup writes for at most " +
+                             budgetMs.ToString("0", CultureInfo.InvariantCulture) + " ms.");
+        }
+
+        // End the capture phase now: slots not yet due are reported `dropped: reason`.
+        internal void StopCaptures(string reason)
+        {
+            for (; next < Schedule.Slots.Count; next++)
+                if (!Schedule.Slots[next].Taken && Schedule.Slots[next].Dropped == null) Schedule.Slots[next].Dropped = reason;
         }
 
         internal void Release()
@@ -687,6 +700,7 @@ namespace UnityOpenMcpBridge.Screenshot
                     sb.Append(",\"realtime_ms\":").Append(PlaytestJson.Num(s.RealtimeMs));
                     sb.Append(",\"file\":").Append(image.File == null ? "null" : BridgeJson.EscapeString(image.File));
                     sb.Append(",\"width\":").Append(image.Width).Append(",\"height\":").Append(image.Height);
+                    if (s.Dropped != null) sb.Append(",\"dropped\":").Append(BridgeJson.EscapeString(s.Dropped));
                     if (s.Unchanged) sb.Append(",\"unchanged\":true");
                     if (!double.IsNaN(s.Luminance))
                     {

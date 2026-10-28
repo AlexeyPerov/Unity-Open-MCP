@@ -10,8 +10,11 @@
 //              removed / changed keys and files; small values shown, long
 //              strings and files as size + sha256.
 //   restore  — edit mode only. Without confirm: a dry run returning the diff
-//              it would apply (current → snapshot; every removal listed).
-//              With confirm: PlayerPrefs.DeleteAll + typed Set* + Save (so the
+//              it would apply (current → snapshot; every removal and
+//              overwrite listed) and its `plan` id. With confirm + that plan
+//              (refused when the state moved since the dry run): after
+//              proving the store reader sees a fresh key, PlayerPrefs.DeleteAll
+//              + typed Set* + Save (so the
 //              Editor's in-memory cache and the store agree; excluded keys keep
 //              their current values), EditorPrefs only under the snapshot's
 //              prefixes (never DeleteAll), and persistentDataPath mirrored
@@ -46,6 +49,7 @@ namespace UnityOpenMcpBridge.Playtest
         void Flush();
         PrefsReadResult Read(string company, string product);
         void DeleteAll();
+        void Delete(string key);
         void Set(PrefEntry entry);
     }
 
@@ -64,6 +68,7 @@ namespace UnityOpenMcpBridge.Playtest
         public void Flush() => PlayerPrefs.Save();
         public PrefsReadResult Read(string company, string product) => PrefsStore.ReadPlayerPrefs(company, product);
         public void DeleteAll() => PlayerPrefs.DeleteAll();
+        public void Delete(string key) => PlayerPrefs.DeleteKey(key);
 
         public void Set(PrefEntry e)
         {
@@ -132,13 +137,21 @@ namespace UnityOpenMcpBridge.Playtest
             IdentityOverride != null ? IdentityOverride() : new[] { PlayerSettings.companyName, PlayerSettings.productName };
 
         // Only restore with confirm:true writes state; every other request is
-        // read-only for the project (EffectiveToolContract).
+        // read-only for the project (EffectiveToolContract). Mutating when either
+        // the depth-aware reader or the registry's argument binder (which reads
+        // the first occurrence of a key anywhere in the body) sees restore +
+        // confirm, so a crafted body cannot bind a restore the gate classified
+        // as a read.
         internal static bool IsMutatingRequest(string body)
         {
-            var action = JsonBody.GetString(JsonBody.TopLevelField(body ?? "{}", "action"), "action");
-            return string.Equals(action?.Trim(), "restore", StringComparison.OrdinalIgnoreCase)
-                && JsonBody.GetBool(JsonBody.TopLevelField(body ?? "{}", "confirm"), "confirm");
+            body = body ?? "{}";
+            return IsRestoreConfirm(JsonBody.TopLevelField(body, "action"), JsonBody.TopLevelField(body, "confirm"))
+                || IsRestoreConfirm(body, body);
         }
+
+        private static bool IsRestoreConfirm(string actionJson, string confirmJson) =>
+            string.Equals(JsonBody.GetString(actionJson, "action")?.Trim(), "restore", StringComparison.OrdinalIgnoreCase)
+            && JsonBody.GetBool(confirmJson, "confirm");
 
         [BridgeTool(ToolName,
             Title = "Playtest: Player State Sandbox",
@@ -159,6 +172,7 @@ namespace UnityOpenMcpBridge.Playtest
             string name = null,
             string against = null,
             bool confirm = false,
+            string plan = null,
             string[] editor_prefs_prefixes = null,
             string[] exclude = null,
             string[] exclude_keys = null,
@@ -176,7 +190,7 @@ namespace UnityOpenMcpBridge.Playtest
             int lim = limit ?? DefaultLimit;
             if (lim < 1 || lim > MaxLimit) return Invalid("limit must be 1.." + MaxLimit + ".");
 
-            var misplaced = MisplacedArguments(action, against, confirm, editor_prefs_prefixes, exclude, exclude_keys,
+            var misplaced = MisplacedArguments(action, against, confirm, plan, editor_prefs_prefixes, exclude, exclude_keys,
                 max_files_mb, overwrite, company, product);
             if (misplaced != null) return Invalid(misplaced);
 
@@ -195,7 +209,7 @@ namespace UnityOpenMcpBridge.Playtest
                     case "diff":
                         return Diff(name, against, company ?? id[0], product ?? id[1], id, lim);
                     case "restore":
-                        return Restore(name, confirm, company ?? id[0], product ?? id[1], id, lim);
+                        return Restore(name, confirm, plan, company ?? id[0], product ?? id[1], id, lim);
                     case "list":
                         return List(company ?? id[0], product ?? id[1], id);
                     default:
@@ -208,7 +222,7 @@ namespace UnityOpenMcpBridge.Playtest
             }
         }
 
-        private static string MisplacedArguments(string action, string against, bool confirm, string[] prefixes,
+        private static string MisplacedArguments(string action, string against, bool confirm, string plan, string[] prefixes,
             string[] exclude, string[] excludeKeys, int? maxMb, bool overwrite, string company, string product)
         {
             var wrong = new List<string>();
@@ -227,8 +241,10 @@ namespace UnityOpenMcpBridge.Playtest
             }
             if (action != "diff" && against != null) wrong.Add("against");
             if (action != "restore" && confirm) wrong.Add("confirm");
+            if (plan != null && !(action == "restore" && confirm)) wrong.Add("plan");
             if (wrong.Count == 0) return null;
-            return string.Join(", ", wrong) + (wrong.Count == 1 ? " does" : " do") + " not apply to action '" + action + "'." +
+            return string.Join(", ", wrong) + (wrong.Count == 1 ? " does" : " do") + " not apply to action '" + action + "'" +
+                (wrong.Contains("plan") && action == "restore" ? " without confirm: true" : "") + "." +
                 (action == "snapshot" && (company != null || product != null)
                     ? " A snapshot always captures the open project."
                     : "");
@@ -324,7 +340,13 @@ namespace UnityOpenMcpBridge.Playtest
                 {
                     var old = Path.Combine(productDir, ".old-" + Guid.NewGuid().ToString("N"));
                     Directory.Move(dir, old);
-                    Directory.Move(tmp, dir);
+                    try { Directory.Move(tmp, dir); }
+                    catch
+                    {
+                        // Put the previous snapshot back under its name.
+                        Directory.Move(old, dir);
+                        throw;
+                    }
                     TryDeleteDirectory(old);
                 }
                 else
@@ -409,7 +431,7 @@ namespace UnityOpenMcpBridge.Playtest
             sb.Append(",\"to\":");
             if (toDoc != null) AppendSide(sb, toDoc, SnapshotStore.SnapshotDir(company, product, against));
             else sb.Append("{\"current\":true,\"mode\":").Append(Q(IsPlaying ? "play" : "edit")).Append(",\"flushed\":true}");
-            AppendDiff(sb, diff, limit, listEveryRemoval: false);
+            AppendDiff(sb, diff, limit, listEveryLoss: false);
             sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }
@@ -418,7 +440,8 @@ namespace UnityOpenMcpBridge.Playtest
         // restore
         // ==================================================================
 
-        private static ToolDispatchResult Restore(string name, bool confirm, string company, string product, string[] id, int limit)
+        private static ToolDispatchResult Restore(string name, bool confirm, string planArg, string company, string product,
+            string[] id, int limit)
         {
             if (IsPlaying)
                 return ToolDispatchResult.FailWithDetail("edit_mode_required",
@@ -433,32 +456,54 @@ namespace UnityOpenMcpBridge.Playtest
                 return Mismatch(snap, id, "restore",
                     "restore only applies a snapshot of the open project (same company and product name).");
 
+            var target = SnapshotStore.ToState(snap);
+            var badPath = target.Files.Select(f => f.Path).Concat(target.Dirs).FirstOrDefault(p => !PersistentFiles.IsSafeRelative(p));
+            if (badPath != null)
+                return ToolDispatchResult.FailWithDetail("snapshot_corrupt",
+                    "Snapshot manifest path '" + badPath + "' is not a plain path under persistentDataPath; nothing was changed.",
+                    "{\"name\":" + Q(name) + ",\"path\":" + Q(badPath) + "}",
+                    new[] { "Take a new snapshot; this one cannot be restored safely." });
+
             var prefixes = snap.editorPrefsCaptured ? snap.editorPrefsPrefixes : null;
             var current = CaptureCurrent(id, snap.keyExcludes, prefixes, snap.fileExcludes, hash: true,
                 limitBytes: 0, limitFiles: 0, out failure);
             if (failure != null) return failure;
-            var target = SnapshotStore.ToState(snap);
             var plan = StateDiff.Compute(current.State, target);
+            var unsupportedDeleted = current.State.UnsupportedPrefs.Concat(current.ExcludedUnsupported).ToList();
+            var planId = PlanId(plan, unsupportedDeleted);
 
             if (!confirm)
             {
                 var sb = new StringBuilder(2048);
                 sb.Append("{\"status\":\"ok\",\"action\":\"restore\",\"dry_run\":true");
+                sb.Append(",\"plan\":").Append(Q(planId));
                 sb.Append(",\"from\":{\"current\":true,\"mode\":\"edit\"}");
                 sb.Append(",\"to\":"); AppendSide(sb, snap, snapDir);
-                AppendDiff(sb, plan, limit, listEveryRemoval: true);
-                sb.Append(",\"unsupported_deleted\":"); AppendStrings(sb, current.State.UnsupportedPrefs);
-                sb.Append(",\"warning\":").Append(Q(RestoreWarning(plan, prefixes, current.State.UnsupportedPrefs.Count)));
+                AppendDiff(sb, plan, limit, listEveryLoss: true);
+                sb.Append(",\"unsupported_deleted\":"); AppendStrings(sb, unsupportedDeleted);
+                sb.Append(",\"warning\":").Append(Q(RestoreWarning(plan, prefixes, unsupportedDeleted.Count)));
                 sb.Append(",\"agentNextSteps\":"); AppendStrings(sb, new[]
                 {
                     plan.Identical
                         ? "Nothing to restore: the current state already matches the snapshot."
-                        : "Review prefs.removed / files.removed (everything restore deletes), then call restore again with " +
-                          "confirm: true to apply. Nothing has changed yet.",
+                        : "Review prefs.removed / files.removed and the changed lists (everything restore deletes or " +
+                          "overwrites), then call restore again with confirm: true and plan: \"" + planId + "\" to apply. " +
+                          "Nothing has changed yet.",
                 });
                 sb.Append('}');
                 return ToolDispatchResult.Ok(sb.ToString());
             }
+
+            // confirm applies exactly the plan the caller reviewed: a state that
+            // moved since the dry run (a new save file, a changed key) refuses.
+            if (planArg != planId)
+                return ToolDispatchResult.FailWithDetail(planArg == null ? "plan_required" : "plan_changed",
+                    planArg == null
+                        ? "restore confirm:true needs the `plan` id of the dry run it applies; nothing was changed."
+                        : "The current state changed since the dry run that returned plan '" + planArg +
+                          "'; nothing was changed.",
+                    "{\"plan\":" + Q(planId) + ",\"given\":" + Q(planArg) + "}",
+                    new[] { "Call restore without confirm, review its removals and overwrites, then confirm with the plan it returns." });
 
             // Integrity first: every stored file must still match its manifest.
             var filesDir = Path.Combine(snapDir, SnapshotStore.FilesDir);
@@ -472,76 +517,131 @@ namespace UnityOpenMcpBridge.Playtest
                         new[] { "Take a new snapshot; this one cannot be restored faithfully." });
             }
 
-            var errors = new List<string>();
-            var backend = Prefs;
-
-            // PlayerPrefs: the API (not the store) so the Editor's in-memory cache
-            // and the store agree. Excluded keys keep their current values.
-            backend.DeleteAll();
-            foreach (var e in target.Prefs) backend.Set(e);
-            foreach (var e in current.ExcludedEntries) backend.Set(e);
-            backend.Flush();
-
-            // EditorPrefs: only keys under the snapshot's prefixes, never DeleteAll.
-            int editorDeleted = 0, editorSet = 0;
-            if (prefixes != null)
+            // Every path restore writes or removes stays under persistentDataPath:
+            // none may pass through a symbolic link (the scan skips links, so a
+            // link is never in the plan as itself).
+            var root = PersistentRoot;
+            var linked = string.IsNullOrEmpty(root)
+                ? new List<string>()
+                : plan.Files.Added.Select(f => f.Path)
+                    .Concat(plan.Files.Changed.Select(kv => kv.Value.Path))
+                    .Concat(plan.Files.Removed.Select(f => f.Path))
+                    .Concat(plan.Files.DirsAdded).Concat(plan.Files.DirsRemoved)
+                    .Where(p => PersistentFiles.PassesThroughLink(root, p)).Distinct(StringComparer.Ordinal).ToList();
+            if (linked.Count > 0)
             {
-                var ep = EditorPrefsBackend;
-                foreach (var e in plan.EditorPrefs.Removed) { ep.Delete(e.Key); editorDeleted++; }
-                foreach (var kv in plan.EditorPrefs.Changed) { ep.Set(kv.Value); editorSet++; }
-                foreach (var e in plan.EditorPrefs.Added) { ep.Set(e); editorSet++; }
+                var detail = new StringBuilder(256);
+                detail.Append("{\"root\":").Append(Q(root)).Append(",\"paths\":"); AppendStrings(detail, linked.Take(20));
+                detail.Append('}');
+                return ToolDispatchResult.FailWithDetail("persistent_path_link",
+                    linked.Count + " path(s) restore would write or remove pass through a symbolic link out of persistentDataPath; " +
+                    "nothing was changed.", detail.ToString(),
+                    new[] { "Remove or replace the link (see paths), then run the dry run again." });
             }
 
-            // Files: exact mirror of the snapshot (excluded paths untouched).
-            var root = PersistentRoot;
+            // The dry run's prefs.removed is only as complete as the store read:
+            // prove the reader sees a key written and saved through PlayerPrefs
+            // before DeleteAll (DeleteAll removes the probe again).
+            var backend = Prefs;
+            if (!StoreSeesWrites(backend, id, out var storeSource))
+                return ToolDispatchResult.FailWithDetail("prefs_store_unverified",
+                    "A probe key written through PlayerPrefs and saved did not appear in the store read (" + storeSource +
+                    "), so the dry run's prefs lists cannot be trusted; nothing was restored.",
+                    "{\"store\":" + Q(storeSource) + ",\"probe_key\":" + Q(StoreProbeKey) + "}",
+                    new[] { "The PlayerPrefs store this Editor writes is not the one the bridge reads on this platform; " +
+                            "report it with the store path. Files and PlayerPrefs were left as they are." });
+
+            var errors = new List<string>();
+            int editorDeleted = 0, editorSet = 0;
             int written = 0, removed = 0, dirsCreated = 0, dirsRemoved = 0;
             var keptDirs = new List<string>();
-            if (!string.IsNullOrEmpty(root))
+            try
             {
-                Directory.CreateDirectory(root);
-                foreach (var d in plan.Files.DirsAdded)
+                // PlayerPrefs: the API (not the store) so the Editor's in-memory cache
+                // and the store agree. Excluded keys keep their current values.
+                backend.DeleteAll();
+                foreach (var e in target.Prefs) backend.Set(e);
+                foreach (var e in current.ExcludedEntries) backend.Set(e);
+                backend.Flush();
+
+                // EditorPrefs: only keys under the snapshot's prefixes, never DeleteAll.
+                if (prefixes != null)
                 {
-                    try { Directory.CreateDirectory(PersistentFiles.ToNative(root, d)); dirsCreated++; }
-                    catch (Exception e) { errors.Add("mkdir " + d + ": " + e.Message); }
+                    var ep = EditorPrefsBackend;
+                    foreach (var e in plan.EditorPrefs.Removed) { ep.Delete(e.Key); editorDeleted++; }
+                    foreach (var kv in plan.EditorPrefs.Changed) { ep.Set(kv.Value); editorSet++; }
+                    foreach (var e in plan.EditorPrefs.Added) { ep.Set(e); editorSet++; }
                 }
-                foreach (var f in plan.Files.Added.Concat(plan.Files.Changed.Select(kv => kv.Value)))
+
+                // Files: exact mirror of the snapshot (excluded paths untouched).
+                // Removals first: on a case-insensitive file system a case-only
+                // rename would otherwise delete the file just written.
+                if (!string.IsNullOrEmpty(root))
                 {
-                    try
+                    Directory.CreateDirectory(root);
+                    foreach (var f in plan.Files.Removed)
                     {
-                        var dst = PersistentFiles.ToNative(root, f.Path);
-                        Directory.CreateDirectory(Path.GetDirectoryName(dst));
-                        File.Copy(PersistentFiles.ToNative(filesDir, f.Path), dst, overwrite: true);
-                        written++;
+                        try { File.Delete(PersistentFiles.ToNative(root, f.Path)); removed++; }
+                        catch (Exception e) { errors.Add("remove " + f.Path + ": " + e.Message); }
                     }
-                    catch (Exception e) { errors.Add("write " + f.Path + ": " + e.Message); }
+                    foreach (var d in plan.Files.DirsAdded)
+                    {
+                        try { Directory.CreateDirectory(PersistentFiles.ToNative(root, d)); dirsCreated++; }
+                        catch (Exception e) { errors.Add("mkdir " + d + ": " + e.Message); }
+                    }
+                    foreach (var f in plan.Files.Added.Concat(plan.Files.Changed.Select(kv => kv.Value)))
+                    {
+                        try
+                        {
+                            var dst = PersistentFiles.ToNative(root, f.Path);
+                            Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                            File.Copy(PersistentFiles.ToNative(filesDir, f.Path), dst, overwrite: true);
+                            written++;
+                        }
+                        catch (Exception e) { errors.Add("write " + f.Path + ": " + e.Message); }
+                    }
+                    foreach (var d in plan.Files.DirsRemoved.OrderByDescending(d => d.Length))
+                    {
+                        try
+                        {
+                            var abs = PersistentFiles.ToNative(root, d);
+                            if (!Directory.Exists(abs)) continue;
+                            if (Directory.EnumerateFileSystemEntries(abs).Any()) { keptDirs.Add(d); continue; }
+                            Directory.Delete(abs, recursive: false);
+                            dirsRemoved++;
+                        }
+                        catch (Exception e) { errors.Add("rmdir " + d + ": " + e.Message); }
+                    }
                 }
-                foreach (var f in plan.Files.Removed)
-                {
-                    try { File.Delete(PersistentFiles.ToNative(root, f.Path)); removed++; }
-                    catch (Exception e) { errors.Add("remove " + f.Path + ": " + e.Message); }
-                }
-                foreach (var d in plan.Files.DirsRemoved.OrderByDescending(d => d.Length))
-                {
-                    var abs = PersistentFiles.ToNative(root, d);
-                    if (!Directory.Exists(abs)) continue;
-                    if (Directory.EnumerateFileSystemEntries(abs).Any()) { keptDirs.Add(d); continue; }
-                    try { Directory.Delete(abs, recursive: false); dirsRemoved++; }
-                    catch (Exception e) { errors.Add("rmdir " + d + ": " + e.Message); }
-                }
+            }
+            catch (Exception e)
+            {
+                errors.Add("aborted: " + e.GetType().Name + ": " + e.Message);
             }
 
             // Verify: re-read everything and compare with the snapshot.
-            var after = CaptureCurrent(id, snap.keyExcludes, prefixes, snap.fileExcludes, hash: true,
-                limitBytes: 0, limitFiles: 0, out var verifyFailure);
-            StateDiff residual = verifyFailure == null ? StateDiff.Compute(after.State, target) : null;
+            Capture after = null;
+            string verifyError = null;
+            try
+            {
+                after = CaptureCurrent(id, snap.keyExcludes, prefixes, snap.fileExcludes, hash: true,
+                    limitBytes: 0, limitFiles: 0, out var verifyFailure);
+                verifyError = verifyFailure?.ErrorMessage;
+            }
+            catch (Exception e)
+            {
+                verifyError = e.GetType().Name + ": " + e.Message;
+            }
+            StateDiff residual = after != null ? StateDiff.Compute(after.State, target) : null;
             bool verified = residual != null && residual.Identical && keptDirs.Count == 0;
 
             var outSb = new StringBuilder(2048);
             outSb.Append("{\"status\":\"ok\",\"action\":\"restore\",\"dry_run\":false");
+            outSb.Append(",\"plan\":").Append(Q(planId));
             outSb.Append(",\"from\":{\"current\":true,\"mode\":\"edit\"}");
             outSb.Append(",\"to\":"); AppendSide(outSb, snap, snapDir);
-            AppendDiff(outSb, plan, limit, listEveryRemoval: true);
-            outSb.Append(",\"unsupported_deleted\":"); AppendStrings(outSb, current.State.UnsupportedPrefs);
+            AppendDiff(outSb, plan, limit, listEveryLoss: true);
+            outSb.Append(",\"unsupported_deleted\":"); AppendStrings(outSb, unsupportedDeleted);
             outSb.Append(",\"applied\":{\"prefs\":{\"deleted_all\":true,\"set\":").Append(target.Prefs.Count);
             outSb.Append(",\"kept_excluded\":").Append(current.ExcludedEntries.Count).Append('}');
             outSb.Append(",\"editor_prefs\":");
@@ -555,24 +655,92 @@ namespace UnityOpenMcpBridge.Playtest
             if (!verified)
             {
                 outSb.Append(",\"residual\":");
-                if (residual == null) outSb.Append("{\"error\":").Append(Q(verifyFailure?.ErrorMessage)).Append('}');
-                else { outSb.Append('{'); AppendDiffBody(outSb, residual, limit, listEveryRemoval: true); outSb.Append('}'); }
+                if (residual == null) outSb.Append("{\"error\":").Append(Q(verifyError)).Append('}');
+                else { outSb.Append('{'); AppendDiffBody(outSb, residual, limit, listEveryLoss: true); outSb.Append('}'); }
             }
             outSb.Append(",\"errors\":"); AppendStrings(outSb, errors);
             outSb.Append('}');
 
             if (errors.Count > 0)
                 return ToolDispatchResult.PartialFailure("restore_incomplete",
-                    errors.Count + " file operation(s) failed; the state is partly restored (see output.errors and residual).",
+                    errors.Count + " operation(s) failed; the state is partly restored (see output.errors and residual).",
                     outSb.ToString());
+            if (!verified)
+                return ToolDispatchResult.PartialFailure("restore_incomplete",
+                    "Every operation ran, but the re-read state does not match the snapshot (see output.residual and " +
+                    "dirs_kept_not_empty).", outSb.ToString());
             return ToolDispatchResult.Ok(outSb.ToString());
+        }
+
+        internal const string StoreProbeKey = "unity_open_mcp.store_probe";
+
+        // Writes a fresh probe key through PlayerPrefs, saves and reads the store
+        // back. On failure the probe is deleted again; on success the caller's
+        // DeleteAll removes it.
+        private static bool StoreSeesWrites(IPlayerPrefsBackend backend, string[] id, out string source)
+        {
+            var value = Guid.NewGuid().ToString("N");
+            backend.Set(PrefEntry.OfString(StoreProbeKey, value));
+            backend.Flush();
+            var read = backend.Read(id[0], id[1]);
+            source = read.Source;
+            bool seen = read.Error == null && read.Entries.Any(e =>
+                e.Key == StoreProbeKey && e.Type == PrefType.String && e.StringValue == value);
+            if (!seen)
+            {
+                backend.Delete(StoreProbeKey);
+                backend.Flush();
+            }
+            return seen;
+        }
+
+        // Stable id of what restore would do: every pref, editor pref and file
+        // removal, overwrite and addition with its value or content hash, plus the
+        // unsupported keys DeleteAll drops. confirm must echo the dry run's id.
+        internal static string PlanId(StateDiff plan, IEnumerable<string> unsupportedDeleted)
+        {
+            var sb = new StringBuilder(1024);
+            AppendPlanKeys(sb, 'p', plan.Prefs);
+            if (plan.EditorPrefs != null) AppendPlanKeys(sb, 'e', plan.EditorPrefs);
+            foreach (var f in plan.Files.Removed) AppendPlanLine(sb, "f-", f.Path, f.Sha256);
+            foreach (var kv in plan.Files.Changed) AppendPlanLine(sb, "f~", kv.Key.Path, kv.Key.Sha256 + ">" + kv.Value.Sha256);
+            foreach (var f in plan.Files.Added) AppendPlanLine(sb, "f+", f.Path, f.Sha256);
+            foreach (var d in plan.Files.DirsAdded) AppendPlanLine(sb, "d+", d, "");
+            foreach (var d in plan.Files.DirsRemoved) AppendPlanLine(sb, "d-", d, "");
+            foreach (var k in unsupportedDeleted) AppendPlanLine(sb, "u-", k, "");
+            return PersistentFiles.Sha256Text(sb.ToString()).Substring(0, 16);
+        }
+
+        private static void AppendPlanKeys(StringBuilder sb, char tag, KeyDiff d)
+        {
+            foreach (var e in d.Removed) AppendPlanLine(sb, tag + "-", e.Key, PlanValue(e));
+            foreach (var kv in d.Changed) AppendPlanLine(sb, tag + "~", kv.Key.Key, PlanValue(kv.Key) + ">" + PlanValue(kv.Value));
+            foreach (var e in d.Added) AppendPlanLine(sb, tag + "+", e.Key, PlanValue(e));
+        }
+
+        private static string PlanValue(PrefEntry e)
+        {
+            switch (e.Type)
+            {
+                case PrefType.Int: return "i" + e.IntValue.ToString(CultureInfo.InvariantCulture);
+                case PrefType.Float: return "f" + PrefEntry.FloatBits(e.FloatValue).ToString(CultureInfo.InvariantCulture);
+                default: return "s" + PersistentFiles.Sha256Text(e.StringValue ?? "");
+            }
+        }
+
+        // Length-prefixed so no key or path can forge another entry's line.
+        private static void AppendPlanLine(StringBuilder sb, string tag, string key, string value)
+        {
+            key = key ?? "";
+            sb.Append(tag).Append(key.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(key)
+              .Append(' ').Append(value).Append('\n');
         }
 
         internal static string RestoreWarning(StateDiff plan, string[] prefixes, int unsupportedDeleted)
         {
             var sb = new StringBuilder("Dry run - nothing changed. restore confirm:true overwrites the current state: ");
             sb.Append("PlayerPrefs.DeleteAll, then the snapshot's ").Append("keys (").Append(plan.Prefs.Removed.Count)
-              .Append(" key(s) not in the snapshot are deleted; excluded keys keep their current values");
+              .Append(" key(s) not in the snapshot are deleted; excluded keys of a supported type keep their current values");
             if (unsupportedDeleted > 0)
                 sb.Append("; ").Append(unsupportedDeleted).Append(" key(s) of a type PlayerPrefs cannot hold are deleted for good (unsupported_deleted)");
             sb.Append(')');
@@ -645,6 +813,9 @@ namespace UnityOpenMcpBridge.Playtest
         {
             public PlayerState State;
             public List<PrefEntry> ExcludedEntries = new List<PrefEntry>();
+            // Excluded keys of a type PlayerPrefs cannot write back: DeleteAll
+            // still removes them, so restore reports them as deleted.
+            public List<string> ExcludedUnsupported = new List<string>();
             public List<FileEntry> Files => State.Files;
             public List<string> Dirs => State.Dirs;
             public string PrefsSource;
@@ -672,7 +843,11 @@ namespace UnityOpenMcpBridge.Playtest
                 if (Glob.IsKeyExcluded(keyExcludes, e.Key)) { cap.ExcludedEntries.Add(e); cap.State.ExcludedKeys++; }
                 else cap.State.Prefs.Add(e);
             }
-            cap.State.UnsupportedPrefs.AddRange(read.Unsupported.Where(k => !Glob.IsKeyExcluded(keyExcludes, k)));
+            foreach (var k in read.Unsupported)
+            {
+                if (Glob.IsKeyExcluded(keyExcludes, k)) cap.ExcludedUnsupported.Add(k);
+                else cap.State.UnsupportedPrefs.Add(k);
+            }
 
             if (prefixes != null)
             {
@@ -804,37 +979,40 @@ namespace UnityOpenMcpBridge.Playtest
         }
 
         // Appends ",\"identical\":..,\"prefs\":{..},\"editor_prefs\":..,\"files\":{..}".
-        internal static void AppendDiff(StringBuilder sb, StateDiff diff, int limit, bool listEveryRemoval)
+        // listEveryLoss: removed and changed lists ignore `limit` (restore shows
+        // every value it deletes or overwrites); added lists stay bounded.
+        internal static void AppendDiff(StringBuilder sb, StateDiff diff, int limit, bool listEveryLoss)
         {
             sb.Append(',');
-            AppendDiffBody(sb, diff, limit, listEveryRemoval);
+            AppendDiffBody(sb, diff, limit, listEveryLoss);
         }
 
-        internal static void AppendDiffBody(StringBuilder sb, StateDiff diff, int limit, bool listEveryRemoval)
+        internal static void AppendDiffBody(StringBuilder sb, StateDiff diff, int limit, bool listEveryLoss)
         {
             sb.Append("\"identical\":").Append(diff.Identical ? "true" : "false");
-            sb.Append(",\"prefs\":"); AppendKeyDiff(sb, diff.Prefs, limit, listEveryRemoval);
+            sb.Append(",\"prefs\":"); AppendKeyDiff(sb, diff.Prefs, limit, listEveryLoss);
             sb.Append(",\"editor_prefs\":");
             if (diff.EditorPrefs == null) sb.Append("null");
             else
             {
-                AppendKeyDiff(sb, diff.EditorPrefs, limit, listEveryRemoval);
+                AppendKeyDiff(sb, diff.EditorPrefs, limit, listEveryLoss);
                 sb.Length -= 1;
                 sb.Append(",\"prefixes\":"); AppendStrings(sb, diff.EditorPrefsPrefixes);
                 sb.Append('}');
             }
-            sb.Append(",\"files\":"); AppendFileDiff(sb, diff.Files, limit, listEveryRemoval);
+            sb.Append(",\"files\":"); AppendFileDiff(sb, diff.Files, limit, listEveryLoss);
         }
 
-        private static void AppendKeyDiff(StringBuilder sb, KeyDiff d, int limit, bool listEveryRemoval)
+        private static void AppendKeyDiff(StringBuilder sb, KeyDiff d, int limit, bool listEveryLoss)
         {
             int truncated = 0;
+            int lossLimit = listEveryLoss ? int.MaxValue : limit;
             sb.Append("{\"added\":[");
             truncated += AppendBounded(sb, d.Added, limit, AppendPref);
             sb.Append("],\"removed\":[");
-            truncated += AppendBounded(sb, d.Removed, listEveryRemoval ? int.MaxValue : limit, AppendPref);
+            truncated += AppendBounded(sb, d.Removed, lossLimit, AppendPref);
             sb.Append("],\"changed\":[");
-            truncated += AppendBounded(sb, d.Changed, limit, (s, kv) =>
+            truncated += AppendBounded(sb, d.Changed, lossLimit, (s, kv) =>
             {
                 s.Append("{\"key\":").Append(Q(kv.Key.Key));
                 s.Append(",\"from\":{"); AppendTypedValue(s, kv.Key); s.Append('}');
@@ -848,15 +1026,16 @@ namespace UnityOpenMcpBridge.Playtest
             sb.Append(",\"truncated\":").Append(truncated).Append('}');
         }
 
-        private static void AppendFileDiff(StringBuilder sb, FileDiff d, int limit, bool listEveryRemoval)
+        private static void AppendFileDiff(StringBuilder sb, FileDiff d, int limit, bool listEveryLoss)
         {
             int truncated = 0;
+            int lossLimit = listEveryLoss ? int.MaxValue : limit;
             sb.Append("{\"added\":[");
             truncated += AppendBounded(sb, d.Added, limit, AppendFile);
             sb.Append("],\"removed\":[");
-            truncated += AppendBounded(sb, d.Removed, listEveryRemoval ? int.MaxValue : limit, AppendFile);
+            truncated += AppendBounded(sb, d.Removed, lossLimit, AppendFile);
             sb.Append("],\"changed\":[");
-            truncated += AppendBounded(sb, d.Changed, limit, (s, kv) =>
+            truncated += AppendBounded(sb, d.Changed, lossLimit, (s, kv) =>
             {
                 s.Append("{\"path\":").Append(Q(kv.Key.Path));
                 s.Append(",\"from\":{\"size\":").Append(kv.Key.Size).Append(",\"sha256\":").Append(Q(kv.Key.Sha256)).Append('}');

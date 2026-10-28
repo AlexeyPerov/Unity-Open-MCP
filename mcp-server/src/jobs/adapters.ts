@@ -228,7 +228,10 @@ export type PlaymodePollOutcome =
 /**
  * Poll a scheduler operation to a terminal state. An abort of `signal` sends one
  * cancel and keeps polling for its acknowledgement; at the deadline a cancel is
- * sent once (the bridge then releases held input) before giving up.
+ * sent once (the bridge then releases held input) before giving up. A cancel
+ * counts as sent only once the bridge answered it — a failed one is retried
+ * with backoff. An operation the deadline cancel ended is a `deadline`
+ * outcome, never a caller-initiated `cancelled`.
  */
 export async function pollPlaymodeOperation(live: LiveClient, operationId: string, options: PlaymodePollOptions & {
   signal?: AbortSignal;
@@ -242,21 +245,25 @@ export async function pollPlaymodeOperation(live: LiveClient, operationId: strin
   let lastAnswer = Date.now();
   let failures = 0;
   let cancelSent = false;
+  let deadlineCancel = false;
   let last: Record<string, any> | null = null;
   while (true) {
     const overdue = Date.now() - startedAt >= deadlineMs;
     const wantCancel = !cancelSent && (overdue || options.signal?.aborted === true);
-    if (!wantCancel) {
+    if (!wantCancel || failures > 0) {
       try {
         await delay(pollIntervalMs * 2 ** Math.min(failures, 3), undefined,
-          cancelSent || !options.signal ? undefined : { signal: options.signal });
+          wantCancel || cancelSent || !options.signal ? undefined : { signal: options.signal });
       } catch { /* aborted: send the cancel now */ }
     }
     const action = !cancelSent && (overdue || options.signal?.aborted === true) ? "cancel" : "status";
-    if (action === "cancel") cancelSent = true;
     let answer: Record<string, any>;
     try {
       answer = await live.playmodeOperation({ action, operation_id: operationId });
+      if (action === "cancel") {
+        cancelSent = true;
+        deadlineCancel = options.signal?.aborted !== true;
+      }
       if (failures) options.onTransport?.(true, `Bridge answered again for operation ${operationId}.`);
       failures = 0;
       lastAnswer = Date.now();
@@ -270,6 +277,7 @@ export async function pollPlaymodeOperation(live: LiveClient, operationId: strin
     if (answer.error) return { kind: "unreachable", error: `${answer.error.code}: ${answer.error.message}` };
     last = answer;
     options.onSnapshot?.(answer);
+    if (deadlineCancel && answer.state === "cancelled" && answer.reason === "cancelled") return { kind: "deadline", snapshot: answer, cancelSent };
     if (PLAYMODE_TERMINAL.has(String(answer.state))) return { kind: "terminal", snapshot: answer, cancelSent };
     // A cancel sent at the deadline gets a short grace window for its acknowledgement.
     if (overdue && cancelSent && Date.now() - startedAt >= deadlineMs + 5_000) return { kind: "deadline", snapshot: last, cancelSent };

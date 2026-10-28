@@ -7,7 +7,8 @@
 // is beyond the inline budget runs as a `jobs` play-mode operation and the call
 // returns its job id. `timeout_ms` is the wait's own limit: the live client
 // forwards it unclamped for this tool (TOOL_OWNED_TIMEOUT_TOOLS); the bridge
-// reads it both as the tool parameter and as the start call's dispatch budget.
+// reads it only as the tool parameter and dispatches the start call on its
+// default budget.
 import { makeTool } from "./schema-fragments.js";
 import { conditionSchema } from "./playtest-conditions.js";
 
@@ -75,7 +76,7 @@ export const playtestWait = makeTool(
         type: "string",
         enum: ["gameplay", "realtime"],
         default: "gameplay",
-        description: "Clock for ms conditions and elapsed_ms: gameplay (scaled by Time.timeScale; a paused game never advances) or realtime (unscaled).",
+        description: "Clock for ms conditions and elapsed_ms: gameplay (scaled by Time.timeScale; a paused game never advances) or realtime (wall clock).",
       },
       fail_on: {
         type: "array",

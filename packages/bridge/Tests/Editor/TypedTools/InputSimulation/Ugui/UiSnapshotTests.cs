@@ -195,6 +195,27 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             Assert.AreEqual("transparent", Node("Btn_A").Visibility);
         }
 
+        [Test]
+        public void CanvasRendererFadeMakesAGraphicTransparent()
+        {
+            Node("Coins").Go.GetComponent<CanvasRenderer>().SetAlpha(0f);
+            Assert.AreEqual("transparent", Node("Coins").Visibility, "Graphic.CrossFadeAlpha fades the CanvasRenderer");
+        }
+
+        [Test]
+        public void CanvasCameraFollowsUguiDrawRules()
+        {
+            var canvas = canvasGo.GetComponent<Canvas>();
+            Assert.IsNull(UiScreenModel.CanvasCamera(canvas, out var noCamera));
+            Assert.IsFalse(noCamera);
+            canvas.renderMode = RenderMode.ScreenSpaceCamera;
+            Assert.IsNull(UiScreenModel.CanvasCamera(canvas, out noCamera), "no camera: drawn as Overlay");
+            Assert.IsFalse(noCamera);
+            canvas.renderMode = RenderMode.WorldSpace;
+            Assert.AreEqual(Camera.main, UiScreenModel.CanvasCamera(canvas, out noCamera));
+            Assert.AreEqual(Camera.main == null, noCamera);
+        }
+
         // --- text normalisation / matching ------------------------------------
 
         [Test]
@@ -203,6 +224,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             Assert.AreEqual("Buy now", UiText.Display("  <b>Buy</b>\n\t now <color=#f00>  </color>"));
             Assert.AreEqual("a <3 b", UiText.Display("a <3 b"), "a lone '<' is not a tag");
             Assert.AreEqual("<b>x</b>", UiText.Display("<b>x</b>", richText: false));
+            Assert.AreEqual("Claim x2 now", UiText.Display("Claim<br>x2<BR />now"), "a <br> line break reads as a space");
             var exact = UiText.Matcher.Create("  buy NOW ", "exact", out _);
             Assert.IsTrue(exact.IsMatch("Buy now"));
             Assert.IsFalse(exact.IsMatch("Buy now!"));
@@ -214,6 +236,22 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             Assert.IsNull(UiText.Matcher.Create(" <b></b> ", "exact", out _), "empty after normalisation");
         }
 
+        [Test]
+        public void RegexTimeoutStopsMatchingAndRefuses()
+        {
+            // Nested quantifiers backtrack exponentially on a non-matching tail.
+            var matcher = UiText.Matcher.Create("^(a+)+$", "regex", out _);
+            Assert.IsFalse(matcher.IsMatch(new string('a', 40) + "!"));
+            Assert.IsTrue(matcher.TimedOut, "a timeout is not a plain no-match");
+            Assert.IsFalse(matcher.IsMatch("aaa"), "a timed-out run matches nothing more");
+
+            const string catastrophic = "^(\\w+\\s?)+$"; // the long sentence ends with '.'
+            Assert.IsFalse(Resolve(catastrophic, "regex", null, out _, out var error));
+            StringAssert.Contains("\"regex_timeout\"", error);
+            StringAssert.Contains("\"regex_timeout\"",
+                UiSnapshotTools.Snapshot(under: canvasName, placeholder_pattern: catastrophic));
+        }
+
         // --- label targeting -------------------------------------------------
 
         [Test]
@@ -221,8 +259,27 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
         {
             Assert.IsTrue(Resolve("buy now", null, null, out var res, out var error), error);
             Assert.AreEqual(canvasName + "/Btn_A", res.Node.Path);
-            Assert.AreEqual(res.Node.VisibleRect.center, res.Point);
+            Assert.Less(Vector2.Distance(res.Node.VisibleRect.center, res.Point), 0.01f, "the label fills its button");
             StringAssert.Contains("\"match\":\"exact\"", res.Json());
+        }
+
+        [Test]
+        public void TargetText_LabelMatchTapsThatLabelInsideItsControl()
+        {
+            // Free band between the offers (y 100..160) and the viewport (y 200..).
+            var row = Button("Row", canvasGo.transform, 60, 165, 160, 30);
+            Text("Title", row.transform, 0, 0, 80, 30, "Daily deal");
+            Text("Price", row.transform, 80, 0, 80, 30, "250 gems");
+            var price = Node("Row/Price");
+
+            Assert.IsTrue(Resolve("250 gems", null, null, out var res, out var error), error);
+            Assert.AreEqual(canvasName + "/Row", res.Node.Path, "the control stays the target");
+            Assert.IsTrue(price.VisibleRect.Contains(res.Point), "tapped where the matched text shows");
+            Assert.Greater(Vector2.Distance(res.Node.TapPoint, res.Point), 1f);
+
+            // A whole-label match is refined by the first label text that also matches.
+            Assert.IsTrue(Resolve("gems", "contains", null, out res, out error), error);
+            Assert.IsTrue(price.VisibleRect.Contains(res.Point));
         }
 
         [Test]

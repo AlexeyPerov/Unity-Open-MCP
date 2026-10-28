@@ -25,6 +25,12 @@ namespace UnityOpenMcpBridge.Screenshot
         internal const int DefaultStartTimeoutMs = 30_000;
         internal const int MaxStartTimeoutMs = 600_000;
         internal const double EncodeBudgetMsPerTick = 40;
+        internal const double CaptureWallMarginMs = 30_000;
+
+        // Wall-clock bound for a started gameplay-time schedule (its offsets
+        // stop advancing while Time.timeScale is 0): twice its length plus a
+        // margin. Shared with inputsim_gesture capture_at_ms.
+        internal static double CaptureWallLimitMs(double scheduleMs) => 2 * scheduleMs + CaptureWallMarginMs;
 
         [BridgeTool(ToolName,
             Title = "Senses: Capture Series",
@@ -166,6 +172,12 @@ namespace UnityOpenMcpBridge.Screenshot
         private ConditionTick? previous;
         private int startFrame = -1, lastFrame = -1, ticks;
         private string outcome;
+        private double startWallMs, armedWallMs;
+        private string firedJson;           // start_on.fired, frozen when the schedule started
+        private bool captureTimedOut;
+        // Only a gameplay-time at_ms / every_ms schedule can stop advancing; at_frames
+        // and realtime always progress while frames run.
+        internal readonly double CaptureLimitMs;
 
         // Test seam: wall-clock ms since the call.
         internal Func<double> WallClockOverride;
@@ -179,6 +191,8 @@ namespace UnityOpenMcpBridge.Screenshot
             this.startTimeoutMs = startTimeoutMs;
             TimeBase = timeBase;
             ExpectedDurationMs = schedule.LastMs;
+            CaptureLimitMs = timeBase == PlayModeTimeBase.Gameplay && schedule.Mode != "at_frames"
+                ? CaptureSeriesTool.CaptureWallLimitMs(schedule.LastMs) : double.PositiveInfinity;
             Phase = hasTrigger ? "waiting for start_on" : "capturing";
         }
 
@@ -193,23 +207,31 @@ namespace UnityOpenMcpBridge.Screenshot
             if (startFrame < 0)
             {
                 startFrame = frame.FrameCount;
+                startWallMs = WallMs;
                 Recorder.OperationId = Id;
                 watcher.Attach();
             }
             lastFrame = frame.FrameCount;
             ticks++;
+            // realtime is the wall clock since the first tick (a hitch counts in
+            // full); gameplay is the scheduler's scaled clock.
+            double wallElapsed = WallMs - startWallMs;
             var now = new ConditionTick
             {
                 Frame = frame.FrameCount,
                 TickIndex = frame.TickIndex,
-                ElapsedMs = frame.ElapsedMs,
-                RealtimeMs = frame.RealtimeMs,
+                ElapsedMs = TimeBase == PlayModeTimeBase.Realtime ? wallElapsed : frame.ElapsedMs,
+                RealtimeMs = wallElapsed,
                 PlayTime = frame.PlayTime,
             };
 
             if (!Recorder.Armed)
             {
-                if (!hasTrigger) Recorder.Arm(now);
+                if (!hasTrigger)
+                {
+                    Recorder.Arm(now);
+                    armedWallMs = WallMs;
+                }
                 else
                 {
                     bool met = watcher.Observe(now);
@@ -228,6 +250,14 @@ namespace UnityOpenMcpBridge.Screenshot
                         var fire = watcher.FiredNode()?.Fire ?? watcher.Root.Fire;
                         var at = watcher.TickAt(fire.Frame);
                         Recorder.Arm(at ?? new ConditionTick { Frame = fire.Frame, ElapsedMs = fire.ElapsedMs, RealtimeMs = fire.RealtimeMs, PlayTime = fire.PlayTime });
+                        armedWallMs = WallMs;
+                        // The trigger is settled: report it as it fired and stop
+                        // evaluating it (a state that later turns false, or a
+                        // predicate polled during the captures, would rewrite it).
+                        var fired = new StringBuilder(256);
+                        watcher.AppendFired(fired);
+                        firedJson = fired.ToString();
+                        watcher.StopMatching();
                         Phase = "capturing";
                     }
                     else if (WallMs >= startTimeoutMs)
@@ -239,10 +269,17 @@ namespace UnityOpenMcpBridge.Screenshot
                     }
                 }
             }
-            else if (hasTrigger) watcher.Observe(now);   // keep recording errors / history
 
             if (Recorder.Armed && !Recorder.CapturesDone)
+            {
                 Recorder.Observe(now, previous, frame.ScreenWidth, frame.ScreenHeight);
+                if (!Recorder.CapturesDone && WallMs - armedWallMs >= CaptureLimitMs)
+                {
+                    // Gameplay time stopped advancing: keep and encode what was captured.
+                    Recorder.StopCaptures("timed_out");
+                    captureTimedOut = true;
+                }
+            }
             previous = now;
 
             if (Recorder.CaptureError != null && Recorder.Taken == 0)
@@ -254,9 +291,17 @@ namespace UnityOpenMcpBridge.Screenshot
             }
             if (!Recorder.CapturesDone) return false;
             Phase = "encoding";
-            bool done = Recorder.EncodeStep(CaptureSeriesTool.EncodeBudgetMsPerTick);
-            if (done) outcome = Recorder.CaptureError != null ? "partial" : "completed";
-            return done;
+            if (!Recorder.EncodeStep(CaptureSeriesTool.EncodeBudgetMsPerTick)) return false;
+            if (captureTimedOut)
+            {
+                outcome = "capture_timed_out";
+                FailureCode = "timed_out";
+                FailureMessage = "The gameplay-time schedule did not reach its last offset within " +
+                                 PlaytestJson.Num(CaptureLimitMs, 0) + " ms of wall-clock time (Time.timeScale 0?); " +
+                                 "the frames captured so far are kept, the rest are dropped: timed_out. Use time: realtime for a paused game.";
+            }
+            else outcome = Recorder.CaptureError != null ? "partial" : "completed";
+            return true;
         }
 
         protected internal override void Cleanup(PlayModeEndReason reason)
@@ -264,7 +309,9 @@ namespace UnityOpenMcpBridge.Screenshot
             watcher.Detach();
             if (outcome == null) outcome = PlayModeScheduler.ReasonName(reason);
             // Keep the evidence captured so far when the series was cut short
-            // in a live Editor; a reload / quit drops it (no slow teardown).
+            // in a live Editor, within the recorder's flush budget (this runs
+            // inside a cancel request or the exit-play callback); a reload /
+            // quit drops it.
             if (reason == PlayModeEndReason.Cancelled || reason == PlayModeEndReason.PlayModeExited || reason == PlayModeEndReason.Failed)
             {
                 try { Recorder.FlushPending(); } catch (Exception) { /* best effort */ }
@@ -285,10 +332,10 @@ namespace UnityOpenMcpBridge.Screenshot
             Recorder.AppendJson(sb, TimeBase == PlayModeTimeBase.Gameplay ? "gameplay" : "realtime");
             if (hasTrigger)
             {
-                sb.Append(",\"start_on\":{\"fired\":");
-                if (Recorder.Armed) watcher.AppendFired(sb); else sb.Append("null");
+                sb.Append(",\"start_on\":{\"fired\":").Append(firedJson ?? "null");
                 sb.Append(",\"condition\":");
                 watcher.Root.AppendJson(sb);
+                if (watcher.PendingDropped > 0) sb.Append(",\"logs_dropped\":").Append(watcher.PendingDropped);
                 sb.Append('}');
             }
             sb.Append(",\"frames\":{\"start\":").Append(startFrame).Append(",\"end\":").Append(lastFrame).Append(",\"ticks\":").Append(ticks).Append('}');

@@ -11,6 +11,9 @@
 // domain — a missing member refuses with `editor_internals_unavailable` naming
 // it. The Game view half and the Simulator half are checked separately, so a
 // missing Simulator member does not take `get` / `set_resolution` down.
+// Display-only members (HiDPI backing scale, zoom, the low-resolution toggle,
+// the dock area's front tab) are optional: a missing one drops its field and
+// never disables a half.
 //
 // Nothing here patches Unity. The only persistent effect is a custom Game view
 // size entry (`Open MCP <w>x<h>`) added to the Editor's size list (Editor
@@ -232,6 +235,8 @@ namespace UnityOpenMcpBridge.Playtest
             public PropertyInfo SizeBaseText, SizeDisplayText, SizeType, SizeWidth, SizeHeight, SizeIsFree;
             public ConstructorInfo SizeCtor;
             public FieldInfo TargetTexture;
+            public FieldInfo WindowParent;     // optional: EditorWindow.m_Parent (its HostView)
+            public PropertyInfo HostActualView; // optional: HostView.actualView (the dock area's front tab)
 
             public Type SimulatorWindow, DeviceSimulatorMain, DeviceInfoAsset, DeviceInfo, ScreenData, OrientationData, ScreenSimulation, UserInterfaceController, SimulatorUtilities, DeviceLoader;
             public MethodInfo ShowSimulator, LoadDevices, RotationToOrientation, ApplyChanges;
@@ -274,9 +279,16 @@ namespace UnityOpenMcpBridge.Playtest
             m.SizeSelectionCallback = Meth(m.GameView, "SizeSelectionCallback", Inst, new[] { typeof(int), typeof(object) }, typeof(void), miss);
             m.SelectedSizeIndex = Prop(m.GameView, "selectedSizeIndex", Inst, typeof(int), miss);
             m.TargetRenderSize = Prop(m.GameView, "targetRenderSize", Inst, typeof(Vector2), miss);
-            m.BackingScale = Prop(m.GameView, "backingScale", Inst, typeof(float), miss);
-            m.ZoomAreaScale = Prop(m.GameView, "zoomAreaScale", Inst, typeof(Vector2), miss);
-            m.LowResolution = Prop(m.GameView, "lowResolutionForAspectRatios", Inst, typeof(bool), miss);
+            m.BackingScale = OptionalProp(m.GameView, "backingScale", typeof(float));
+            m.ZoomAreaScale = OptionalProp(m.GameView, "zoomAreaScale", typeof(Vector2));
+            m.LowResolution = OptionalProp(m.GameView, "lowResolutionForAspectRatios", typeof(bool));
+            var hostView = editor.GetType("UnityEditor.HostView");
+            var parent = typeof(EditorWindow).GetField("m_Parent", Inst);
+            if (hostView != null && parent != null && parent.FieldType.IsAssignableFrom(hostView))
+            {
+                m.WindowParent = parent;
+                m.HostActualView = OptionalProp(hostView, "actualView", typeof(EditorWindow));
+            }
 
             m.SizesInstance = m.GameViewSizes.GetProperty("instance", Stat);
             if (m.SizesInstance == null) miss.Add("GameViewSizes.instance");
@@ -387,6 +399,15 @@ namespace UnityOpenMcpBridge.Playtest
                 return null;
             }
             return p;
+        }
+
+        // A display-only member: null when absent or of another type, never recorded as missing.
+        private static PropertyInfo OptionalProp(Type type, string name, Type propertyType)
+        {
+            PropertyInfo p = null;
+            try { p = type.GetProperty(name, Inst); }
+            catch (AmbiguousMatchException) { /* treated as absent */ }
+            return p != null && p.GetGetMethod(true) != null && p.PropertyType == propertyType ? p : null;
         }
 
         private static FieldInfo Field(Type type, string name, BindingFlags flags, Type fieldType, List<string> miss)
@@ -565,23 +586,44 @@ namespace UnityOpenMcpBridge.Playtest
         internal static float BackingScale(EditorWindow view)
         {
             var m = Resolve();
-            if (Kind(view) == PlayModeViewKind.Game)
+            if (Kind(view) == PlayModeViewKind.Game && m.BackingScale != null)
             {
                 try { return (float)m.BackingScale.GetValue(view); } catch { /* fall through */ }
             }
             return EditorGUIUtility.pixelsPerPoint;
         }
 
+        // Game view zoom, or -1 when unknown (not a Game view, or no zoom member).
         internal static float Zoom(EditorWindow gameView)
         {
             var m = Resolve();
-            return Kind(gameView) == PlayModeViewKind.Game ? ((Vector2)m.ZoomAreaScale.GetValue(gameView)).y : -1f;
+            return Kind(gameView) == PlayModeViewKind.Game && m.ZoomAreaScale != null ? ((Vector2)m.ZoomAreaScale.GetValue(gameView)).y : -1f;
         }
 
-        internal static bool LowResolution(EditorWindow gameView)
+        // The Game view's "Low Resolution Aspect Ratios" toggle; null when unknown.
+        internal static bool? LowResolution(EditorWindow gameView)
         {
             var m = Resolve();
-            return Kind(gameView) == PlayModeViewKind.Game && (bool)m.LowResolution.GetValue(gameView);
+            if (Kind(gameView) != PlayModeViewKind.Game || m.LowResolution == null) return null;
+            return (bool)m.LowResolution.GetValue(gameView);
+        }
+
+        // Whether the view is the front tab of its dock area. Only the front tab
+        // renders: a hidden view's render target keeps the last frame it drew
+        // while the game runs on. Null when this Editor does not expose the dock
+        // area (the caller then reports nothing rather than guess).
+        internal static bool? IsFrontTab(EditorWindow view)
+        {
+            var m = Resolve();
+            if (view == null || m.WindowParent == null || m.HostActualView == null) return null;
+            try
+            {
+                var host = m.WindowParent.GetValue(view) as UnityEngine.Object;
+                if (host == null) return false;
+                if (!m.HostActualView.DeclaringType.IsInstanceOfType(host)) return null;
+                return (m.HostActualView.GetValue(host) as EditorWindow) == view;
+            }
+            catch (Exception) { return null; }
         }
 
         // ------------------------------------------------------------------

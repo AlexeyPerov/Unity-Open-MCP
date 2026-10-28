@@ -6,7 +6,8 @@
 // (step, call, during / after it) and stack; the player-state diff from the
 // session's snapshot and the editor events (play mode, domain reloads) close
 // it. Calls that were in flight when an earlier MCP server process stopped are
-// reported as lost.
+// reported as lost; calls of the ending process that had not returned yet, as
+// still running at end.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { thumbnail } from "./png.js";
@@ -26,6 +27,7 @@ export interface ReportSummary {
   findings: Array<{ step: number; label: string; verdict: string; note?: string }>;
   top_errors: Array<{ type: string; message: string; first_step: number | null; first_call: number | null; relation: string; count: number }>;
   lost_in_flight: Array<{ seq: number; tool: string; at: string }>;
+  running_at_end: Array<{ seq: number; tool: string; at: string }>;
   state_diff: { prefs?: unknown; files?: unknown; editor_prefs?: unknown; identical?: unknown; error?: unknown } | null;
   hooks: { begin?: string; end?: string };
   notes: string[];
@@ -60,6 +62,7 @@ interface CallRow {
   job_id?: string;
   of?: number;
   lost?: boolean;
+  running?: boolean;
   streamDown?: boolean;
 }
 
@@ -74,6 +77,8 @@ interface Step {
 
 const cell = (value: string) => value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 const code = (value: string) => "`" + value.replace(/`/g, "'") + "`";
+// A code span inside a table cell: a `|` splits the row even there, so it is escaped too.
+const cellCode = (value: string) => cell(code(value));
 const clip = (value: string, max: number) => (value.length > max ? `${value.slice(0, max)}…` : value);
 const firstLine = (value: string) => value.split("\n")[0].trim();
 const shortTool = (tool: string) => tool.replace(/^unity_open_mcp_/, "").replace(/^unity_senses_/, "senses_");
@@ -110,6 +115,9 @@ export function writeReport(input: ReportInput): ReportSummary {
   const notes: string[] = [];
   const looseErrors: Array<Record<string, any>> = [];
   let endNote: string | undefined;
+  let running = new Set<number>();
+  let errorRepeats: Array<{ type?: string; message?: string; count?: number }> = [];
+  let errorsOverLimit = 0, streamGaps = 0, firstGap: string | undefined;
   for (const entry of entries) {
     switch (entry.k) {
       case "call_started":
@@ -140,7 +148,7 @@ export function writeReport(input: ReportInput): ReportSummary {
         editorEvents.push(entry);
         break;
       case "stream_gap":
-        notes.push(`The bridge event stream reported missed events at ${entry.at} (${entry.detail}); errors from that moment may be missing.`);
+        if (streamGaps++ === 0) firstGap = `${entry.at} (${entry.detail})`;
         break;
       case "limit":
         notes.push(String(entry.message));
@@ -154,14 +162,22 @@ export function writeReport(input: ReportInput): ReportSummary {
       case "session_ended":
         if (entry.dropped_calls) notes.push(`${entry.dropped_calls} call(s) over the recording limit were not logged.`);
         if (entry.frames_skipped) notes.push(`${entry.frames_skipped} frame(s) over the frame limit were referenced, not copied.`);
+        running = new Set(Array.isArray(entry.running) ? entry.running : []);
+        errorRepeats = Array.isArray(entry.error_repeats) ? entry.error_repeats : [];
+        errorsOverLimit = typeof entry.errors_over_limit === "number" ? entry.errors_over_limit : 0;
+        if (entry.errors_dropped) notes.push(`${entry.errors_dropped} console error(s) arrived while the backlog of one call was full and were dropped (not counted).`);
         break;
     }
   }
 
-  // Steps: the calls before each mark belong to it; a call still "started" without a result was lost.
+  if (streamGaps) notes.push(`The bridge event stream reported missed events ${streamGaps} time(s), first at ${firstGap}; errors from those moments may be missing.`);
+
+  // Steps: the calls before each mark belong to it; a call still "started" without
+  // a result was lost (an earlier process stopped) or still running at end.
   const steps: Step[] = [];
   let current: CallRow[] = [];
   const lost: Array<{ seq: number; tool: string; at: string }> = [];
+  const runningAtEnd: Array<{ seq: number; tool: string; at: string }> = [];
   for (const { kind, entry } of orderedEvents) {
     if (kind === "mark") {
       steps.push({ number: entry.step, label: entry.label, verdict: entry.verdict, note: entry.note, at: entry.at, calls: current });
@@ -171,8 +187,10 @@ export function writeReport(input: ReportInput): ReportSummary {
     const row = calls.get(entry.seq);
     if (row) { current.push(row); continue; }
     if (kind === "start") {
-      lost.push({ seq: entry.seq, tool: entry.tool, at: entry.at });
-      current.push({ seq: entry.seq, tool: entry.tool, kind: entry.kind, at: entry.at, duration_ms: 0, status: "lost", args: entry.args, captures: [], errors: [], errorsAfter: [], lost: true });
+      const still = running.has(entry.seq);
+      (still ? runningAtEnd : lost).push({ seq: entry.seq, tool: entry.tool, at: entry.at });
+      current.push({ seq: entry.seq, tool: entry.tool, kind: entry.kind, at: entry.at, duration_ms: 0, status: still ? "running" : "lost", args: entry.args,
+        captures: [], errors: [], errorsAfter: [], ...(still ? { running: true } : { lost: true }) });
     }
   }
   if (current.length) steps.push({ number: null, label: "After the last mark", verdict: null, calls: current });
@@ -209,6 +227,17 @@ export function writeReport(input: ReportInput): ReportSummary {
   }
   timeline.sort((a, b) => a.at - b.at);
   for (const t of timeline) record(t.e, t.step, t.call, t.relation);
+  // Occurrences the recorder counted but did not log (a message past its repeat cap, errors past the session cap).
+  let suppressed = 0;
+  for (const repeat of errorRepeats) {
+    const count = typeof repeat.count === "number" ? repeat.count : 0;
+    const row = catalog.get(errorKey(repeat));
+    if (row) row.count += count;
+    suppressed += count;
+  }
+  totalErrors += suppressed + errorsOverLimit;
+  if (suppressed) notes.push(`${suppressed} repeat(s) of ${errorRepeats.length} message(s) over the per-message log cap were counted, not logged (they are in the ×counts).`);
+  if (errorsOverLimit) notes.push(`${errorsOverLimit} console error(s) over the per-call / per-session error limit were counted, not logged.`);
   const errorRows = [...catalog.values()].sort((a, b) => a.id - b.id);
 
   // ---- thumbnails --------------------------------------------------------
@@ -246,35 +275,40 @@ export function writeReport(input: ReportInput): ReportSummary {
     view.mode ? `${view.mode === "simulator" ? `Device Simulator ${view.device ?? ""}`.trim() : `Game view ${view.size ?? ""}`.trim()}` : null,
     Array.isArray(view.screen) ? `${view.screen[0]}×${view.screen[1]}${view.orientation ? ` ${view.orientation}` : ""}` : null,
   ].filter(Boolean).join(" · ") || "not recorded";
+  // A hook ran: an invoke that succeeded, or a job (`jobs start` row) whose observed result did not fail.
   const hooks: { begin?: string; end?: string } = {};
+  const failedJobs = new Set(allCalls.filter(c => c.of !== undefined && c.status === "error").map(c => c.of));
   for (const c of allCalls) {
-    const id = typeof (c.args as any)?.command_id === "string" ? (c.args as any).command_id as string
-      : typeof (c.args as any)?.tool_or_command === "string" ? (c.args as any).tool_or_command as string : "";
-    if (/(^|\.)playtest\.begin$/.test(id) && c.status === "ok") hooks.begin = id;
-    if (/(^|\.)playtest\.end$/.test(id) && c.status === "ok") hooks.end = id;
+    const args = c.args as any;
+    const id = typeof args?.command_id === "string" ? args.command_id as string
+      : typeof args?.tool_or_command === "string" ? args.tool_or_command as string : "";
+    const ran = c.status === "ok" || (c.status === "job_started" && !failedJobs.has(c.seq));
+    if (/(^|\.)playtest\.begin$/.test(id) && ran) hooks.begin = id;
+    if (/(^|\.)playtest\.end$/.test(id) && ran) hooks.end = id;
   }
 
   const md: string[] = [];
   md.push(`# Playtest report: ${cell(meta.name)}`, "");
   md.push("| | |", "|---|---|");
-  md.push(`| Session | ${code(meta.id)} |`);
-  md.push(`| Project | ${cell(meta.company)} / ${cell(meta.product)} (${code(meta.project)}) |`);
+  md.push(`| Session | ${cellCode(meta.id)} |`);
+  md.push(`| Project | ${cell(meta.company)} / ${cell(meta.product)} (${cellCode(meta.project)}) |`);
   md.push(`| Started | ${meta.started_at} |`);
   md.push(`| Ended | ${meta.ended_at ?? "—"} (${Number.isFinite(endedMs - startedMs) ? duration(endedMs - startedMs) : "?"}) |`);
   md.push(`| Device | ${cell(deviceText)} |`);
-  md.push(`| Player-state snapshot | ${meta.snapshot ? `${code(meta.snapshot.name)} (${meta.snapshot.taken ? "taken at start" : "existing"})` : "none"} |`);
-  if (hooks.begin || hooks.end) md.push(`| Project isolation hook | ${[hooks.begin, hooks.end].filter(Boolean).map(h => code(h!)).join(" → ")}${hooks.begin && !hooks.end ? " (end hook not recorded)" : ""} |`);
+  md.push(`| Player-state snapshot | ${meta.snapshot ? `${cellCode(meta.snapshot.name)} (${meta.snapshot.taken ? "taken at start" : "existing"})` : "none"} |`);
+  if (hooks.begin || hooks.end) md.push(`| Project isolation hook | ${[hooks.begin, hooks.end].filter(Boolean).map(h => cellCode(h!)).join(" → ")}${hooks.begin && !hooks.end ? " (end hook not recorded)" : ""} |`);
   md.push(`| Recorded | ${allCalls.length} call(s) in ${steps.length} step(s), ${failedCalls} failed, ${captureCount} frame(s), ${errorRows.length} distinct error(s) (${totalErrors} total) |`);
   md.push(`| Verdicts | ok ${verdicts.ok} · bug ${verdicts.bug} · suspicious ${verdicts.suspicious} |`);
   md.push("");
 
   md.push("## Findings", "");
   const findings = steps.filter(s => s.verdict === "bug" || s.verdict === "suspicious");
-  if (!findings.length && !errorRows.length && !lost.length && !failedCalls) md.push("No bug or suspicious verdicts, no console errors, no failed calls.");
+  if (!findings.length && !errorRows.length && !lost.length && !runningAtEnd.length && !failedCalls) md.push("No bug or suspicious verdicts, no console errors, no failed calls.");
   for (const step of findings) md.push(`- **${step.verdict}** — step ${step.number}: ${cell(step.label)}${step.note ? ` — ${cell(step.note)}` : ""}`);
   for (const row of errorRows) md.push(`- **${row.type}** ${code(clip(firstLine(row.message), 160))} — first in ${row.first_step !== null ? `step ${row.first_step}` : row.first_call !== null ? "the unmarked calls" : "the session before any call"}${row.first_call !== null ? `, call #${row.first_call} ${code(shortTool(row.first_tool ?? ""))} (${row.relation} it)` : ""}${row.count > 1 ? `, ×${row.count}` : ""} → [E${row.id}](#e${row.id})`);
   if (failedCalls) md.push(`- ${failedCalls} recorded call(s) failed (status \`error\` in the steps below).`);
   for (const l of lost) md.push(`- **Lost in flight:** call #${l.seq} ${code(shortTool(l.tool))} started at ${l.at} and never finished — the MCP server process stopped during it.`);
+  for (const l of runningAtEnd) md.push(`- **Still running at end:** call #${l.seq} ${code(shortTool(l.tool))} started at ${l.at} and had not returned when the session ended.`);
   if (endNote) md.push("", `> ${cell(endNote)}`);
   md.push("");
 
@@ -287,10 +321,11 @@ export function writeReport(input: ReportInput): ReportSummary {
     md.push("| # | Time | Tool | Arguments | Result | Duration |", "|---|---|---|---|---|---|");
     for (const call of step.calls) {
       const result = call.lost ? "**lost** (server stopped)"
-        : call.status === "error" ? `**error** ${code(call.error?.code ?? "")}${call.error?.message ? ` ${cell(clip(call.error.message, 120))}` : ""}`
-        : call.status === "job_started" ? `job ${code(call.job_id ?? "")}`
+        : call.running ? "**still running at end**"
+        : call.status === "error" ? `**error** ${cellCode(call.error?.code ?? "")}${call.error?.message ? ` ${cell(clip(call.error.message, 120))}` : ""}`
+        : call.status === "job_started" ? `job ${cellCode(call.job_id ?? "")}`
         : resultText(call);
-      md.push(`| ${call.seq}${call.of ? ` (of #${call.of})` : ""} | ${time(call.at)} | ${code(shortTool(call.tool))} | ${call.args !== undefined ? code(clip(JSON.stringify(call.args), 160)) : ""} | ${result} | ${call.lost ? "—" : duration(call.duration_ms)} |`);
+      md.push(`| ${call.seq}${call.of ? ` (of #${call.of})` : ""} | ${time(call.at)} | ${cellCode(shortTool(call.tool))} | ${call.args !== undefined ? cellCode(clip(JSON.stringify(call.args), 160)) : ""} | ${result} | ${call.lost || call.running ? "—" : duration(call.duration_ms)} |`);
     }
     md.push("");
     const stepErrors = step.calls.flatMap(c => [
@@ -357,23 +392,23 @@ export function writeReport(input: ReportInput): ReportSummary {
       ];
       if (!rows.length) continue;
       md.push(`${title}: ${JSON.stringify(part.counts ?? {})}`, "", "| Change | Key | From | To |", "|---|---|---|---|");
-      for (const [change, key, from, to] of rows) md.push(`| ${change} | ${code(String(key))} | ${cell(from)} | ${cell(to)} |`);
+      for (const [change, key, from, to] of rows) md.push(`| ${change} | ${cellCode(String(key))} | ${cell(from)} | ${cell(to)} |`);
       if (part.truncated) md.push(`| … | ${part.truncated} more | | |`);
       md.push("");
     }
     const files = diff.files;
     if (files && ((files.added?.length ?? 0) + (files.removed?.length ?? 0) + (files.changed?.length ?? 0)) > 0) {
       md.push(`persistentDataPath files: ${JSON.stringify(files.counts ?? {})}`, "", "| Change | Path | Size |", "|---|---|---|");
-      for (const e of files.added ?? []) md.push(`| added | ${code(e.path)} | ${e.size ?? ""} |`);
-      for (const e of files.removed ?? []) md.push(`| removed | ${code(e.path)} | ${e.size ?? ""} |`);
-      for (const e of files.changed ?? []) md.push(`| changed | ${code(e.path)} | ${e.from?.size ?? ""} → ${e.to?.size ?? ""} |`);
+      for (const e of files.added ?? []) md.push(`| added | ${cellCode(String(e.path))} | ${e.size ?? ""} |`);
+      for (const e of files.removed ?? []) md.push(`| removed | ${cellCode(String(e.path))} | ${e.size ?? ""} |`);
+      for (const e of files.changed ?? []) md.push(`| changed | ${cellCode(String(e.path))} | ${e.from?.size ?? ""} → ${e.to?.size ?? ""} |`);
       md.push("");
     }
   }
 
   if (editorEvents.length) {
     md.push("## Editor events", "", "| Time | State |", "|---|---|");
-    for (const e of editorEvents) md.push(`| ${time(e.at)} | ${code(String(e.state))}${EDITOR_STATE_NOTES[String(e.state)] ?? ""} |`);
+    for (const e of editorEvents) md.push(`| ${time(e.at)} | ${cellCode(String(e.state))}${EDITOR_STATE_NOTES[String(e.state)] ?? ""} |`);
     md.push("");
   }
   const streamDown = allCalls.filter(c => c.streamDown).length;
@@ -395,7 +430,7 @@ export function writeReport(input: ReportInput): ReportSummary {
     errors: { unique: errorRows.length, total: totalErrors },
     findings: findings.slice(0, 10).map(s => ({ step: s.number ?? 0, label: s.label, verdict: s.verdict!, ...(s.note ? { note: clip(s.note, 300) } : {}) })),
     top_errors: errorRows.slice(0, 5).map(r => ({ type: r.type, message: clip(firstLine(r.message), 200), first_step: r.first_step, first_call: r.first_call, relation: r.relation, count: r.count })),
-    lost_in_flight: lost, state_diff: stateDiff, hooks, notes,
+    lost_in_flight: lost, running_at_end: runningAtEnd, state_diff: stateDiff, hooks, notes,
   };
 }
 

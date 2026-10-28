@@ -203,6 +203,17 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             StringAssert.Contains("not visible", result);
         }
 
+        [Test]
+        public void Settle_AViewBehindAnotherTabNeverSettles()
+        {
+            var op = new GameViewSettleOperation(1080, 1920, 100);
+            Assert.IsFalse(op.Observe(1080, 1920, 1080, 1920, 0, 1, viewVisible: false));
+            Assert.IsFalse(op.Observe(1080, 1920, 1080, 1920, 16, 2, viewVisible: false), "stale render target of a hidden tab");
+            Assert.IsTrue(op.Observe(1080, 1920, 1080, 1920, 120, 3, viewVisible: false), "out of time");
+            Assert.IsFalse(op.Settled);
+            StringAssert.Contains("\"visible\":false", op.BuildResult(PlayModeEndReason.Completed, null));
+        }
+
         // ---- batch ----------------------------------------------------------
 
         [Test]
@@ -245,6 +256,11 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             Assert.IsNull(ScreenshotService.ValidateFrameArgs("game", null, null, "native", null));
             Assert.IsNotNull(ScreenshotService.ValidateFrameArgs("composed", 1280, null, null, null));
             Assert.IsNotNull(ScreenshotService.ValidateFrameArgs("composed", 1280, 720, "native", null));
+            // scene / game / isolated default a missing axis instead of refusing it.
+            Assert.IsNull(ScreenshotService.ValidateFrameArgs("scene", 1920, null, null, null));
+            Assert.IsNull(ScreenshotService.ValidateFrameArgs("isolated", null, 512, null, null));
+            Assert.IsNull(ScreenshotService.ValidateFrameArgs("game", 800, null, null, null));
+            Assert.IsNotNull(ScreenshotService.ValidateFrameArgs("game", null, 720, "native", null));
             Assert.IsNotNull(ScreenshotService.ValidateFrameArgs("composed", null, null, "large", null));
             Assert.IsNotNull(ScreenshotService.ValidateFrameArgs("scene", null, null, "native", null));
             Assert.IsNotNull(ScreenshotService.ValidateFrameArgs("scene", null, null, null, "safe_area"));

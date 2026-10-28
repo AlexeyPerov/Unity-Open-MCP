@@ -1,10 +1,12 @@
 // capture_series / gesture capture_at_ms: schedule parsing and limits, the
 // recorder's frame accounting on synthetic ticks (a capture taken at tick F is
 // labelled with frame F-1, the frame the view holds), shared captures for slots
-// due on one frame, the unchanged-pixels flag, luminance / diff metrics inside a
-// metric region, the memory budget, PNG + contact-sheet output (upright, labelled
-// with frame and time), argument validation, a start_on trigger arming the
-// schedule at the frame that made it true, registration and the batch refusal.
+// due on one frame, the unchanged-pixels flag (every pixel compared), luminance /
+// diff metrics inside a metric region, the memory budget, the cleanup flush
+// budget, PNG + contact-sheet output (upright, labelled with frame and time),
+// argument validation, a start_on trigger arming the schedule at the frame that
+// made it true (and reported as it fired), the wall-clock bound of a gameplay
+// schedule that stops advancing, registration and the batch refusal.
 // Grabbing the real play-mode view is covered by the manual checklist.
 using System;
 using System.Collections.Generic;
@@ -171,6 +173,41 @@ namespace UnityOpenMcpBridge.Tests.Playtest
         }
 
         [Test]
+        public void Unchanged_ComparesEveryPixel()
+        {
+            const int w = 512, h = 512;
+            var schedule = FrameSchedule.Parse(null, null, null, "[0, 1, 2]", 120, "", out _);
+            var rec = Recorder(schedule, null, f =>
+            {
+                var px = Solid(w, h, 40);
+                if (f >= 51) px[1 * 4] = 41;   // one channel of the second pixel
+                return px;
+            }, w, h);
+            Run(rec, 50, 53);
+            Assert.IsFalse(schedule.Slots[1].Unchanged, "one pixel differs from frame 50");
+            Assert.IsTrue(schedule.Slots[2].Unchanged, "frame 52 equals 51 byte for byte");
+        }
+
+        [Test]
+        public void FlushPending_StopsAtItsBudgetAndReportsUnwrittenFrames()
+        {
+            var schedule = FrameSchedule.Parse(null, null, null, "[0, 1, 2]", 120, "", out _);
+            var rec = Recorder(schedule, null, f => Solid(8, 4, (byte)f));
+            Run(rec, 0, 3);
+            Assert.AreEqual(3, rec.Taken);
+            rec.FlushPending(0);   // the first frame is always written
+            Assert.IsNull(schedule.Slots[0].Dropped);
+            Assert.AreEqual("flush_budget", schedule.Slots[1].Dropped);
+            Assert.AreEqual("flush_budget", schedule.Slots[2].Dropped);
+            var sb = new System.Text.StringBuilder();
+            rec.AppendJson(sb, "gameplay");
+            var json = sb.ToString();
+            StringAssert.Contains("frame-000-f0-0ms.png", json);
+            StringAssert.Contains("\"file\":null,\"width\":8,\"height\":4,\"dropped\":\"flush_budget\"", json);
+            StringAssert.Contains("were not written", json);
+        }
+
+        [Test]
         public void Metric_LuminanceAndDiffInsideTheRegion()
         {
             var schedule = FrameSchedule.Parse(null, null, null, "[0, 1]", 120, "", out _);
@@ -316,6 +353,57 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             StringAssert.Contains("\"base\":{\"frame\":103", status);
             StringAssert.Contains("\"index\":0,\"at_ms\":0,\"frame\":103", status);
             StringAssert.Contains("\"index\":1,\"at_ms\":200,\"frame\":105", status);
+        }
+
+        [Test]
+        public void StartOn_FiredIsFrozenWhenTheScheduleStarts()
+        {
+            var go = new GameObject("SeriesTest_Popup_" + Guid.NewGuid().ToString("N").Substring(0, 6));
+            try
+            {
+                go.SetActive(false);
+                var op = CaptureSeriesTool.Create("[0, 300]", null, null, null,
+                    "{\"object\":{\"path\":\"" + go.name + "\",\"state\":\"active\"}}", 5000, "gameplay", null, null, null, null,
+                    false, 1, 0, 0, out var refusal);
+                Assert.IsNotNull(op, refusal);
+                op.Recorder.GrabOverride = _ => (Solid(4, 4, 1), 4, 4);
+                op.Recorder.FolderOverride = folder;
+                Assert.IsNotNull(PlayModeScheduler.Start(op, "series-0000-0003", out var error), error);
+                PlayModeScheduler.TickAll(1, 0.1f, 0.1f, 1f, 4, 4, 0.1);
+                go.SetActive(true);    // during frame 1
+                PlayModeScheduler.TickAll(2, 0.1f, 0.1f, 1f, 4, 4, 0.2);
+                go.SetActive(false);   // the popup closes while the series runs
+                for (int f = 3; f <= 8; f++) PlayModeScheduler.TickAll(f, 0.1f, 0.1f, 1f, 4, 4, f * 0.1);
+                var status = PlayModeScheduler.Status("series-0000-0003");
+                StringAssert.Contains("\"state\":\"succeeded\"", status);
+                StringAssert.Contains("\"start_on\":{\"fired\":{\"path\":\"start_on\",\"type\":\"object\",\"frame\":1,", status);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void GameplaySchedule_ThatStopsAdvancing_TimesOutKeepingItsFrames()
+        {
+            var op = CaptureSeriesTool.Create("[0, 1000]", null, null, null, null, null, "gameplay", null, null, null, null,
+                false, 1, 0, 0, out var refusal);
+            Assert.IsNotNull(op, refusal);
+            double wall = 0;
+            op.WallClockOverride = () => wall;
+            op.Recorder.GrabOverride = _ => (Solid(4, 4, 7), 4, 4);
+            op.Recorder.FolderOverride = folder;
+            Assert.AreEqual(CaptureSeriesTool.CaptureWallLimitMs(1000), op.CaptureLimitMs);
+            Assert.IsNotNull(PlayModeScheduler.Start(op, "series-0000-0004", out var error), error);
+            // Time.timeScale 0: game time never reaches the 1000 ms slot.
+            for (int f = 1; f <= 3; f++) PlayModeScheduler.TickAll(f, 0f, 0.1f, 0f, 4, 4, 0);
+            StringAssert.Contains("\"state\":\"running\"", PlayModeScheduler.Status("series-0000-0004"));
+            wall = op.CaptureLimitMs + 1;
+            PlayModeScheduler.TickAll(4, 0f, 0.1f, 0f, 4, 4, 0);
+            var status = PlayModeScheduler.Status("series-0000-0004");
+            StringAssert.Contains("\"state\":\"failed\"", status);
+            StringAssert.Contains("\"outcome\":\"capture_timed_out\",\"error_code\":\"timed_out\"", status);
+            StringAssert.Contains("\"captured\":1", status);
+            StringAssert.Contains("\"index\":1,\"at_ms\":1000,\"captured\":false,\"dropped\":\"timed_out\"", status);
+            Assert.IsNull(PlayModeScheduler.RunningWithResource(CaptureSeriesOperation.Resource), "the series lock is released");
         }
 
         [Test]

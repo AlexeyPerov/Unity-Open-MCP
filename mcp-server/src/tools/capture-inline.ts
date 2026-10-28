@@ -34,7 +34,7 @@ export const captureInline = makeTool(
             minimum: 64,
             maximum: 4096,
             description:
-              "Capture width in pixels (with height). Omitted: 1280 for scene/game/isolated; 'composed' " +
+              "Capture width in pixels (with height for 'composed'). Omitted: 1280 for scene/game/isolated; 'composed' " +
               "returns the game's native resolution. For 'isolated', per quadrant (full image is 2x). For " +
               "'composed', a width/height of another aspect than the game is fitted and padded (letterbox), " +
               "never stretched — the response then carries scaled_from [w, h] and content_rect [x, y, w, h] " +
@@ -45,7 +45,7 @@ export const captureInline = makeTool(
             minimum: 64,
             maximum: 4096,
             description:
-              "Capture height in pixels (with width). Omitted: 720 for scene/game/isolated; native for " +
+              "Capture height in pixels (with width for 'composed'). Omitted: 720 for scene/game/isolated; native for " +
               "'composed'. For 'isolated', per quadrant (full image is 2x).",
           },
           object_path: {

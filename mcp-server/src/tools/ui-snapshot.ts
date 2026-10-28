@@ -20,7 +20,8 @@ export const uiSnapshot = makeTool(
   "Read what the uGUI screen shows, in edit or play mode: a flat accessibility tree of nodes " +
     "{ id, path, role (button | toggle | slider | input | scroll | text | image | container), text, " +
     "rect [x, y, w, h] in Screen pixels (bottom-left origin, the space of inputsim screen_x/screen_y), " +
-    "visible, visibility (on_screen | clipped | offscreen | transparent | zero_size), interactable, " +
+    "visible, visibility (on_screen | clipped | offscreen | transparent | zero_size; reason: no_camera for " +
+    "a World Space canvas nothing can project), interactable, " +
     "occluded_by, sprite, depth } plus `screen` { w, h, safe_area, dpi } and `textSources` " +
     "(ugui, plus tmp when TextMeshPro is installed). A control's text is its label (descendant texts); " +
     "visibility follows the CanvasGroup alpha chain, RectMask2D / Mask clipping and screen bounds; " +
@@ -81,7 +82,8 @@ export const uiSnapshot = makeTool(
         type: "string",
         description:
           "Regex (.NET, case-sensitive) flagging texts that look like unresolved localisation keys, e.g. " +
-          "'^[*#{].*[*#}]$'. Only checked when passed; there is no built-in pattern.",
+          "'^[*#{].*[*#}]$'. Only checked when passed; there is no built-in pattern. Over 100 ms on a " +
+          "text or 2 s for the snapshot → regex_timeout.",
       },
       min_touch_size: {
         type: "number",

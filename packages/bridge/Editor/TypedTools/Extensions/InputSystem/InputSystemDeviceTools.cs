@@ -365,9 +365,15 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
 
         public bool HasTouchscreen => Touchscreen.current != null;
 
+        // The editor input behaviour setting exists from Input System 1.1; before
+        // it, pointer input always followed Game view focus.
         public bool RespectsGameViewFocus =>
+#if UNITY_OPEN_MCP_EXT_INPUTSYSTEM_1_1
             InputSystem.settings.editorInputBehaviorInPlayMode !=
             InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
+#else
+            true;
+#endif
 
         public void Queue(int finger, DeviceTouchPhase phase, Vector2 position)
         {

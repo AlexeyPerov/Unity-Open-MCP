@@ -35,7 +35,8 @@ export function textTargetProps(subject: string) {
       enum: [...TEXT_MATCH_MODES],
       description:
         "target_text only: exact (default when omitted) | contains (case-insensitive substring) | " +
-        "regex (.NET, case-insensitive, matched against the normalised text).",
+        "regex (.NET, case-insensitive, matched against the normalised text; over 100 ms on a text or " +
+        "2 s for the screen → regex_timeout).",
     },
   } as const;
 }

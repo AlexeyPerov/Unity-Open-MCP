@@ -1,8 +1,8 @@
 // Drives a condition tree across scheduler ticks: captures console messages
 // every frame (for log conditions, `errors logged meanwhile` and `fail_on`),
-// keeps a short tick history (to time-stamp a log by the frame it was logged
-// in), and evaluates the tree every `PollEvery` frames. Used by playtest_wait
-// and by capture_series' `start_on`.
+// keeps a tick history as long as the longest poll interval (to time-stamp a
+// log by the frame it was logged in), and evaluates the tree every `PollEvery`
+// frames. Used by playtest_wait and by capture_series' `start_on`.
 //
 // Owns no OS handle: the only external hook is Application.logMessageReceived,
 // subscribed on the first tick and removed by Detach (called from the owning
@@ -15,7 +15,9 @@ namespace UnityOpenMcpBridge.Playtest
 {
     internal sealed class ConditionWatcher
     {
-        internal const int HistorySize = 256;
+        // Covers every tick since the previous poll, so a log pending at a poll
+        // always finds the tick it was logged in.
+        internal const int HistorySize = PlaytestWaitTools.MaxPollEveryFrames + 1;
         internal const int MaxErrors = 20;
         internal const int MaxStackChars = 4000;
         internal const int MaxPendingLogs = 2000;
@@ -57,6 +59,14 @@ namespace UnityOpenMcpBridge.Playtest
             if (!subscribed) return;
             Application.logMessageReceived -= OnLog;
             subscribed = false;
+        }
+
+        // The condition is settled (a start_on that fired): stop buffering
+        // messages for it. Errors and fail_on keep recording until Detach.
+        internal void StopMatching()
+        {
+            logsWanted = false;
+            pending.Clear();
         }
 
         private void OnLog(string condition, string stackTrace, LogType type)

@@ -30,7 +30,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         public string Under;
         public int? Index;
         public string TextMatch;
-        public string TextTargetJson; // resolution report for TargetText keyframes
+        public string TextTargetJson; // resolution report: first keyframe of each distinct label query only
         public Vector2 Point;     // resolved Screen pixels
     }
 
@@ -56,8 +56,10 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         internal const int MaxFingers = 10;
         internal const int MaxKeyframes = 256;
         internal const double MaxDurationMs = 300000;
+        internal const int MaxTextTargets = 32;
 
         public readonly List<GestureFinger> Fingers = new List<GestureFinger>();
+        public int TextTargetsOmitted;   // distinct label resolutions past MaxTextTargets (no TextTargetJson)
         public string Coords = "screen";
         public PlayModeTimeBase Time = PlayModeTimeBase.Realtime;
         public double DurationMs;
@@ -184,12 +186,19 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
 
         // As above; `resolveText` maps a target_text keyframe to its tap point
         // (context names the keyframe) and returns a complete error body on
-        // failure, surfaced through `errorJson`.
+        // failure, surfaced through `errorJson`. Every label resolves now,
+        // against one walk of the screen as it is at the gesture start; a
+        // repeated query (same text, match, under, index) reuses its first
+        // resolution, and only the first MaxTextTargets distinct ones keep a
+        // TextTargetJson (the rest are counted in TextTargetsOmitted).
         internal bool ResolvePoints(Vector2 screen, Func<string, (bool Ok, Vector2 Point, string Code, string Message)> resolveTarget,
             Func<GestureKeyframe, string, (bool Ok, Vector2 Point, string TargetJson, string ErrorJson)> resolveText,
             out string code, out string message, out string errorJson)
         {
             code = message = errorJson = null;
+            TextTargetsOmitted = 0;
+            var labels = new Dictionary<string, Vector2>();
+            using var sharedWalk = DeviceTargets.ShareUiWalk();
             foreach (var finger in Fingers)
             {
                 for (int k = 0; k < finger.Path.Count; k++)
@@ -214,16 +223,23 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                                     message = context + ": " + InputBackends.UiTextUnavailableMessage;
                                     return false;
                                 }
-                                var t = resolveText(key, context);
-                                if (!t.Ok)
+                                var query = key.TargetText + "\n" + key.TextMatch + "\n" + key.Under + "\n" + key.Index;
+                                key.TextTargetJson = null;
+                                if (!labels.TryGetValue(query, out var labelPoint))
                                 {
-                                    code = "text_target_failed";
-                                    message = context;
-                                    errorJson = t.ErrorJson;
-                                    return false;
+                                    var t = resolveText(key, context);
+                                    if (!t.Ok)
+                                    {
+                                        code = "text_target_failed";
+                                        message = context;
+                                        errorJson = t.ErrorJson;
+                                        return false;
+                                    }
+                                    labels[query] = labelPoint = t.Point;
+                                    if (labels.Count <= MaxTextTargets) key.TextTargetJson = t.TargetJson;
+                                    else TextTargetsOmitted++;
                                 }
-                                key.TextTargetJson = t.TargetJson;
-                                key.Point = t.Point + (key.HasX ? new Vector2((float)key.X, (float)key.Y) : Vector2.zero);
+                                key.Point = labelPoint + (key.HasX ? new Vector2((float)key.X, (float)key.Y) : Vector2.zero);
                                 break;
                             }
                             if (string.IsNullOrEmpty(key.Target))

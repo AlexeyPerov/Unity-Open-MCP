@@ -62,11 +62,22 @@ GameObject name. It resolves over the same uGUI screen model as
   matches on its label (the texts of its descendants) or on any one of those
   texts, and resolves to the control; a plain text resolves to itself. The tap
   point is the centre of the element's visible rect (so a row half-clipped by a
-  scroll view is tapped on its visible part).
+  scroll view is tapped on its visible part); when one of a control's label texts
+  matches, the control is tapped where that text shows inside it (a price label
+  at the right of a shop row is tapped there, not at the row's centre).
+- A plain text is the element acted on. With the default `routing: "dispatch"`
+  the events go to the text's GameObject and bubble only to its ancestors, so a
+  label laid over a button as a **sibling** (not a child) does not press it
+  (`hasHandler: false`, `blockedBy` names the button); use
+  `routing: "raycast_real"` there, which taps whatever the input module hits at
+  that point.
 - `text_match`: `exact` (default when omitted) compares after normalisation —
-  trimmed, whitespace collapsed, rich-text tags removed, case-insensitive —
-  so `" BUY "` matches `<b>Buy</b>`; `contains` is a case-insensitive substring;
-  `regex` is a .NET regex, case-insensitive, matched against the normalised text.
+  trimmed, whitespace collapsed, rich-text tags removed (a `<br>` reads as a
+  space), case-insensitive — so `" BUY "` matches `<b>Buy</b>`; `contains` is a
+  case-insensitive substring; `regex` is a .NET regex, case-insensitive, matched
+  against the normalised text. A regex is limited to 100 ms per text and 2 s per
+  screen; past either it refuses with `regex_timeout` (naming the pattern and the
+  text) rather than reading the text as a non-match.
 - Several visible matches refuse with `ambiguous_target`: `candidates` (paths) and
   `matches[]` (`index`, `path`, `id`, `role`, `text`, `visibility`, `rect`) in
   hierarchy order. Pick one with `index` or narrow with `under` (a hierarchy path
@@ -78,13 +89,18 @@ GameObject name. It resolves over the same uGUI screen model as
 - `target_text` excludes the other forms for the same end: `object_id`, `target`,
   `screen_x`/`screen_y` (pointer and touch); for a pointer `drag` / touch `swipe`
   it is the start, exclusive with `from_target` / `from_x`/`from_y`
-  (`conflicting_targets`). `under` / `index` without `target_text` →
-  `invalid_arguments`.
+  (`conflicting_targets`). `under` / `index` / `text_match` without
+  `target_text` → `invalid_arguments`.
 - Gestures: with `coords: "target"` a keyframe names `target` or `target_text`
   (with its own `under`, `index`, `text_match`); `x`/`y` stay pixel offsets.
+  Every keyframe resolves when the gesture starts, against one read of the
+  screen as it is then — a label that only appears mid-gesture is
+  `target_not_found`; tap it with a separate call after the screen shows it.
 - The result reports the resolution as `textTarget` (`query`, `match`, `text`,
   `path`, `id`, `role`, `index`, `matches`, `point`); gestures list
-  `textTargets` per finger and keyframe.
+  `textTargets` (`finger`, `keyframe`, `target`) once per distinct label query
+  (text, `text_match`, `under`, `index`), at its first keyframe — at most 32;
+  `textTargetsOmitted` counts the rest.
 - Label targeting is compiled with uGUI; without `com.unity.ugui`, touch and
   gesture refuse `target_text` with `ui_text_unavailable`.
 
@@ -165,7 +181,7 @@ on it with [`unity_open_mcp_jobs`](jobs.md#play-mode-operations), which can also
 start one directly. A gesture that outlives the inline window (for example
 `time: "gameplay"` at a low time scale) is cancelled and returns `gesture_timeout`.
 `operation_id` is an optional idempotency handle: a retried call with the same id
-returns the same operation. One input gesture runs at a time
+returns the same operation (for a gesture that runs as a job, the same job). One input gesture runs at a time
 (`playmode_operation_busy`); `inputsim_touch` and `raycast_real` are refused
 while it runs. The gesture cannot be a `batch_execute` step.
 

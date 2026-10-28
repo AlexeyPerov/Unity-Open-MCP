@@ -24,7 +24,8 @@ import { PLAYTEST_SESSION_ACTIONS, PLAYTEST_SESSION_ACTION_KEYS, PLAYTEST_VERDIC
 import { PlaytestRecorder, classifyCall, RECORDING_LIMITS } from "./playtest/recorder.js";
 import { Redactor, REDACTED, isSecretKey, secretEnvValues } from "./playtest/redact.js";
 import { decodePng, downscale, encodePng, pngSize, thumbnail } from "./playtest/png.js";
-import { appDataRoot, readProjectIdentity, safeSegment, sessionId, SESSION_ID_PATTERN } from "./playtest/session-store.js";
+import { appDataRoot, readProjectIdentity, safeSegment, sessionId, SessionStore, SESSION_ID_PATTERN } from "./playtest/session-store.js";
+import { writeReport } from "./playtest/report.js";
 
 const NAME = "unity_open_mcp_playtest_session";
 const tool = () => { const t = ALL_TOOLS.find(x => x.name === NAME); assert.ok(t, NAME); return t!; };
@@ -120,6 +121,64 @@ test("redaction: secret-named keys at any depth, secret fragments in text, known
   assert.equal(diff.changed[1].to.value, 2);
   assert.ok(secretEnvValues({ MY_API_TOKEN: "abcdefgh12", PATH: "/usr/bin:/bin", SHORT_TOKEN: "x" }).includes("abcdefgh12"));
   assert.equal(secretEnvValues({ PATH: "/usr/bin:/bin" }).length, 0);
+});
+
+test("redaction: Basic / Digest credentials, JWTs, flags, query keys, pass / sessionKey", () => {
+  const r = new Redactor([]);
+  const masked: Array<[string, string]> = [
+    ["Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA"],
+    ['Digest username="qa", realm="api", nonce="dcd98b", response="6629fae49393a053"', "6629fae49393a053"],
+    ["saved eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl in prefs", "eyJzdWIiOiIxIn0"],
+    ["login --password hunter2 --verbose", "hunter2"],
+    ["run -token abc123", "abc123"],
+    ["pass=hunter2", "hunter2"],
+    ["https://api.example.com/v1?mode=1&key=AIzaSy123", "AIzaSy123"],
+    ['{"user":"qa","pass":"hunter2","sessionKey":"s-123"}', "s-123"],
+  ];
+  for (const [input, secret] of masked) {
+    const out = r.text(input);
+    assert.ok(!out.includes(secret), `${input} → ${out}`);
+    assert.ok(out.includes(REDACTED), input);
+  }
+  assert.ok(r.text('{"user":"qa","pass":"hunter2"}').includes('"user":"qa"'));
+  // Prose and ordinary keys are left alone.
+  for (const prose of ["Basic settings are fine", "Pressed key=Space", "bypass=1", "--no-password-prompt yes", "Test pass: 3/4"])
+    assert.equal(r.text(prose), prose);
+  assert.ok(isSecretKey("pass") && isSecretKey("sessionKey"));
+  // Only strings under a secret-named key are masked: a `tokens` currency or a count stays readable.
+  const out = r.value({ pass: "hunter2", sessionKey: "abc", tokens: 150, token_count: 5, pinned: true, auth: { state: "guest", level: 2 },
+    prefs: [{ key: "tokens", from: { type: "int", value: 100 }, to: { type: "int", value: 150 } }] }) as any;
+  assert.equal(out.pass, REDACTED);
+  assert.equal(out.sessionKey, REDACTED);
+  assert.equal(out.tokens, 150);
+  assert.equal(out.token_count, 5);
+  assert.equal(out.pinned, true);
+  assert.deepEqual(out.auth, { state: REDACTED, level: 2 });
+  assert.deepEqual(out.prefs[0].to, { type: "int", value: 150 });
+});
+
+test("report: a `|` inside a table cell's code span is escaped, so the row keeps its columns", t => {
+  const dir = mkdtempSync(join(tmpdir(), "uom-report-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const meta = {
+    format: 1, id: "20261028-000000-pipes-abcd", name: "pipes", project: "/p", company: "c", product: "p", owner: { project: "/p", agent: "a" },
+    server_pid: 1, started_at: "2026-10-28T00:00:00.000Z", ended_at: "2026-10-28T00:01:00.000Z", state: "ended" as const, device: null,
+    snapshot: { name: "s", taken: true }, limits: {},
+  };
+  const entries = [
+    { k: "call_started", seq: 1, tool: "unity_open_mcp_inputsim_pointer", kind: "input", at: "2026-10-28T00:00:01.000Z", args: { target_text: "Yes | No" } },
+    { k: "call", seq: 1, tool: "unity_open_mcp_inputsim_pointer", kind: "input", at: "2026-10-28T00:00:01.000Z", ended_at: "2026-10-28T00:00:01.100Z", duration_ms: 100, status: "ok" },
+    { k: "mark", step: 1, at: "2026-10-28T00:00:02.000Z", label: "Tap", verdict: "ok" },
+  ];
+  const stateDiff = { ok: true, output: { identical: false, prefs: { counts: { added: 1 }, added: [{ key: "slot|1", to: { type: "int", value: 3 } }] },
+    files: { counts: { added: 1 }, added: [{ path: "saves/a|b.json", size: 2 }] } } };
+  const summary = writeReport({ store: new SessionStore(dir), dir, meta, entries, stateDiff, redactor: new Redactor([]), maxThumbnails: 0, now: Date.now });
+  const lines = readFileSync(summary.report, "utf8").split("\n");
+  const columns = (line: string) => line.split(/(?<!\\)\|/).length - 2;
+  const row = (needle: string) => { const line = lines.find(l => l.includes(needle)); assert.ok(line, needle); return line!; };
+  assert.equal(columns(row("Yes \\| No")), 6);
+  assert.equal(columns(row("slot\\|1")), 4);
+  assert.equal(columns(row("a\\|b.json")), 3);
 });
 
 // ---------------------------------------------------------------------------

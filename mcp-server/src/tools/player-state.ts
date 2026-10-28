@@ -14,7 +14,8 @@ import { GATE_PROP, makeTool } from "./schema-fragments.js";
 
 export const PLAYER_STATE_ACTIONS = ["snapshot", "diff", "restore", "list", "delete"] as const;
 export const PLAYER_STATE_RESTORE_SCOPE = "ProjectSettings/ProjectSettings.asset";
-const SNAPSHOT_NAME_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$";
+// No "..", no trailing "." (the bridge refuses both).
+const SNAPSHOT_NAME_PATTERN = "^(?!.*\\.\\.)(?!.*\\.$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}$";
 
 export const playerState = makeTool(
   "unity_open_mcp_player_state",
@@ -29,7 +30,8 @@ export const playerState = makeTool(
     "(snapshot_exists unless overwrite); diff = `name` vs the current state (or vs snapshot `against`): " +
     "prefs / editor_prefs / files added, removed, changed — small values shown, long strings and files as " +
     "size + sha256; restore = EDIT MODE ONLY; without confirm a dry run returning the diff it would apply " +
-    "(current → snapshot) with EVERY removal listed; with confirm:true it OVERWRITES the current state — " +
+    "(current → snapshot) with EVERY removal and overwrite listed and a `plan` id; with confirm:true + that " +
+    "plan it OVERWRITES the current state (plan_changed when the state moved since the dry run) — " +
     "PlayerPrefs.DeleteAll + the snapshot's keys + Save (so the Editor's in-memory cache and the store agree), " +
     "EditorPrefs only under the snapshot's prefixes, persistentDataPath mirrored exactly (files not in the " +
     "snapshot are DELETED) — then re-reads and reports verified; it is the only gated action (paths_hint " +
@@ -37,7 +39,7 @@ export const playerState = makeTool(
     "snapshot_project_mismatch for another project's snapshot; list / delete = the snapshots of this " +
     "project (company + product address another project's store). Prefer a project's own isolated-save " +
     "hook (project_commands playtest.begin / playtest.end) when it exists; otherwise snapshot → play → diff " +
-    "→ stop → restore (dry run, then confirm). macOS verified; Windows registry and Linux readers are " +
+    "→ stop → restore (dry run, then confirm with its plan). macOS verified; Windows registry and Linux readers are " +
     "untested in the field.",
   {
     required: ["action"],
@@ -64,9 +66,17 @@ export const playerState = makeTool(
         type: "boolean",
         default: false,
         description:
-          "[restore] false (default) = dry run: returns the diff restore would apply, nothing changes. " +
-          "true = apply: overwrites PlayerPrefs, opted-in EditorPrefs and persistentDataPath (removing files not " +
-          "in the snapshot). Review the dry run's removals first.",
+          "[restore] false (default) = dry run: returns the diff restore would apply and its plan id, nothing " +
+          "changes. true = apply (needs `plan`): overwrites PlayerPrefs, opted-in EditorPrefs and persistentDataPath " +
+          "(removing files not in the snapshot). Review the dry run's removals and overwrites first.",
+      },
+      plan: {
+        type: "string",
+        pattern: "^[0-9a-f]{16}$",
+        description:
+          "[restore confirm:true] The `plan` id the dry run returned. Required with confirm:true: restore applies " +
+          "only the plan that was reviewed and refuses plan_changed when the current state moved since (a new " +
+          "save file, a changed key) — run the dry run again then.",
       },
       editor_prefs_prefixes: {
         type: "array",
@@ -126,8 +136,9 @@ export const playerState = makeTool(
         minimum: 1,
         maximum: 1000,
         description:
-          "[diff / restore] Entries listed per added / changed list (default 100; counts are always complete, " +
-          "`truncated` says how many were left out). restore always lists every removal.",
+          "[diff / restore] Entries listed per list (default 100; counts are always complete, `truncated` says " +
+          "how many were left out). diff bounds added / removed / changed; restore bounds only added and always " +
+          "lists every removal and overwrite.",
       },
       paths_hint: {
         type: "array",

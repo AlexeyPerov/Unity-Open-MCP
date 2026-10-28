@@ -67,14 +67,17 @@ namespace UnityOpenMcpBridge
         //       render_target_unavailable; batch refusal of both new tools;
         //       registry arguments read from the depth-1 projection when a
         //       condition / start_on payload is present (playtest_wait's
-        //       timeout_ms is its own parameter, not only the dispatch budget).
+        //       timeout_ms is its own parameter; its start dispatch keeps the
+        //       default budget).
         //   7 — Player-state sandbox: player_state (snapshot / diff / restore /
         //       list / delete); request-level mutability (only restore with
         //       confirm:true is a gated mutation); snapshot_exists /
         //       snapshot_not_found / snapshot_unreadable / snapshot_corrupt /
         //       snapshot_project_mismatch / edit_mode_required /
         //       persistent_data_too_large / prefs_store_unreadable /
-        //       restore_incomplete / editor_internals_unavailable (EditorPrefs
+        //       restore_incomplete / plan_required / plan_changed (confirm
+        //       applies only the dry run's plan) / persistent_path_link /
+        //       prefs_store_unverified / editor_internals_unavailable (EditorPrefs
         //       without a flush); a registry tool may return a failed result
         //       (mutation.success:false) and a failed mutation's own next steps
         //       reach agentNextSteps.

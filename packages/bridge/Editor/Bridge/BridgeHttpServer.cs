@@ -882,7 +882,12 @@ namespace UnityOpenMcpBridge
                 var deprecations = BatchSchemaValidator.Deprecations(body, requestSchema);
                 if (deprecations.Count > 0) context.Response.Headers["X-Unity-Open-MCP-Deprecations"] = string.Join("; ", deprecations);
             }
-            var timeoutMs = BridgeRequestBody.ExtractTimeoutMs(body);
+            // playtest_wait's timeout_ms is the wait's own limit (up to 10 min); its
+            // start call answers at once, so it dispatches on the default budget and
+            // the bridge gives up on a blocked main thread before the MCP fetch does.
+            var timeoutMs = toolName == Playtest.PlaytestWaitTools.ToolName
+                ? BridgeRequestBody.DefaultTimeoutMs
+                : BridgeRequestBody.ExtractTimeoutMs(body);
             var activity = BridgeActivityRecorder.CurrentActivity;
 
             if (BridgeActivityLog.Verbose && activity != null && !string.IsNullOrEmpty(body))

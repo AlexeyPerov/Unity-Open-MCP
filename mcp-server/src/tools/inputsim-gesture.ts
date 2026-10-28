@@ -117,7 +117,9 @@ export const inputsimGesture = makeTool(
         description:
           "Capture the composed game frame at these offsets (ms, the gesture's `time` base) from the gesture " +
           "start — the call returns when the gesture and the last capture are done. Result `captures.frames[]`: " +
-          "frame, play_time, elapsed_ms, file, `unchanged`. Needs a rendering Game view / Simulator (Unity 6).",
+          "frame, play_time, elapsed_ms, file, `unchanged`. Needs a rendering Game view / Simulator (Unity 6). " +
+          "In gameplay time a paused game (timeScale 0) ends the gesture after a wall-clock limit (error_code " +
+          "timed_out); captured frames are kept.",
       },
       operation_id: {
         type: "string",

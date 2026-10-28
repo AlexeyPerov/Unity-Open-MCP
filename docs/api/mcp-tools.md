@@ -500,13 +500,22 @@ Space Overlay UI.
   in edit mode). When the view's render target cannot be reached (an Editor
   without the Game view adapter), the frame falls back to `ScreenCapture`
   (`source: "screen_capture"`) with a `warning` that it may include Editor
-  chrome. A `warning` also appears when the view's last rendered frame differs
-  from the game's screen size (the size just changed, or the view's tab is not
-  in front).
+  chrome. A `warning` also appears when the play-mode view is not the front tab
+  of its dock area (a hidden tab does not render, so the frame is the last one
+  it drew and may be stale), or when the view's last rendered frame differs
+  from the game's screen size (the size just changed and has not rendered yet).
 - **Safe area.** `overlay: "safe_area"` (composed only) tints the band outside
   the safe area — notch, home indicator, cutouts — and outlines the safe rect;
   the response repeats `safe_area` `[x, y, w, h]` in screen pixels (bottom-left
-  origin). In the Game view the safe area is the whole screen.
+  origin). In the Game view the safe area is the whole screen. With no Game view
+  or Device Simulator open there is no screen to draw it from: the capture is
+  refused with `safe_area_unavailable`.
+- **Errors.** `validation_error` (a composed width without height or the
+  reverse, `size: "native"` with width/height, an overlay outside composed),
+  `native_size_unavailable` (`view: "game"` with `size: "native"` before the
+  Game view reports a size), `safe_area_unavailable` (above). Game view /
+  Simulator errors (`game_view_unavailable`, `simulator_unavailable`, …) belong
+  to [`unity_open_mcp_game_view`](playtest.md#errors).
 - **What it was taken at.** Game and composed captures carry `capturedAt`:
   `mode` (`game` / `simulator`), the Game view `size` label or the Simulator
   `device`, `orientation`, `screen` `[w, h]`, the Simulator `safe_area`, and
@@ -523,7 +532,8 @@ contact sheet.
 
 `view: "game"` (Camera.main only) keeps its 1280×720 default; `size: "native"`
 renders it at the game's resolution (`size: "native"` in the response, otherwise
-`"requested"`). `scene` and `isolated` are unchanged.
+`"requested"`). `scene` and `isolated` are unchanged; for scene, game and
+isolated a missing width or height still defaults on its own (1280 / 720).
 
 > **Capture-scaling fix.** Composed captures used to be scaled to the requested
 > width/height (default 1280×720) — stretched whenever the aspect differed — and

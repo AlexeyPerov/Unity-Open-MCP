@@ -46,6 +46,10 @@ export const RECORDING_LIMITS = {
   /** Thumbnails written by `end` (downscaled; the full frames stay files). */
   maxThumbnails: 60,
   maxErrorsPerCall: 20,
+  /** Occurrences of one console message logged per session; later ones are counted, not logged. */
+  maxErrorRepeats: 20,
+  /** Console errors logged per session; later ones are counted, not logged. */
+  maxErrors: 2_000,
   maxEditorEvents: 200,
   maxArgsChars: 2_000,
   maxPendingErrors: 500,
@@ -101,7 +105,7 @@ interface PendingError {
   source: "stream" | "response";
 }
 
-/** A finished call's time window and the error messages already recorded for it. */
+/** A finished call's time window and its response-only errors, each waiting for the stream's copy (with the stack). */
 interface CallWindow { seq: number; start: number; end: number; messages: Set<string> }
 
 interface OpenSession {
@@ -121,6 +125,17 @@ interface OpenSession {
   windows: CallWindow[];
   inflight: Map<number, number>;
   pending: PendingError[];
+  /** Stream errors dropped because the pending backlog was full. */
+  pendingDropped: number;
+  streamGaps: number;
+  /** Logged occurrences per error message, and how many errors were logged. */
+  errorSeen: Map<string, number>;
+  errorsLogged: number;
+  /** Counted, not logged: repeats of one message past maxErrorRepeats, and errors past maxErrors / maxErrorsPerCall. */
+  errorRepeats: Map<string, { type: string; message: string; count: number }>;
+  errorsOverLimit: number;
+  /** Stream errors already written (ts + message), so a job result's own copy is not a second error. */
+  recentErrors: Array<{ ts: number; key: string }>;
   jobs: Map<string, { seq: number; kind: CallKind; tool: string }>;
   limitNoted: Set<string>;
   sinceMark: { calls: number; errors: number; captures: number; failed: number };
@@ -175,6 +190,8 @@ export class PlaytestRecorder {
   private readonly isAlive: (pid: number) => boolean;
   private readonly streamConnected: () => boolean;
   private readonly open = new Map<string, OpenSession>();
+  /** Owners whose `start` is between its check and its session (awaiting the bridge). */
+  private readonly starting = new Set<string>();
   private identity: { company: string; product: string } | null = null;
 
   constructor(options: RecorderOptions) {
@@ -205,8 +222,7 @@ export class PlaytestRecorder {
     if (!classified) return null;
     this.settle(session);
     if (session.calls >= RECORDING_LIMITS.maxCalls) {
-      session.droppedCalls++;
-      this.noteLimit(session, "calls", `More than ${RECORDING_LIMITS.maxCalls} calls; later calls are counted but not logged.`);
+      this.dropCall(session);
       return null;
     }
     const seq = session.nextSeq++;
@@ -231,12 +247,12 @@ export class PlaytestRecorder {
     const error = (output.error ?? body.error) as { code?: string; message?: string } | undefined;
     const jobId = typeof body.job_id === "string" ? body.job_id : undefined;
     const status = thrown ? "error" : result?.isError || error ? "error" : jobId && !TERMINAL_JOB_STATES.has(String(body.state)) ? "job_started" : "ok";
-    const errors = this.collectErrors(session, handle.start, end, output, body);
+    const { errors, total, responseOnly } = this.collectErrors(session, handle.start, end, output, body);
     const captures = result ? this.collectCaptures(session, seq, output, result) : [];
-    this.pushWindow(session, { seq, start: handle.start, end, messages: new Set(errors.map(e => messageKey(String(e.message ?? "")))) });
+    this.pushWindow(session, { seq, start: handle.start, end, messages: responseOnly });
     if (jobId && status === "job_started") session.jobs.set(jobId, { seq, kind: handle.kind, tool: handle.tool });
     session.sinceMark.calls++;
-    session.sinceMark.errors += errors.length;
+    session.sinceMark.errors += total;
     session.sinceMark.captures += captures.length;
     if (status === "error") session.sinceMark.failed++;
     const entry: Record<string, unknown> = {
@@ -264,17 +280,19 @@ export class PlaytestRecorder {
     const started = jobId ? session.jobs.get(jobId) : undefined;
     if (!jobId || !started || !TERMINAL_JOB_STATES.has(String(body.state))) return;
     session.jobs.delete(jobId);
-    if (session.calls >= RECORDING_LIMITS.maxCalls) { session.droppedCalls++; return; }
+    if (session.calls >= RECORDING_LIMITS.maxCalls) { this.dropCall(session); return; }
     const seq = session.nextSeq++;
     session.calls++;
     const start = typeof body.started_at === "number" ? body.started_at : this.now();
     const end = typeof body.finished_at === "number" ? body.finished_at : this.now();
     const jobResult = (body.result && typeof body.result === "object" ? body.result : {}) as Record<string, any>;
-    const errors = this.collectErrors(session, start, end, jobResult, {});
+    // The stream's copies of the job's errors were already written (a job is not
+    // in flight for attribution); collectErrors skips the result's own copies of them.
+    const { errors, total, responseOnly } = this.collectErrors(session, start, end, jobResult, {});
     const captures = this.collectCaptures(session, seq, jobResult, null);
-    this.pushWindow(session, { seq, start, end, messages: new Set(errors.map(e => messageKey(String(e.message ?? "")))) });
+    this.pushWindow(session, { seq, start, end, messages: responseOnly });
     session.sinceMark.calls++;
-    session.sinceMark.errors += errors.length;
+    session.sinceMark.errors += total;
     session.sinceMark.captures += captures.length;
     const status = body.state === "succeeded" ? "ok" : "error";
     if (status === "error") session.sinceMark.failed++;
@@ -296,7 +314,11 @@ export class PlaytestRecorder {
     if (this.open.size === 0) return;
     for (const session of this.open.values()) {
       if (event.type === "log" && ERROR_TYPES.has(String(event.logType ?? "").toLowerCase())) {
-        if (session.pending.length >= RECORDING_LIMITS.maxPendingErrors) continue;
+        if (session.pending.length >= RECORDING_LIMITS.maxPendingErrors) {
+          session.pendingDropped++;
+          this.noteLimit(session, "pending_errors", `More than ${RECORDING_LIMITS.maxPendingErrors} console errors arrived during one call; later ones were dropped.`);
+          continue;
+        }
         const ts = Date.parse(event.ts);
         session.pending.push({
           ts: Number.isFinite(ts) ? ts : this.now(), type: String(event.logType),
@@ -312,7 +334,7 @@ export class PlaytestRecorder {
         if (session.streamReady++ > 0 && session.editorEvents++ < RECORDING_LIMITS.maxEditorEvents)
           this.append(session, { k: "editor", at: event.ts, state: "stream_reconnected", playing: null });
       } else if (event.type === "missed") {
-        this.append(session, { k: "stream_gap", at: event.ts, detail: event.message ?? "" });
+        if (session.streamGaps++ < RECORDING_LIMITS.maxEditorEvents) this.append(session, { k: "stream_gap", at: event.ts, detail: event.message ?? "" });
       }
       this.settle(session);
     }
@@ -323,7 +345,10 @@ export class PlaytestRecorder {
   // ---------------------------------------------------------------------
 
   async start(owner: SessionOwner, args: Record<string, unknown>, call: ToolCaller): Promise<Record<string, unknown>> {
-    const existing = this.open.get(ownerKey(owner)) ?? this.diskSessionOf(owner);
+    const key = ownerKey(owner);
+    if (this.starting.has(key))
+      throw new PlaytestError("session_already_open", "This agent's previous start is still running; wait for its answer instead of starting again.");
+    const existing = this.open.get(key) ?? this.diskSessionOf(owner);
     if (existing) {
       const meta = "meta" in existing ? existing.meta : existing;
       throw new PlaytestError("session_already_open",
@@ -332,6 +357,12 @@ export class PlaytestRecorder {
     }
     if (args.snapshot === true && typeof args.use_snapshot === "string")
       throw new PlaytestError("invalid_arguments", "Pass either snapshot:true (take one now) or use_snapshot (an existing one), not both.");
+    // Claimed before the first await: a retried start must not open a second session.
+    this.starting.add(key);
+    try { return await this.startClaimed(owner, args, call); } finally { this.starting.delete(key); }
+  }
+
+  private async startClaimed(owner: SessionOwner, args: Record<string, unknown>, call: ToolCaller): Promise<Record<string, unknown>> {
     const identity = await this.resolveIdentity(call);
     const name = typeof args.name === "string" && args.name.trim() ? args.name.trim() : "playtest";
     const startedAt = this.now();
@@ -453,7 +484,12 @@ export class PlaytestRecorder {
     const endedAt = this.now();
     if (typeof args.note === "string" && args.note)
       this.append(session, { k: "end_note", at: iso(endedAt), note: this.redactor.text(clip(args.note, 2_000)) });
-    this.append(session, { k: "session_ended", at: iso(endedAt), dropped_calls: session.droppedCalls, frames_skipped: session.framesSkipped });
+    this.append(session, {
+      k: "session_ended", at: iso(endedAt), dropped_calls: session.droppedCalls, frames_skipped: session.framesSkipped,
+      // Calls of this process that had not returned yet (not lost: the process is alive).
+      running: [...session.inflight.keys()],
+      error_repeats: [...session.errorRepeats.values()], errors_over_limit: session.errorsOverLimit, errors_dropped: session.pendingDropped,
+    });
     const meta: SessionMeta = { ...session.meta, state: "ended", ended_at: iso(endedAt) };
     const summary: ReportSummary = writeReport({
       store: this.store, dir: session.dir, meta, entries: this.store.readLog(session.dir),
@@ -469,7 +505,7 @@ export class PlaytestRecorder {
     if (summary.hooks.begin && !summary.hooks.end)
       nextSteps.push(`The project's isolation hook ${summary.hooks.begin} ran without its end hook — invoke the matching playtest end command.`);
     if (session.meta.snapshot)
-      nextSteps.push(`Restore the player state after stopping play mode: player_state {"action":"restore","name":"${session.meta.snapshot.name}"} (dry run), then with "confirm":true.`);
+      nextSteps.push(`Restore the player state after stopping play mode: player_state {"action":"restore","name":"${session.meta.snapshot.name}"} (dry run), then with "confirm":true and the dry run's "plan".`);
     return { status: "ok", action: "end", session: meta.id, report: summary.report, folder: session.dir, summary, agentNextSteps: nextSteps };
   }
 
@@ -496,6 +532,7 @@ export class PlaytestRecorder {
       meta, dir, nextSeq: 1, nextStep: 1, calls: 0, droppedCalls: 0, marks: 0, frames: 0, frameBytes: 0, framesSkipped: 0,
       // An already-connected stream will not send another `ready` until it reconnects.
       editorEvents: 0, lastEditorState: null, streamReady: this.streamConnected() ? 1 : 0, windows: [], inflight: new Map(), pending: [], jobs: new Map(),
+      pendingDropped: 0, streamGaps: 0, errorSeen: new Map(), errorsLogged: 0, errorRepeats: new Map(), errorsOverLimit: 0, recentErrors: [],
       limitNoted: new Set(), sinceMark: { calls: 0, errors: 0, captures: 0, failed: 0 },
     };
     this.open.set(ownerKey(meta.owner), session);
@@ -515,6 +552,47 @@ export class PlaytestRecorder {
     if (session.limitNoted.has(what)) return;
     session.limitNoted.add(what);
     this.append(session, { k: "limit", at: iso(this.now()), what, message });
+  }
+
+  /** A call over maxCalls: counted (the count is logged, so an adopting process keeps it), not recorded. */
+  private dropCall(session: OpenSession): void {
+    session.droppedCalls++;
+    this.noteLimit(session, "calls", `More than ${RECORDING_LIMITS.maxCalls} calls; later calls are counted but not logged.`);
+    this.append(session, { k: "dropped", calls: session.droppedCalls });
+  }
+
+  /**
+   * Whether this console error is written to the log. Each message is logged
+   * maxErrorRepeats times and the session maxErrors times; the rest are counted
+   * (per message, written at end), so an error thrown every frame cannot grow
+   * the log without bound. `occurrence: false` is a second copy of an error
+   * already counted (the stream's copy of a response error): written while the
+   * message is under its cap, never counted.
+   */
+  private keepError(session: OpenSession, type: string, message: string, occurrence = true): boolean {
+    const key = messageKey(message);
+    const seen = session.errorSeen.get(key);
+    if (!occurrence) return seen === undefined || seen <= RECORDING_LIMITS.maxErrorRepeats;
+    if (seen !== undefined && seen >= RECORDING_LIMITS.maxErrorRepeats) {
+      const repeat = session.errorRepeats.get(key) ?? { type, message: this.redactor.text(key), count: 0 };
+      repeat.count++;
+      session.errorRepeats.set(key, repeat);
+      this.noteLimit(session, "error_repeats", `A console message logged ${RECORDING_LIMITS.maxErrorRepeats} times is counted, not logged again.`);
+      return false;
+    }
+    if (session.errorsLogged >= RECORDING_LIMITS.maxErrors) {
+      session.errorsOverLimit++;
+      this.noteLimit(session, "errors", `More than ${RECORDING_LIMITS.maxErrors} console errors; later ones are counted, not logged.`);
+      return false;
+    }
+    session.errorSeen.set(key, (seen ?? 0) + 1);
+    session.errorsLogged++;
+    return true;
+  }
+
+  private rememberStreamError(session: OpenSession, ts: number, message: string): void {
+    session.recentErrors.push({ ts, key: messageKey(message) });
+    if (session.recentErrors.length > 1_000) session.recentErrors.splice(0, session.recentErrors.length - 1_000);
   }
 
   private requireOpen(owner: SessionOwner, sessionArg?: string): OpenSession {
@@ -537,27 +615,45 @@ export class PlaytestRecorder {
     const same = ownerKey(meta.owner) === ownerKey(owner);
     for (const other of this.open.values())
       if (other.meta.id === id && !same) throw new PlaytestError("session_owned_by_other_agent", `Session ${id} belongs to another agent of this MCP server.`);
-    // Not open in this process (checked above), so a session naming this pid
-    // was left by an earlier process that had the same pid.
-    if (!same && meta.server_pid !== this.pid && this.isAlive(meta.server_pid))
+    // A live process keeps its session even for the same agent id (two processes
+    // sharing an explicit _meta.agentId); not open in this process (checked
+    // above), so a session naming this pid was left by an earlier process.
+    if (meta.server_pid !== this.pid && this.isAlive(meta.server_pid))
       throw new PlaytestError("session_owned_by_other_agent",
         `Session ${id} is open in another running MCP server process (pid ${meta.server_pid}); only its owner can mark or end it.`);
+    this.store.terminateLog(dir);
     const adopted: SessionMeta = {
       ...meta, owner: { ...owner }, server_pid: this.pid,
       adoptions: [...(meta.adoptions ?? []), { at: iso(this.now()), from: meta.owner, from_pid: meta.server_pid }],
     };
     this.store.writeMeta(adopted);
     const session = this.openSession(adopted, dir);
-    // Continue numbering after what the previous process logged.
+    // Continue numbering and the limits after what the previous process logged.
+    const logged = (items: unknown) => {
+      for (const item of Array.isArray(items) ? items : []) {
+        const key = messageKey(String(item?.message ?? ""));
+        session.errorSeen.set(key, (session.errorSeen.get(key) ?? 0) + 1);
+        session.errorsLogged++;
+      }
+    };
     for (const entry of this.store.readLog(dir)) {
       if (typeof entry.seq === "number") session.nextSeq = Math.max(session.nextSeq, entry.seq + 1);
       if (entry.k === "call") {
         session.calls++;
         const start = Date.parse(entry.at), end = Date.parse(entry.ended_at);
         if (Number.isFinite(start) && Number.isFinite(end)) session.windows.push({ seq: entry.seq, start, end, messages: new Set() });
-        session.frames += Array.isArray(entry.captures) ? entry.captures.filter((c: any) => c.file).length : 0;
+        for (const capture of Array.isArray(entry.captures) ? entry.captures : []) {
+          if (capture?.file) { session.frames++; session.frameBytes += typeof capture.bytes === "number" ? capture.bytes : 0; }
+          else if (capture?.skipped) session.framesSkipped++;
+        }
+        logged(entry.errors);
       }
+      if (entry.k === "errors") logged(entry.items);
       if (entry.k === "mark") { session.marks++; session.nextStep = Math.max(session.nextStep, entry.step + 1); }
+      if (entry.k === "dropped" && typeof entry.calls === "number") session.droppedCalls = Math.max(session.droppedCalls, entry.calls);
+      if (entry.k === "limit" && typeof entry.what === "string") session.limitNoted.add(entry.what);
+      if (entry.k === "editor") session.editorEvents++;
+      if (entry.k === "stream_gap") session.streamGaps++;
     }
     session.windows = session.windows.slice(-256);
     this.append(session, { k: "adopted", at: iso(this.now()), from: meta.owner, from_pid: meta.server_pid, lost_in_flight: this.lostInFlight(session) });
@@ -667,9 +763,12 @@ export class PlaytestRecorder {
    * Which recorded call an error at `ts` belongs to: the call whose window
    * contains it; else one within 50 ms of it (clock rounding, the stream's
    * latency); else the last call that ended before it ("after" — a tap's
-   * consequence logged frames later).
+   * consequence logged frames later). A call whose response already reported
+   * this message wins over another call sharing the same millisecond.
    */
-  private attribute(session: OpenSession, ts: number): { window: CallWindow; relation: "during" | "after" } | null {
+  private attribute(session: OpenSession, ts: number, key: string): { window: CallWindow; relation: "during" | "after" } | null {
+    const reported = session.windows.find(w => w.messages.has(key) && ts >= w.start - 50 && ts <= w.end + 50);
+    if (reported) return { window: reported, relation: "during" };
     let near: CallWindow | undefined, nearGap = Infinity, before: CallWindow | undefined;
     for (const w of session.windows) {
       if (ts >= w.start && ts <= w.end) return { window: w, relation: "during" };
@@ -692,21 +791,30 @@ export class PlaytestRecorder {
     const ready = session.pending.filter(e => e.ts < earliestInflight);
     if (ready.length === 0) return;
     session.pending = session.pending.filter(e => !ready.includes(e));
-    const items = ready.map(e => {
-      const target = this.attribute(session, e.ts);
+    const items: Array<Record<string, unknown>> = [];
+    for (const e of ready) {
       const key = messageKey(e.message);
-      if (target && !(target.relation === "during" && target.window.messages.has(key))) session.sinceMark.errors++;
-      if (target?.relation === "during") target.window.messages.add(key);
-      return this.redactor.value({
+      const target = this.attribute(session, e.ts, key);
+      // The stream's copy of an error the call's response already reported: one error, now with its stack.
+      const copy = target?.relation === "during" && target.window.messages.delete(key);
+      if (target && !copy) session.sinceMark.errors++;
+      this.rememberStreamError(session, e.ts, e.message);
+      if (!this.keepError(session, e.type, e.message, !copy)) continue;
+      items.push(this.redactor.value({
         at: iso(e.ts), type: e.type, message: clip(e.message, 2_000), ...(e.stack ? { stack: clip(e.stack, 4_000) } : {}),
         seq: target?.window.seq ?? null, relation: target?.relation ?? "before_first_call", source: e.source,
-      });
-    });
-    this.append(session, { k: "errors", items });
+      }));
+    }
+    if (items.length) this.append(session, { k: "errors", items });
   }
 
-  /** Errors logged inside the call's window: stream events first, then the response's own evidence. */
-  private collectErrors(session: OpenSession, start: number, end: number, output: Record<string, any>, body: Record<string, any>): Array<Record<string, unknown>> {
+  /**
+   * Errors logged inside the call's window: stream events first, then the
+   * response's own evidence. `total` counts every occurrence; `errors` holds
+   * the ones written (per-call, per-message and per-session caps).
+   */
+  private collectErrors(session: OpenSession, start: number, end: number, output: Record<string, any>, body: Record<string, any>):
+    { errors: Array<Record<string, unknown>>; total: number; responseOnly: Set<string> } {
     const out: Array<Record<string, unknown>> = [];
     const seen = new Set<string>();
     // From the call's start (an earlier error belongs to the call before it) to
@@ -715,12 +823,15 @@ export class PlaytestRecorder {
     session.pending = session.pending.filter(e => !inWindow.includes(e));
     for (const e of inWindow) {
       seen.add(messageKey(e.message));
+      this.rememberStreamError(session, e.ts, e.message);
       out.push({ at: iso(e.ts), type: e.type, message: clip(e.message, 2_000), ...(e.stack ? { stack: clip(e.stack, 4_000) } : {}), source: "stream" });
     }
     const add = (type: string, message: string, stack?: string) => {
       const key = messageKey(message);
       if (seen.has(key)) return;
       seen.add(key);
+      // Already written from the stream inside this window (a job's errors, an overlapping call's).
+      if (session.recentErrors.some(r => r.key === key && r.ts >= start - 50 && r.ts <= end + 50)) return;
       out.push({ type, message: clip(message, 2_000), ...(stack ? { stack: clip(stack, 4_000) } : {}), source: "response" });
     };
     const logs = Array.isArray(body.logs) ? body.logs : [];
@@ -733,7 +844,10 @@ export class PlaytestRecorder {
     const exception = output.exception as Record<string, unknown> | undefined;
     if (exception && typeof exception.message === "string")
       add(String(exception.type ?? "exception").toLowerCase(), exception.message, typeof exception.stack === "string" ? exception.stack : undefined);
-    return this.redactor.value(out.slice(0, RECORDING_LIMITS.maxErrorsPerCall));
+    session.errorsOverLimit += Math.max(0, out.length - RECORDING_LIMITS.maxErrorsPerCall);
+    const kept = out.slice(0, RECORDING_LIMITS.maxErrorsPerCall).filter(e => this.keepError(session, String(e.type), String(e.message)));
+    const responseOnly = new Set(out.filter(e => e.source === "response").map(e => messageKey(String(e.message))));
+    return { errors: this.redactor.value(kept), total: out.length, responseOnly };
   }
 
   /** Frames a call wrote (file paths anywhere in its output, inline images) → linked into the report folder. */

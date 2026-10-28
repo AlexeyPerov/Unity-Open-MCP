@@ -40,7 +40,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
 
             info.Raw = text.text;
             info.RichText = text.richText;
-            info.Alpha = text.color.a;
+            info.Alpha = text.color.a * UiScreenModel.RendererAlpha(go);
             info.Source = Source;
 
             var rect = text.rectTransform.rect;

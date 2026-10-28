@@ -9,8 +9,10 @@
 // screen bounds, and the resulting `visibility`:
 //   zero_size   — the screen rect has no area
 //   transparent — effective alpha ≈ 0 (CanvasGroup chain, a disabled Canvas, or
-//                 an invisible text/image graphic)
-//   offscreen   — the rect does not intersect the screen (or is behind the camera)
+//                 an invisible text/image graphic: color × CanvasRenderer alpha)
+//   offscreen   — the rect does not intersect the screen (or is behind the camera,
+//                 or a World Space canvas has no camera to project it:
+//                 Reason "no_camera")
 //   clipped     — on screen but fully outside its masks
 //   on_screen   — at least partly visible (`visible: true`)
 // The label of a control (button / toggle / slider / input) is the text of its
@@ -38,7 +40,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
     {
         public string Raw;
         public bool RichText;
-        public float Alpha;            // graphic color alpha (0..1)
+        public float Alpha;            // graphic color alpha × CanvasRenderer alpha (0..1)
         public bool Overflowing;       // content exceeds the text rect
         public Vector2 Content;        // size the content needs (local units)
         public string Source;          // "ugui" | "tmp" | reader-specific
@@ -95,6 +97,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         public Rect ScreenRect;
         public Rect VisibleRect;
         public string Visibility = "on_screen";
+        public string Reason;          // set when geometry alone does not explain Visibility ("no_camera")
         public bool Visible => Visibility == "on_screen";
         public bool Interactive => Control || Role == "scroll";
 
@@ -134,12 +137,33 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             var screenRect = new Rect(0, 0, Mathf.Max(0, screen.x), Mathf.Max(0, screen.y));
             foreach (var canvas in roots)
             {
-                var cam = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null
-                    : (canvas.worldCamera != null ? canvas.worldCamera : Camera.main);
-                var walk = new Walk { Nodes = nodes, Screen = screenRect, Camera = cam, Root = canvas };
+                var cam = CanvasCamera(canvas, out bool noCamera);
+                var walk = new Walk { Nodes = nodes, Screen = screenRect, Camera = cam, NoCamera = noCamera, Root = canvas };
                 walk.Visit(canvas.transform, ParentPath(canvas.transform), 0, 1f, false, new List<Rect>(), null);
             }
             return nodes;
+        }
+
+        // The camera uGUI draws a root canvas with (GraphicRaycaster.eventCamera
+        // rules): none for Overlay and for Screen Space - Camera without a camera,
+        // which Unity draws as Overlay (world corners are screen pixels). World
+        // Space uses its camera, else Camera.main; with neither it cannot be
+        // projected (`noCamera`).
+        internal static Camera CanvasCamera(Canvas canvas, out bool noCamera)
+        {
+            noCamera = false;
+            var own = canvas.worldCamera != null ? canvas.worldCamera : null;
+            switch (canvas.renderMode)
+            {
+                case RenderMode.ScreenSpaceOverlay:
+                    return null;
+                case RenderMode.ScreenSpaceCamera:
+                    return own;
+                default:
+                    var cam = own != null ? own : Camera.main;
+                    noCamera = cam == null;
+                    return cam;
+            }
         }
 
         // Total ordering of transforms by scene, then hierarchy (sibling indices).
@@ -187,6 +211,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             public List<UiNode> Nodes;
             public Rect Screen;
             public Camera Camera;
+            public bool NoCamera;          // World Space canvas with no camera: nothing projects
             public Canvas Root;
             private readonly Vector3[] corners = new Vector3[4];
 
@@ -228,7 +253,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                     else if (node.Role == "image")
                     {
                         var graphic = go.GetComponent<Graphic>();
-                        if (graphic != null) node.Alpha *= graphic.enabled ? graphic.color.a : 0f;
+                        if (graphic != null) node.Alpha *= graphic.enabled ? graphic.color.a * RendererAlpha(go) : 0f;
                     }
                     ComputeGeometry(node, clips);
                     if (node.Role == "text" || (!node.Control && node.OwnText.HasValue)) node.Owner = owner;
@@ -266,6 +291,13 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
 
             private void ComputeGeometry(UiNode node, List<Rect> clips)
             {
+                if (NoCamera)
+                {
+                    node.ScreenRect = node.VisibleRect = Rect.zero;
+                    node.Visibility = "offscreen";
+                    node.Reason = "no_camera";
+                    return;
+                }
                 node.Rt.GetWorldCorners(corners);
                 float minX = float.PositiveInfinity, minY = float.PositiveInfinity;
                 float maxX = float.NegativeInfinity, maxY = float.NegativeInfinity;
@@ -391,13 +423,22 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             return false;
         }
 
+        // CanvasRenderer alpha (Graphic.CrossFadeAlpha / CrossFadeColor fades),
+        // 1 without a renderer. Read through GetComponent: Graphic.canvasRenderer
+        // adds a missing renderer, which would mutate the scene.
+        internal static float RendererAlpha(GameObject go)
+        {
+            var renderer = go.GetComponent<CanvasRenderer>();
+            return renderer != null ? renderer.GetAlpha() : 1f;
+        }
+
         private static UiTextInfo ReadUguiText(Text text)
         {
             var info = new UiTextInfo
             {
                 Raw = text.text,
                 RichText = text.supportRichText,
-                Alpha = text.color.a,
+                Alpha = text.color.a * RendererAlpha(text.gameObject),
                 Source = "ugui",
             };
             var rect = text.rectTransform.rect;
@@ -418,14 +459,16 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
     internal static class UiText
     {
         private static readonly Regex Tags = new Regex(@"</?[A-Za-z#][^<>]*>", RegexOptions.CultureInvariant);
+        private static readonly Regex LineBreakTags = new Regex(@"<br\s*/?>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         private static readonly Regex Spaces = new Regex(@"\s+", RegexOptions.CultureInvariant);
 
         // What the player reads: rich-text tags stripped (when the component
-        // renders rich text), zero-width characters removed, whitespace collapsed.
+        // renders rich text; a <br> line break reads as a space, like a newline),
+        // zero-width characters removed, whitespace collapsed.
         internal static string Display(string raw, bool richText = true)
         {
             if (string.IsNullOrEmpty(raw)) return "";
-            var s = richText ? Tags.Replace(raw, "") : raw;
+            var s = richText ? Tags.Replace(LineBreakTags.Replace(raw, " "), "") : raw;
             s = s.Replace("​", "").Replace("­", "");
             return Spaces.Replace(s, " ").Trim();
         }
@@ -436,13 +479,16 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         internal static bool IsValidMode(string mode)
             => string.IsNullOrEmpty(mode) || mode == "exact" || mode == "contains" || mode == "regex";
 
+        // One matcher serves one screen walk: a regex is bounded per text and
+        // over the whole walk (UiRegexRun); once it times out, TimedOut is set,
+        // every later IsMatch is false and the caller refuses with regex_timeout.
         internal sealed class Matcher
         {
             private readonly string mode;
             private readonly string needle;
-            private readonly Regex regex;
+            private readonly UiRegexRun regex;
 
-            private Matcher(string mode, string needle, Regex regex)
+            private Matcher(string mode, string needle, UiRegexRun regex)
             {
                 this.mode = mode;
                 this.needle = needle;
@@ -464,8 +510,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                     try
                     {
                         var rx = new Regex(query ?? "", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                            TimeSpan.FromMilliseconds(100));
-                        return new Matcher(mode, null, rx);
+                            UiRegexRun.PerText);
+                        return new Matcher(mode, null, new UiRegexRun(rx));
                     }
                     catch (ArgumentException ex)
                     {
@@ -483,6 +529,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             }
 
             internal string Mode => mode;
+            internal bool TimedOut => regex != null && regex.TimedOut;
+            internal UiRegexRun RegexRun => regex;
 
             // `display` is already normalised (UiText.Display).
             internal bool IsMatch(string display)
@@ -491,8 +539,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 switch (mode)
                 {
                     case "regex":
-                        try { return regex.IsMatch(display); }
-                        catch (RegexMatchTimeoutException) { return false; }
+                        return regex.IsMatch(display);
                     case "contains":
                         return display.ToLowerInvariant().Contains(needle);
                     default:
@@ -507,6 +554,45 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             if (s == null || s.Length <= max) return s;
             return s.Substring(0, max - 1) + "…";
         }
+    }
+
+    // A caller-supplied regex run over the texts of one screen walk. Each text
+    // is bounded by the Regex's own timeout (PerText) and the walk by Budget, so
+    // a catastrophic pattern costs the main thread a couple of seconds at most.
+    // The first text past either limit stops the run (TimedOutOn); it is never
+    // read as "no match" — callers refuse with regex_timeout.
+    internal sealed class UiRegexRun
+    {
+        internal static readonly TimeSpan PerText = TimeSpan.FromMilliseconds(100);
+        internal static readonly TimeSpan Budget = TimeSpan.FromMilliseconds(2000);
+
+        private readonly Regex regex;
+        private readonly System.Diagnostics.Stopwatch spent = new System.Diagnostics.Stopwatch();
+
+        internal UiRegexRun(Regex regex) { this.regex = regex; }
+
+        internal string TimedOutOn { get; private set; }
+        internal bool TimedOut => TimedOutOn != null;
+
+        internal bool IsMatch(string text)
+        {
+            if (TimedOut || text == null) return false;
+            spent.Start();
+            try { return regex.IsMatch(text); }
+            catch (RegexMatchTimeoutException) { TimedOutOn = text; return false; }
+            finally
+            {
+                spent.Stop();
+                if (TimedOutOn == null && spent.Elapsed > Budget) TimedOutOn = text;
+            }
+        }
+
+        // {"error":{"code":"regex_timeout",…}} naming the pattern and the text.
+        internal string ErrorJson(string prefix, string parameter)
+            => InputSimulationJson.Error("regex_timeout",
+                prefix + $"{parameter} '{UiText.Clip(regex.ToString(), 120)}' exceeded its time limit " +
+                $"({PerText.TotalMilliseconds:0} ms per text, {Budget.TotalMilliseconds:0} ms per screen) at text '" +
+                UiText.Clip(TimedOutOn, 80) + "'. Simplify the pattern: avoid nested quantifiers such as (\\w+\\s?)+.");
     }
 
     // `under` scope: a node path, or a trailing path suffix ("Shop" matches
@@ -597,10 +683,12 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
 
         // Resolve the visible element whose text matches. Controls match on
         // their label or any single label text; a matching text inside a control
-        // resolves to the control. Several visible matches refuse with
-        // ambiguous_target unless `index` picks one (hierarchy order).
+        // resolves to the control, tapped where that text shows inside it
+        // (LabelTapPoint). Several visible matches refuse with ambiguous_target
+        // unless `index` picks one (hierarchy order). `nodes` reuses a walk taken
+        // by the caller (null = walk now).
         internal static bool TryResolve(string query, string mode, string under, int? index, string context,
-            out UiTextResolution resolution, out string errorJson)
+            out UiTextResolution resolution, out string errorJson, List<UiNode> nodes = null)
         {
             resolution = null;
             errorJson = null;
@@ -617,7 +705,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 return false;
             }
 
-            var nodes = UiScreenModel.Collect(GameViewWindows.MainGameViewSize());
+            if (nodes == null) nodes = UiScreenModel.Collect(GameViewWindows.MainGameViewSize());
             var scope = UiScope.Build(nodes, under);
             if (!string.IsNullOrEmpty(under) && !scope.Any)
             {
@@ -628,15 +716,36 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
 
             var visible = new List<UiNode>();
             var hidden = new List<UiNode>();
-            var seen = new HashSet<UiNode>();
+            var points = new Dictionary<UiNode, Vector2>();
+            var byLabelText = new HashSet<UiNode>();
             foreach (var n in nodes)
             {
                 if (!scope.Contains(n)) continue;
                 UiNode candidate = null;
-                if (n.Control && matcher.IsMatch(n.Text)) candidate = n;
+                Vector2 point = default;
+                bool labelText = false;
+                if (n.Control && matcher.IsMatch(n.Text)) { candidate = n; point = n.TapPoint; }
                 else if (n.OwnText.HasValue && matcher.IsMatch(n.OwnTextDisplay))
-                    candidate = n.Folded ? n.Owner : n;
-                if (candidate == null || !seen.Add(candidate)) continue;
+                {
+                    labelText = n.Folded;
+                    candidate = labelText ? n.Owner : n;
+                    point = labelText ? LabelTapPoint(n, n.Owner) : n.TapPoint;
+                }
+                if (matcher.TimedOut)
+                {
+                    errorJson = matcher.RegexRun.ErrorJson(prefix, "target_text regex");
+                    return false;
+                }
+                if (candidate == null) continue;
+                if (points.ContainsKey(candidate))
+                {
+                    // A control matched on its whole label is tapped on the first
+                    // single label text that also matches.
+                    if (labelText && byLabelText.Add(candidate)) points[candidate] = point;
+                    continue;
+                }
+                points[candidate] = point;
+                if (labelText) byLabelText.Add(candidate);
                 if (candidate.Visible) visible.Add(candidate);
                 else hidden.Add(candidate);
             }
@@ -671,13 +780,22 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             resolution = new UiTextResolution
             {
                 Node = node,
-                Point = node.TapPoint,
+                Point = points[node],
                 Index = pick,
                 Matches = visible.Count,
                 Query = query,
                 Mode = matcher.Mode,
             };
             return true;
+        }
+
+        // Where a label text shows inside its control: the centre of the text's
+        // visible rect clipped to the control's visible rect; the control's own
+        // tap point when the text shows nowhere inside it.
+        internal static Vector2 LabelTapPoint(UiNode text, UiNode owner)
+        {
+            var area = UiScreenModel.Intersect(text.VisibleRect, owner.VisibleRect);
+            return area.width > 0 && area.height > 0 ? area.center : owner.TapPoint;
         }
 
         private static string Describe(string query, string mode)
@@ -751,7 +869,15 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             {
                 point = default;
                 targetJson = null;
-                if (!UiTextTargets.TryResolve(text, match, under, index, context, out var res, out errorJson))
+                // Inside a UiTextWalkScope every lookup reads the same walk.
+                List<UiNode> nodes = null;
+                if (UiTextWalkScope.Active)
+                {
+                    nodes = UiTextWalkScope.Shared as List<UiNode>;
+                    if (nodes == null)
+                        UiTextWalkScope.Shared = nodes = UiScreenModel.Collect(GameViewWindows.MainGameViewSize());
+                }
+                if (!UiTextTargets.TryResolve(text, match, under, index, context, out var res, out errorJson, nodes))
                     return false;
                 point = res.Point;
                 targetJson = res.Json();

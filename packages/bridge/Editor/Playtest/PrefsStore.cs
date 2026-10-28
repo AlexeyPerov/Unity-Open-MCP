@@ -539,8 +539,13 @@ namespace UnityOpenMcpBridge.Playtest
                     if (rc != ErrorSuccess) throw new IOException("RegEnumValue failed (" + rc + ") for HKCU\\" + subKey + ".");
                     index++;
                     var valueName = name.ToString(0, (int)Math.Min(nameChars, (uint)name.Length));
+                    // A value name without PlayerPrefs' `_h<hash>` suffix is still
+                    // removed by DeleteAll: report it so restore lists it.
                     if (!TryDecodeRegistryValue(valueName, type, data, (int)dataBytes, out var entry, out var unsupported))
+                    {
+                        result.Unsupported.Add(valueName);
                         continue;
+                    }
                     if (unsupported) result.Unsupported.Add(entry.Key);
                     else result.Entries.Add(entry);
                 }

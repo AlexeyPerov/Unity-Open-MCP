@@ -1086,7 +1086,7 @@
           "type": "string"
         },
         "height": {
-          "description": "Capture height in pixels (with width). Omitted: 720 for scene/game/isolated; native for 'composed'. For 'isolated', per quadrant (full image is 2x).",
+          "description": "Capture height in pixels (with width for 'composed'). Omitted: 720 for scene/game/isolated; native for 'composed'. For 'isolated', per quadrant (full image is 2x).",
           "maximum": 4096,
           "minimum": 64,
           "type": "integer"
@@ -1121,7 +1121,7 @@
           "type": "string"
         },
         "width": {
-          "description": "Capture width in pixels (with height). Omitted: 1280 for scene/game/isolated; 'composed' returns the game's native resolution. For 'isolated', per quadrant (full image is 2x). For 'composed', a width/height of another aspect than the game is fitted and padded (letterbox), never stretched — the response then carries scaled_from [w, h] and content_rect [x, y, w, h] (top-left origin).",
+          "description": "Capture width in pixels (with height for 'composed'). Omitted: 1280 for scene/game/isolated; 'composed' returns the game's native resolution. For 'isolated', per quadrant (full image is 2x). For 'composed', a width/height of another aspect than the game is fitted and padded (letterbox), never stretched — the response then carries scaled_from [w, h] and content_rect [x, y, w, h] (top-left origin).",
           "maximum": 4096,
           "minimum": 64,
           "type": "integer"
@@ -1472,7 +1472,7 @@
           "type": "string"
         },
         "height": {
-          "description": "Capture height in pixels (with width). Omitted: 720 for scene/game/isolated; native for 'composed'. For 'isolated', per quadrant (full image is 2x).",
+          "description": "Capture height in pixels (with width for 'composed'). Omitted: 720 for scene/game/isolated; native for 'composed'. For 'isolated', per quadrant (full image is 2x).",
           "maximum": 4096,
           "minimum": 64,
           "type": "integer"
@@ -1507,7 +1507,7 @@
           "type": "string"
         },
         "width": {
-          "description": "Capture width in pixels (with height). Omitted: 1280 for scene/game/isolated; 'composed' returns the game's native resolution. For 'isolated', per quadrant (full image is 2x). For 'composed', a width/height of another aspect than the game is fitted and padded (letterbox), never stretched — the response then carries scaled_from [w, h] and content_rect [x, y, w, h] (top-left origin).",
+          "description": "Capture width in pixels (with height for 'composed'). Omitted: 1280 for scene/game/isolated; 'composed' returns the game's native resolution. For 'isolated', per quadrant (full image is 2x). For 'composed', a width/height of another aspect than the game is fitted and padded (letterbox), never stretched — the response then carries scaled_from [w, h] and content_rect [x, y, w, h] (top-left origin).",
           "maximum": 4096,
           "minimum": 64,
           "type": "integer"
@@ -12216,7 +12216,7 @@
             "contains",
             "regex"
           ],
-          "description": "target_text only: exact (default when omitted) | contains (case-insensitive substring) | regex (.NET, case-insensitive, matched against the normalised text)."
+          "description": "target_text only: exact (default when omitted) | contains (case-insensitive substring) | regex (.NET, case-insensitive, matched against the normalised text; over 100 ms on a text or 2 s for the screen → regex_timeout)."
         }
       },
       "additionalProperties": false
@@ -12387,7 +12387,7 @@
             "contains",
             "regex"
           ],
-          "description": "target_text only: exact (default when omitted) | contains (case-insensitive substring) | regex (.NET, case-insensitive, matched against the normalised text)."
+          "description": "target_text only: exact (default when omitted) | contains (case-insensitive substring) | regex (.NET, case-insensitive, matched against the normalised text; over 100 ms on a text or 2 s for the screen → regex_timeout)."
         }
       },
       "additionalProperties": false
@@ -12675,7 +12675,7 @@
           "type": "string"
         },
         "capture_at_ms": {
-          "description": "Capture the composed game frame at these offsets (ms, the gesture's `time` base) from the gesture start — the call returns when the gesture and the last capture are done. Result `captures.frames[]`: frame, play_time, elapsed_ms, file, `unchanged`. Needs a rendering Game view / Simulator (Unity 6).",
+          "description": "Capture the composed game frame at these offsets (ms, the gesture's `time` base) from the gesture start — the call returns when the gesture and the last capture are done. Result `captures.frames[]`: frame, play_time, elapsed_ms, file, `unchanged`. Needs a rendering Game view / Simulator (Unity 6). In gameplay time a paused game (timeScale 0) ends the gesture after a wall-clock limit (error_code timed_out); captured frames are kept.",
           "items": {
             "maximum": 300000,
             "minimum": 0,
@@ -12740,7 +12740,7 @@
                       "type": "string"
                     },
                     "text_match": {
-                      "description": "target_text only: exact (default when omitted) | contains (case-insensitive substring) | regex (.NET, case-insensitive, matched against the normalised text).",
+                      "description": "target_text only: exact (default when omitted) | contains (case-insensitive substring) | regex (.NET, case-insensitive, matched against the normalised text; over 100 ms on a text or 2 s for the screen → regex_timeout).",
                       "enum": [
                         "exact",
                         "contains",
@@ -12802,7 +12802,7 @@
     }
   },
   "unity_open_mcp_ui_snapshot": {
-    "description": "Read what the uGUI screen shows, in edit or play mode: a flat accessibility tree of nodes { id, path, role (button | toggle | slider | input | scroll | text | image | container), text, rect [x, y, w, h] in Screen pixels (bottom-left origin, the space of inputsim screen_x/screen_y), visible, visibility (on_screen | clipped | offscreen | transparent | zero_size), interactable, occluded_by, sprite, depth } plus `screen` { w, h, safe_area, dpi } and `textSources` (ugui, plus tmp when TextMeshPro is installed). A control's text is its label (descendant texts); visibility follows the CanvasGroup alpha chain, RectMask2D / Mask clipping and screen bounds; occluded_by is the front-most raycast hit covering a raycast-target node (play mode only). PROFILES: compact (default) = visible nodes that have text or are controls, labels folded into their control, null keys omitted; balanced = every visible node (images, containers) + sprite/depth; full = every active node in any visibility state with every key. Bound it with page_size + cursor (pagination.next_cursor). DIAGNOSTICS (first page): overflow (text larger than its rect) and zero_size_interactables always; placeholder (texts matching placeholder_pattern) and small_touch_targets (controls under min_touch_size px, with Screen.dpi) only when passed. Then tap by label: inputsim_pointer / inputsim_touch target_text, or inputsim_gesture keyframe target_text. uGUI only (no UI Toolkit). Read-only, gate-free. Requires com.unity.ugui.",
+    "description": "Read what the uGUI screen shows, in edit or play mode: a flat accessibility tree of nodes { id, path, role (button | toggle | slider | input | scroll | text | image | container), text, rect [x, y, w, h] in Screen pixels (bottom-left origin, the space of inputsim screen_x/screen_y), visible, visibility (on_screen | clipped | offscreen | transparent | zero_size; reason: no_camera for a World Space canvas nothing can project), interactable, occluded_by, sprite, depth } plus `screen` { w, h, safe_area, dpi } and `textSources` (ugui, plus tmp when TextMeshPro is installed). A control's text is its label (descendant texts); visibility follows the CanvasGroup alpha chain, RectMask2D / Mask clipping and screen bounds; occluded_by is the front-most raycast hit covering a raycast-target node (play mode only). PROFILES: compact (default) = visible nodes that have text or are controls, labels folded into their control, null keys omitted; balanced = every visible node (images, containers) + sprite/depth; full = every active node in any visibility state with every key. Bound it with page_size + cursor (pagination.next_cursor). DIAGNOSTICS (first page): overflow (text larger than its rect) and zero_size_interactables always; placeholder (texts matching placeholder_pattern) and small_touch_targets (controls under min_touch_size px, with Screen.dpi) only when passed. Then tap by label: inputsim_pointer / inputsim_touch target_text, or inputsim_gesture keyframe target_text. uGUI only (no UI Toolkit). Read-only, gate-free. Requires com.unity.ugui.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -12845,7 +12845,7 @@
         },
         "placeholder_pattern": {
           "type": "string",
-          "description": "Regex (.NET, case-sensitive) flagging texts that look like unresolved localisation keys, e.g. '^[*#{].*[*#}]$'. Only checked when passed; there is no built-in pattern."
+          "description": "Regex (.NET, case-sensitive) flagging texts that look like unresolved localisation keys, e.g. '^[*#{].*[*#}]$'. Only checked when passed; there is no built-in pattern. Over 100 ms on a text or 2 s for the snapshot → regex_timeout."
         },
         "min_touch_size": {
           "type": "number",
@@ -12857,7 +12857,7 @@
     }
   },
   "unity_open_mcp_game_view": {
-    "description": "Read or set what the game renders at: the Game view resolution or a Device Simulator device. ACTIONS: get = mode (game | simulator | none), the selected size entry or device, window size in logical points and pixels (HiDPI), scale, focused, render_texture, and `screen` = what the game sees (width, height, aspect, safe_area [x, y, w, h] bottom-left origin, insets {top, bottom, left, right} — the notch is insets.top in portrait — cutouts, dpi, orientation); set_resolution = fixed width × height in pixels via a custom Game view size entry named 'Open MCP <w>x<h>' (created once, reused by name, never deleted — the only persistent effect, stored in the Editor's Game view size list), or an existing entry by size_label (e.g. 'Free Aspect' to restore what get reported); switches the Simulator back to the Game view when needed; set_device = the ONLY action that opens the Device Simulator: swaps the Game view tab for the Simulator (or opens one), selects `device` (an id from list_devices) and rotates it to `orientation` (default portrait), then reports the resulting safe area; orientation_applied is false when the project's orientation settings keep the game in another orientation; both set actions bring the Game view / Simulator tab to the front inside Unity (a hidden tab does not render and the game falls back to 640x480; the Unity application itself is not raised); list_devices = the Simulator's device catalog (id, screen, dpi, portrait safe area, insets, notch, orientations), paged. SETTLE: in play mode set_* returns once Screen.width/height inside the game and the view's render target report the new size for two frames, else error not_settled (paused Editor, hidden Game view tab) with what was observed. Nothing is restored implicitly: call get first and set back explicitly. Then capture with unity_senses_screenshot / capture_inline view 'composed' (native size by default; overlay 'safe_area' draws the safe area). Editor UI only, gate-free. Unity 6; other Editors answer unsupported_editor_version.",
+    "description": "Read or set what the game renders at: the Game view resolution or a Device Simulator device. ACTIONS: get = mode (game | simulator | none), the selected size entry or device, window size in logical points and pixels (HiDPI), scale, focused, visible (false = the view is behind another tab, which does not render; in play mode a warning says render_texture and screen are then stale), render_texture, and `screen` = what the game sees (width, height, aspect, safe_area [x, y, w, h] bottom-left origin, insets {top, bottom, left, right} — the notch is insets.top in portrait — cutouts, dpi, orientation); set_resolution = fixed width × height in pixels via a custom Game view size entry named 'Open MCP <w>x<h>' (created once, reused by name, never deleted — the only persistent effect, stored in the Editor's Game view size list), or an existing entry by size_label (e.g. 'Free Aspect' to restore what get reported); switches the Simulator back to the Game view when needed; set_device = the ONLY action that opens the Device Simulator: swaps the Game view tab for the Simulator (or opens one), selects `device` (an id from list_devices) and rotates it to `orientation` (default portrait), then reports the resulting safe area; orientation_applied is false when the project's orientation settings keep the game in another orientation; both set actions bring the Game view / Simulator tab to the front inside Unity (a hidden tab does not render and the game falls back to 640x480; the Unity application itself is not raised); list_devices = the Simulator's device catalog (id, screen, dpi, portrait safe area, insets, notch, orientations), paged. SETTLE: in play mode set_* returns once Screen.width/height inside the game and the view's render target report the new size for two frames, else error not_settled (paused Editor, hidden Game view tab) with what was observed. Nothing is restored implicitly: call get first and set back explicitly. Then capture with unity_senses_screenshot / capture_inline view 'composed' (native size by default; overlay 'safe_area' draws the safe area). Editor UI only, gate-free. Unity 6; other Editors answer unsupported_editor_version.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -13334,7 +13334,7 @@
         },
         "time": {
           "default": "gameplay",
-          "description": "Clock for ms conditions and elapsed_ms: gameplay (scaled by Time.timeScale; a paused game never advances) or realtime (unscaled).",
+          "description": "Clock for ms conditions and elapsed_ms: gameplay (scaled by Time.timeScale; a paused game never advances) or realtime (wall clock).",
           "enum": [
             "gameplay",
             "realtime"
@@ -13829,7 +13829,7 @@
         },
         "time": {
           "default": "gameplay",
-          "description": "Clock for at_ms / every_ms: gameplay (scaled by Time.timeScale, what animations see) or realtime.",
+          "description": "Clock for at_ms / every_ms: gameplay (scaled by Time.timeScale, what animations see) or realtime (wall clock). A gameplay schedule that stops advancing (Time.timeScale 0) ends as timed_out after twice its length + 30 s of wall-clock time, keeping the frames already captured.",
           "enum": [
             "gameplay",
             "realtime"
@@ -13841,7 +13841,7 @@
     }
   },
   "unity_open_mcp_player_state": {
-    "description": "Isolate the player state a live playtest changes: snapshot it, see what a session changed, put it back. STATE = PlayerPrefs (every key with its type, read from the platform store after PlayerPrefs.Save so it is what the game wrote, even unsaved), persistentDataPath files (size + sha256; default excludes Unity/** and TestResults.xml, cap max_files_mb), and EditorPrefs only under editor_prefs_prefixes (opt-in; EditorPrefs are shared by every project on the machine). Unity's own session keys (unity.player_session*, unity_connect.*) are excluded by default; excluded keys and paths are never captured, diffed or touched. Snapshots are stored outside the project in the app-data folder (…/unity-open-mcp/player-state/<company>/<product>/<name>/). ACTIONS: snapshot = capture into `name` (snapshot_exists unless overwrite); diff = `name` vs the current state (or vs snapshot `against`): prefs / editor_prefs / files added, removed, changed — small values shown, long strings and files as size + sha256; restore = EDIT MODE ONLY; without confirm a dry run returning the diff it would apply (current → snapshot) with EVERY removal listed; with confirm:true it OVERWRITES the current state — PlayerPrefs.DeleteAll + the snapshot's keys + Save (so the Editor's in-memory cache and the store agree), EditorPrefs only under the snapshot's prefixes, persistentDataPath mirrored exactly (files not in the snapshot are DELETED) — then re-reads and reports verified; it is the only gated action (paths_hint defaults to ProjectSettings/ProjectSettings.asset) and refuses edit_mode_required in play mode and snapshot_project_mismatch for another project's snapshot; list / delete = the snapshots of this project (company + product address another project's store). Prefer a project's own isolated-save hook (project_commands playtest.begin / playtest.end) when it exists; otherwise snapshot → play → diff → stop → restore (dry run, then confirm). macOS verified; Windows registry and Linux readers are untested in the field.",
+    "description": "Isolate the player state a live playtest changes: snapshot it, see what a session changed, put it back. STATE = PlayerPrefs (every key with its type, read from the platform store after PlayerPrefs.Save so it is what the game wrote, even unsaved), persistentDataPath files (size + sha256; default excludes Unity/** and TestResults.xml, cap max_files_mb), and EditorPrefs only under editor_prefs_prefixes (opt-in; EditorPrefs are shared by every project on the machine). Unity's own session keys (unity.player_session*, unity_connect.*) are excluded by default; excluded keys and paths are never captured, diffed or touched. Snapshots are stored outside the project in the app-data folder (…/unity-open-mcp/player-state/<company>/<product>/<name>/). ACTIONS: snapshot = capture into `name` (snapshot_exists unless overwrite); diff = `name` vs the current state (or vs snapshot `against`): prefs / editor_prefs / files added, removed, changed — small values shown, long strings and files as size + sha256; restore = EDIT MODE ONLY; without confirm a dry run returning the diff it would apply (current → snapshot) with EVERY removal and overwrite listed and a `plan` id; with confirm:true + that plan it OVERWRITES the current state (plan_changed when the state moved since the dry run) — PlayerPrefs.DeleteAll + the snapshot's keys + Save (so the Editor's in-memory cache and the store agree), EditorPrefs only under the snapshot's prefixes, persistentDataPath mirrored exactly (files not in the snapshot are DELETED) — then re-reads and reports verified; it is the only gated action (paths_hint defaults to ProjectSettings/ProjectSettings.asset) and refuses edit_mode_required in play mode and snapshot_project_mismatch for another project's snapshot; list / delete = the snapshots of this project (company + product address another project's store). Prefer a project's own isolated-save hook (project_commands playtest.begin / playtest.end) when it exists; otherwise snapshot → play → diff → stop → restore (dry run, then confirm with its plan). macOS verified; Windows registry and Linux readers are untested in the field.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -13858,7 +13858,7 @@
         },
         "against": {
           "description": "[diff] Compare `name` with this other snapshot instead of the current state.",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+          "pattern": "^(?!.*\\.\\.)(?!.*\\.$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
           "type": "string"
         },
         "company": {
@@ -13868,7 +13868,7 @@
         },
         "confirm": {
           "default": false,
-          "description": "[restore] false (default) = dry run: returns the diff restore would apply, nothing changes. true = apply: overwrites PlayerPrefs, opted-in EditorPrefs and persistentDataPath (removing files not in the snapshot). Review the dry run's removals first.",
+          "description": "[restore] false (default) = dry run: returns the diff restore would apply and its plan id, nothing changes. true = apply (needs `plan`): overwrites PlayerPrefs, opted-in EditorPrefs and persistentDataPath (removing files not in the snapshot). Review the dry run's removals and overwrites first.",
           "type": "boolean"
         },
         "editor_prefs_prefixes": {
@@ -13909,7 +13909,7 @@
           ]
         },
         "limit": {
-          "description": "[diff / restore] Entries listed per added / changed list (default 100; counts are always complete, `truncated` says how many were left out). restore always lists every removal.",
+          "description": "[diff / restore] Entries listed per list (default 100; counts are always complete, `truncated` says how many were left out). diff bounds added / removed / changed; restore bounds only added and always lists every removal and overwrite.",
           "maximum": 1000,
           "minimum": 1,
           "type": "integer"
@@ -13922,7 +13922,7 @@
         },
         "name": {
           "description": "[snapshot / diff / restore / delete] Snapshot name: 1-64 of [A-Za-z0-9._-], starting with a letter or digit.",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+          "pattern": "^(?!.*\\.\\.)(?!.*\\.$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
           "type": "string"
         },
         "overwrite": {
@@ -13938,6 +13938,11 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "plan": {
+          "description": "[restore confirm:true] The `plan` id the dry run returned. Required with confirm:true: restore applies only the plan that was reviewed and refuses plan_changed when the current state moved since (a new save file, a changed key) — run the dry run again then.",
+          "pattern": "^[0-9a-f]{16}$",
+          "type": "string"
         },
         "product": {
           "description": "[diff / restore / list / delete] Product name of another project's snapshot store (default: the open project's).",

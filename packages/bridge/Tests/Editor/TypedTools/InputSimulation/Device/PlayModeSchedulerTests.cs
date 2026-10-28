@@ -46,7 +46,13 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             public string PackageVersion => "test";
             public bool HasTouchscreen => true;
             public bool RespectsGameViewFocus => false;
-            public void Queue(int finger, DeviceTouchPhase phase, Vector2 position) => Queued.Add((finger, phase, position));
+            // Records the Began, then fails — like a second backend failing after the first took it.
+            public bool ThrowAfterBegan;
+            public void Queue(int finger, DeviceTouchPhase phase, Vector2 position)
+            {
+                Queued.Add((finger, phase, position));
+                if (ThrowAfterBegan && phase == DeviceTouchPhase.Began) throw new System.InvalidOperationException("Touchscreen.current is null.");
+            }
             public void UpdateNow() { }
             public void StepFrames(int frames) { }
         }
@@ -251,6 +257,17 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             PlayModeScheduler.Cancel(Id);
             Assert.AreEqual(DeviceTouchPhase.Canceled, backend.Queued[backend.Queued.Count - 1].Phase);
             StringAssert.Contains("\"reason\":\"cancelled\"", PlayModeScheduler.Status(Id));
+        }
+
+        [Test]
+        public void GestureWhoseBeganInjectionThrowsStillReleasesTheFinger()
+        {
+            var backend = new RecordingBackend { ThrowAfterBegan = true };
+            var op = NewGesture(backend, "[{\"path\":[{\"at_ms\":0,\"x\":10,\"y\":10},{\"at_ms\":5000,\"x\":20,\"y\":20}]}]");
+            PlayModeScheduler.Start(op, Id, out _);
+            Tick(1);
+            StringAssert.Contains("\"state\":\"failed\"", PlayModeScheduler.Status(Id));
+            Assert.AreEqual(DeviceTouchPhase.Canceled, backend.Queued[backend.Queued.Count - 1].Phase, "a partially injected Began is cancelled");
         }
 
         [Test]

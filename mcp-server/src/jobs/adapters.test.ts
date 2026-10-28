@@ -329,10 +329,25 @@ test("play-mode poll cancels once at the deadline so held input is released", as
   const { live, calls } = playmodeLive([{ state: "running", phase: "running" }],
     { cancelState: { state: "cancelled", reason: "cancelled", result: { released: true } } });
   const outcome = await pollPlaymodeOperation(live, "op-1234-5678", { deadlineMs: 20, pollIntervalMs: 2 });
-  assert.equal(outcome.kind, "terminal");
+  assert.equal(outcome.kind, "deadline", "the poll's own deadline cancel is a timeout, not a caller cancel");
   assert.equal(calls.cancel, 1);
-  if (outcome.kind === "terminal") {
-    assert.equal(outcome.snapshot.state, "cancelled");
+  if (outcome.kind === "deadline") {
+    assert.equal(outcome.snapshot?.state, "cancelled");
     assert.equal(outcome.cancelSent, true);
   }
+});
+
+test("play-mode poll retries a cancel the bridge did not answer", async () => {
+  let cancels = 0;
+  const live = {
+    playmodeOperation: async (args: { action: string; operation_id: string }) => {
+      if (args.action !== "cancel") return { operation_id: args.operation_id, state: "running", phase: "running" };
+      if (++cancels === 1) throw new ProjectJobHttpError(500);
+      return { operation_id: args.operation_id, state: "cancelled", reason: "cancelled", result: { released: true } };
+    },
+  } as unknown as LiveClient;
+  const outcome = await pollPlaymodeOperation(live, "op-1234-5678", { deadlineMs: 10, pollIntervalMs: 2 });
+  assert.equal(cancels, 2, "a failed cancel is sent again");
+  assert.equal(outcome.kind, "deadline");
+  if (outcome.kind === "deadline") assert.equal(outcome.snapshot?.result.released, true);
 });

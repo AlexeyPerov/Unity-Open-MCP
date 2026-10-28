@@ -26,8 +26,12 @@ test("player_state schema: actions, name pattern, opt-in arguments without defau
   assert.deepEqual(tool().inputSchema.required, ["action"]);
   const pattern = new RegExp(p.name.pattern);
   for (const ok of ["before", "run-1", "a.b_c", "X".repeat(64)]) assert.ok(pattern.test(ok), ok);
-  for (const bad of ["", "-lead", ".hidden", "a/b", "a b", "X".repeat(65)]) assert.ok(!pattern.test(bad), bad);
+  for (const bad of ["", "-lead", ".hidden", "a/b", "a b", "X".repeat(65), "a.", "a..b"]) assert.ok(!pattern.test(bad), bad);
   assert.equal(p.against.pattern, p.name.pattern);
+  const plan = new RegExp(p.plan.pattern);
+  assert.ok(plan.test("0123456789abcdef"));
+  for (const bad of ["", "0123456789ABCDEF", "0123456789abcde", "0123456789abcdef0"]) assert.ok(!plan.test(bad), bad);
+  assert.equal(p.plan.default, undefined, "plan is never filled in by the server");
   // Nothing that changes what is captured or applied is filled in by the server.
   for (const key of ["editor_prefs_prefixes", "exclude", "exclude_keys", "max_files_mb", "overwrite", "company", "product", "limit"])
     assert.equal(p[key].default, undefined, key);
@@ -54,7 +58,7 @@ test("player_state: restore is a dry run unless confirm:true, scoped to the iden
 
 test("player_state description states the overwrite and the file removal plainly", () => {
   const d = tool().description!;
-  for (const phrase of ["OVERWRITES", "DELETED", "EVERY removal", "EDIT MODE ONLY", "dry run", "edit_mode_required",
+  for (const phrase of ["OVERWRITES", "DELETED", "EVERY removal", "plan_changed", "EDIT MODE ONLY", "dry run", "edit_mode_required",
     "snapshot_project_mismatch", "editor_prefs_prefixes", "outside the project", "playtest.begin", "PlayerPrefs.Save"])
     assert.ok(d.includes(phrase), phrase);
 });

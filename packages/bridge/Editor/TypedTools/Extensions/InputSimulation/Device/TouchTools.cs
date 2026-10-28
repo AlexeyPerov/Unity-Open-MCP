@@ -77,8 +77,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             if (advance_frames > 60) advance_frames = 60;
 
             bool byText = !string.IsNullOrEmpty(target_text);
-            if (!byText && (!string.IsNullOrEmpty(under) || index.HasValue))
-                return Error("invalid_arguments", "under and index refine target_text; pass target_text with them.");
+            if (!byText && (!string.IsNullOrEmpty(under) || index.HasValue || text_match != null))
+                return Error("invalid_arguments", "under, index and text_match refine target_text; pass target_text with them.");
             if (byText)
             {
                 bool conflict = action == "swipe"

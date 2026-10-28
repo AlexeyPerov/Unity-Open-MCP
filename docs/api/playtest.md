@@ -65,7 +65,7 @@ order (scene order, then sibling order).
 | `role` | `button` (Button, Dropdown, other Selectables, click handlers), `toggle`, `slider` (Slider, Scrollbar), `input` (InputField, TextMeshPro input field), `scroll` (ScrollRect), `text`, `image`, `container` |
 | `text` | Display text: rich-text tags removed, whitespace collapsed. A control's text is its **label**: the texts of its descendants that are not inside a nested control |
 | `rect` | `[x, y, w, h]` in Screen pixels, bottom-left origin — the space of `Input.mousePosition` and `inputsim_*` `screen_x`/`screen_y` |
-| `visible`, `visibility` | see below; `visible` is `visibility == "on_screen"` |
+| `visible`, `visibility`, `reason` | see below; `visible` is `visibility == "on_screen"`; `reason` (only when set) explains a visibility the rect does not: `no_camera` |
 | `interactable` | Controls and scroll views: `Selectable` state through the `CanvasGroup` chain |
 | `occluded_by` | Play mode with an EventSystem: the front-most raycast hit covering a raycast-target node at its tap point. Absent/`null` when nothing covers it or the node is not a raycast target there |
 | `sprite`, `depth` | `balanced` / `full`: the Image sprite name; hierarchy depth below the root canvas |
@@ -81,13 +81,14 @@ in. Disabled text components are not read.
 | `visibility` | When |
 |---|---|
 | `zero_size` | The screen rect is narrower or shorter than half a pixel |
-| `transparent` | Effective alpha ≈ 0: the `CanvasGroup` alpha chain (`ignoreParentGroups` restarts it), a disabled `Canvas` above, or a text/image whose own color alpha is 0 |
-| `offscreen` | The rect does not intersect the screen, or is behind the canvas camera |
+| `transparent` | Effective alpha ≈ 0: the `CanvasGroup` alpha chain (`ignoreParentGroups` restarts it), a disabled `Canvas` above, or a text/image whose own alpha is 0 (color alpha × `CanvasRenderer` alpha, so a `CrossFadeAlpha` fade counts) |
+| `offscreen` | The rect does not intersect the screen, or is behind the canvas camera, or a World Space canvas has no camera to project it (no event camera and no `Camera.main`; the node carries `reason: "no_camera"` and a zero rect) |
 | `clipped` | On screen but fully outside an enclosing `RectMask2D` / `Mask` (an override-sorting canvas stops clipping from above, as in uGUI) |
 | `on_screen` | At least partly visible |
 
 The screen is the main Game view's pixel size (the simulated device screen when
-the Device Simulator is active). `safe_area` is the safe area the game sees: the
+the Device Simulator is active). A Screen Space - Camera canvas without a camera
+is measured as Overlay, as Unity draws it. `safe_area` is the safe area the game sees: the
 Device Simulator's for the selected device and orientation, otherwise the whole
 view (the Game view has no safe area). `dpi` is `Screen.dpi`.
 
@@ -121,7 +122,7 @@ list is `{ count, items (≤ 20), truncated }`; items carry `id`, `path`,
 |---|---|---|
 | `overflow` | always | Text whose content exceeds its rect: TextMeshPro preferred height (wrapping at the text area) or width (no wrapping) above the area, or `isTextOverflowing`; `UI.Text` preferred height above the rect, or preferred width with horizontal overflow. Items add `text`, `source`, `size`, `content`. Best-fit `UI.Text` is not checked |
 | `zero_size_interactables` | always | Controls with a zero-size rect |
-| `placeholder` | only with `placeholder_pattern` | Texts matching the regex (.NET, case-sensitive) — e.g. unresolved localisation keys such as `^[*#{].*[*#}]$`. There is no built-in pattern |
+| `placeholder` | only with `placeholder_pattern` | Texts matching the regex (.NET, case-sensitive) — e.g. unresolved localisation keys such as `^[*#{].*[*#}]$`. There is no built-in pattern. The pattern gets 100 ms per text and 2 s per snapshot; past either the call refuses with `regex_timeout` (naming the pattern and the text) |
 | `small_touch_targets` | only with `min_touch_size` | Visible controls whose rect is narrower or shorter than `min_touch_size` screen pixels; reports `dpi` so the caller can convert from dp (`px = dp × dpi / 160`) |
 
 ## `unity_open_mcp_game_view`
@@ -183,7 +184,8 @@ orientation.
 | `window` | The view's window in logical points and in pixels (`backing_scale` = pixels per point on HiDPI displays) |
 | `size` | Game view only: the selected entry (`index`, `label`, `type` `free_aspect` / `aspect_ratio` / `fixed_resolution`, `custom`, `width`/`height`) |
 | `device` | Simulator only: device id, physical portrait size, dpi, rotation in degrees |
-| `scale`, `focused`, `low_resolution_aspect_ratios` | View zoom / Simulator preview scale, Editor focus, the Game view's low-resolution setting |
+| `scale`, `focused`, `low_resolution_aspect_ratios` | View zoom / Simulator preview scale, Editor focus, the Game view's low-resolution setting (`scale` and `low_resolution_aspect_ratios` are left out on an Editor that does not expose them) |
+| `visible`, `warning` | Whether the view is the front tab of its dock area (left out when the Editor does not expose it). Only the front tab renders: in play mode a hidden view adds a `warning` — `render_texture` is the last frame it drew and `screen` its configured size, not what the running game sees |
 | `render_texture` | Size of the frame the view last rendered (`null` before it first renders) |
 | `screen` | What the game sees: `Screen.width`/`height`, reduced `aspect`, `safe_area` `[x, y, w, h]` (bottom-left origin), `insets` (the unsafe band per edge — a notch is `insets.top` in portrait), `cutouts`, `dpi`, `orientation` (`portrait` / `landscape` in the Game view) |
 | `entry` | `set_resolution`: the entry used, `created`, `persistent` |
@@ -201,12 +203,17 @@ not the game, and a running game picks up a new size only on a later frame. So:
   `source: "edit_mode_view"`).
 - **Play mode** — the bridge watches `Screen.width`/`height` inside the player
   loop and the view's render target, and the call returns once both report the
-  new size for two consecutive frames (`settle.frames`, `settle.observed`).
+  new size for two consecutive frames (`settle.frames`, `settle.observed`); a
+  view behind another tab never counts (`observed.visible: false`), since its
+  render target is a stale frame.
   `settle_timeout_ms` (default 5000, max 20000) bounds the wait; then the call
-  answers `not_settled` with what the game last reported. A paused Editor
+  answers `not_settled` (`state: "timeout"`) with what the game last reported. A paused Editor
   answers `not_settled` at once (`state: "paused"`) — unpause or step frames,
-  then call `get`. A size the Editor clamps (GPU texture limit, 8K cap) answers
-  `not_settled` with `clamped`.
+  then call `get`.
+- **Clamped size** — a fixed size the Editor clamps (GPU texture limit, 8K cap)
+  is still applied: the game renders at the clamped size, the call settles on
+  it as above (`expected` is the clamped size), and the response carries
+  `clamped` `{requested, render, note}`.
 
 `set_resolution` / `set_device` are refused inside `batch_execute`
 (`batch_step_requires_server_poll`): no frame advances while a batch holds the
@@ -246,7 +253,7 @@ A condition is an object with exactly one key:
 | `object` `{path \| object_id, state}` | A GameObject is `exists` (default), `active` (`activeInHierarchy`), `inactive` or `destroyed` | Loaded scenes plus `DontDestroyOnLoad`, inactive objects included. `path` is a hierarchy path or a bare name; `object_id` an instance id (e.g. a `ui_snapshot` id). Once found the object is tracked: `destroyed` means that object was destroyed |
 | `project_command` `{id, args, field}` | A synchronous, read-only [project command](project-commands.md) returns JSON `true` — or, with `field`, an object whose top-level `field` is `true` | The project's own predicate ("is the wave over"), called at every poll. Arguments are validated once, at start. Mutating or async commands answer `command_not_allowed`; an unknown id `command_unavailable`. There is no arbitrary C# predicate |
 | `frames` N | N frames have run since the start | |
-| `ms` N | N ms have passed in the call's `time` base | `time: gameplay` (default) is the game's clock (`Time.time`, so `time_scale` speeds it up); `realtime` is unscaled |
+| `ms` N | N ms have passed in the call's `time` base | `time: gameplay` (default) is the game's clock (`Time.time`, so `time_scale` speeds it up); `realtime` is the wall clock (a hitch counts in full) |
 | `all` / `any` `[leaves]` | Every / one of the leaves holds at the same poll | One level deep (leaves only), 1–16 leaves |
 
 Frames are reported precisely. A poll at the start of frame F+1 sees the state the
@@ -301,7 +308,9 @@ and `last` observed state — on a timeout this is what the game showed. `errors
 lists console errors and exceptions logged meanwhile (at most 20, first stack line;
 `errors_dropped` counts the rest). With `fail_on`, `exception` carries the type,
 message, full stack (≤ 4000 characters), frame and play time. `time_scale` appears
-when one was requested.
+when one was requested. `logs_dropped` appears when more than 2000 console messages
+arrived between two polls, so a `log` condition did not see them all (lower
+`poll_every_frames`).
 
 ## `unity_senses_capture_series`
 
@@ -317,8 +326,8 @@ inside `batch_execute`. Group `playtest`; live-only like every `unity_senses_*` 
 
 | Argument | Meaning |
 |---|---|
-| `at_ms` `[…]` / `every_ms` + `duration_ms` / `at_frames` `[…]` | The schedule — exactly one form; at most 120 captures. `at_ms` / `every_ms` count the `time` base (`gameplay` default, `realtime`); `at_frames` counts frames |
-| `start_on` | Start the schedule when a condition holds (the `playtest_wait` shapes). Offset 0 is the frame that made it true. `start_timeout_ms` (default 30000) bounds it: `timed_out`, nothing captured |
+| `at_ms` `[…]` / `every_ms` + `duration_ms` / `at_frames` `[…]` | The schedule — exactly one form; at most 120 captures. `at_ms` / `every_ms` count the `time` base (`gameplay` default; `realtime` = the wall clock); `at_frames` counts frames |
+| `start_on` | Start the schedule when a condition holds (the `playtest_wait` shapes). Offset 0 is the frame that made it true; `start_on.fired` / `.condition` describe that moment (the condition is not evaluated after it). `start_timeout_ms` (default 30000) bounds it: `timed_out`, nothing captured |
 | `region` `[x, y, w, h]` | Crop every capture; screen pixels, bottom-left origin — a `ui_snapshot` rect can be passed as is |
 | `scale` | 0.05–1; shrink every capture (1 = native, the default) |
 | `metric` | `luminance` = mean Rec. 709 luminance (0..1) per capture; `diff` adds the mean absolute luminance change and the fraction of pixels that changed by more than 10/255 against the previous capture |
@@ -330,7 +339,7 @@ Timing: the scheduler ticks at the start of a frame, when the view holds the fra
 the game rendered last. A capture scheduled at `t` is the first frame whose offset
 from the start reached `t`, read on the next tick and labelled with that frame —
 the image and its `frame` / `play_time` / `elapsed_ms` always describe the same
-frame. `unchanged: true` marks a capture whose pixels equal the previous one (a
+frame. `unchanged: true` marks a capture whose every pixel equals the previous one (a
 static screen, or a hidden Game view tab, which does not render). Pixels are read
 back at capture time; PNG encoding runs after the last capture, so encoding never
 delays a scheduled frame. At most 512 MB of frames are held before encoding; a
@@ -360,8 +369,13 @@ capture over that budget is reported `dropped: "memory_budget"` (use `scale` or
 
 Series estimated over 40 s (start_on wait + schedule + encoding) run as a
 [`jobs` play-mode operation](jobs.md#play-mode-operations). Cancelling or exiting
-play mode keeps the frames already captured (they are encoded during cleanup); a
-domain reload drops them.
+play mode keeps the frames already captured: cleanup writes them for at most 1 s,
+and a frame it could not write is listed with `file: null` and
+`dropped: "flush_budget"`. A domain reload drops them. A `gameplay` `at_ms` /
+`every_ms` schedule that stops advancing (the game sets `Time.timeScale` to 0)
+ends after twice its length plus 30 s of wall-clock time as `timed_out` (outcome
+`capture_timed_out`): the frames captured so far are written, the rest are
+`dropped: "timed_out"`.
 
 ### Tap and capture what follows
 
@@ -370,7 +384,9 @@ composed frame at those offsets from the gesture start (the gesture's `time` bas
 inside the same scheduled operation, so a tap and the frames after it come back
 from one call under `captures` (same frame fields as a series, native size, at most
 30). The call returns when both the gesture and the last capture are done; the
-gesture's input resource is held until then.
+gesture's input resource is held until then. In `gameplay` time the pair is
+bounded the same way (twice its length plus 30 s of wall-clock time): `timed_out`,
+fingers released, the frames captured so far kept.
 
 ### Recipes
 
@@ -392,7 +408,8 @@ session, shows what the session changed, and puts it back.
 > every PlayerPrefs key and writes the snapshot's keys back, and makes
 > `persistentDataPath` an exact copy of the snapshot: **files that are not in the
 > snapshot are deleted.** Opted-in EditorPrefs are overwritten under their
-> prefixes. Call `restore` without `confirm` first and read what it would delete.
+> prefixes. Call `restore` without `confirm` first, read what it would delete, and
+> confirm with the `plan` id it returns.
 
 **What is captured.**
 
@@ -443,7 +460,7 @@ the open project's Player Settings.
 |---|---|---|
 | `snapshot` | `name`, `editor_prefs_prefixes`, `exclude`, `exclude_keys`, `max_files_mb`, `overwrite` | Captures the open project's state into `name` (`snapshot_exists` unless `overwrite`). Edit or play mode; writes nothing in the project |
 | `diff` | `name`, `against`, `limit` | `name` → the current state (`to.current`, flushed first), or → snapshot `against` |
-| `restore` | `name`, `confirm`, `limit` | Edit mode only. Without `confirm` (the default): a dry run returning the diff it would apply. With `confirm: true`: applies it, re-reads everything and reports `verified` |
+| `restore` | `name`, `confirm`, `plan`, `limit` | Edit mode only. Without `confirm` (the default): a dry run returning the diff it would apply and its `plan` id. With `confirm: true` and that `plan`: applies it, re-reads everything and reports `verified` |
 | `list` | — | The snapshots of this project's store: name, `created_at`, prefs / files counts, bytes, EditorPrefs prefixes |
 | `delete` | `name` | Removes one snapshot |
 
@@ -452,7 +469,8 @@ the open project's Player Settings.
 of another project compares only with another snapshot (`against`), and `restore`
 refuses it (`snapshot_project_mismatch`) — whether it lives in another project's
 store or its metadata names another company / product. Names are 1–64 of
-`[A-Za-z0-9._-]`, starting with a letter or digit.
+`[A-Za-z0-9._-]`, starting with a letter or digit, without `..` and not ending in
+`.`.
 
 ### Diff
 
@@ -492,14 +510,23 @@ always complete and `truncated` says how many entries were left out.
 
 `restore` reads the current state and diffs it **to** the snapshot — current →
 snapshot, so `removed` is what restore deletes. The dry run returns that diff with
-**every** removal listed (`prefs.removed`, `editor_prefs.removed`, `files.removed`,
-`files.dirs_removed` are never truncated), `unsupported_deleted` (current keys of
-a type PlayerPrefs cannot hold — `DeleteAll` removes them for good), a `warning`
-that spells out the overwrite and the number of files it removes, and changes
-nothing.
+**every** removal and overwrite listed (the `removed` and `changed` lists of
+`prefs`, `editor_prefs` and `files`, and `files.dirs_removed`, are never
+truncated; `limit` bounds only `added`), `unsupported_deleted` (current keys of a
+type PlayerPrefs cannot hold, excluded ones included — `DeleteAll` removes them
+for good), a `warning` that spells out the overwrite and the number of files it
+removes, and a `plan` id — a hash of exactly that diff — and changes nothing.
 
-With `confirm: true` it first checks every stored file against the manifest
-(`snapshot_corrupt`, nothing changed, on a mismatch), then:
+`confirm: true` needs that `plan` (`plan_required` without it): restore applies
+only the plan that was reviewed, and refuses `plan_changed` when the current state
+moved since the dry run (the game saved a new file, a key changed) — run the dry
+run again and review it. Then, before changing anything, it refuses
+`snapshot_corrupt` when a stored file no longer matches the manifest (or a
+manifest path is not a plain path under `persistentDataPath`),
+`persistent_path_link` when a path it would write or remove passes through a
+symbolic link, and `prefs_store_unverified` when a probe key written and saved
+through PlayerPrefs does not show up in the store read (the dry run's key lists
+could not be trusted). Then:
 
 1. PlayerPrefs through the PlayerPrefs API — `PlayerPrefs.DeleteAll()`, typed
    `Set*` for every snapshot key, the excluded keys' current values written back,
@@ -514,11 +541,14 @@ With `confirm: true` it first checks every stored file against the manifest
    snapshot removed when empty (`dirs_kept_not_empty` otherwise); excluded paths
    untouched.
 
-It then re-reads everything and reports `verified: true`, or `verified: false`
-with the `residual` diff. A file operation that fails leaves a partial restore:
-`restore_incomplete` with `errors` and the output. Refusals: `edit_mode_required`
-in play mode (dry run included — use `diff` while the game runs),
-`snapshot_project_mismatch`, `snapshot_not_found`, `snapshot_unreadable`.
+Files not in the snapshot are removed before snapshot files are written, so a
+case-only rename on a case-insensitive file system keeps the restored file. It
+then re-reads everything and reports `verified: true`. A failed operation, or a
+re-read state that still differs (`verified: false` with the `residual` diff, or
+folders kept because they are not empty), is `restore_incomplete` with `errors`
+and the full output. Refusals: `edit_mode_required` in play mode (dry run
+included — use `diff` while the game runs), `snapshot_project_mismatch`,
+`snapshot_not_found`, `snapshot_unreadable`.
 
 **Gate and scope.** Only `restore` with `confirm: true` writes state, and the
 bridge classifies it as a mutation per request: it runs the normal gate (checkpoint
@@ -551,9 +581,10 @@ custom store, a server). Look for them first:
 3. Play the session; `player_state {"action":"diff","name":"before"}` (in play mode
    or after) lists what it changed — part of the playtest report.
 4. Stop play mode; `player_state {"action":"restore","name":"before"}` — read the
-   dry run's `prefs.removed` / `files.removed`.
-5. `player_state {"action":"restore","name":"before","confirm":true}`; check
-   `verified: true`. `delete` the snapshot when done.
+   dry run's `prefs.removed` / `files.removed` and the `changed` lists, note its
+   `plan`.
+5. `player_state {"action":"restore","name":"before","confirm":true,"plan":"<plan>"}`;
+   check `verified: true`. `delete` the snapshot when done.
 
 ## `unity_open_mcp_playtest_session`
 
@@ -607,20 +638,28 @@ stream (with stacks) and are matched to calls by time: inside a call's window (�
 one (a tap's consequence logged frames later). The call's own `logs[]` and a wait's
 or series' `errors` fill in what the stream missed — it reconnects after a domain
 reload; such entries have no stack. The same message from both sources is one
-error.
+error. A job's errors are attributed from the stream as they happen (to the call
+before them); the job result's own copies of them are not counted again.
+
+The console is shared: an error is matched to *your* calls by time, whoever caused
+it. When another agent drives the same Editor during your session, its errors show
+up in your report as during / after your calls — run one playtest per Editor, or
+read the attribution with that in mind.
 
 **Frames.** File paths a capture reports (`filePath`, a series' frames and contact
 sheet) are hard-linked — or copied — into the session's `report/frames/` when the
 call ends; `capture_inline` images are written there from the response. Full-size
 frames stay files; the report shows downscaled thumbnails.
 
-**Secrets.** Before anything is written: a property whose name reads as a secret
-(`password`, `token`, `api_key`, `authorization`, `client_secret`, `session_id`, …)
-is replaced with `[redacted]` at any depth; inside free text (notes, console
-messages, stacks, results) `Bearer …`, `password=…` and `"token": "…"`-style
-fragments, the bridge auth token and secret-named environment variable values are
-masked; a PlayerPrefs diff entry whose key reads as a secret keeps its type, not
-its value.
+**Secrets.** Before anything is written: under a property whose name reads as a
+secret (`password`, `pass`, `token`, `api_key`, `authorization`, `client_secret`,
+`session_id`, `sessionKey`, …) every string is replaced with `[redacted]`, at any
+depth — numbers, booleans and the shape of objects stay (a `tokens: 150` currency
+is still readable); inside free text (notes, console messages, stacks, results)
+`Bearer …`, `Basic …` and `Digest …` credentials, JWTs, `password=…`, `?key=…` /
+`pass=…`, `--password …` flags and `"token": "…"`-style fragments, the bridge auth
+token and secret-named environment variable values are masked; a PlayerPrefs diff
+entry whose key reads as a secret keeps its type, not its string value.
 
 ### Storage
 
@@ -647,11 +686,14 @@ slug>-<4 hex>`. Nothing deletes sessions; remove old folders by hand.
 so the log survives a domain reload (the server is not in Unity) and an MCP server
 restart. A call is logged twice — `call_started` before dispatch, `call` after —
 so a call that was in flight when the server process stopped is reported as
-**lost** with its arguments. After a restart the new server's agent id differs:
+**lost** with its arguments (one the ending process itself had not finished is
+**still running at end**). After a restart the new server's agent id differs:
 `status` lists the session under `orphaned`; `end` or `resume` with `session:
 <id>` adopts it (refused with `session_owned_by_other_agent` while the owning
-process is alive). A session opened with a stable `_meta.agentId` is the same
-owner after a restart.
+process is alive, even for the same agent id). A session opened with a stable
+`_meta.agentId` is the same owner after a restart. Adoption continues the
+numbering and the limits (frames, bytes, dropped calls, logged errors) where the
+log left them.
 
 ### Report
 
@@ -659,9 +701,11 @@ owner after a restart.
 one), and writes `report.md`:
 
 - a header: session, project, start / end, device, snapshot, the project isolation
-  hook seen (`*.playtest.begin` / `*.playtest.end` commands), totals and verdicts;
+  hook seen (`*.playtest.begin` / `*.playtest.end` invoked, or started as a job that
+  did not fail), totals and verdicts;
 - **Findings**: `bug` / `suspicious` steps with notes, each distinct error with its
-  first occurrence (step, call, during / after), failed calls, lost calls;
+  first occurrence (step, call, during / after), failed calls, lost calls and calls
+  still running at end;
 - **Steps**: per mark, a table of its calls (time, tool, arguments, result,
   duration), the errors it caused and its frames — a series shows its contact
   sheet, other captures a thumbnail, the rest as links;
@@ -681,7 +725,7 @@ one), and writes `report.md`:
     "findings": [ { "step": 6, "label": "Tap Report Bug", "verdict": "bug", "note": "Tapping Report Bug throws InvalidOperationException." } ],
     "top_errors": [ { "type": "exception", "message": "InvalidOperationException: [PlaytestFixture] Deliberate exception from the Report Bug button",
                       "first_step": 6, "first_call": 11, "relation": "during", "count": 1 } ],
-    "lost_in_flight": [], "state_diff": { "identical": false, "prefs": { "added": 3, "removed": 0, "changed": 0, "unchanged": 5 } },
+    "lost_in_flight": [], "running_at_end": [], "state_diff": { "identical": false, "prefs": { "added": 3, "removed": 0, "changed": 0, "unchanged": 5 } },
     "hooks": { "begin": "project.demo.playtest.begin" }
   },
   "agentNextSteps": [ "Hand the report to the human: …/report.md", "…" ]
@@ -691,7 +735,11 @@ one), and writes `report.md`:
 **Limits** per session: 500 recorded calls (later ones are counted, not logged),
 200 marks, 300 frames or 512 MB of frames (later ones are referenced by their
 source path), 60 thumbnails (≤ 320 px, a contact sheet ≤ 960 px; 20 s of decoding),
-20 errors per call, 2,000 characters of arguments per call.
+20 errors per call, 2,000 characters of arguments per call. Console errors: one
+message is logged 20 times and a session 2,000 errors; later ones are counted, not
+logged (the report adds them to the ×counts), so an exception thrown every frame
+cannot grow the log without bound. Errors arriving while one call's backlog (500)
+is full are dropped, and the report says how many.
 
 ## Snapshot → tap by label
 
@@ -707,14 +755,18 @@ source path), 60 thumbnails (≤ 320 px, a contact sheet ≤ 960 px; 20 s of dec
 |---|---|
 | `invalid_arguments` | `ui_snapshot`: unknown `profile` / `role`, invalid `placeholder_pattern`, `min_touch_size` ≤ 0. `game_view`: unknown action, width/height out of range or without the other, width/height together with `size_label`, an orientation the device does not support, `settle_timeout_ms` out of range |
 | `under_not_found` | No node path matches `under` |
-| `not_settled` | `game_view` set_*: the change was applied but the game did not report the new size (paused Editor, time-out, clamped size); carries `expected`, `observed` and the applied state |
+| `not_settled` | `game_view` set_*: the change was applied but the game did not report the new size (paused Editor, time-out, the view behind another tab); carries `expected`, `observed` and the applied state |
+| `game_view_unavailable` | `set_resolution`: no Game view could be found or opened |
+| `simulator_unavailable` | `set_device`: the Device Simulator could not be opened, or reported no screen after selecting the device |
+| `native_size_unavailable` | `unity_senses_screenshot` / `capture_inline` `view: "game"` with `size: "native"`: the Game view reports no size yet |
+| `safe_area_unavailable` | `unity_senses_screenshot` / `capture_inline` `overlay: "safe_area"`: no Game view or Device Simulator reports the game's screen (mode `none`) |
 | `device_not_found` / `ambiguous_device` | `set_device`: no device / several devices match `device` (`candidates`) |
 | `size_not_found` | `set_resolution`: no size entry has that `size_label` (`labels` lists them) |
 | `unsupported_editor_version` | `game_view` on an Editor outside the verified table (Unity 6 line) |
 | `editor_internals_unavailable` | `game_view`: an internal Game view / Simulator member this Editor lacks (`detected.missing`) |
 | `batch_step_requires_server_poll` | `game_view` set_*, `playtest_wait` or `capture_series` inside `batch_execute` |
 | `play_mode_required` | `playtest_wait` / `capture_series` in edit mode |
-| `timed_out` | `playtest_wait`: the condition did not hold within `timeout_ms` (carries `condition` with every leaf's last state); `capture_series`: `start_on` did not hold within `start_timeout_ms` |
+| `timed_out` | `playtest_wait`: the condition did not hold within `timeout_ms` (carries `condition` with every leaf's last state); `capture_series`: `start_on` did not hold within `start_timeout_ms` (outcome `start_on_timed_out`), or a `gameplay` schedule stopped advancing (outcome `capture_timed_out`, frames kept); `inputsim_gesture` with `capture_at_ms` in `gameplay` time: the same wall-clock bound |
 | `exception_thrown` / `error_logged` | `playtest_wait` with `fail_on`: the game logged an exception / error (carries `exception`) |
 | `condition_error` | A leaf cannot be evaluated (a project command threw) |
 | `command_unavailable` / `command_not_allowed` | `project_command`: unknown or disabled id / a mutating or async command |
@@ -727,11 +779,14 @@ source path), 60 thumbnails (≤ 320 px, a contact sheet ≤ 960 px; 20 s of dec
 | `snapshot_exists` | `player_state` `snapshot` to a name that exists, without `overwrite` |
 | `snapshot_not_found` / `snapshot_unreadable` | `player_state`: no such snapshot in the addressed store (`available` lists the names) / its `snapshot.json` cannot be read |
 | `snapshot_project_mismatch` | `player_state` `restore` (or `diff` against the current state) of a snapshot whose company / product differ from the open project |
-| `snapshot_corrupt` | `player_state` `restore confirm:true`: a stored file no longer matches the manifest; nothing was changed |
+| `snapshot_corrupt` | `player_state` `restore`: a stored file no longer matches the manifest, or a manifest path leaves `persistentDataPath`; nothing was changed |
+| `plan_required` / `plan_changed` | `player_state` `restore confirm:true` without the dry run's `plan` / after the current state moved since that dry run; nothing was changed |
+| `persistent_path_link` | `player_state` `restore confirm:true`: a path it would write or remove passes through a symbolic link (`paths`); nothing was changed |
+| `prefs_store_unverified` | `player_state` `restore confirm:true`: a probe key saved through PlayerPrefs did not appear in the store read; nothing was restored |
 | `persistent_data_too_large` | `player_state` `snapshot`: `persistentDataPath` exceeds `max_files_mb` or 5000 files after excludes (`largest` lists the biggest files); nothing written |
 | `prefs_store_unreadable` | `player_state`: the platform PlayerPrefs / EditorPrefs store could not be read (`store` names it) |
 | `editor_internals_unavailable` | `player_state` with EditorPrefs on an Editor without the internal EditorPrefs flush |
-| `restore_incomplete` | `player_state` `restore confirm:true`: some file operations failed; the state is partly restored (`errors`, `residual`) |
+| `restore_incomplete` | `player_state` `restore confirm:true`: some operations failed, or the re-read state still differs from the snapshot (`errors`, `residual`, `dirs_kept_not_empty`) |
 | `session_already_open` | `playtest_session` `start` while this agent has an open session (`session` names it), or `mark` / `end` / `resume` naming a different session than the open one |
 | `no_open_session` | `playtest_session` `mark` / `end` without an open session (`orphaned` lists sessions a stopped server left open) |
 | `session_not_found` / `session_ended` | `playtest_session`: no such session for this project / it already ended (`report`) |

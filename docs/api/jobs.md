@@ -104,7 +104,8 @@ deduplicates retries). The job owns `operation_id` (supplying one is rejected):
 the job id is the bridge operation id. The direct tool call starts a job by itself
 when the operation's worst case exceeds the 40 s inline budget — a gesture's last
 keyframe or capture, a wait's `timeout_ms`, a capture series' `start_on` wait plus
-its schedule plus encoding — and returns that job snapshot.
+its schedule plus encoding — and returns that job snapshot; an `operation_id`
+passed to that direct call becomes the job's `idempotency_key`.
 
 The adapter starts the operation through the tool (the bridge validates, routes
 input and refuses as usual — a refusal is a `failed` job carrying the bridge's

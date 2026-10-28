@@ -307,7 +307,9 @@ namespace UnityOpenMcpBridge
 
         private static void Install()
         {
-            if (installed || SuppressPlayerLoop) return;
+            if (SuppressPlayerLoop) return;
+            // Re-read the live loop every time: project code may have replaced it
+            // (and dropped the tick) since the last install.
             var loop = PlayerLoop.GetCurrentPlayerLoop();
             if (Contains(loop)) { installed = true; return; }
             var systems = loop.subSystemList;

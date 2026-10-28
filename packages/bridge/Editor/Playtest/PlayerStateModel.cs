@@ -324,6 +324,33 @@ namespace UnityOpenMcpBridge.Playtest
 
         internal static string Join(string rel, string name) => rel.Length == 0 ? name : rel + "/" + name;
 
+        // A manifest path restore may write: relative, '/'-separated, no empty,
+        // '.' or '..' segment, so it always resolves under the root.
+        internal static bool IsSafeRelative(string rel)
+        {
+            if (string.IsNullOrEmpty(rel) || rel.IndexOf('\\') >= 0 || rel.IndexOf(':') >= 0 || Path.IsPathRooted(rel))
+                return false;
+            foreach (var seg in rel.Split('/'))
+                if (seg.Length == 0 || seg == "." || seg == "..") return false;
+            return true;
+        }
+
+        // True when `rel` or one of its folders under `root` is a symbolic link
+        // (reparse point): writing or deleting there would leave `root`.
+        internal static bool PassesThroughLink(string root, string rel)
+        {
+            var path = root;
+            foreach (var seg in rel.Split('/'))
+            {
+                path = Path.Combine(path, seg);
+                FileAttributes attrs;
+                try { attrs = File.GetAttributes(path); }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) { return false; }
+                if ((attrs & FileAttributes.ReparsePoint) != 0) return true;
+            }
+            return false;
+        }
+
         internal static string ToNative(string root, string rel) =>
             Path.Combine(root, rel.Replace('/', Path.DirectorySeparatorChar));
     }

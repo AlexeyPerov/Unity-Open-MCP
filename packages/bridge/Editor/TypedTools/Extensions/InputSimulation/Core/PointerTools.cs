@@ -109,9 +109,9 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 if (!UiTextTargets.TryResolve(target_text, text_match, under, index, null, out byText, out var textError))
                     return textError;
             }
-            else if (!string.IsNullOrEmpty(under) || index.HasValue)
+            else if (!string.IsNullOrEmpty(under) || index.HasValue || text_match != null)
                 return InputSimulationJson.Error("invalid_arguments",
-                    "under and index refine target_text; pass target_text with them.");
+                    "under, index and text_match refine target_text; pass target_text with them.");
 
             if (routing == "raycast_real")
             {

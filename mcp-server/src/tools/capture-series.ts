@@ -85,7 +85,10 @@ export const captureSeries = makeTool(
         type: "string",
         enum: ["gameplay", "realtime"],
         default: "gameplay",
-        description: "Clock for at_ms / every_ms: gameplay (scaled by Time.timeScale, what animations see) or realtime.",
+        description:
+          "Clock for at_ms / every_ms: gameplay (scaled by Time.timeScale, what animations see) or realtime (wall clock). " +
+          "A gameplay schedule that stops advancing (Time.timeScale 0) ends as timed_out after twice its length + 30 s " +
+          "of wall-clock time, keeping the frames already captured.",
       },
       scale: {
         type: "number",

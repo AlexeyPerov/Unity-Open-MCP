@@ -37,7 +37,7 @@ namespace UnityOpenMcpBridge.Screenshot
             view = (view ?? "scene").ToLowerInvariant();
             var argError = ScreenshotService.ValidateFrameArgs(view, width, height, size, overlay);
             if (argError != null) return ErrorJson("validation_error", argError);
-            // scene / game / isolated keep their 1280x720 default; composed defaults to native.
+            // scene / game / isolated default each missing axis to 1280 / 720; composed defaults to native.
             int w = width ?? 1280, h = height ?? 720;
 
             try
@@ -79,6 +79,10 @@ namespace UnityOpenMcpBridge.Screenshot
                 }
 
                 return BuildSuccessJson(view, w, h, filePath);
+            }
+            catch (CaptureRefusedException e)
+            {
+                return ErrorJson(e.Code, e.Message);
             }
             catch (System.Exception e)
             {

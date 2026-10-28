@@ -54,13 +54,18 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             var dispatched = new List<string>(steps.Count);
             framesAdvanced = 0;
             bool paused = EditorApplication.isPaused;
+            bool open = false; // a Began went out (to any backend) without its Ended
+            var point = default(Vector2);
             try
             {
                 if (inputSystem) InputBackends.InputSystem.UpdateNow();
                 foreach (var step in steps)
                 {
+                    point = step.Point;
+                    if (step.Phase == DeviceTouchPhase.Began) open = true;
                     if (legacy) EditorInputAdapter.SimulateTouch(finger, step.Point, step.Phase);
                     if (inputSystem) InputBackends.InputSystem.Queue(finger, step.Phase, step.Point);
+                    if (step.Phase == DeviceTouchPhase.Ended || step.Phase == DeviceTouchPhase.Canceled) open = false;
                     dispatched.Add(PhaseName(step.Phase));
                     int frames = step.FramesAfter < 0 ? 0 : step.FramesAfter;
                     if (inputSystem) InputBackends.InputSystem.StepFrames(frames);
@@ -69,11 +74,36 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 }
                 if (inputSystem) InputBackends.InputSystem.UpdateNow();
             }
+            catch
+            {
+                // A failed sequence never leaves the finger pressed.
+                if (open) CancelOpenTouch(legacy, inputSystem, finger, point);
+                throw;
+            }
             finally
             {
                 EditorApplication.isPaused = paused;
             }
             return dispatched;
+        }
+
+        // Best effort on a failure path: the caller reports the original error.
+        private static void CancelOpenTouch(bool legacy, bool inputSystem, int finger, Vector2 point)
+        {
+            if (legacy)
+            {
+                try { EditorInputAdapter.SimulateTouch(finger, point, DeviceTouchPhase.Canceled); }
+                catch (System.Exception) { /* entry point gone — nothing was held */ }
+            }
+            if (inputSystem)
+            {
+                try
+                {
+                    InputBackends.InputSystem.Queue(finger, DeviceTouchPhase.Canceled, point);
+                    InputBackends.InputSystem.UpdateNow();
+                }
+                catch (System.Exception) { /* no Touchscreen left to release */ }
+            }
         }
 
         // Legacy phases collapse without a frame between them.

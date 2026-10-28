@@ -63,7 +63,6 @@ export async function routeGameView(
     case "settled":
       return { kind: "passthrough", result: start };
     case "paused":
-    case "clamped":
     case "failed":
       return notSettled(out, String(settle.reason ?? settle.error?.message ?? `Settle ${settle.state}.`), { state: settle.state }, logs);
     case "pending":

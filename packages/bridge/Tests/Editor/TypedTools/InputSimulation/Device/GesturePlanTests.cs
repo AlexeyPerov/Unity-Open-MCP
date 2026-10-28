@@ -147,6 +147,24 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
         }
 
         [Test]
+        public void RepeatedLabelQueriesResolveOnceAndReportOnce()
+        {
+            var plan = Parse("[{\"path\":[{\"at_ms\":0,\"target_text\":\"Buy\"},{\"at_ms\":10,\"target_text\":\"Buy\",\"x\":1,\"y\":1}," +
+                             "{\"at_ms\":20,\"target_text\":\"Buy\",\"index\":1}]}]", "target");
+            int calls = 0;
+            Assert.IsTrue(plan.ResolvePoints(Vector2.zero, t => (true, Vector2.zero, null, null),
+                (k, c) => { calls++; return (true, new Vector2(10, 20 * calls), "{\"n\":" + calls + "}", null); },
+                out _, out _, out var errorJson), errorJson);
+            Assert.AreEqual(2, calls, "same text/match/under/index resolves once");
+            var path = plan.Fingers[0].Path;
+            Assert.AreEqual("{\"n\":1}", path[0].TextTargetJson);
+            Assert.IsNull(path[1].TextTargetJson, "a repeated query is reported once");
+            Assert.AreEqual(new Vector2(11, 21), path[1].Point);
+            Assert.AreEqual("{\"n\":2}", path[2].TextTargetJson);
+            Assert.AreEqual(0, plan.TextTargetsOmitted);
+        }
+
+        [Test]
         public void TargetTextKeyframeArgumentsAreValidated()
         {
             var plan = GesturePlan.Parse("[{\"path\":[{\"at_ms\":0,\"target\":\"A\",\"target_text\":\"Buy\"},{\"at_ms\":1,\"target\":\"A\"}]}]",

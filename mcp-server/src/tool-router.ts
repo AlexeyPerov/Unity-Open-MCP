@@ -873,7 +873,11 @@ export class ToolRouter implements Router {
     const spec = PLAYMODE_ROUTES[name];
     const estimateMs = playmodeEstimateMs(name, args);
     if (estimateMs > spec.inlineLimitMs) {
-      const started = await this.routeJobs({ action: "start", tool_or_command: name, args }, identity);
+      // The job owns the bridge operation id; a caller's operation_id keeps
+      // its retry meaning as the job's idempotency key.
+      const { operation_id: retryKey, ...jobArgs } = args;
+      const started = await this.routeJobs({ action: "start", tool_or_command: name, args: jobArgs,
+        ...(typeof retryKey === "string" ? { idempotency_key: retryKey } : {}) }, identity);
       const body = toolResultBody(started);
       if (started.isError || typeof body.job_id !== "string") return started;
       return sourceResult({ ...body, note: `${spec.label} can take ${Math.round(estimateMs)} ms (> ${spec.inlineLimitMs} ms inline budget); it runs as a job.`,

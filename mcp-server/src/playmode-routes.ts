@@ -59,7 +59,9 @@ export const PLAYMODE_ROUTES: Record<string, PlaymodeRouteSpec> = {
     resultHint: "the frames and files",
     startMeta: () => ({}),
     failureNextSteps: code => code === "timed_out"
-      ? ["start_on never held: read start_on.condition.last; widen the condition or raise start_timeout_ms."]
+      ? ["Either start_on never held (read start_on.condition.last; widen the condition or raise start_timeout_ms), " +
+        "or a gameplay-time schedule stopped advancing (game paused / timeScale 0) and hit its wall-clock limit — the " +
+        "frames already captured are kept (outcome capture_timed_out); unpause or use time \"realtime\"."]
       : undefined,
   },
 };

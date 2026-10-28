@@ -141,7 +141,7 @@ stops a wait at the first exception instead of timing out.
    (verdicts, findings, first occurrence of each error, lost calls).
 2. Stop play mode. Put the state back: invoke `playtest.end`, or
    `player_state restore` (dry run first — read `prefs.removed` /
-   `files.removed` — then `confirm: true`), and `player_state delete` the
+   `files.removed` — then `confirm: true` with the dry run's `plan`), and `player_state delete` the
    session's snapshot.
 3. Put the Game view back (`game_view set_resolution` with the `size_label` from
    the first `get`).
@@ -181,6 +181,8 @@ text are redacted. See [the report contract](api/playtest.md#report).
 - **The MCP server restarted.** The session is on disk: `playtest_session
   status` lists it under `orphaned`; `end` (or `resume`) with `session: "<id>"`
   takes it over, and the report names the call that was in flight.
+- **One playtest per Editor.** The console is shared: errors are matched to your
+  calls by time, so another agent driving the same Editor shows up in your report.
 
 ## A complete run on the demo
 

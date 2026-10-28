@@ -20,8 +20,9 @@
 // Every write is synchronous and small: a log line is appended with one
 // appendFileSync (open-write-close) the moment the event happens, so the log
 // survives a domain reload, an Editor crash and an MCP server restart; the
-// metadata file is replaced through a temp file + rename.
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+// metadata file is replaced through a temp file + rename. A process that adopts
+// a session first ends a torn last line, so its own entries stay parseable.
+import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -151,16 +152,52 @@ export class SessionStore {
     appendFileSync(join(this.dir(meta), LOG_FILE), JSON.stringify(entry) + "\n");
   }
 
-  /** Every parseable line of a session log; a torn last line (a crash mid-write) is skipped. */
+  /**
+   * Every parseable line of a session log; a torn line (a crash mid-write) is
+   * skipped. Read in chunks, so a log larger than the longest JS string still
+   * yields its entries.
+   */
   readLog(dir: string): Array<Record<string, any>> {
-    let text: string;
-    try { text = readFileSync(join(dir, LOG_FILE), "utf8"); } catch { return []; }
+    let fd: number;
+    try { fd = openSync(join(dir, LOG_FILE), "r"); } catch { return []; }
     const out: Array<Record<string, any>> = [];
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      try { out.push(JSON.parse(line)); } catch { /* torn line */ }
-    }
+    const parse = (line: Buffer) => {
+      const text = line.toString("utf8");
+      if (!text.trim()) return;
+      try { out.push(JSON.parse(text)); } catch { /* torn line */ }
+    };
+    try {
+      const chunk = Buffer.alloc(1 << 20);
+      let rest = Buffer.alloc(0);
+      for (let read = readSync(fd, chunk, 0, chunk.length, null); read > 0; read = readSync(fd, chunk, 0, chunk.length, null)) {
+        const data = rest.length ? Buffer.concat([rest, chunk.subarray(0, read)]) : chunk.subarray(0, read);
+        let start = 0;
+        for (let newline = data.indexOf(10); newline >= 0; newline = data.indexOf(10, start)) {
+          parse(data.subarray(start, newline));
+          start = newline + 1;
+        }
+        // Copied: `chunk` is reused by the next read.
+        rest = Buffer.from(data.subarray(start));
+      }
+      if (rest.length) parse(rest);
+    } catch { /* an unreadable tail: keep the entries read so far */ }
+    finally { closeSync(fd); }
     return out;
+  }
+
+  /** End a torn last line, so the next appended entry starts a line of its own. */
+  terminateLog(dir: string): void {
+    const file = join(dir, LOG_FILE);
+    let torn = false;
+    try {
+      const fd = openSync(file, "r");
+      try {
+        const size = fstatSync(fd).size;
+        const last = Buffer.alloc(1);
+        torn = size > 0 && readSync(fd, last, 0, 1, size - 1) === 1 && last[0] !== 10;
+      } finally { closeSync(fd); }
+    } catch { return; }
+    if (torn) appendFileSync(file, "\n");
   }
 
   /** Sessions of one product, newest first. */

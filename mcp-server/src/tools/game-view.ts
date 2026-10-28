@@ -20,7 +20,9 @@ export const gameView = makeTool(
   "unity_open_mcp_game_view",
   "Read or set what the game renders at: the Game view resolution or a Device Simulator device. " +
     "ACTIONS: get = mode (game | simulator | none), the selected size entry or device, window size in " +
-    "logical points and pixels (HiDPI), scale, focused, render_texture, and `screen` = what the game " +
+    "logical points and pixels (HiDPI), scale, focused, visible (false = the view is behind another " +
+    "tab, which does not render; in play mode a warning says render_texture and screen are then " +
+    "stale), render_texture, and `screen` = what the game " +
     "sees (width, height, aspect, safe_area [x, y, w, h] bottom-left origin, insets {top, bottom, left, " +
     "right} — the notch is insets.top in portrait — cutouts, dpi, orientation); set_resolution = fixed " +
     "width × height in pixels via a custom Game view size entry named 'Open MCP <w>x<h>' (created once, " +

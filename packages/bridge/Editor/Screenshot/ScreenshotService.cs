@@ -104,6 +104,12 @@ namespace UnityOpenMcpBridge.Screenshot
         public static FrameCapture CaptureComposed(int? width, int? height, bool safeAreaOverlay)
         {
             var context = DescribeGameView();
+            // The overlay is drawn from the game's screen; without one there is no
+            // safe area to draw (never tint the whole frame as unsafe).
+            if (safeAreaOverlay && (context.ScreenWidth <= 0 || context.ScreenHeight <= 0))
+                throw new CaptureRefusedException("safe_area_unavailable",
+                    "overlay: \"safe_area\" needs the game's screen, and no Game view or Device Simulator reports one (mode: " +
+                    context.Mode + "). Open the Game view or select a device with unity_open_mcp_game_view, or capture without the overlay.");
             Texture2D frame = null;
             try
             {
@@ -340,6 +346,7 @@ namespace UnityOpenMcpBridge.Screenshot
             public string Orientation;
             public int ScreenWidth, ScreenHeight;
             public Rect SafeArea;
+            public bool? FrontTab;                 // the view is its dock area's front tab; null when unknown
             public string Note;
         }
 
@@ -364,6 +371,7 @@ namespace UnityOpenMcpBridge.Screenshot
                     ctx.SafeArea = safe;
                 }
                 ctx.View = view;
+                ctx.FrontTab = GameViewAdapter.IsFrontTab(view);
                 ctx.Mode = GameViewAdapter.KindName(kind);
                 if (kind == PlayModeViewKind.Game)
                 {
@@ -423,14 +431,17 @@ namespace UnityOpenMcpBridge.Screenshot
             }
             if (c.Context != null)
             {
-                if (c.Source == "play_mode_view" && c.Context.ScreenWidth > 0 &&
+                string warning = null;
+                if (c.Source == "play_mode_view" && c.Context.FrontTab == false)
+                    warning = "The play-mode view is not the front tab of its dock area, so the running game does not render into it: " +
+                              "this is the last frame it drew and may be stale. game_view set_resolution / set_device bring it to the front.";
+                else if (c.Source == "play_mode_view" && c.Context.ScreenWidth > 0 &&
                     (c.NativeWidth != c.Context.ScreenWidth || c.NativeHeight != c.Context.ScreenHeight))
-                    sb.Append(",\"warning\":").Append(BridgeJson.EscapeString(
-                        "The view's last rendered frame (" + c.NativeWidth + "x" + c.NativeHeight + ") differs from the game's screen (" +
-                        c.Context.ScreenWidth + "x" + c.Context.ScreenHeight + "): the size changed and has not rendered yet, or the view is not visible."));
-                if (c.Source == "screen_capture")
-                    sb.Append(",\"warning\":").Append(BridgeJson.EscapeString(
-                        "The play-mode view's render target was unreachable; this frame is the Editor panel ScreenCapture saw and may include Editor chrome."));
+                    warning = "The view's last rendered frame (" + c.NativeWidth + "x" + c.NativeHeight + ") differs from the game's screen (" +
+                              c.Context.ScreenWidth + "x" + c.Context.ScreenHeight + "): the size changed and has not rendered yet.";
+                else if (c.Source == "screen_capture")
+                    warning = "The play-mode view's render target was unreachable; this frame is the Editor panel ScreenCapture saw and may include Editor chrome.";
+                if (warning != null) sb.Append(",\"warning\":").Append(BridgeJson.EscapeString(warning));
                 sb.Append(",\"capturedAt\":");
                 AppendContext(sb, c.Context);
             }
@@ -453,9 +464,11 @@ namespace UnityOpenMcpBridge.Screenshot
                 if (size != "native") return "size must be \"native\" (or omitted).";
                 sizeNative = true;
             }
-            if (width.HasValue != height.HasValue) return "Pass width and height together (or neither).";
-            if (sizeNative && width.HasValue) return "size: \"native\" returns the game's own resolution; drop width/height or drop size.";
             if (sizeNative && view != "composed" && view != "game") return "size: \"native\" applies to the composed and game views.";
+            if (sizeNative && (width.HasValue || height.HasValue)) return "size: \"native\" returns the game's own resolution; drop width/height or drop size.";
+            // composed fits the native frame into width x height, so it needs both;
+            // scene / game / isolated default each missing axis (1280 / 720).
+            if (view == "composed" && width.HasValue != height.HasValue) return "Pass width and height together for the composed view (or neither).";
             if (!string.IsNullOrEmpty(overlay) && overlay != "none")
             {
                 if (overlay != "safe_area") return "overlay must be \"safe_area\" (or omitted).";
@@ -846,5 +859,17 @@ namespace UnityOpenMcpBridge.Screenshot
         public bool SafeAreaOverlay;
         public Rect SafeArea;                   // game screen pixels, bottom-left origin
         public ScreenshotService.GameViewContext Context;
+    }
+
+    // A capture refused for a reason the caller can act on: the capture tools
+    // answer with its stable code instead of execution_error.
+    internal sealed class CaptureRefusedException : InvalidOperationException
+    {
+        public readonly string Code;
+
+        public CaptureRefusedException(string code, string message) : base(message)
+        {
+            Code = code;
+        }
     }
 }

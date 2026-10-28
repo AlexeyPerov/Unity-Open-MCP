@@ -34,10 +34,14 @@ namespace UnityOpenMcpBridge.Tests.Playtest
                 var r = new PrefsReadResult { Source = "fake store " + company + "/" + product };
                 r.Entries.AddRange(Store.Values);
                 r.Unsupported.AddRange(Unsupported);
-                return r;
+                return ReadVisible(r);
             }
             public void DeleteAll() { Memory.Clear(); DeleteAllCalls++; }
+            public void Delete(string key) => Memory.Remove(key);
             public void Set(PrefEntry e) => Memory[e.Key] = e;
+            // A store reader that misses what the Editor saves.
+            public bool StoreBlind;
+            public PrefsReadResult ReadVisible(PrefsReadResult r) => StoreBlind ? new PrefsReadResult { Source = r.Source } : r;
         }
 
         private sealed class FakeEditorPrefs : IEditorPrefsBackend
@@ -117,6 +121,18 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             Assert.IsFalse(r.Success, "expected " + code + ", got success: " + r.Output);
             Assert.AreEqual(code, r.ErrorCode, r.ErrorMessage);
         }
+
+        private static string PlanOf(string dryRunJson)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(dryRunJson, "\"plan\":\"([0-9a-f]{16})\"");
+            Assert.IsTrue(m.Success, "dry run carries a plan id: " + dryRunJson);
+            return m.Groups[1].Value;
+        }
+
+        // Dry run, then confirm with the plan it returned.
+        private static ToolDispatchResult ConfirmRestore(string name) =>
+            PlayerStateTools.Run("restore", name, confirm: true,
+                plan: PlanOf(Ok(PlayerStateTools.Run("restore", name)).Output));
 
         // Seed a "developer save": int / float / string prefs, a Unity session
         // key (excluded by default) and files, including an excluded folder.
@@ -424,7 +440,7 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             SeedDeveloperSave();
             Ok(PlayerStateTools.Run("snapshot", "before"));
             PlaySession();
-            var r = Ok(PlayerStateTools.Run("restore", "before", confirm: true));
+            var r = Ok(ConfirmRestore("before"));
             StringAssert.Contains("\"verified\":true", r.Output);
             StringAssert.Contains("\"errors\":[]", r.Output);
             Assert.AreEqual(1, prefs.DeleteAllCalls);
@@ -485,9 +501,77 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             Ok(PlayerStateTools.Run("snapshot", "before"));
             PlaySession();
             File.WriteAllText(Path.Combine(store, "TestCo", "Test Product", "before", "files", "save.json"), "tampered");
-            Refused(PlayerStateTools.Run("restore", "before", confirm: true), "snapshot_corrupt");
+            Refused(ConfirmRestore("before"), "snapshot_corrupt");
             Assert.AreEqual(0, prefs.DeleteAllCalls);
             Assert.IsTrue(FileExists("new/run.json"));
+        }
+
+        [Test]
+        public void Restore_ConfirmAppliesOnlyThePlanTheDryRunShowed()
+        {
+            SeedDeveloperSave();
+            Ok(PlayerStateTools.Run("snapshot", "before"));
+            PlaySession();
+            Refused(PlayerStateTools.Run("restore", "before", confirm: true), "plan_required");
+            var plan = PlanOf(Ok(PlayerStateTools.Run("restore", "before")).Output);
+            Assert.AreEqual(plan, PlanOf(Ok(PlayerStateTools.Run("restore", "before")).Output), "the plan id is stable");
+
+            // The game saves a new slot after the dry run: confirm refuses, nothing changes.
+            WriteFile("slots/slot2.dat", "two");
+            Refused(PlayerStateTools.Run("restore", "before", confirm: true, plan: plan), "plan_changed");
+            Assert.IsTrue(FileExists("slots/slot2.dat"));
+            Assert.AreEqual(0, prefs.DeleteAllCalls);
+
+            // A changed value the dry run listed changes the plan too.
+            var replanned = PlanOf(Ok(PlayerStateTools.Run("restore", "before")).Output);
+            prefs.Set(PrefEntry.OfInt("coins", 151));
+            Refused(PlayerStateTools.Run("restore", "before", confirm: true, plan: replanned), "plan_changed");
+            Ok(ConfirmRestore("before"));
+            Assert.IsFalse(FileExists("slots/slot2.dat"));
+        }
+
+        [Test]
+        public void Restore_RefusesWhenTheStoreReaderMissesSavedKeys()
+        {
+            SeedDeveloperSave();
+            Ok(PlayerStateTools.Run("snapshot", "before"));
+            PlaySession();
+            var plan = PlanOf(Ok(PlayerStateTools.Run("restore", "before")).Output);
+            prefs.StoreBlind = true;
+            Refused(PlayerStateTools.Run("restore", "before", confirm: true, plan: PlanOf(Ok(PlayerStateTools.Run("restore", "before")).Output)),
+                "prefs_store_unverified");
+            Assert.AreEqual(0, prefs.DeleteAllCalls);
+            Assert.AreEqual(150, prefs.Memory["coins"].IntValue);
+            Assert.IsFalse(prefs.Memory.ContainsKey(PlayerStateTools.StoreProbeKey), "the probe key is removed again");
+            prefs.StoreBlind = false;
+            Assert.AreEqual(plan, PlanOf(Ok(PlayerStateTools.Run("restore", "before")).Output));
+        }
+
+        [Test]
+        public void Restore_ExcludedUnsupportedKeysAreReportedAsDeleted()
+        {
+            SeedDeveloperSave();
+            Ok(PlayerStateTools.Run("snapshot", "before"));
+            prefs.Unsupported.Add("unity.player_session_blob");
+            var json = Ok(PlayerStateTools.Run("restore", "before")).Output;
+            StringAssert.Contains("\"unsupported_deleted\":[\"unity.player_session_blob\"]", json);
+        }
+
+        [Test]
+        public void Restore_RefusesManifestPathsOutsideTheRoot()
+        {
+            SeedDeveloperSave();
+            Ok(PlayerStateTools.Run("snapshot", "before"));
+            var dir = Path.Combine(store, "TestCo", "Test Product", "before");
+            var doc = SnapshotStore.Load(dir, out _);
+            doc.files[0].path = "../escaped.txt";
+            SnapshotStore.WriteMeta(dir, doc);
+            Refused(PlayerStateTools.Run("restore", "before"), "snapshot_corrupt");
+            Assert.AreEqual(0, prefs.DeleteAllCalls);
+            Assert.IsFalse(PersistentFiles.IsSafeRelative("/abs"));
+            Assert.IsFalse(PersistentFiles.IsSafeRelative("a//b"));
+            Assert.IsFalse(PersistentFiles.IsSafeRelative("a\\b"));
+            Assert.IsTrue(PersistentFiles.IsSafeRelative("Saves/slot 1.json"));
         }
 
         [Test]
@@ -508,7 +592,7 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             StringAssert.Contains("\"editor_prefs\":{\"added\":[{\"key\":\"mytool.extra\"", diff);
             StringAssert.DoesNotContain("OtherProject", diff);
 
-            var applied = Ok(PlayerStateTools.Run("restore", "ep", confirm: true)).Output;
+            var applied = Ok(ConfirmRestore("ep")).Output;
             StringAssert.Contains("\"verified\":true", applied);
             Assert.AreEqual(1, editorPrefs.Memory["mytool.flag"].IntValue);
             Assert.AreEqual("a", editorPrefs.Memory["mytool.name"].StringValue);
@@ -558,6 +642,7 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             Refused(PlayerStateTools.Run("diff", "x", exclude: new[] { "*.log" }), "invalid_arguments");
             Refused(PlayerStateTools.Run("list", against: "y"), "invalid_arguments");
             Refused(PlayerStateTools.Run("snapshot", "x", confirm: true), "invalid_arguments");
+            Refused(PlayerStateTools.Run("restore", "x", plan: "0123456789abcdef"), "invalid_arguments");
             Refused(PlayerStateTools.Run("diff", "x", limit: 0), "invalid_arguments");
         }
 
@@ -580,6 +665,10 @@ namespace UnityOpenMcpBridge.Tests.Playtest
                 "{\"action\":\"delete\",\"name\":\"a\"}",
             })
                 Assert.IsFalse(EffectiveToolContract.IsMutating(tool, body), body);
+            // The binder reads a key's first occurrence anywhere in the body; the
+            // gate must not classify a body the binder resolves to a restore as a read.
+            Assert.IsTrue(EffectiveToolContract.IsMutating(tool,
+                "{\"paths_hint\":[\"action\"],\"name\":\"restore\",\"action\":\"list\",\"confirm\":true}"));
             Assert.AreEqual(LifecyclePolicy.None, EffectiveToolContract.Lifecycle(tool, "{\"action\":\"restore\",\"confirm\":true}"));
         }
 

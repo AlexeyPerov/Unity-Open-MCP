@@ -179,6 +179,7 @@ test("a lost settle watch (reload) and a deadline cancel are both not_settled", 
   assert.equal(r2.kind, "body");
   if (r2.kind !== "body") return;
   assert.equal((r2.body.error as any).code, "not_settled");
+  assert.equal((r2.body.error as any).state, "timeout", "the poll's own deadline cancel reads as a timeout");
   assert.equal(stuck.calls.filter((c) => c.kind === "cancel").length, 1, "the watch is cancelled once at the deadline");
 });
 

@@ -1,7 +1,8 @@
 // playtest_wait: condition parsing and refusals, each condition type firing at
 // the right frame on synthetic scheduler ticks (log by the frame it was logged
-// in, state conditions by the frame that changed them, delays by the frame they
-// elapsed at), all / any, poll_every_frames, timeout with the last observed
+// in, even across the longest poll interval; state conditions by the frame that
+// changed them, delays by the frame they elapsed at; realtime `ms` by the wall
+// clock), all / any, poll_every_frames, timeout with the last observed
 // state, fail_on exception with its stack, time_scale applied once and restored
 // on every exit path (completion, timeout, cancel, exit play, reload) unless the
 // game changed it, the exclusive time-scale resource, the project-command
@@ -182,6 +183,31 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             var status = Status();
             StringAssert.Contains("\"fired\":{\"path\":\"condition\",\"type\":\"log\",\"frame\":22,\"observed_frame\":23,\"play_time\":2.2", status);
             StringAssert.Contains("\"message\":\"Wave 2 cleared\"", status);
+        }
+
+        [Test]
+        public void Log_KeepsItsFrameTimeAcrossTheLongestPollInterval()
+        {
+            var op = Wait("{\"log\":{\"pattern\":\"boss\"}}", pollEvery: PlaytestWaitTools.MaxPollEveryFrames);
+            Tick(0); Tick(1);
+            op.Watcher.Record(new LoggedMessage { Message = "boss spawned", Type = LogType.Log, Frame = 1, PlayTime = 0.1 });
+            for (int f = 2; f <= PlaytestWaitTools.MaxPollEveryFrames; f++) Tick(f);
+            StringAssert.Contains("\"type\":\"log\",\"frame\":1,\"observed_frame\":600,\"play_time\":0.1,\"elapsed_ms\":100", Status());
+        }
+
+        [Test]
+        public void Ms_RealtimeIsTheWallClock()
+        {
+            double wall = 0;
+            var op = PlaytestWaitTools.Create("{\"ms\":900}", 30000, 1, null, "realtime", null, out var refusal);
+            Assert.IsNotNull(op, refusal);
+            op.WallClockOverride = () => wall;
+            PlayModeScheduler.Start(op, Id, out _);
+            // One 1 s frame: the scheduler's per-frame clamped realtime would count 250 ms.
+            PlayModeScheduler.TickAll(1, 1f, 1f, 1f, 1000, 800, 1);
+            wall = 1000;
+            PlayModeScheduler.TickAll(2, 1f, 1f, 1f, 1000, 800, 2);
+            StringAssert.Contains("\"fired\":{\"path\":\"condition\",\"type\":\"ms\",\"frame\":2", Status());
         }
 
         [Test]

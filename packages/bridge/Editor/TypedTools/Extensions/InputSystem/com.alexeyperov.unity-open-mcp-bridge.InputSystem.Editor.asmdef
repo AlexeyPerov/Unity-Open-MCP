@@ -21,6 +21,11 @@
       "name": "com.unity.inputsystem",
       "expression": "1.0.0",
       "define": "UNITY_OPEN_MCP_EXT_INPUTSYSTEM"
+    },
+    {
+      "name": "com.unity.inputsystem",
+      "expression": "1.1.0",
+      "define": "UNITY_OPEN_MCP_EXT_INPUTSYSTEM_1_1"
     }
   ],
   "noEngineReferences": false

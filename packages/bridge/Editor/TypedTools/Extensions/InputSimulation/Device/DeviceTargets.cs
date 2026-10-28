@@ -78,6 +78,11 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             return resolver.TryResolve(text, match, under, index, context, out point, out targetJson, out errorJson);
         }
 
+        // Label lookups inside the returned scope share one uGUI walk: the screen
+        // as it is when the first lookup runs (a gesture resolves every keyframe
+        // up front). Dispose ends the sharing.
+        internal static UiTextWalkScope ShareUiWalk() => new UiTextWalkScope();
+
         // target-first, else explicit screen coordinates.
         internal static bool ResolvePoint(
             string target, float? sx, float? sy, out Vector2 point, out (string Code, string Message) err)
@@ -149,6 +154,27 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             return mainCam != null
                 ? mainCam.WorldToScreenPoint(go.transform.position)
                 : new Vector2(go.transform.position.x, go.transform.position.y);
+        }
+    }
+
+    // A main-thread scope in which the uGUI label resolver reuses one walk.
+    // `Shared` is that walk, opaque here (this assembly cannot see uGUI types);
+    // the resolver fills it on first use and the outermost Dispose clears it.
+    internal sealed class UiTextWalkScope : System.IDisposable
+    {
+        private static int depth;
+        private bool disposed;
+
+        internal static bool Active => depth > 0;
+        internal static object Shared;
+
+        internal UiTextWalkScope() { depth++; }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            if (--depth == 0) Shared = null;
         }
     }
 }
