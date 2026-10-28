@@ -5,7 +5,7 @@ Activate the `playtest` group (with `input-simulation` to drive input —
 tools let an agent read and play the running game the way a tester does: put the
 game on a target device or resolution, read what the screen says, tap a control
 by its label, wait for the game to get somewhere, capture what it shows over time,
-and check the result.
+check the result — and put the player's save back afterwards.
 
 | Tool | Does | Compiles when |
 |---|---|---|
@@ -13,6 +13,7 @@ and check the result.
 | `unity_open_mcp_game_view` | Reads or sets the Game view resolution or a Device Simulator device + orientation, and reports the screen, safe area and notch insets the game sees | always (Unity 6; other Editors answer `unsupported_editor_version`) |
 | `unity_open_mcp_playtest_wait` | Waits in play mode until a condition holds (a log line, a UI query, a GameObject state, the project's own read-only predicate, frames, ms — or all / any of them), with a timeout, an optional time scale for the wait and an early stop on game exceptions | always |
 | `unity_senses_capture_series` | Captures the composed game frame at scheduled play-mode frames (relative to the call or a condition), with an optional crop, per-frame luminance / diff metric and a labelled contact sheet | always (Unity 6; reads the play-mode view) |
+| `unity_open_mcp_player_state` | Snapshots, diffs and restores the player state a session changes — PlayerPrefs, `persistentDataPath` files, opt-in EditorPrefs — in a store outside the project; restore is edit-mode only, a dry run unless confirmed, and gated | always (macOS verified; Windows and Linux readers untested in the field) |
 
 `inputsim_gesture` (in `input-simulation`) takes `capture_at_ms`: a tap and the
 frames after it are captured in the same scheduled operation; see
@@ -378,6 +379,178 @@ gesture's input resource is held until then.
 - An animation: `capture_series {"at_ms":[0,100,200,300],"start_on":{"log":{"pattern":"Popup opening"}},"contact_sheet":true}`, then open the contact sheet.
 - A breathing artifact: `capture_series {"every_ms":500,"duration_ms":15000,"scale":0.25,"metric":"diff","metric_region":[…]}` and read `metric.luminance` over time.
 
+## `unity_open_mcp_player_state`
+
+A live playtest plays against the developer's own save: it spends currency, pays
+first-clear rewards, moves progress. `player_state` captures that state before a
+session, shows what the session changed, and puts it back.
+
+> **Restore overwrites the current state.** `restore` with `confirm: true` deletes
+> every PlayerPrefs key and writes the snapshot's keys back, and makes
+> `persistentDataPath` an exact copy of the snapshot: **files that are not in the
+> snapshot are deleted.** Opted-in EditorPrefs are overwritten under their
+> prefixes. Call `restore` without `confirm` first and read what it would delete.
+
+**What is captured.**
+
+- **PlayerPrefs** — every key with its type (int, float, string). Unity has no API
+  that lists PlayerPrefs keys, so the bridge reads the store the Editor persists
+  them to. The Editor keeps PlayerPrefs in memory and writes the store only on
+  `PlayerPrefs.Save()` or quit, so every read starts with `PlayerPrefs.Save()`:
+  the snapshot sees what the game set even if it never saved (the same flush Unity
+  does on quit; values do not change). A key stored with a type PlayerPrefs cannot
+  hold is listed under `unsupported` and is not restored.
+- **Files** — `Application.persistentDataPath`, with size and SHA-256 per file and
+  the folder list (empty folders included). Symbolic links are skipped and listed.
+  Capped at `max_files_mb` (default 64, at most 1024) and 5000 files after
+  excludes; over the cap the snapshot refuses `persistent_data_too_large` with the
+  largest files and writes nothing.
+- **EditorPrefs** — only with `editor_prefs_prefixes` (each ≥ 3 characters): keys
+  starting with one of them. Off by default because EditorPrefs are shared by
+  every project on the machine. The Editor caches EditorPrefs too; the bridge
+  flushes them through the Editor's internal `EditorPrefs.Sync` (Unity 6) and
+  refuses `editor_internals_unavailable` where it does not exist rather than read
+  a stale store.
+
+**Excluded keys and paths are outside the sandbox**: not captured, not diffed and
+never touched by restore (they keep their current values / files). Defaults:
+keys `unity.player_session*` and `unity_connect.*` (Unity's own per-session
+bookkeeping, which changes on every play), paths `Unity/**` (Unity's analytics
+folder) and `TestResults.xml` (the Test Runner's last results). `exclude` (path
+globs: `**` any depth, `*` / `?` within a name; a pattern without `/` matches a
+file or folder name at any depth) and `exclude_keys` (`*` / `?` wildcards) add to
+them; the snapshot records its excludes and every later diff / restore uses them.
+
+**Where snapshots live** — outside the project, in the platform app-data folder:
+`<app data>/unity-open-mcp/player-state/<company>/<product>/<name>/` with
+`snapshot.json` (metadata, typed prefs, file manifest) and `files/` (the copy).
+`<app data>` is `~/Library/Application Support` on macOS, `%LOCALAPPDATA%` on
+Windows, `$XDG_DATA_HOME` or `~/.local/share` on Linux. Company and product are
+the open project's Player Settings.
+
+| Platform | PlayerPrefs store read | EditorPrefs store | Status |
+|---|---|---|---|
+| macOS | preferences domain `unity.<company>.<product>` (`~/Library/Preferences/unity.<company>.<product>.plist`) through `defaults export` | `com.unity3d.UnityEditor5.x` | verified |
+| Windows | registry `HKCU\Software\Unity\UnityEditor\<company>\<product>`; value names `<key>_h<hash>`, ints `REG_DWORD`, floats an 8-byte double under a `REG_DWORD` tag, strings UTF-8 `REG_BINARY` | `HKCU\Software\Unity Technologies\Unity Editor 5.x` | decoders unit-tested; not yet verified on a Windows Editor |
+| Linux | `~/.config/unity3d/<company>/<product>/prefs` (XML, strings base64) | `~/.local/share/unity3d/prefs` | untested |
+
+### Actions
+
+| Action | Arguments | Does |
+|---|---|---|
+| `snapshot` | `name`, `editor_prefs_prefixes`, `exclude`, `exclude_keys`, `max_files_mb`, `overwrite` | Captures the open project's state into `name` (`snapshot_exists` unless `overwrite`). Edit or play mode; writes nothing in the project |
+| `diff` | `name`, `against`, `limit` | `name` → the current state (`to.current`, flushed first), or → snapshot `against` |
+| `restore` | `name`, `confirm`, `limit` | Edit mode only. Without `confirm` (the default): a dry run returning the diff it would apply. With `confirm: true`: applies it, re-reads everything and reports `verified` |
+| `list` | — | The snapshots of this project's store: name, `created_at`, prefs / files counts, bytes, EditorPrefs prefixes |
+| `delete` | `name` | Removes one snapshot |
+
+`company` / `product` address another project's store for `diff`, `restore`,
+`list` and `delete`. The current state is always the open project's, so a snapshot
+of another project compares only with another snapshot (`against`), and `restore`
+refuses it (`snapshot_project_mismatch`) — whether it lives in another project's
+store or its metadata names another company / product. Names are 1–64 of
+`[A-Za-z0-9._-]`, starting with a letter or digit.
+
+### Diff
+
+```json
+{
+  "status": "ok", "action": "diff",
+  "from": { "snapshot": "before", "created_at": "2026-10-28T14:51:12.481Z", "company": "DefaultCompany", "product": "Unity Open MCP Demo", "path": "…" },
+  "to": { "current": true, "mode": "play", "flushed": true },
+  "identical": false,
+  "prefs": {
+    "added": [],
+    "removed": [],
+    "changed": [
+      { "key": "fixture.coins", "from": { "type": "int", "value": 100 }, "to": { "type": "int", "value": 150 } },
+      { "key": "fixture.last_level", "from": { "type": "string", "value": "level_1" }, "to": { "type": "string", "value": "level_3" } },
+      { "key": "fixture.volume", "from": { "type": "float", "value": 0.25 }, "to": { "type": "float", "value": 0.75 } }
+    ],
+    "counts": { "added": 0, "removed": 0, "changed": 3, "unchanged": 5 }, "truncated": 0
+  },
+  "editor_prefs": null,
+  "files": {
+    "added": [ { "path": "fixture_save.json", "size": 43, "sha256": "0eaae594…" } ],
+    "removed": [], "changed": [], "dirs_added": [], "dirs_removed": [],
+    "counts": { "added": 1, "removed": 0, "changed": 0, "unchanged": 0 }, "truncated": 0
+  }
+}
+```
+
+`added` = only in `to`, `removed` = only in `from`, `changed` = both, different
+(a type change counts). Ints and floats are shown; strings up to 256 characters
+are shown, longer ones as `length` + `sha256`; files as `size` + `sha256` (never
+their content). `limit` (default 100, at most 1000) bounds each list; `counts` are
+always complete and `truncated` says how many entries were left out.
+`editor_prefs` is `null` unless the snapshot opted in (then it carries `prefixes`).
+
+### Restore
+
+`restore` reads the current state and diffs it **to** the snapshot — current →
+snapshot, so `removed` is what restore deletes. The dry run returns that diff with
+**every** removal listed (`prefs.removed`, `editor_prefs.removed`, `files.removed`,
+`files.dirs_removed` are never truncated), `unsupported_deleted` (current keys of
+a type PlayerPrefs cannot hold — `DeleteAll` removes them for good), a `warning`
+that spells out the overwrite and the number of files it removes, and changes
+nothing.
+
+With `confirm: true` it first checks every stored file against the manifest
+(`snapshot_corrupt`, nothing changed, on a mismatch), then:
+
+1. PlayerPrefs through the PlayerPrefs API — `PlayerPrefs.DeleteAll()`, typed
+   `Set*` for every snapshot key, the excluded keys' current values written back,
+   `PlayerPrefs.Save()` — so the Editor's in-memory cache (what the next play
+   session reads) and the store agree. The store is never written behind Unity's
+   back.
+2. EditorPrefs (only if the snapshot opted in) — keys under the snapshot's
+   prefixes: the ones not in the snapshot deleted, the others set. Never
+   `EditorPrefs.DeleteAll()`.
+3. Files — `persistentDataPath` mirrored exactly: snapshot files written where
+   missing or different, files not in the snapshot deleted, folders not in the
+   snapshot removed when empty (`dirs_kept_not_empty` otherwise); excluded paths
+   untouched.
+
+It then re-reads everything and reports `verified: true`, or `verified: false`
+with the `residual` diff. A file operation that fails leaves a partial restore:
+`restore_incomplete` with `errors` and the output. Refusals: `edit_mode_required`
+in play mode (dry run included — use `diff` while the game runs),
+`snapshot_project_mismatch`, `snapshot_not_found`, `snapshot_unreadable`.
+
+**Gate and scope.** Only `restore` with `confirm: true` writes state, and the
+bridge classifies it as a mutation per request: it runs the normal gate (checkpoint
+→ restore → validate → delta) and is recorded in the gate history and the opt-in
+audit log; every other action — and the dry run — is read-only for the project
+(`effectiveReadOnly: true`, no gate, no scope). Restore writes no project asset, so
+its declared scope is `ProjectSettings/ProjectSettings.asset`, the asset holding
+the company / product identity the PlayerPrefs store, `persistentDataPath` and the
+snapshot are bound to. The MCP schema supplies it as the default `paths_hint` (a
+direct bridge caller passes it, like any mutation); a caller's own `paths_hint`
+wins. The gate's delta therefore confirms that no project asset changed. Like
+every mutation, an applied restore is refused with `job_busy` while a project job
+runs. Refusals come back as a failed mutation (`mutation.success: false`, the code
+in `mutation.error`, what to do in `agentNextSteps`).
+
+### Sandbox a playtest
+
+Prefer the project's own isolation when it has one. A project can register
+[project commands](project-commands.md) `playtest.begin` / `playtest.end` that
+switch the game to an isolated save of its own (a test profile, a separate
+storage scope) and back; that covers state the bridge cannot see (cloud saves, a
+custom store, a server). Look for them first:
+
+1. `project_commands(action: "list", query: "playtest")` — when `playtest.begin`
+   and `playtest.end` exist, invoke `playtest.begin` before playing and
+   `playtest.end` after.
+2. Otherwise, in edit mode: `player_state {"action":"snapshot","name":"before"}`
+   (add `editor_prefs_prefixes` for the project's own dev toggles).
+3. Play the session; `player_state {"action":"diff","name":"before"}` (in play mode
+   or after) lists what it changed — part of the playtest report.
+4. Stop play mode; `player_state {"action":"restore","name":"before"}` — read the
+   dry run's `prefs.removed` / `files.removed`.
+5. `player_state {"action":"restore","name":"before","confirm":true}`; check
+   `verified: true`. `delete` the snapshot when done.
+
 ## Snapshot → tap by label
 
 1. `ui_snapshot` — read the screen (compact).
@@ -408,3 +581,12 @@ gesture's input resource is held until then.
 | `capture_failed` | `capture_series`: the first capture could not be read |
 | `playmode_operation_busy` | A second time-scaled wait, or a second capture series, while one runs |
 | `wait_stalled` / `capture_series_stalled` | The operation did not finish inside the call's inline window (a paused Editor); it was cancelled — run it as a job |
+| `edit_mode_required` | `player_state` `restore` (dry run included) while the Editor is playing |
+| `snapshot_exists` | `player_state` `snapshot` to a name that exists, without `overwrite` |
+| `snapshot_not_found` / `snapshot_unreadable` | `player_state`: no such snapshot in the addressed store (`available` lists the names) / its `snapshot.json` cannot be read |
+| `snapshot_project_mismatch` | `player_state` `restore` (or `diff` against the current state) of a snapshot whose company / product differ from the open project |
+| `snapshot_corrupt` | `player_state` `restore confirm:true`: a stored file no longer matches the manifest; nothing was changed |
+| `persistent_data_too_large` | `player_state` `snapshot`: `persistentDataPath` exceeds `max_files_mb` or 5000 files after excludes (`largest` lists the biggest files); nothing written |
+| `prefs_store_unreadable` | `player_state`: the platform PlayerPrefs / EditorPrefs store could not be read (`store` names it) |
+| `editor_internals_unavailable` | `player_state` with EditorPrefs on an Editor without the internal EditorPrefs flush |
+| `restore_incomplete` | `player_state` `restore confirm:true`: some file operations failed; the state is partly restored (`errors`, `residual`) |

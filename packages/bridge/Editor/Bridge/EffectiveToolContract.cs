@@ -81,6 +81,9 @@ namespace UnityOpenMcpBridge
                 JsonBody.GetString(JsonBody.TopLevelField(body, "menu_path"), "menu_path"))) return false;
             if (tool == "unity_open_mcp_apply_fix" && JsonBody.GetBool(JsonBody.TopLevelField(body, "dry_run"), "dry_run", true)) return false;
             if (IsUpgradePreview(tool, body)) return false;
+            // Snapshot / diff / list / delete and a restore dry run are read-only
+            // for the project; only an applied restore writes player state.
+            if (tool == Playtest.PlayerStateTools.ToolName) return Playtest.PlayerStateTools.IsMutatingRequest(body);
             if (tool == "unity_open_mcp_batch_execute")
                 return BatchExecuteTool.Preflight(body, out var mutating) != null || mutating;
             return BridgeToolClassification.MutatingTools.Contains(tool)

@@ -68,7 +68,17 @@ namespace UnityOpenMcpBridge
         //       registry arguments read from the depth-1 projection when a
         //       condition / start_on payload is present (playtest_wait's
         //       timeout_ms is its own parameter, not only the dispatch budget).
-        public const int WireContract = 6;
+        //   7 — Player-state sandbox: player_state (snapshot / diff / restore /
+        //       list / delete); request-level mutability (only restore with
+        //       confirm:true is a gated mutation); snapshot_exists /
+        //       snapshot_not_found / snapshot_unreadable / snapshot_corrupt /
+        //       snapshot_project_mismatch / edit_mode_required /
+        //       persistent_data_too_large / prefs_store_unreadable /
+        //       restore_incomplete / editor_internals_unavailable (EditorPrefs
+        //       without a flush); a registry tool may return a failed result
+        //       (mutation.success:false) and a failed mutation's own next steps
+        //       reach agentNextSteps.
+        public const int WireContract = 7;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
         public static string Mode => "live";

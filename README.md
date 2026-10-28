@@ -53,7 +53,8 @@ Manager and Input System projects alike), advance frames, wait until the game
 gets somewhere (a log line, a label, an object, the project's own predicate —
 optionally fast-forwarded), then verify visually with captures at the device's
 native resolution and safe area, or frame-scheduled capture series for animated
-content.
+content — and snapshot, diff and restore the player's save (PlayerPrefs and
+`persistentDataPath`) so a live session does not spend the developer's progress.
 
 ### Live, batch, or offline
 

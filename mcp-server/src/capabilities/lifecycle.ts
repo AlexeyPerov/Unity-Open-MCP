@@ -252,6 +252,12 @@ export const TOOL_LIFECYCLE: Record<string, ToolLifecycle> = {
   "unity_open_mcp_playerprefs_delete": { class: "scene-dirty" },
   "unity_open_mcp_editorprefs_set": { class: "scene-dirty" },
   "unity_open_mcp_editorprefs_delete": { class: "scene-dirty" },
+  // Player-state sandbox: the class of an applied restore (gate + paths_hint);
+  // snapshot / diff / list / delete and a restore dry run resolve to none.
+  "unity_open_mcp_player_state": {
+    class: "scene-dirty",
+    note: "Only restore with confirm:true writes state (gated); every other call is read-only for the project.",
+  },
   // M27 Plan 4 — batch_execute runs many nested typed tools sequentially; a
   // batch that includes scene/prefab/asset mutators behaves like the heaviest
   // nested tool. The bridge wraps the whole sequence in one batch-level gate
@@ -384,6 +390,9 @@ export function lifecycleFor(toolName: string): ToolLifecycle {
  */
 export function lifecycleForCall(toolName: string, args: Record<string, unknown>): ToolLifecycle {
   if (toolName === "unity_open_mcp_upgrade" && args.dry_run !== false) return { class: "none" };
+  if (toolName === "unity_open_mcp_player_state" && !(args.action === "restore" && args.confirm === true)) {
+    return { class: "none" };
+  }
   return lifecycleFor(toolName);
 }
 

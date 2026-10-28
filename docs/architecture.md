@@ -116,6 +116,12 @@ probe the uGUI sub-assembly registers, GameObject state, a read-only project
 command, frames, ms) are evaluated inside the player loop, and the series
 recorder reads the play-mode view's render target at scheduled frames (shared
 with `inputsim_gesture` `capture_at_ms`) and encodes PNGs after the last capture.
+`player_state` (`Editor/Playtest/`) keeps its snapshots outside the project, in
+the platform app-data folder (`unity-open-mcp/player-state/<company>/<product>/`):
+it reads the platform PlayerPrefs / EditorPrefs store after flushing the Editor's
+in-memory copy, copies `persistentDataPath`, and restores only through the
+PlayerPrefs / EditorPrefs API. Its one mutation (an applied restore) is classified
+per request and runs the normal gate with the project-identity asset as scope.
 
 ## Related docs
 

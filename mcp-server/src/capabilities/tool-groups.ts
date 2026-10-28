@@ -367,7 +367,10 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "wait only and fail_on exception — never poll in a loop of calls. capture_series " +
       "(unity_senses_*): frame-scheduled composed captures inside the player loop (at_ms / every_ms / " +
       "at_frames, after an optional start_on condition) with region crop, luminance / diff metric and " +
-      "a labelled contact sheet. Both run on the play-mode scheduler (jobs when long). ui_snapshot " +
+      "a labelled contact sheet. Both run on the play-mode scheduler (jobs when long). player_state: " +
+      "snapshot / diff / restore the state a session changes (PlayerPrefs from the platform store, " +
+      "persistentDataPath files, opt-in EditorPrefs by key prefix), stored outside the project; restore " +
+      "is edit-mode only, a dry run unless confirm:true, and gated. ui_snapshot " +
       "compiles when com.unity.ugui is present; the compiled subset is reconciled from GET /tools.",
     defaultEnabled: false,
   },
@@ -1023,6 +1026,10 @@ assign("playtest", [
   // capture_series keeps the unity_senses_* prefix (live-only, never batch).
   "unity_open_mcp_playtest_wait",
   "unity_senses_capture_series",
+  // Player-state sandbox (bridge root assembly): snapshot / diff / list /
+  // delete are read-only for the project; restore with confirm:true is the one
+  // gated mutation (request-level classification in the bridge).
+  "unity_open_mcp_player_state",
 ]);
 
 // ---------------------------------------------------------------------------

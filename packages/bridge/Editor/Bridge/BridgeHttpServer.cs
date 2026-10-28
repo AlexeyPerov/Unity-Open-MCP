@@ -1348,7 +1348,8 @@ namespace UnityOpenMcpBridge
                     Outcome = GateOutcome.Skipped,
                     SkippedReason = nonMutatingResult.Success ? "read_only" : "mutation_failed",
                     EffectiveReadOnly = true,
-                    GateFailed = false
+                    GateFailed = false,
+                    AgentNextSteps = nonMutatingResult.Success ? null : nonMutatingResult.NextSteps
                 };
             }
 

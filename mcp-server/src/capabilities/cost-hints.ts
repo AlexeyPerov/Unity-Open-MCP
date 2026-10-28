@@ -296,6 +296,17 @@ export const RECOMMENDED_TOOL_CHAINS: RecommendedToolChain[] = [
     ],
   },
   {
+    name: "playtest-state-sandbox",
+    task: "Run a live playtest without spending the developer's save: capture the player state, see what the session changed, put it back.",
+    steps: [
+      "unity_open_mcp_project_commands (list query playtest) — prefer the project's own playtest.begin / playtest.end isolated-save hook when it exists",
+      "unity_open_mcp_player_state (action snapshot, name) in edit mode — PlayerPrefs, persistentDataPath, opt-in editor_prefs_prefixes",
+      "play the session, then unity_open_mcp_player_state (action diff, name) — what it changed",
+      "stop play mode, unity_open_mcp_player_state (action restore, name) — dry run: review prefs.removed / files.removed",
+      "unity_open_mcp_player_state (action restore, name, confirm true) — overwrites the state; read verified",
+    ],
+  },
+  {
     name: "device-layout-check",
     task: "Check a screen's layout on a phone (notch / safe area) or at a fixed resolution, with frames a human can compare.",
     steps: [

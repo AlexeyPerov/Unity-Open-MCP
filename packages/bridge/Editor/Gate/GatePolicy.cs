@@ -179,7 +179,8 @@ namespace UnityOpenMcpBridge
                     GateRan = false,
                     Outcome = GateOutcome.Skipped,
                     SkippedReason = offResult.Success ? "gate_off" : "mutation_failed",
-                    GateFailed = false
+                    GateFailed = false,
+                    AgentNextSteps = offResult.Success ? null : offResult.NextSteps
                 };
             }
 
@@ -210,7 +211,7 @@ namespace UnityOpenMcpBridge
                 var playResult = await mutation();
                 var steps = playResult.Success
                     ? new[] { "Validation skipped: editor is in play mode (the scene graph is animating; the verify scan does not settle). Re-run in edit mode for a verified result." }
-                    : null;
+                    : playResult.NextSteps;
                 return new GateDispatchResult
                 {
                     Mutation = playResult,
@@ -286,7 +287,8 @@ namespace UnityOpenMcpBridge
                     CheckpointDurationMs = checkpointMs,
                     TotalGateDurationMs = gateSw.ElapsedMilliseconds,
                     GateFailed = false,
-                    AgentNextSteps = BuildNextSteps()
+                    // A structured refusal's own next steps say what to do instead.
+                    AgentNextSteps = mutationResult.NextSteps ?? BuildNextSteps()
                 };
             }
 

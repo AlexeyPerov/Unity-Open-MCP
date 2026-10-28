@@ -208,6 +208,11 @@ namespace UnityOpenMcpBridge
                 var instance = entry.GetInstance();
                 var result = entry.Method.Invoke(instance, args);
 
+                // A tool that returns its own ToolDispatchResult reports a
+                // refusal as a failed mutation (mutation.success:false with a
+                // stable code) instead of an error object inside a success.
+                if (result is ToolDispatchResult direct) return direct;
+
                 var output = result?.ToString();
                 if (result != null && output == null)
                     output = JsonBody.GetRawValue(result.ToString(), "");

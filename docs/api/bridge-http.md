@@ -188,9 +188,17 @@ constraints and live tool/lifecycle availability before any dispatch. All-read
 batches require no scope; mixed/mutating batches require the explicit union
 `paths_hint`, even with `gate: "off"`. Invalid steps are reported together.
 
+`unity_open_mcp_player_state` is mutating only for `restore` with `confirm: true`;
+its snapshot, diff, list, delete and restore dry run are read-only for the project
+(no gate, no scope). The applied restore writes no project asset and declares
+`ProjectSettings/ProjectSettings.asset` (the project identity it is bound to) as its
+scope; see [Restore](playtest.md#restore).
+
 A failed mutation before validation has `gate.outcome: "skipped"`,
 `skippedReason: "mutation_failed"`, `skipped: true`, and null `validation` and
-`delta`. A completed checkpoint ID remains available. Gate failure counters do
+`delta`. A completed checkpoint ID remains available. A refusal that names what
+to do instead carries it in `agentNextSteps` (read-only and gate-off calls
+included). Gate failure counters do
 not count such failures; activity still records the failed operation. A partial
 batch validates committed mutations and reports the actual validation outcome
 independently of `mutation.success`. Existing delta and next-step fields remain.

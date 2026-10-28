@@ -13839,5 +13839,116 @@
       },
       "type": "object"
     }
+  },
+  "unity_open_mcp_player_state": {
+    "description": "Isolate the player state a live playtest changes: snapshot it, see what a session changed, put it back. STATE = PlayerPrefs (every key with its type, read from the platform store after PlayerPrefs.Save so it is what the game wrote, even unsaved), persistentDataPath files (size + sha256; default excludes Unity/** and TestResults.xml, cap max_files_mb), and EditorPrefs only under editor_prefs_prefixes (opt-in; EditorPrefs are shared by every project on the machine). Unity's own session keys (unity.player_session*, unity_connect.*) are excluded by default; excluded keys and paths are never captured, diffed or touched. Snapshots are stored outside the project in the app-data folder (…/unity-open-mcp/player-state/<company>/<product>/<name>/). ACTIONS: snapshot = capture into `name` (snapshot_exists unless overwrite); diff = `name` vs the current state (or vs snapshot `against`): prefs / editor_prefs / files added, removed, changed — small values shown, long strings and files as size + sha256; restore = EDIT MODE ONLY; without confirm a dry run returning the diff it would apply (current → snapshot) with EVERY removal listed; with confirm:true it OVERWRITES the current state — PlayerPrefs.DeleteAll + the snapshot's keys + Save (so the Editor's in-memory cache and the store agree), EditorPrefs only under the snapshot's prefixes, persistentDataPath mirrored exactly (files not in the snapshot are DELETED) — then re-reads and reports verified; it is the only gated action (paths_hint defaults to ProjectSettings/ProjectSettings.asset) and refuses edit_mode_required in play mode and snapshot_project_mismatch for another project's snapshot; list / delete = the snapshots of this project (company + product address another project's store). Prefer a project's own isolated-save hook (project_commands playtest.begin / playtest.end) when it exists; otherwise snapshot → play → diff → stop → restore (dry run, then confirm). macOS verified; Windows registry and Linux readers are untested in the field.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "description": "snapshot: capture into name. diff: name vs current (or against). restore: dry run, or apply with confirm:true (edit mode). list: snapshots of this project. delete: remove snapshot name.",
+          "enum": [
+            "snapshot",
+            "diff",
+            "restore",
+            "list",
+            "delete"
+          ],
+          "type": "string"
+        },
+        "against": {
+          "description": "[diff] Compare `name` with this other snapshot instead of the current state.",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+          "type": "string"
+        },
+        "company": {
+          "description": "[diff / restore / list / delete] Company name of another project's snapshot store (default: the open project's). restore refuses a snapshot whose company / product differ from the open project.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "confirm": {
+          "default": false,
+          "description": "[restore] false (default) = dry run: returns the diff restore would apply, nothing changes. true = apply: overwrites PlayerPrefs, opted-in EditorPrefs and persistentDataPath (removing files not in the snapshot). Review the dry run's removals first.",
+          "type": "boolean"
+        },
+        "editor_prefs_prefixes": {
+          "description": "[snapshot] Also capture EditorPrefs whose key starts with one of these prefixes (≥ 3 characters each). Off by default: EditorPrefs are shared by all projects on this machine. restore touches only keys under the snapshot's prefixes (never EditorPrefs.DeleteAll).",
+          "items": {
+            "minLength": 3,
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
+        },
+        "exclude": {
+          "description": "[snapshot] Extra glob patterns of persistentDataPath paths to leave out (added to the defaults Unity/** and TestResults.xml): '**' any depth, '*' / '?' within a name; a pattern without '/' matches a file or folder name at any depth (e.g. '*.log', 'Cache/**'). Excluded paths are never restored or removed.",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 32,
+          "type": "array"
+        },
+        "exclude_keys": {
+          "description": "[snapshot] Extra PlayerPrefs key patterns to leave out ('*' any run, '?' one character), added to the defaults unity.player_session* and unity_connect.* (Unity's per-session bookkeeping). Excluded keys keep their current values on restore.",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 32,
+          "type": "array"
+        },
+        "gate": {
+          "default": "enforce",
+          "description": "[restore confirm:true] Gate mode for the applied restore. Other actions are not gated.",
+          "enum": [
+            "enforce",
+            "warn",
+            "off"
+          ]
+        },
+        "limit": {
+          "description": "[diff / restore] Entries listed per added / changed list (default 100; counts are always complete, `truncated` says how many were left out). restore always lists every removal.",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_files_mb": {
+          "description": "[snapshot] Size cap for the persistentDataPath copy after excludes (default 64; at most 5000 files). Over the cap → persistent_data_too_large with the largest files, nothing written.",
+          "maximum": 1024,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "name": {
+          "description": "[snapshot / diff / restore / delete] Snapshot name: 1-64 of [A-Za-z0-9._-], starting with a letter or digit.",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+          "type": "string"
+        },
+        "overwrite": {
+          "description": "[snapshot] Replace an existing snapshot of the same name (default false → snapshot_exists).",
+          "type": "boolean"
+        },
+        "paths_hint": {
+          "default": [
+            "ProjectSettings/ProjectSettings.asset"
+          ],
+          "description": "Audit / gate scope for restore with confirm:true, materialized automatically: restore writes no project asset; ProjectSettings.asset holds the company / product the snapshot is bound to. Ignored by every other action.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "product": {
+          "description": "[diff / restore / list / delete] Product name of another project's snapshot store (default: the open project's).",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
   }
 }

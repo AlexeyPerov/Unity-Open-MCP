@@ -121,8 +121,10 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "placeholder / touch-size diagnostics), tap by on-screen label (target_text on " +
       "inputsim_pointer / inputsim_touch / inputsim_gesture), set the Game view resolution " +
       "or a Device Simulator device to check layout and the safe area (game_view), wait until a " +
-      "log / UI / object / project-predicate condition holds (playtest_wait, optional time_scale) " +
-      "and capture frame-scheduled series of animated content (capture_series, gesture capture_at_ms).",
+      "log / UI / object / project-predicate condition holds (playtest_wait, optional time_scale), " +
+      "capture frame-scheduled series of animated content (capture_series, gesture capture_at_ms) " +
+      "and sandbox the player state a session changes (player_state: snapshot / diff / restore of " +
+      "PlayerPrefs and persistentDataPath).",
     keywords: [
       "playtest",
       "playtests",
@@ -157,6 +159,14 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "frame-series",
       "contact-sheet",
       "breathing",
+      "player-state",
+      "playerprefs-snapshot",
+      "save-state",
+      "savegame",
+      "persistent-data",
+      "persistentdatapath",
+      "state-sandbox",
+      "snapshot-restore",
     ],
   },
   {
