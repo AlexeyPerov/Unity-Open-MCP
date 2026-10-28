@@ -12065,7 +12065,7 @@
     }
   },
   "unity_open_mcp_inputsim_pointer": {
-    "description": "Simulate a uGUI pointer interaction on a named GameObject or screen point during play mode, via the EventSystem + ExecuteEvents. Resolution precedence: object_id (a handle from scene_get_data / inputsim_probe) > target (name or slash-path, with duplicate detection + partial-path match) > screen_x/screen_y (raycasts through EventSystem.current). The response reports `interactable`, `blockedBy`, and (for drag) `dropTarget`/`dropLanded` so a click on a disabled button or behind a modal is never a silent ok. Play-mode only — refuses with `play_mode_required` otherwise; pair with editor_set_state to enter play mode and inputsim_step to advance frames before a screenshot. ROUTING: `dispatch` (default) is the ExecuteEvents path above (reaches IPointer*/IDrag handlers only, bypasses occlusion). `raycast_real` instead injects a real touch at the point through the project's input backend (`backend`: auto | legacy_touch | input_system, reported as an array) so the scene's own EventSystem input module raycasts and dispatches it — whatever is on top receives it; the response reports `topHit`, `targetHit`, `blockedBy`, `inputModule` and `notes` (e.g. module/backend mismatch). raycast_real supports click, double_click, press, release, drag with the left button only and refuses like inputsim_touch (input_backend_unavailable, unsupported_editor_version). Gate-free. Requires com.unity.ugui.",
+    "description": "Simulate a uGUI pointer interaction on a named GameObject or screen point during play mode, via the EventSystem + ExecuteEvents. Resolution precedence: object_id (a handle from scene_get_data / inputsim_probe) > target (name or slash-path, with duplicate detection + partial-path match) > screen_x/screen_y (raycasts through EventSystem.current). The response reports `interactable`, `blockedBy`, and (for drag) `dropTarget`/`dropLanded` so a click on a disabled button or behind a modal is never a silent ok. Play-mode only — refuses with `play_mode_required` otherwise; pair with editor_set_state to enter play mode and inputsim_step to advance frames before a screenshot. ROUTING: `dispatch` (default) is the ExecuteEvents path above (reaches IPointer*/IDrag handlers only, bypasses occlusion). `raycast_real` instead injects a real touch at the point through the project's input backend (`backend`: auto | legacy_touch | input_system, reported as an array) so the scene's own EventSystem input module raycasts and dispatches it — whatever is on top receives it; the response reports `topHit`, `targetHit`, `blockedBy`, `inputModule` and `notes` (e.g. module/backend mismatch). raycast_real supports click, double_click, press, release, drag with the left button only and refuses like inputsim_touch (input_backend_unavailable, unsupported_editor_version). TARGET BY LABEL: `target_text` (+ under, index, text_match) picks the visible element whose text matches (see ui_snapshot) — exclusive with object_id/target/screen_x/screen_y (conflicting_targets); ambiguous labels refuse with ambiguous_target. Gate-free. Requires com.unity.ugui.",
     "inputSchema": {
       "type": "object",
       "required": [
@@ -12170,6 +12170,29 @@
           ],
           "default": "auto",
           "description": "Input backend for routing: raycast_real (ignored by dispatch; must stay auto there)."
+        },
+        "target_text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Element to act on (the drag start for drag) by its on-screen text instead of a name: the visible uGUI element (UI.Text / TextMeshPro) whose text matches; a button matches on its label. Default match is exact after normalisation (trim, whitespace collapse, rich-text tags removed, case-insensitive). Ambiguous → ambiguous_target with matches[]; pick with `index` or narrow with `under`. The result reports the resolution (`textTarget`; gestures list `textTargets`). Requires com.unity.ugui."
+        },
+        "under": {
+          "type": "string",
+          "description": "target_text only: search the subtree of this hierarchy path or trailing path suffix ('Shop')."
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "target_text only: pick the n-th visible match (hierarchy order, 0-based; see matches[].index)."
+        },
+        "text_match": {
+          "type": "string",
+          "enum": [
+            "exact",
+            "contains",
+            "regex"
+          ],
+          "description": "target_text only: exact (default when omitted) | contains (case-insensitive substring) | regex (.NET, case-insensitive, matched against the normalised text)."
         }
       },
       "additionalProperties": false
@@ -12230,7 +12253,7 @@
     }
   },
   "unity_open_mcp_inputsim_touch": {
-    "description": "Simulate a touch / swipe during play mode through the project's REAL input backend, reported as `backend` (array): legacy Input Manager touches (legacy_touch — Input.GetTouch, plus the legacy mouse API via Input.simulateMouseWithTouches, which StandaloneInputModule reads) and/or Input System Touchscreen events (input_system). `backend: auto` (default) injects into every enabled, reachable backend (activeInputHandler Both → both when a Touchscreen device exists; skipped backends are listed). Refusals: input_backend_unavailable (with the detected configuration and next steps), legacy_multitouch_unsupported (legacy is finger 0 only), unsupported_editor_version, no_device (explicit input_system without a Touchscreen). `tap` = press+release at a point; `swipe` = press at from_, move across `steps` interpolated points, release at to_; `press`/`release` = single-phase control. POLLING vs CALLBACK: with input_system only and no `advance_frames`, all phases process within one dispatch — polling code sees a collapsed jump. Pass `advance_frames` ≥ 1 to advance frames after Began and each Moved phase; legacy_touch always advances at least one frame between phases. For seconds-long holds/drags use inputsim_gesture. Endpoints resolve target-first (name/path to visual center) or accept screen coordinates. Root-anchored paths win over suffix matches; ambiguous names/paths return ambiguous_target with candidate paths. This tool has no object_id parameter; use a unique path or screen coordinates. Play-mode only — refuses with `play_mode_required` otherwise. Gate-free.",
+    "description": "Simulate a touch / swipe during play mode through the project's REAL input backend, reported as `backend` (array): legacy Input Manager touches (legacy_touch — Input.GetTouch, plus the legacy mouse API via Input.simulateMouseWithTouches, which StandaloneInputModule reads) and/or Input System Touchscreen events (input_system). `backend: auto` (default) injects into every enabled, reachable backend (activeInputHandler Both → both when a Touchscreen device exists; skipped backends are listed). Refusals: input_backend_unavailable (with the detected configuration and next steps), legacy_multitouch_unsupported (legacy is finger 0 only), unsupported_editor_version, no_device (explicit input_system without a Touchscreen). `tap` = press+release at a point; `swipe` = press at from_, move across `steps` interpolated points, release at to_; `press`/`release` = single-phase control. POLLING vs CALLBACK: with input_system only and no `advance_frames`, all phases process within one dispatch — polling code sees a collapsed jump. Pass `advance_frames` ≥ 1 to advance frames after Began and each Moved phase; legacy_touch always advances at least one frame between phases. For seconds-long holds/drags use inputsim_gesture. Endpoints resolve target-first (name/path to visual center) or accept screen coordinates. Root-anchored paths win over suffix matches; ambiguous names/paths return ambiguous_target with candidate paths. This tool has no object_id parameter; use a unique path, screen coordinates, or `target_text` — the visible uGUI element whose text matches (exclusive with target/screen_x/screen_y; for swipe it is the start, exclusive with from_target/from_x/from_y — conflicting_targets). Play-mode only — refuses with `play_mode_required` otherwise. Gate-free.",
     "inputSchema": {
       "type": "object",
       "required": [
@@ -12318,6 +12341,29 @@
           ],
           "default": "auto",
           "description": "auto = every enabled, reachable backend; legacy_touch = legacy Input Manager only; input_system = Input System Touchscreen only (allows fingers 1–9)."
+        },
+        "target_text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Point to tap/press/release (the swipe start for swipe) by its on-screen text instead of a name: the visible uGUI element (UI.Text / TextMeshPro) whose text matches; a button matches on its label. Default match is exact after normalisation (trim, whitespace collapse, rich-text tags removed, case-insensitive). Ambiguous → ambiguous_target with matches[]; pick with `index` or narrow with `under`. The result reports the resolution (`textTarget`; gestures list `textTargets`). Requires com.unity.ugui."
+        },
+        "under": {
+          "type": "string",
+          "description": "target_text only: search the subtree of this hierarchy path or trailing path suffix ('Shop')."
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "target_text only: pick the n-th visible match (hierarchy order, 0-based; see matches[].index)."
+        },
+        "text_match": {
+          "type": "string",
+          "enum": [
+            "exact",
+            "contains",
+            "regex"
+          ],
+          "description": "target_text only: exact (default when omitted) | contains (case-insensitive substring) | regex (.NET, case-insensitive, matched against the normalised text)."
         }
       },
       "additionalProperties": false
@@ -12641,6 +12687,29 @@
                       "type": "string",
                       "description": "coords: target only — GameObject name or hierarchy path whose visual center is the point."
                     },
+                    "target_text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "coords: target only — the keyframe point (instead of `target`; x/y stay pixel offsets) by its on-screen text instead of a name: the visible uGUI element (UI.Text / TextMeshPro) whose text matches; a button matches on its label. Default match is exact after normalisation (trim, whitespace collapse, rich-text tags removed, case-insensitive). Ambiguous → ambiguous_target with matches[]; pick with `index` or narrow with `under`. The result reports the resolution (`textTarget`; gestures list `textTargets`). Requires com.unity.ugui."
+                    },
+                    "under": {
+                      "type": "string",
+                      "description": "target_text only: search the subtree of this hierarchy path or trailing path suffix ('Shop')."
+                    },
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "target_text only: pick the n-th visible match (hierarchy order, 0-based; see matches[].index)."
+                    },
+                    "text_match": {
+                      "type": "string",
+                      "enum": [
+                        "exact",
+                        "contains",
+                        "regex"
+                      ],
+                      "description": "target_text only: exact (default when omitted) | contains (case-insensitive substring) | regex (.NET, case-insensitive, matched against the normalised text)."
+                    },
                     "phase": {
                       "type": "string",
                       "enum": [
@@ -12667,7 +12736,7 @@
             "target"
           ],
           "default": "screen",
-          "description": "screen = Screen pixels (bottom-left origin, same as Input.mousePosition); normalized = 0..1 of the Game view size; target = each keyframe names a target, x/y are pixel offsets."
+          "description": "screen = Screen pixels (bottom-left origin, same as Input.mousePosition); normalized = 0..1 of the Game view size; target = each keyframe names a target or a target_text (on-screen label, like inputsim_touch), x/y are pixel offsets."
         },
         "time": {
           "type": "string",
@@ -12692,6 +12761,61 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9-]{8,64}$",
           "description": "Optional idempotency handle for the bridge operation (8-64 letters, digits, dashes). A retried call with the same id returns the same operation instead of starting another. Omit it normally (the server generates one); jobs always set it to the job id."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "unity_open_mcp_ui_snapshot": {
+    "description": "Read what the uGUI screen shows, in edit or play mode: a flat accessibility tree of nodes { id, path, role (button | toggle | slider | input | scroll | text | image | container), text, rect [x, y, w, h] in Screen pixels (bottom-left origin, the space of inputsim screen_x/screen_y), visible, visibility (on_screen | clipped | offscreen | transparent | zero_size), interactable, occluded_by, sprite, depth } plus `screen` { w, h, safe_area, dpi } and `textSources` (ugui, plus tmp when TextMeshPro is installed). A control's text is its label (descendant texts); visibility follows the CanvasGroup alpha chain, RectMask2D / Mask clipping and screen bounds; occluded_by is the front-most raycast hit covering a raycast-target node (play mode only). PROFILES: compact (default) = visible nodes that have text or are controls, labels folded into their control, null keys omitted; balanced = every visible node (images, containers) + sprite/depth; full = every active node in any visibility state with every key. Bound it with page_size + cursor (pagination.next_cursor). DIAGNOSTICS (first page): overflow (text larger than its rect) and zero_size_interactables always; placeholder (texts matching placeholder_pattern) and small_touch_targets (controls under min_touch_size px, with Screen.dpi) only when passed. Then tap by label: inputsim_pointer / inputsim_touch target_text, or inputsim_gesture keyframe target_text. uGUI only (no UI Toolkit). Read-only, gate-free. Requires com.unity.ugui.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": [
+            "compact",
+            "balanced",
+            "full"
+          ],
+          "default": "compact",
+          "description": "compact (default) = visible text/control nodes, labels folded into their control; balanced = every visible node + sprite/depth; full = every active node in any visibility state (hidden / clipped / offscreen / zero-size included) with every key."
+        },
+        "page_size": {
+          "type": "integer",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 200,
+          "description": "Max nodes per page. Default 50, cap 200. Follow pagination.next_cursor for the rest."
+        },
+        "cursor": {
+          "type": "string",
+          "description": "Opaque cursor from a previous response's pagination.next_cursor. Omit on the first call."
+        },
+        "text_contains": {
+          "type": "string",
+          "description": "Keep nodes whose text contains this (case-insensitive, after trimming, whitespace collapse and rich-text tag removal)."
+        },
+        "role": {
+          "type": "string",
+          "description": "Keep only these roles (comma-separated): button, toggle, slider, input, scroll, text, image, container."
+        },
+        "under": {
+          "type": "string",
+          "description": "Scope to the subtree of a hierarchy path ('Canvas/Shop') or a trailing path suffix ('Shop'). Diagnostics use the same scope. Unknown → under_not_found."
+        },
+        "visible_only": {
+          "type": "boolean",
+          "description": "Drop nodes that are not on screen. Defaults to true for compact/balanced and false for full; set false on compact to see hidden text and controls too."
+        },
+        "placeholder_pattern": {
+          "type": "string",
+          "description": "Regex (.NET, case-sensitive) flagging texts that look like unresolved localisation keys, e.g. '^[*#{].*[*#}]$'. Only checked when passed; there is no built-in pattern."
+        },
+        "min_touch_size": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Flag visible controls whose rect is narrower or shorter than this many screen pixels (diagnostics.small_touch_targets, which also reports Screen.dpi so you can convert from dp: px = dp × dpi / 160). Only checked when passed."
         }
       },
       "additionalProperties": false

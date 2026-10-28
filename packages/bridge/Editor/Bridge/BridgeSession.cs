@@ -44,7 +44,13 @@ namespace UnityOpenMcpBridge
         //       `routing`/`backend`, inputsim_gesture + POST /playmode-operations
         //       (shared play-mode scheduler), input_backend_unavailable /
         //       legacy_multitouch_unsupported / unsupported_editor_version.
-        public const int WireContract = 3;
+        //   4 — UI snapshot and label targeting: ui_snapshot; target_text /
+        //       under / index / text_match on inputsim_pointer and
+        //       inputsim_touch (and inputsim_gesture keyframes); `textTarget(s)`
+        //       in their results; ambiguous_target `matches`, target_not_found
+        //       `hidden_matches`, conflicting_targets / index_out_of_range /
+        //       under_not_found / ui_text_unavailable.
+        public const int WireContract = 4;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
         public static string Mode => "live";

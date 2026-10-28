@@ -200,7 +200,7 @@ function buildSuite() {
     "gate-intelligence", "build-settings", "navigation", "input-system", "probuilder",
     "particle-system", "animation", "splines", "lighting", "audio", "ui", "constraints",
     "terrain", "cinemachine", "timeline", "tilemap", "shadergraph", "vfx",
-    "memoryprofiler", "sprite2d", "agent-senses", "unity-hub-control",
+    "memoryprofiler", "sprite2d", "input-simulation", "playtest", "agent-senses", "unity-hub-control",
   ];
   s("manage_tools_activate_all", "A", "unity_open_mcp_manage_tools", {
     // activate one representative group; the action contract is identical per id
@@ -282,6 +282,9 @@ function buildSuite() {
   s("hub_get_install_path", "B", "unity_open_mcp_hub_get_install_path", {}, { expect: "tolerate", tolerate: ["install_path_unparseable"] });
   // hub_available_releases hits the network; keep it but tolerate failure
   s("hub_available_releases", "B", "unity_open_mcp_hub_available_releases", { limit: 3 });
+
+  // --- playtest reads (live-only, read-only; edit mode is fine) ---
+  s("ui_snapshot", "B", "unity_open_mcp_ui_snapshot", { page_size: 5 });
 
   // --- agent-senses reads (live-only, read-only) ---
   // read_console has a LogEntries reflection bug on Unity 6 (see

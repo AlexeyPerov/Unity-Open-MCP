@@ -26,6 +26,11 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         public bool HasX, HasY;
         public double X, Y;       // raw (pixels, 0..1, or target offset in pixels)
         public string Target;
+        public string TargetText; // coords: target — label instead of a name/path
+        public string Under;
+        public int? Index;
+        public string TextMatch;
+        public string TextTargetJson; // resolution report for TargetText keyframes
         public Vector2 Point;     // resolved Screen pixels
     }
 
@@ -116,8 +121,17 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                         return Fail("invalid_arguments", where + " needs both x and y, or neither.", out code, out message);
                     var phaseRaw = JsonBody.GetTopLevelRawValue(kraw, "phase");
                     key.Phase = phaseRaw == null ? null : JsonBody.GetString("{\"v\":" + phaseRaw + "}", "v");
-                    var targetRaw = JsonBody.GetTopLevelRawValue(kraw, "target");
-                    key.Target = targetRaw == null ? null : JsonBody.GetString("{\"v\":" + targetRaw + "}", "v");
+                    key.Target = StringField(kraw, "target");
+                    key.TargetText = StringField(kraw, "target_text");
+                    key.Under = StringField(kraw, "under");
+                    key.TextMatch = StringField(kraw, "text_match");
+                    var indexRaw = JsonBody.GetTopLevelRawValue(kraw, "index");
+                    if (indexRaw != null && indexRaw.Trim() != "null")
+                    {
+                        if (!int.TryParse(indexRaw.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var idx) || idx < 0)
+                            return Fail("invalid_arguments", where + ".index must be an integer >= 0.", out code, out message);
+                        key.Index = idx;
+                    }
 
                     bool first = k == 0, last = k == keyValues.Count - 1;
                     if (key.Phase == null) key.Phase = first ? "down" : last ? "up" : "move";
@@ -133,15 +147,20 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                         return Fail("invalid_arguments", where + ".at_ms must be greater than the previous keyframe's.", out code, out message);
 
                     bool mayInherit = key.Phase == "hold";
+                    bool hasText = !string.IsNullOrEmpty(key.TargetText);
+                    if (!hasText && (key.Under != null || key.Index.HasValue || key.TextMatch != null))
+                        return Fail("invalid_arguments", where + ": under, index and text_match refine target_text.", out code, out message);
                     if (coords == "target")
                     {
-                        if (string.IsNullOrEmpty(key.Target) && !mayInherit)
-                            return Fail("invalid_arguments", where + " needs target (coords: target); x/y are pixel offsets from its center.", out code, out message);
+                        if (hasText && !string.IsNullOrEmpty(key.Target))
+                            return Fail("conflicting_targets", where + ": pass target or target_text, not both.", out code, out message);
+                        if (string.IsNullOrEmpty(key.Target) && !hasText && !mayInherit)
+                            return Fail("invalid_arguments", where + " needs target or target_text (coords: target); x/y are pixel offsets from its center.", out code, out message);
                     }
                     else
                     {
-                        if (!string.IsNullOrEmpty(key.Target))
-                            return Fail("invalid_arguments", where + ".target is only valid with coords: target.", out code, out message);
+                        if (!string.IsNullOrEmpty(key.Target) || hasText)
+                            return Fail("invalid_arguments", where + ".target / .target_text are only valid with coords: target.", out code, out message);
                         if (!key.HasX && !mayInherit)
                             return Fail("invalid_arguments", where + " needs x and y.", out code, out message);
                         if (coords == "normalized" && key.HasX && (key.X < 0 || key.X > 1 || key.Y < 0 || key.Y > 1))
@@ -161,8 +180,16 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         // name/path to its center; `screen` is the game's Screen size.
         internal bool ResolvePoints(Vector2 screen, Func<string, (bool Ok, Vector2 Point, string Code, string Message)> resolveTarget,
             out string code, out string message)
+            => ResolvePoints(screen, resolveTarget, null, out code, out message, out _);
+
+        // As above; `resolveText` maps a target_text keyframe to its tap point
+        // (context names the keyframe) and returns a complete error body on
+        // failure, surfaced through `errorJson`.
+        internal bool ResolvePoints(Vector2 screen, Func<string, (bool Ok, Vector2 Point, string Code, string Message)> resolveTarget,
+            Func<GestureKeyframe, string, (bool Ok, Vector2 Point, string TargetJson, string ErrorJson)> resolveText,
+            out string code, out string message, out string errorJson)
         {
-            code = message = null;
+            code = message = errorJson = null;
             foreach (var finger in Fingers)
             {
                 for (int k = 0; k < finger.Path.Count; k++)
@@ -178,6 +205,27 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                             key.Point = key.HasX ? new Vector2((float)(key.X * screen.x), (float)(key.Y * screen.y)) : previous;
                             break;
                         default:
+                            if (!string.IsNullOrEmpty(key.TargetText))
+                            {
+                                var context = "fingers id " + finger.Id + " keyframe " + k;
+                                if (resolveText == null)
+                                {
+                                    code = "ui_text_unavailable";
+                                    message = context + ": " + InputBackends.UiTextUnavailableMessage;
+                                    return false;
+                                }
+                                var t = resolveText(key, context);
+                                if (!t.Ok)
+                                {
+                                    code = "text_target_failed";
+                                    message = context;
+                                    errorJson = t.ErrorJson;
+                                    return false;
+                                }
+                                key.TextTargetJson = t.TargetJson;
+                                key.Point = t.Point + (key.HasX ? new Vector2((float)key.X, (float)key.Y) : Vector2.zero);
+                                break;
+                            }
                             if (string.IsNullOrEmpty(key.Target))
                             {
                                 key.Point = previous + (key.HasX ? new Vector2((float)key.X, (float)key.Y) : Vector2.zero);
@@ -218,6 +266,13 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 point = Vector2.Lerp(a.Point, b.Point, (float)Math.Max(0, Math.Min(1, t)));
             }
             return new FingerSample { State = FingerState.Down, Point = point, Keyframe = k };
+        }
+
+        private static string StringField(string obj, string key)
+        {
+            var raw = JsonBody.GetTopLevelRawValue(obj, key);
+            if (raw == null || raw.Trim() == "null") return null;
+            return JsonBody.GetString("{\"v\":" + raw + "}", "v");
         }
 
         private static bool TryNumber(string obj, string key, out double value, out bool present)

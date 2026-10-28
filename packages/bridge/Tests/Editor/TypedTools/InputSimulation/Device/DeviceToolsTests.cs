@@ -40,6 +40,41 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             StringAssert.Contains("\"play_mode_required\"", json);
         }
 
+        // Label targeting lives in the uGUI sub-assembly; without it (no
+        // com.unity.ugui) touch / gesture refuse target_text honestly.
+        [Test]
+        public void TextTargetingRefusesWithoutTheUiResolver()
+        {
+            var saved = InputBackends.UiText;
+            InputBackends.UiText = null;
+            try
+            {
+                Assert.IsFalse(DeviceTargets.TryResolveText("Buy", null, null, null, "keyframe 0",
+                    out _, out _, out var error));
+                StringAssert.Contains("\"ui_text_unavailable\"", error);
+                StringAssert.Contains("keyframe 0: ", error);
+            }
+            finally { InputBackends.UiText = saved; }
+        }
+
+        [Test]
+        public void UiResolverIsRegisteredExactlyWhenUguiCompiles()
+        {
+            bool uguiCompiled = System.Type.GetType(
+                "UnityOpenMcpBridge.Extensions.InputSimulation.UiSnapshotTools, " +
+                "com.alexeyperov.unity-open-mcp-bridge.InputSimulation.Ugui.Editor") != null;
+            Assert.AreEqual(uguiCompiled, InputBackends.UiText != null);
+            // The registry is scanned with the live bridge (not under batch -runTests).
+            if (BridgeToolRegistry.Contains("unity_open_mcp_inputsim_touch"))
+                Assert.AreEqual(uguiCompiled, BridgeToolRegistry.Contains("unity_open_mcp_ui_snapshot"));
+        }
+
+        [Test]
+        public void TouchGuardRunsBeforeLabelArguments()
+        {
+            StringAssert.Contains("\"play_mode_required\"", TouchTools.Touch(action: "tap", target_text: "Buy", target: "Btn"));
+        }
+
         [Test]
         public void TouchResolverRejectsAmbiguityAndPrefersRootAnchoredPath()
         {

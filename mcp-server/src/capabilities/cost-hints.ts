@@ -83,6 +83,17 @@ export function describeBand(band: CostBand): string {
 // and the doc in the same task.
 // ---------------------------------------------------------------------------
 
+/**
+ * ui_snapshot cost, measured on a 200-node canvas (the demo UI fixture plus
+ * generated rows): one full-roster response per profile at page_size 200,
+ * chars/4. Real screens vary with text length; page_size bounds any of them.
+ */
+const UI_SNAPSHOT_MEASURED = {
+  compact: "~2.7k tokens (47 visible text/control nodes of a 200-node canvas)",
+  balanced: "~5.3k tokens (114 visible nodes of a 200-node canvas)",
+  full: "~14k tokens for all 200 nodes at page_size 200; ~4k per default 50-node page",
+} as const;
+
 export const TOOL_COST_HINTS: ToolCostHint[] = [
   {
     tool: "unity_open_mcp_read_asset",
@@ -159,6 +170,19 @@ export const TOOL_COST_HINTS: ToolCostHint[] = [
       full: { band: "large", approxTokens: describeBand("large") },
     },
   },
+  {
+    tool: "unity_open_mcp_ui_snapshot",
+    profileControls:
+      "node set and keys (compact = visible text/control nodes, labels folded, null keys omitted; " +
+      "balanced = every visible node + sprite/depth; full = every active node, any visibility, every key).",
+    pageSizePages: "flat node list (hierarchy order); diagnostics ride on the first page.",
+    // Measured on a 200-node uGUI canvas (demo fixture), chars/4 estimate.
+    profiles: {
+      compact: { band: "medium", approxTokens: UI_SNAPSHOT_MEASURED.compact },
+      balanced: { band: "large", approxTokens: UI_SNAPSHOT_MEASURED.balanced },
+      full: { band: "large", approxTokens: UI_SNAPSHOT_MEASURED.full },
+    },
+  },
 ];
 
 /**
@@ -175,6 +199,7 @@ export const RECOMMENDED_PAGE_SIZE: Record<string, number> = {
   unity_open_mcp_validate_edit: 25,
   unity_open_mcp_scan_paths: 25,
   unity_open_mcp_component_get: 25,
+  unity_open_mcp_ui_snapshot: 50,
 };
 
 // ---------------------------------------------------------------------------
@@ -250,6 +275,15 @@ export const RECOMMENDED_TOOL_CHAINS: RecommendedToolChain[] = [
       "unity_open_mcp_component_get (default compact) — top-level serialized fields",
       "unity_open_mcp_component_get(property_path=\"...\") — drill into one subtree",
       "escalate to profile=\"balanced\" / \"full\" or page with page_size + cursor when more detail is needed",
+    ],
+  },
+  {
+    name: "playtest-tap-by-label",
+    task: "Read the game screen and tap a control by its on-screen text, then confirm the result.",
+    steps: [
+      "unity_open_mcp_ui_snapshot (default compact) — visible texts and controls with rect / visibility / interactable",
+      "unity_open_mcp_inputsim_pointer or unity_open_mcp_inputsim_touch with target_text (+ index / under when the label repeats)",
+      "unity_open_mcp_inputsim_step, then unity_open_mcp_ui_snapshot or unity_senses_screenshot to confirm",
     ],
   },
   {

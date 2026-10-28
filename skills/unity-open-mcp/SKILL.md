@@ -33,6 +33,7 @@ Use exact schemas, scoped mutations, and gate evidence to work on the selected U
 - Before file-level repair, YAML edits, or offline asset investigation: [YAML and offline work](references/yaml-and-offline-work.md).
 - Before screenshots, event capture, or test runs: [Senses and tests](references/senses-and-tests.md).
 - Before driving gameplay input (taps, drags, multi-second gestures — legacy Input Manager or Input System): activate `input-simulation` and follow its domain skill; read the reported `backend` array and refusals instead of reflecting into game input code.
+- To playtest a screen (read its texts, find "the Buy button"): activate `playtest` with `input-simulation`, read it with `ui_snapshot` (compact, paged), then tap by label with `target_text`; resolve `ambiguous_target` with `index` / `under`, never by guessing names.
 
 ### Project-owned commands
 

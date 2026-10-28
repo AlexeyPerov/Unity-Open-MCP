@@ -95,6 +95,13 @@ test("recommendGroups: navigation intent returns the navigation group", () => {
   assert.ok(nav.matchedTags.includes("navigation"));
 });
 
+test("recommendGroups: a playtest intent brings playtest + input-simulation", () => {
+  const rec = recommendGroups({ intent: "smoke play-test the shop screen and tap by label" });
+  const ids = rec.groups.map((g) => g.id);
+  assert.ok(ids.includes("playtest"), JSON.stringify(ids));
+  assert.ok(ids.includes("input-simulation"), JSON.stringify(ids));
+});
+
 test("recommendGroups: explicit tags activate the implied groups", () => {
   const rec = recommendGroups({ tags: ["audio", "lighting"] });
   const ids = rec.groups.map((g) => g.id);

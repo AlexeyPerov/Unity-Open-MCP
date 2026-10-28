@@ -4,7 +4,9 @@ Activate the `input-simulation` group. Pointer, 3D pointer, probe, and step requ
 uGUI; touch and gesture compile in every project (they route to whichever input
 backend the project uses); keyboard requires the Input System package. These tools
 write no assets and are gate-free. All injection and stepping tools require play
-mode; `inputsim_probe` also works in edit mode.
+mode; `inputsim_probe` also works in edit mode. To read the screen (texts,
+visibility) and tap by label, pair this group with `playtest` —
+[`ui_snapshot`](playtest.md) and [target by label](#target-by-label).
 
 ## Input backends
 
@@ -46,6 +48,43 @@ no `Touchscreen` device unless the Simulator is the active view or one was added
 | `no_device` | `backend: "input_system"` requested explicitly without a `Touchscreen` | — |
 | `playmode_operation_busy` | A gesture is still driving input | Wait for it, or cancel it |
 
+## Target by label
+
+`inputsim_pointer`, `inputsim_touch` and `inputsim_gesture` keyframes accept
+`target_text` — the on-screen text of the element to act on — instead of a
+GameObject name. It resolves over the same uGUI screen model as
+[`ui_snapshot`](playtest.md) (uGUI `Text` and TextMeshPro):
+
+- Only **visible** elements (`visibility: "on_screen"`) are candidates. A control
+  matches on its label (the texts of its descendants) or on any one of those
+  texts, and resolves to the control; a plain text resolves to itself. The tap
+  point is the centre of the element's visible rect (so a row half-clipped by a
+  scroll view is tapped on its visible part).
+- `text_match`: `exact` (default when omitted) compares after normalisation —
+  trimmed, whitespace collapsed, rich-text tags removed, case-insensitive —
+  so `" BUY "` matches `<b>Buy</b>`; `contains` is a case-insensitive substring;
+  `regex` is a .NET regex, case-insensitive, matched against the normalised text.
+- Several visible matches refuse with `ambiguous_target`: `candidates` (paths) and
+  `matches[]` (`index`, `path`, `id`, `role`, `text`, `visibility`, `rect`) in
+  hierarchy order. Pick one with `index` or narrow with `under` (a hierarchy path
+  or trailing path suffix); it never silently takes the first.
+- No visible match refuses with `target_not_found`; `hidden_matches` lists
+  matches that exist but are clipped, offscreen, transparent or zero-size.
+  `index` past the visible matches → `index_out_of_range`; unknown `under` →
+  `under_not_found`.
+- `target_text` excludes the other forms for the same end: `object_id`, `target`,
+  `screen_x`/`screen_y` (pointer and touch); for a pointer `drag` / touch `swipe`
+  it is the start, exclusive with `from_target` / `from_x`/`from_y`
+  (`conflicting_targets`). `under` / `index` without `target_text` →
+  `invalid_arguments`.
+- Gestures: with `coords: "target"` a keyframe names `target` or `target_text`
+  (with its own `under`, `index`, `text_match`); `x`/`y` stay pixel offsets.
+- The result reports the resolution as `textTarget` (`query`, `match`, `text`,
+  `path`, `id`, `role`, `index`, `matches`, `point`); gestures list
+  `textTargets` per finger and keyframe.
+- Label targeting is compiled with uGUI; without `com.unity.ugui`, touch and
+  gesture refuse `target_text` with `ui_text_unavailable`.
+
 ## Touch
 
 `inputsim_touch` supports `tap`, `press`, `release`, and `swipe` with a `backend`
@@ -59,7 +98,8 @@ phases process within one dispatch, visible to callbacks but not to polling code
 domain reload releases it (Canceled).
 
 Target names/paths use ambiguity detection and root-path precedence; target wins
-over coordinates at both swipe endpoints. Touch has no `object_id` parameter.
+over coordinates at both swipe endpoints. Touch has no `object_id` parameter; use
+`target_text` ([target by label](#target-by-label)) to tap what the screen says.
 `duration_ms` is descriptive metadata: it neither sleeps nor guarantees a timed
 Hold interaction.
 
@@ -145,7 +185,8 @@ the target. Inactive objects, disabled Selectables, and non-interactable or
 non-raycastable CanvasGroup chains report non-interactable; `ignoreParentGroups`
 is respected. `hover` sends enter only; `hover_exit` explicitly ends it.
 
-Pointer selection precedence is `object_id`, then target, then screen coordinates.
+Pointer selection precedence is `object_id`, then target, then screen coordinates;
+`target_text` is exclusive with all three ([target by label](#target-by-label)).
 Names and suffix paths must be unique; an exact root-anchored path wins. Ambiguity
 returns candidate paths. RectTransform targeting uses its visual center, not its
 pivot. Drag rejects simultaneous target and coordinate forms for an endpoint.

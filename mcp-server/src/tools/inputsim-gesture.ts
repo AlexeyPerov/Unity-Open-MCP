@@ -11,6 +11,7 @@
 // array. Legacy is single-finger (id 0). Cancel / exit play / reload release
 // every held finger.
 import { makeTool } from "./schema-fragments.js";
+import { textTargetProps } from "./text-target.js";
 
 /** Longest gesture (ms) the direct call waits for inline; longer ones become a job. */
 export const INPUTSIM_GESTURE_INLINE_LIMIT_MS = 40_000;
@@ -30,6 +31,7 @@ const keyframe = {
     x: { type: "number", description: "Screen X (coords: screen = pixels, bottom-left origin; normalized = 0..1; target = pixel offset from the target center)." },
     y: { type: "number", description: "Screen Y, same space as x." },
     target: { type: "string", description: "coords: target only — GameObject name or hierarchy path whose visual center is the point." },
+    ...textTargetProps("coords: target only — the keyframe point (instead of `target`; x/y stay pixel offsets)"),
     phase: {
       type: "string",
       enum: ["down", "move", "hold", "up"],
@@ -84,7 +86,8 @@ export const inputsimGesture = makeTool(
         default: "screen",
         description:
           "screen = Screen pixels (bottom-left origin, same as Input.mousePosition); normalized = " +
-          "0..1 of the Game view size; target = each keyframe names a target, x/y are pixel offsets.",
+          "0..1 of the Game view size; target = each keyframe names a target or a target_text " +
+          "(on-screen label, like inputsim_touch), x/y are pixel offsets.",
       },
       time: {
         type: "string",

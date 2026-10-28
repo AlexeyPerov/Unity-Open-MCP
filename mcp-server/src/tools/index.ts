@@ -505,6 +505,8 @@ import { inputsimPointer3d } from "./inputsim-pointer3d.js";
 // Keyframed gestures over real play-mode frames (shared play-mode scheduler);
 // the server polls the bridge operation to a terminal trace.
 import { inputsimGesture } from "./inputsim-gesture.js";
+// Playtest: read the uGUI screen (text, visibility, diagnostics).
+import { uiSnapshot } from "./ui-snapshot.js";
 
 // M27 Plan 4 — batch_execute ships as a core meta-tool so agents can always
 // discover it. It is the agent ergonomics counterpart to the M26 headless batch
@@ -527,6 +529,12 @@ export const M31_PLAN3_TOOLS: Tool[] = [restartEditor, resourcePressure];
 // com.unity.inputsystem (the bridge surfaces the compiled subset via GET
 // /tools). All gate-free, play-mode-only except probe.
 export const INPUTSIM_TOOLS: Tool[] = [inputsimPointer, inputsimKey, inputsimTouch, inputsimStep, inputsimProbe, inputsimPointer3d, inputsimGesture];
+
+// Playtest — tools that let an agent read and play the running game like a
+// tester: the uGUI screen snapshot (role, text, visibility, diagnostics; its
+// node model also backs `target_text` label targeting on the input tools).
+// Group `playtest`; ui_snapshot compiles with com.unity.ugui.
+export const PLAYTEST_TOOLS: Tool[] = [uiSnapshot];
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -1208,6 +1216,7 @@ export const ALL_TOOLS: Tool[] = [
   ...M27_PLAN4_TOOLS,
   ...M31_PLAN3_TOOLS,
   ...INPUTSIM_TOOLS,
+  ...PLAYTEST_TOOLS,
 ];
 
 // feedback 2026-08-17 — register the reachable tool-name set with tool-hint so

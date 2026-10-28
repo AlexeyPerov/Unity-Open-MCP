@@ -54,8 +54,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             var route = InputRouting.Decide(InputEnvironment.Detect(), backend, plan.FingerIds());
             if (!route.Ok) return route.ErrorJson();
 
-            if (!plan.ResolvePoints(GameViewWindows.MainGameViewSize(), ResolveTarget, out code, out message))
-                return TouchTools.Error(code, message);
+            if (!plan.ResolvePoints(GameViewWindows.MainGameViewSize(), ResolveTarget, ResolveText, out code, out message, out var textError))
+                return textError ?? TouchTools.Error(code, message);
 
             var busy = PlayModeScheduler.RunningWithResource(TouchTools.InputResource);
             if (busy != null && busy != operation_id)
@@ -79,6 +79,14 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 "(or returns a jobs id for long gestures); a direct bridge caller polls POST /playmode-operations " +
                 "{\"action\":\"status\",\"operation_id\":\"" + op.Id + "\"}.")).Append("]}");
             return sb.ToString();
+        }
+
+        private static (bool Ok, Vector2 Point, string TargetJson, string ErrorJson) ResolveText(GestureKeyframe key, string context)
+        {
+            return DeviceTargets.TryResolveText(key.TargetText, key.TextMatch, key.Under, key.Index, context,
+                out var point, out var targetJson, out var errorJson)
+                ? (true, point, targetJson, null)
+                : (false, default(Vector2), null, errorJson);
         }
 
         private static (bool Ok, Vector2 Point, string Code, string Message) ResolveTarget(string target)
@@ -266,6 +274,18 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             if (route.Uses(InputRouting.LegacyTouch))
                 sb.Append(",\"mouseEmulation\":").Append(route.Environment.SimulateMouseWithTouches ? "true" : "false");
             sb.Append(",\"released\":true");
+            bool anyText = false;
+            foreach (var finger in plan.Fingers)
+                for (int k = 0; k < finger.Path.Count; k++)
+                {
+                    var key = finger.Path[k];
+                    if (key.TextTargetJson == null) continue;
+                    sb.Append(anyText ? "," : ",\"textTargets\":[");
+                    anyText = true;
+                    sb.Append("{\"finger\":").Append(finger.Id).Append(",\"keyframe\":").Append(k)
+                      .Append(",\"target\":").Append(key.TextTargetJson).Append('}');
+                }
+            if (anyText) sb.Append(']');
             sb.Append(",\"trace\":[");
             for (int i = 0; i < trace.Count; i++)
             {

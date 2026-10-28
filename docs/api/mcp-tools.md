@@ -22,7 +22,8 @@ definitions live in `mcp-server/src/tools/`.
 | [Routing, offline, and lifecycle contracts](routing-lifecycle.md) | Live/batch/offline/local selection, offline coverage, lifecycle recovery, batch behavior, errors, and multi-agent scheduling. |
 | [CLI and automation](cli-automation.md) | CLI commands, options, JSON output, and links to canonical CI behavior. |
 | [CI templates](../ci/README.md) | Pipeline shape, CLI exit codes, baselines, and provider templates. |
-| [Input simulation](input-simulation.md) | Input backends (legacy Input Manager / Input System), pointer delivery and `raycast_real`, touch, gestures over real frames, frame stepping, and supported input boundaries. |
+| [Input simulation](input-simulation.md) | Input backends (legacy Input Manager / Input System), pointer delivery and `raycast_real`, touch, gestures over real frames, target by label (`target_text`), frame stepping, and supported input boundaries. |
+| [Playtest tools](playtest.md) | `ui_snapshot` (uGUI screen as an accessibility tree: text, visibility, occlusion, diagnostics), profiles and paging, and the snapshot → tap-by-label loop. |
 | [Project commands](project-commands.md) | Editor-only authoring, typed list/describe/invoke, schema versions and safety boundaries. |
 | [Asynchronous jobs](jobs.md) | Job lifecycle, observation, idempotency, cancellation, retention and adapter contracts. |
 | [MCP resources](resources.md) | Resource URIs, payloads, and resource routing. |
@@ -60,6 +61,9 @@ definitions live in `mcp-server/src/tools/`.
   splines, lighting, audio, UI, constraints, terrain, Cinemachine, Timeline,
   Tilemap, Shader Graph, VFX Graph, Memory Profiler, 2D art, and input
   simulation (play-mode click/swipe/drag).
+- **Playtest** — read the uGUI screen (`ui_snapshot`: texts, visibility,
+  overflow / placeholder / touch-size diagnostics) and tap controls by their
+  on-screen label.
 - **Discovery** — capabilities, rules, skill generation, and tool-group
   management.
 - **Unity Hub control** — editor discovery, release listing, installs, modules,
@@ -83,6 +87,7 @@ a multi-step workflow. For session groups, see [Tool groups](tool-groups.md).
 | Embedded domains | Activate `cinemachine` and create a follow camera for the Player. |
 | Agent senses | Run Play Mode tests for the Combat assembly and capture a Game-view screenshot on failure. |
 | Game testing | Probe the UI for interactables, enter play mode, click the Start button by id, advance a few frames, then screenshot to confirm the level loaded. |
+| Playtest | Snapshot the shop screen, tap "Buy" by its label, then check the coin counter text and report any overflowing or placeholder texts. |
 | Tool groups | Reset tool groups, then activate only `core` and `gate-and-verify`. |
 | Batch mutations | In one batch: create ten empty GameObjects named `Enemy_1`…`Enemy_10` under an `Enemies` parent. |
 | Verify / CI | Create a verify baseline for this project, then report any new blocking issues since the last baseline. |
@@ -274,8 +279,8 @@ Heavy tools share:
 - `cursor` from the previous `pagination.next_cursor`.
 
 Profile-aware tools include `read_asset`, `search_assets`, `scene_get_data`,
-`find_references`, `validate_edit`, `scan_paths`, `component_get`, and
-`capabilities` itself. `capabilities.costHints` provides recommended starting
+`find_references`, `validate_edit`, `scan_paths`, `component_get`,
+`ui_snapshot`, and `capabilities` itself. `capabilities.costHints` provides recommended starting
 page sizes and expected cost bands.
 
 Legacy `detail` and per-tool caps remain aliases when `page_size` is omitted.

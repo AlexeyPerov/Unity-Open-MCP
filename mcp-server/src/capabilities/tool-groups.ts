@@ -350,6 +350,20 @@ export const TOOL_GROUPS: ToolGroup[] = [
     defaultEnabled: false,
   },
   {
+    id: "playtest",
+    description:
+      "Playtest surface — read and judge the running game like a tester. ui_snapshot: the uGUI " +
+      "screen as a flat accessibility tree (role, text from UI.Text and TextMeshPro, screen rect, " +
+      "visibility on_screen / clipped / offscreen / transparent / zero_size, interactable, " +
+      "occluded_by) with diagnostics (text overflow, zero-size controls; placeholder pattern and " +
+      "minimum touch size on request); edit and play mode, read-only, paged. Its node model backs " +
+      "`target_text` label targeting on inputsim_pointer / inputsim_touch / inputsim_gesture, so " +
+      "the loop is snapshot → tap by label → step → screenshot (pair with input-simulation and " +
+      "agent-senses). ui_snapshot compiles when com.unity.ugui is present; the compiled subset is " +
+      "reconciled from GET /tools.",
+    defaultEnabled: false,
+  },
+  {
     id: "agent-senses",
     description:
       "Agent senses surface (run_tests, screenshot variants, capture_inline, " +
@@ -983,6 +997,14 @@ assign("input-simulation", [
   "unity_open_mcp_inputsim_probe",
   "unity_open_mcp_inputsim_pointer3d",
   "unity_open_mcp_inputsim_gesture",
+]);
+
+// --- playtest (read and play the game like a tester) ------------------------
+// ui_snapshot is com.unity.ugui-gated in the bridge (it shares the uGUI
+// sub-assembly with inputsim_pointer, whose label targeting uses the same node
+// model). Read-only, gate-free.
+assign("playtest", [
+  "unity_open_mcp_ui_snapshot",
 ]);
 
 // ---------------------------------------------------------------------------

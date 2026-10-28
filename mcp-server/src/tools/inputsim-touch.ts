@@ -14,6 +14,7 @@
 //
 // Play-mode only. Gate-free.
 import { makeTool } from "./schema-fragments.js";
+import { textTargetProps } from "./text-target.js";
 
 export const inputsimTouch = makeTool(
   "unity_open_mcp_inputsim_touch",
@@ -35,7 +36,9 @@ export const inputsimTouch = makeTool(
     "resolve target-first (name/path to visual center) or accept screen coordinates. " +
     "Root-anchored paths win over suffix matches; ambiguous names/paths return " +
     "ambiguous_target with candidate paths. This tool has no object_id parameter; " +
-    "use a unique path or screen coordinates. Play-mode only — refuses " +
+    "use a unique path, screen coordinates, or `target_text` — the visible uGUI element whose " +
+    "text matches (exclusive with target/screen_x/screen_y; for swipe it is the start, exclusive with " +
+    "from_target/from_x/from_y — conflicting_targets). Play-mode only — refuses " +
     "with `play_mode_required` otherwise. Gate-free.",
   {
     required: ["action"],
@@ -102,6 +105,7 @@ export const inputsimTouch = makeTool(
           "auto = every enabled, reachable backend; legacy_touch = legacy Input Manager only; " +
           "input_system = Input System Touchscreen only (allows fingers 1–9).",
       },
+      ...textTargetProps("Point to tap/press/release (the swipe start for swipe)"),
     },
   },
 );

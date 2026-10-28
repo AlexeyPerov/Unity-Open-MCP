@@ -81,6 +81,35 @@ and up. An input update inside each stepped frame consumes the press so gameplay
 can observe `wasPressedThisFrame`. Splitting `down` → `inputsim_step` → `up`
 works for held-state polling; the immediate `down` update may consume the edge.
 
+## Read the screen, tap by label
+
+When you know what the player sees ("the Buy button", "Claim ×2") but not the
+GameObject names, activate `playtest` too
+(`manage_tools(action: "activate_for", intent: "playtest the shop screen")` brings
+both groups):
+
+```jsonc
+{ }                                                          // ui_snapshot (compact)
+// → nodes: [{ "path":"Canvas/Shop/Btn_03", "role":"button", "text":"Buy",
+//             "rect":[40,1173,220,80], "visibility":"on_screen", "interactable":true }, ...]
+//   diagnostics: overflow / zero_size_interactables (+ placeholder, small_touch_targets on request)
+{ "action": "tap", "target_text": "buy" }                    // inputsim_touch (or inputsim_pointer)
+// → "textTarget": { "path":"Canvas/Shop/Btn_03", "text":"Buy", "matches":1, "point":[150,1213] }
+{ "frames": 10 }                                             // inputsim_step
+{ "text_contains": "coins" }                                 // ui_snapshot — confirm the counter changed
+```
+
+- Exact match is the default: trimmed, whitespace collapsed, rich-text tags
+  removed, case-insensitive. Use `text_match: "contains"` for a partial label,
+  `"regex"` for patterns.
+- Only visible elements match. Two equal labels → `ambiguous_target` with
+  `matches[]` — pick with `index` or narrow with `under`; never guess. No visible
+  match → `target_not_found` with `hidden_matches` (clipped / offscreen /
+  transparent): scroll or open the panel first.
+- Gestures: `coords: "target"` keyframes take `target_text` instead of `target`.
+- A label tap still goes through the normal routing: read `blockedBy` /
+  `occluded_by` (a toast or modal on top) before reporting the feature works.
+
 ## The self-sufficient testing loop
 
 ```
@@ -213,10 +242,13 @@ One gesture at a time (`playmode_operation_busy`); not inside `batch_execute`.
 |---|---|---|
 | `play_mode_required` | Called outside play mode | `editor_set_state(state: "play")` first |
 | `no_event_system` | No `EventSystem` in the scene (pointer) | Add one (create via `ui_canvas_add`, or add an EventSystem GameObject) |
-| `target_not_found` | `target` matches no active GameObject | Check the name/path; only active objects are searched |
+| `target_not_found` | `target` matches no active GameObject, or `target_text` matches no visible element (`hidden_matches` lists invisible ones) | Check the name/path; for labels, make the element visible first |
 | `ambiguous_target` | `target` matches >1 active GameObject (`inputsim_pointer`, `inputsim_pointer3d`, `inputsim_touch`) | Use the full path, a longer trailing segment, or `object_id` (candidates listed). `inputsim_key` takes no target |
 | `no_hit` | Screen point raycast hit nothing | Check the point is over a raycast-target element |
 | `both_endpoint_forms` | Both target and screen coords supplied for one drag endpoint | Pass one form per endpoint (target wins; this error makes it explicit) |
+| `conflicting_targets` | `target_text` together with `object_id` / `target` / screen coords (or the drag/swipe start forms) | Pass one form |
+| `index_out_of_range` / `under_not_found` | `index` past the visible label matches / `under` matches no path | Re-read `matches[]` or the snapshot paths |
+| `ui_text_unavailable` | `target_text` on touch/gesture in a project without uGUI | Use `target` or coordinates |
 | `no_target_or_screen_point` | Neither object_id, target, nor screen point given | Provide one |
 | `no_camera` | `Camera.main` is null (pointer3d) | Tag a MainCamera in the scene |
 | `no_device` | `Keyboard.current` is null, or `backend: "input_system"` without a `Touchscreen` | Use `backend: "auto"` (legacy touches when the Input Manager is on); for uGUI prefer `inputsim_pointer` |

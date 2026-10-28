@@ -17,6 +17,13 @@ Seven tools share the `input-simulation` group:
 | `inputsim_gesture` | Keyframed finger paths over real play-mode frames on the shared play-mode scheduler | always (bridge root) |
 | `inputsim_key` | Input System keyboard device events (`Keyboard.current`) | `com.unity.inputsystem` present |
 
+The uGUI half also hosts `ui_snapshot` (tool group `playtest`, not
+`input-simulation`): it shares `UiScreenModel` with label targeting
+(`target_text` on pointer / touch / gesture), so what the snapshot shows is what
+a tap by label resolves. Touch and gesture reach the resolver through
+`InputBackends.UiText`, registered by the uGUI sub-assembly; without uGUI they
+refuse `target_text` with `ui_text_unavailable`.
+
 Layout:
 
 - `Device/` (no asmdef — part of the bridge root assembly): backend routing
@@ -24,7 +31,13 @@ Layout:
   (`EditorInputAdapter`), target resolution, the framed sequence runner, and the
   touch + gesture tools. It compiles in every project, including legacy-only ones.
 - `Core/` (uGUI sub-asmdef): pointer / pointer3d / step / probe, `raycast_real`,
-  and the uGUI top-hit probe used by gesture traces.
+  the uGUI top-hit probe used by gesture traces, and the screen model
+  (`UiScreenModel.cs`: nodes, visibility, text normalisation, the label resolver)
+  behind `ui_snapshot` (`UiSnapshotTools.cs`).
+- `Tmp/` (TextMeshPro sub-asmdef, `UNITY_OPEN_MCP_EXT_INPUTSIM_TMP` from two
+  versionDefines: `com.unity.textmeshpro` ≥ 3.0 or `com.unity.ugui` ≥ 2.0): the
+  `TMP_Text` reader that registers into `UiTextReaders`. Without either package
+  the assembly is skipped and text comes from `UnityEngine.UI.Text` only.
 - `../InputSystem/` (Input System sub-asmdef): the keyboard tool and the
   `Touchscreen` backend that registers into `InputRouting`.
 
@@ -64,6 +77,8 @@ The shared play-mode scheduler the gesture runs on lives in
 
 ## When to use which
 
+- Read what the screen says / find "the Buy button" → **`ui_snapshot`**
+  (`playtest` group), then act with `target_text`.
 - Discover what to click → **`probe`** (lists paths + ids).
 - Click/drag a uGUI element → **`pointer`** (use `object_id` from probe).
 - Click a 3D world object / `OnMouseDown` gameplay → **`pointer3d`**.

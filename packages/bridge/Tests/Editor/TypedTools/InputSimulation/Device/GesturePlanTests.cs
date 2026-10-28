@@ -115,6 +115,53 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
         }
 
         [Test]
+        public void TargetTextKeyframesUseTheLabelResolver()
+        {
+            var plan = Parse("[{\"path\":[{\"at_ms\":0,\"target_text\":\"Buy\",\"under\":\"Shop\",\"index\":1,\"text_match\":\"contains\"}," +
+                             "{\"at_ms\":10,\"target\":\"B\",\"x\":2,\"y\":3}]}]", "target");
+            var key = plan.Fingers[0].Path[0];
+            Assert.AreEqual("Buy", key.TargetText);
+            Assert.AreEqual("Shop", key.Under);
+            Assert.AreEqual(1, key.Index);
+            Assert.AreEqual("contains", key.TextMatch);
+            string seenContext = null;
+            Assert.IsTrue(plan.ResolvePoints(Vector2.zero,
+                t => (true, new Vector2(300, 300), null, null),
+                (k, context) => { seenContext = context; return (true, new Vector2(40, 50), "{\"path\":\"Shop/Btn\"}", null); },
+                out _, out _, out var errorJson), errorJson);
+            Assert.AreEqual(new Vector2(40, 50), key.Point);
+            Assert.AreEqual("{\"path\":\"Shop/Btn\"}", key.TextTargetJson);
+            Assert.AreEqual("fingers id 0 keyframe 0", seenContext);
+            Assert.AreEqual(new Vector2(302, 303), plan.Fingers[0].Path[1].Point);
+
+            // A resolver refusal surfaces its complete error body.
+            Assert.IsFalse(plan.ResolvePoints(Vector2.zero, t => (true, Vector2.zero, null, null),
+                (k, c) => (false, Vector2.zero, null, "{\"error\":{\"code\":\"ambiguous_target\"}}"),
+                out var code, out _, out errorJson));
+            StringAssert.Contains("ambiguous_target", errorJson);
+            Assert.AreEqual("text_target_failed", code);
+
+            // Without the uGUI resolver (old overload) a label keyframe refuses honestly.
+            Assert.IsFalse(plan.ResolvePoints(Vector2.zero, t => (true, Vector2.zero, null, null), out code, out _));
+            Assert.AreEqual("ui_text_unavailable", code);
+        }
+
+        [Test]
+        public void TargetTextKeyframeArgumentsAreValidated()
+        {
+            var plan = GesturePlan.Parse("[{\"path\":[{\"at_ms\":0,\"target\":\"A\",\"target_text\":\"Buy\"},{\"at_ms\":1,\"target\":\"A\"}]}]",
+                "target", "realtime", out var code, out var message);
+            Assert.IsNull(plan);
+            Assert.AreEqual("conflicting_targets", code, message);
+            StringAssert.Contains("refine target_text",
+                ParseError("[{\"path\":[{\"at_ms\":0,\"target\":\"A\",\"under\":\"Shop\"},{\"at_ms\":1,\"target\":\"A\"}]}]", "target"));
+            StringAssert.Contains("only valid with coords: target",
+                ParseError("[{\"path\":[{\"at_ms\":0,\"target_text\":\"Buy\",\"x\":0,\"y\":0},{\"at_ms\":1,\"x\":0,\"y\":0}]}]"));
+            StringAssert.Contains("index must be an integer",
+                ParseError("[{\"path\":[{\"at_ms\":0,\"target_text\":\"Buy\",\"index\":-1},{\"at_ms\":1,\"target\":\"A\"}]}]", "target"));
+        }
+
+        [Test]
         public void GameplayTimeIsRecorded()
         {
             Assert.AreEqual(PlayModeTimeBase.Gameplay, Parse(SpecExample, "screen", "gameplay").Time);

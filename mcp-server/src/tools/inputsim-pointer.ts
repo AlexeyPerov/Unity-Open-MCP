@@ -28,6 +28,7 @@
 // Pair with inputsim_step to advance frames between the interaction and a
 // screenshot so tweens/animations settle before you look.
 import { makeTool } from "./schema-fragments.js";
+import { textTargetProps } from "./text-target.js";
 
 export const inputsimPointer = makeTool(
   "unity_open_mcp_inputsim_pointer",
@@ -48,7 +49,10 @@ export const inputsimPointer = makeTool(
     "`targetHit`, `blockedBy`, `inputModule` and `notes` (e.g. module/backend mismatch). " +
     "raycast_real supports click, double_click, press, release, drag with the left " +
     "button only and refuses like inputsim_touch (input_backend_unavailable, " +
-    "unsupported_editor_version). Gate-free. Requires com.unity.ugui.",
+    "unsupported_editor_version). TARGET BY LABEL: `target_text` (+ under, index, text_match) picks " +
+    "the visible element whose text matches (see ui_snapshot) — exclusive with object_id/target/" +
+    "screen_x/screen_y (conflicting_targets); ambiguous labels refuse with ambiguous_target. " +
+    "Gate-free. Requires com.unity.ugui.",
   {
     required: ["action"],
     properties: {
@@ -157,6 +161,7 @@ export const inputsimPointer = makeTool(
         default: "auto",
         description: "Input backend for routing: raycast_real (ignored by dispatch; must stay auto there).",
       },
+      ...textTargetProps("Element to act on (the drag start for drag)"),
     },
   },
 );

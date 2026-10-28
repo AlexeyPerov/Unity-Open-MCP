@@ -60,6 +60,24 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             return true;
         }
 
+        // Label targeting (`target_text`) through the uGUI resolver registered by
+        // the uGUI sub-assembly. `errorJson` is a complete error body.
+        internal static bool TryResolveText(
+            string text, string match, string under, int? index, string context,
+            out Vector2 point, out string targetJson, out string errorJson)
+        {
+            point = default;
+            targetJson = null;
+            var resolver = InputBackends.UiText;
+            if (resolver == null)
+            {
+                errorJson = TouchTools.Error("ui_text_unavailable",
+                    (string.IsNullOrEmpty(context) ? "" : context + ": ") + InputBackends.UiTextUnavailableMessage);
+                return false;
+            }
+            return resolver.TryResolve(text, match, under, index, context, out point, out targetJson, out errorJson);
+        }
+
         // target-first, else explicit screen coordinates.
         internal static bool ResolvePoint(
             string target, float? sx, float? sy, out Vector2 point, out (string Code, string Message) err)

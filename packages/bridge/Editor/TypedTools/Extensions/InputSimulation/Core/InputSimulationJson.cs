@@ -87,6 +87,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             sb.Append(",\"eventSystem\":").Append(o.EventSystem ? "true" : "false");
             sb.Append(",\"blockedBy\":");
             sb.Append(o.BlockedBy == null ? "null" : Esc(o.BlockedBy));
+            if (o.TextTarget != null) sb.Append(",\"textTarget\":").Append(o.TextTarget);
             if (o.IsDrag)
             {
                 sb.Append(",\"dropTarget\":");
@@ -117,5 +118,6 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         public string DropTarget;          // P1: resolved drop target path, null when not a drag / nothing hit
         public bool DropLanded;            // P1: did an IDropHandler receive the drop?
         public List<string> Dispatched = new List<string>();
+        public string TextTarget;          // target_text resolution report (JSON object), when used
     }
 }

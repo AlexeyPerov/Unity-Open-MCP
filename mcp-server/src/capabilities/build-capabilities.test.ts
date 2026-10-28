@@ -904,6 +904,7 @@ test("costHints block covers the documented heavy-tool roster", () => {
     "unity_open_mcp_find_references",
     "unity_open_mcp_validate_edit",
     "unity_open_mcp_scan_paths",
+    "unity_open_mcp_ui_snapshot",
   ]) {
     assert.ok(hinted.has(tool), `${tool} must appear in costHints`);
   }

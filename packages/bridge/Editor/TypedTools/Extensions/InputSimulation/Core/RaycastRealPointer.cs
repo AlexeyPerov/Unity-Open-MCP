@@ -26,6 +26,23 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             string fromTarget, float? fromX, float? fromY,
             string toTarget, float? toX, float? toY,
             string backend)
+            => Run(action, button, dragSteps, objectId, target, sx, sy, fromTarget, fromX, fromY,
+                toTarget, toX, toY, backend, null, default, null);
+
+        // `target_text` path: the press end was already resolved by label.
+        internal static string RunResolved(
+            string action, PointerEventData.InputButton button, int dragSteps,
+            GameObject resolved, Vector2 point, string toTarget, float? toX, float? toY,
+            string backend, string textTarget)
+            => Run(action, button, dragSteps, null, null, null, null, null, null, null,
+                toTarget, toX, toY, backend, resolved, point, textTarget);
+
+        private static string Run(
+            string action, PointerEventData.InputButton button, int dragSteps,
+            long? objectId, string target, float? sx, float? sy,
+            string fromTarget, float? fromX, float? fromY,
+            string toTarget, float? toX, float? toY,
+            string backend, GameObject preResolved, Vector2 prePoint, string textTarget)
         {
             if (action != "click" && action != "double_click" && action != "press" && action != "release" && action != "drag")
                 return InputSimulationJson.Error("invalid_routing_action",
@@ -45,7 +62,14 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
 
             GameObject resolved;
             Vector2 point, endPoint;
-            if (action == "drag")
+            if (preResolved != null)
+            {
+                resolved = preResolved;
+                point = prePoint;
+                endPoint = point;
+                if (action == "drag" && !ResolvePoint(null, toTarget, toX, toY, "to", out _, out endPoint, out var toErr)) return toErr;
+            }
+            else if (action == "drag")
             {
                 if (!ResolvePoint(objectId, fromTarget, fromX, fromY, "from", out resolved, out point, out var fromErr)) return fromErr;
                 if (!ResolvePoint(null, toTarget, toX, toY, "to", out _, out endPoint, out var toErr)) return toErr;
@@ -119,6 +143,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             sb.Append(",\"skipped\":").Append(route.SkippedJson());
             sb.Append(",\"action\":").Append(InputSimulationJson.Esc(action));
             sb.Append(",\"target\":").Append(targetPath == null ? "null" : InputSimulationJson.Esc(targetPath));
+            if (textTarget != null) sb.Append(",\"textTarget\":").Append(textTarget);
             sb.Append(",\"screenPoint\":[").Append(InputSimulationJson.Num(point.x)).Append(',').Append(InputSimulationJson.Num(point.y)).Append(']');
             if (action == "drag")
                 sb.Append(",\"endPoint\":[").Append(InputSimulationJson.Num(endPoint.x)).Append(',').Append(InputSimulationJson.Num(endPoint.y)).Append(']');

@@ -112,6 +112,30 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
     keywords: ["input", "inputsystem", "input-system", "inputactions", "action-map", "bindings"],
   },
   {
+    // Before input-simulation so "playtest" / "play-test" resolve here and
+    // bring both groups (read the screen + drive input).
+    tag: "playtest",
+    groups: ["playtest", "input-simulation"],
+    reason:
+      "Playtest — read the uGUI screen (ui_snapshot: text, roles, visibility, overflow / " +
+      "placeholder / touch-size diagnostics) and tap by on-screen label (target_text on " +
+      "inputsim_pointer / inputsim_touch / inputsim_gesture).",
+    keywords: [
+      "playtest",
+      "playtests",
+      "play-test",
+      "smoke-test",
+      "ui-snapshot",
+      "screen-text",
+      "read-screen",
+      "target-text",
+      "tap-by-label",
+      "offscreen",
+      "touch-target",
+      "accessibility",
+    ],
+  },
+  {
     tag: "input-simulation",
     groups: ["input-simulation"],
     reason:

@@ -50,7 +50,11 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             int duration_ms = 200,
             int steps = 10,
             int advance_frames = 0,
-            string backend = "auto")
+            string backend = "auto",
+            string target_text = null,
+            string under = null,
+            int? index = null,
+            string text_match = null)
         {
             if (!EditorApplication.isPlaying)
                 return Error("play_mode_required",
@@ -72,21 +76,42 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             if (advance_frames < 0) advance_frames = 0;
             if (advance_frames > 60) advance_frames = 60;
 
+            bool byText = !string.IsNullOrEmpty(target_text);
+            if (!byText && (!string.IsNullOrEmpty(under) || index.HasValue))
+                return Error("invalid_arguments", "under and index refine target_text; pass target_text with them.");
+            if (byText)
+            {
+                bool conflict = action == "swipe"
+                    ? !string.IsNullOrEmpty(from_target) || from_x.HasValue || from_y.HasValue
+                    : !string.IsNullOrEmpty(target) || screen_x.HasValue || screen_y.HasValue;
+                if (conflict)
+                    return Error("conflicting_targets", action == "swipe"
+                        ? "target_text is the swipe start; do not also pass from_target or from_x/from_y."
+                        : "Pass one target form: target_text, target, or screen_x/screen_y.");
+            }
+
             var route = InputRouting.Decide(InputEnvironment.Detect(), backend, new[] { finger });
             if (!route.Ok) return route.ErrorJson();
 
             // Resolve endpoints before injecting anything.
             Vector2 start, end;
+            string textTarget = null;
+            if (byText)
+            {
+                if (!DeviceTargets.TryResolveText(target_text, text_match, under, index, null, out start, out textTarget, out var textErr))
+                    return textErr;
+            }
+            else start = default;
             if (action == "swipe")
             {
-                if (!ResolveSwipeEndpoint(from_target, from_x, from_y, true, default, "from", out start, out var fromErr))
+                if (!byText && !ResolveSwipeEndpoint(from_target, from_x, from_y, true, default, "from", out start, out var fromErr))
                     return fromErr;
                 if (!ResolveSwipeEndpoint(to_target, to_x, to_y, false, start, "to", out end, out var toErr))
                     return toErr;
             }
             else
             {
-                if (!DeviceTargets.ResolvePoint(target, screen_x, screen_y, out start, out var err))
+                if (!byText && !DeviceTargets.ResolvePoint(target, screen_x, screen_y, out start, out var err))
                     return Error(err.Code, err.Message);
                 end = start;
             }
@@ -130,6 +155,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             sb.Append(",\"action\":").Append(BridgeJson.EscapeString(action));
             sb.Append(",\"finger\":").Append(finger);
             sb.Append(",\"endPoint\":[").Append(Num(end.x)).Append(',').Append(Num(end.y)).Append(']');
+            if (textTarget != null) sb.Append(",\"textTarget\":").Append(textTarget);
             sb.Append(",\"durationMs\":").Append(duration_ms);
             sb.Append(",\"advanceFrames\":").Append(between);
             sb.Append(",\"framesAdvanced\":").Append(framesAdvanced);

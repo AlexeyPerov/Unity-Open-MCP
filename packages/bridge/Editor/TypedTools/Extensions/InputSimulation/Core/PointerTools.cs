@@ -65,7 +65,11 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             float? to_x = null,
             float? to_y = null,
             string routing = "dispatch",
-            string backend = "auto")
+            string backend = "auto",
+            string target_text = null,
+            string under = null,
+            int? index = null,
+            string text_match = null)
         {
             _ = view; // reserved for a future scene-view path; game view only today.
 
@@ -85,15 +89,49 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 return InputSimulationJson.Error("invalid_button",
                     $"Unknown button '{button}'. Valid: left, right, middle.");
 
-            if (routing == "raycast_real")
-                return RaycastRealPointer.Run(action, inputButton.Value, drag_steps, object_id, target,
-                    screen_x, screen_y, from_target, from_x, from_y, to_target, to_x, to_y, backend);
-            if (!string.IsNullOrEmpty(routing) && routing != "dispatch")
+            if (routing != "raycast_real" && !string.IsNullOrEmpty(routing) && routing != "dispatch")
                 return InputSimulationJson.Error("invalid_routing",
                     $"Unknown routing '{routing}'. Valid: dispatch, raycast_real.");
+
+            // target_text: the visible element whose label matches (shared with
+            // ui_snapshot). It is the element to act on — the press (from) end of
+            // a drag — and excludes every other form for that end.
+            UiTextResolution byText = null;
+            if (!string.IsNullOrEmpty(target_text))
+            {
+                bool conflict = object_id.HasValue || (action == "drag"
+                    ? !string.IsNullOrEmpty(from_target) || from_x.HasValue || from_y.HasValue
+                    : !string.IsNullOrEmpty(target) || screen_x.HasValue || screen_y.HasValue);
+                if (conflict)
+                    return InputSimulationJson.Error("conflicting_targets", action == "drag"
+                        ? "target_text is the drag start; do not also pass object_id, from_target or from_x/from_y."
+                        : "Pass one target form: target_text, object_id, target, or screen_x/screen_y.");
+                if (!UiTextTargets.TryResolve(target_text, text_match, under, index, null, out byText, out var textError))
+                    return textError;
+            }
+            else if (!string.IsNullOrEmpty(under) || index.HasValue)
+                return InputSimulationJson.Error("invalid_arguments",
+                    "under and index refine target_text; pass target_text with them.");
+
+            if (routing == "raycast_real")
+            {
+                if (byText != null)
+                    return RaycastRealPointer.RunResolved(action, inputButton.Value, drag_steps, byText.Node.Go, byText.Point,
+                        to_target, to_x, to_y, backend, byText.Json());
+                return RaycastRealPointer.Run(action, inputButton.Value, drag_steps, object_id, target,
+                    screen_x, screen_y, from_target, from_x, from_y, to_target, to_x, to_y, backend);
+            }
             if (!string.IsNullOrEmpty(backend) && backend != "auto")
                 return InputSimulationJson.Error("invalid_backend",
                     "backend applies to routing: raycast_real only (dispatch always uses ExecuteEvents).");
+
+            if (byText != null)
+            {
+                if (action == "drag")
+                    return DragFrom(inputButton.Value, drag_steps, byText.Node.Go, byText.Point,
+                        to_target, to_x, to_y, byText.Json());
+                return SingleOn(action, inputButton.Value, byText.Node.Go, byText.Point, RaycastAt(byText.Point), byText.Json());
+            }
 
             if (action == "drag")
                 return DoDrag(inputButton.Value, drag_steps, object_id,
@@ -116,8 +154,20 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             var resolved = ResolveTarget(objectId, target, sx, sy, out var point,
                 out var raycast, out var error);
             if (resolved == null) return error;
+            return SingleOn(action, inputButton, resolved, point, raycast, null);
+        }
 
+        private static string SingleOn(
+            string action,
+            PointerEventData.InputButton inputButton,
+            GameObject resolved, Vector2 point, RaycastResult raycast, string textTarget)
+        {
+            // A label-resolved target is a raycast hit only when the hit is the
+            // element itself or inside it; otherwise synthesize from the target.
+            if (raycast.gameObject != null && !PointerTargets.IsSameOrDescendant(resolved, raycast.gameObject))
+                raycast = default;
             var outcome = NewOutcome(resolved, point);
+            outcome.TextTarget = textTarget;
 
             switch (action)
             {
@@ -195,15 +245,20 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             string toTarget, float? toX, float? toY)
         {
             // P7: target-wins on BOTH endpoints; error when both forms supplied.
-            Vector2 fromPoint, toPoint;
-            GameObject pressTarget;
-
             // The `from` end MUST resolve to an object (it becomes the pressTarget),
             // so a bare screen point raycasts and errors no_hit on empty space.
             var fromResolved = ResolveEndpoint(objectId, fromTarget, fromX, fromY,
-                "from_target/from_x", requireObject: true, out fromPoint, out var fromErr);
+                "from_target/from_x", requireObject: true, out var fromPoint, out var fromErr);
             if (fromResolved == null) return fromErr;
-            pressTarget = fromResolved;
+            return DragFrom(inputButton, dragSteps, fromResolved, fromPoint, toTarget, toX, toY, null);
+        }
+
+        private static string DragFrom(
+            PointerEventData.InputButton inputButton, int dragSteps,
+            GameObject pressTarget, Vector2 fromPoint,
+            string toTarget, float? toX, float? toY, string textTarget)
+        {
+            Vector2 toPoint;
 
             // The `to` end may land in empty space (valid — no drop target). Only
             // hard resolution failures (ambiguous / both-forms) surface as errors.
@@ -217,6 +272,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
 
             var outcome = NewOutcome(pressTarget, fromPoint);
             outcome.IsDrag = true;
+            outcome.TextTarget = textTarget;
             var pressRaycast = RaycastAt(fromPoint);
 
             var ped = NewEventData(fromPoint, inputButton, pressRaycast, pressTarget);

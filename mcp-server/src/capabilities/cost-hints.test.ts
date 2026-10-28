@@ -37,6 +37,7 @@ const EXPECTED_HEAVY_TOOLS = [
   "unity_open_mcp_validate_edit",
   "unity_open_mcp_scan_paths",
   "unity_open_mcp_component_get",
+  "unity_open_mcp_ui_snapshot",
 ];
 
 test("cost hints cover the documented heavy-tool roster", () => {

@@ -98,6 +98,11 @@ operations or through the generic `playmode_operation` jobs adapter for long one
 Device input injection is routed per call to the project's backends (legacy Input
 Manager, Input System) from the bridge root assembly, so it compiles in projects
 without the Input System package; see [Input simulation](api/input-simulation.md).
+The uGUI screen model behind `ui_snapshot` and label targeting (`target_text`)
+lives in the uGUI input-simulation sub-assembly and registers a resolver into the
+root for touch and gesture; TextMeshPro text comes from a separate optional
+sub-assembly (versionDefines on `com.unity.textmeshpro` ≥ 3.0 or `com.unity.ugui`
+≥ 2.0) that registers a text reader. See [Playtest tools](api/playtest.md).
 
 ## Related docs
 

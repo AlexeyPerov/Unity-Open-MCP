@@ -47,10 +47,28 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         string InputModuleName { get; }
     }
 
+    // Registered by the uGUI sub-assembly: label targeting (`target_text`) over
+    // the same screen model ui_snapshot reports.
+    internal interface IUiTextTargets
+    {
+        // Resolve the visible uGUI element whose text matches. On success `point`
+        // is its tap point (Screen pixels) and `targetJson` a JSON object
+        // describing the match; on failure `errorJson` is a complete
+        // {"error":{…}} body (ambiguous_target carries candidates + matches).
+        // `context` prefixes error messages (e.g. which keyframe).
+        bool TryResolve(string text, string match, string under, int? index, string context,
+            out Vector2 point, out string targetJson, out string errorJson);
+    }
+
     internal static class InputBackends
     {
         internal static IInputSystemTouchBackend InputSystem;
         internal static IUiHitProbe Ui;
+        internal static IUiTextTargets UiText;
+
+        internal const string UiTextUnavailableMessage =
+            "target_text needs uGUI (com.unity.ugui): the label resolver is compiled with it. " +
+            "Use target (name/path) or screen coordinates.";
     }
 
     // Detected input configuration (pure data so routing is unit-testable).

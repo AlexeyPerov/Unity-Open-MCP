@@ -619,6 +619,21 @@ test("groupToTools unity-hub-control roster has all 6 tools", () => {
   assert.ok(map["unity-hub-control"].includes("unity_open_mcp_hub_set_install_path"));
 });
 
+test("playtest group is registered, ungated, manual-activation, and owns ui_snapshot", () => {
+  const g = getGroup("playtest");
+  assert.ok(g, "playtest group must exist");
+  assert.equal(g!.defaultEnabled, false);
+  // Cross-cutting group: its tools compile in different bridge assemblies, so
+  // there is no single domain define; compiled availability comes from GET /tools.
+  assert.equal(g!.domainDefine, undefined);
+  assert.equal(g!.autoActivate, undefined);
+  assert.equal(groupFor("unity_open_mcp_ui_snapshot"), "playtest");
+  assert.ok(groupToTools()["playtest"].includes("unity_open_mcp_ui_snapshot"));
+  // inputsim_* (including gesture) stay in input-simulation.
+  assert.equal(groupFor("unity_open_mcp_inputsim_gesture"), "input-simulation");
+  assert.equal(groupFor("unity_open_mcp_inputsim_probe"), "input-simulation");
+});
+
 // ---------------------------------------------------------------------------
 // Session state — activate / deactivate / reset
 // ---------------------------------------------------------------------------
