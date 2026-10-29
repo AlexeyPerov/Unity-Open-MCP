@@ -42,21 +42,33 @@ and targeted fixes.
 > **Agent:** The gate preview found new missing references in `Level1` and
 > `SpawnPoint`, so I stopped before committing a broken project.
 
+### Playtest the game like a tester
+
+An agent can play the running game and hand back a report a human can review.
+It puts the game on a target resolution or Device Simulator device, reads the
+screen (uGUI text, visibility, layout diagnostics), taps controls by their
+on-screen label, clicks, drags, swipes and plays multi-second gestures over real
+frames (legacy Input Manager and Input System projects alike), and waits until
+the game gets somewhere — a log line, a label, an object, or the project's own
+predicate, optionally fast-forwarded. Captures come at the device's native
+resolution and safe area, or as frame-scheduled series for animated content. The
+player's save (PlayerPrefs and `persistentDataPath`) is snapshotted and restored,
+so a session does not spend the developer's progress, and the whole run is
+recorded — steps, verdicts, frames and the console errors each step caused —
+into a Markdown report.
+
+> **User:** Smoke-test the shop on an iPhone 13.<br>
+> **Agent:** Five steps passed; tapping *Buy* threw a `NullReferenceException`.
+> The report has the frames and the stack. Your save is untouched.
+
+See the [Playtest guide](docs/playtest-guide.md) and
+[Playtest tools](docs/api/playtest.md).
+
 ### Test and observe
 
 Run Edit/Play Mode tests, inspect the console, capture screenshots, profiler and
-memory data, and pull events. Input simulation closes the gameplay loop: put the
-game on a target resolution or Device Simulator device, read the screen (uGUI
-text, visibility, layout diagnostics), tap controls by their on-screen label,
-click / drag / swipe, play multi-second gestures over real frames (legacy Input
-Manager and Input System projects alike), advance frames, wait until the game
-gets somewhere (a log line, a label, an object, the project's own predicate —
-optionally fast-forwarded), then verify visually with captures at the device's
-native resolution and safe area, or frame-scheduled capture series for animated
-content — and snapshot, diff and restore the player's save (PlayerPrefs and
-`persistentDataPath`) so a live session does not spend the developer's progress.
-A playtest can be recorded as it runs — steps, verdicts, frames and the console
-errors each step caused — into a Markdown report a human can review.
+memory data, and pull events — the feedback an agent needs to trust its own
+changes.
 
 ### Live, batch, or offline
 
@@ -151,7 +163,6 @@ For users:
 - [Troubleshooting](docs/troubleshooting.md) — connectivity and recovery guidance.
 - [Dialog policy](docs/dialog-policy.md) — startup modal handling and automation.
 - [Skills](docs/skills.md) — agent playbooks installed into Unity projects.
-- [Playtest guide](docs/playtest-guide.md) — let an agent play the game, record the session and hand back a report.
 - [Version compatibility](docs/versioning.md) — version matching and mismatch recovery.
 - [Updating](docs/updating.md) — Hub, MCP, Unity package, and air-gapped update paths.
 
