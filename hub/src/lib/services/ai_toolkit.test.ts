@@ -100,10 +100,11 @@ test("mcpClientConfigTarget resolves opencode-global to ~/.config/opencode/openc
   assert.equal(t.mergeKey, "mcp.unity-open-mcp");
 });
 
-test("mcpClientConfigTarget returns null path for claude-code (CLI-only)", () => {
+test("mcpClientConfigTarget: claude-code writes the project .mcp.json", () => {
   const t = mcpClientConfigTarget("claude-code", "/home/dev");
-  assert.equal(t.path, null);
-  assert.equal(t.scope, "none");
+  assert.equal(t.path, ".mcp.json");
+  assert.equal(t.scope, "project");
+  assert.equal(t.mergeKey, "mcpServers.unity-open-mcp");
 });
 
 test("mcpClientConfigTarget returns null path for manual (clipboard-only)", () => {
@@ -196,11 +197,12 @@ test("portableStrategy: a global config has no portable form", () => {
 });
 
 test("portableStrategy: Claude Code resolves the project from its spawn cwd", () => {
-  assert.equal(portableStrategy("claude-code", "none"), "args");
+  assert.equal(portableStrategy("claude-code", "project"), "args");
 });
 
-test("portableStrategy: the wrapper-only client falls back to absolute in the Hub", () => {
-  assert.equal(portableStrategy("codex", "project"), "absolute");
+test("portableStrategy: Codex runs the committed wrapper script", () => {
+  assert.equal(portableStrategy("codex", "project"), "wrapper");
+  assert.deepEqual(portableServerArgs("wrapper", "Client"), []);
 });
 
 test("portableStrategy: ZCode's workspace config resolves the project from its session directory", () => {

@@ -30,7 +30,9 @@ fn main() {
     // a tiny regex-free extractor is enough — we avoid pulling serde_json in
     // as a build-dependency just for this.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let version_json = manifest_dir.join("..").join("version.json");
+    // `hub/src-tauri` → repo root. `hub/version.json` is the Hub app's own
+    // release version, not the trio's.
+    let version_json = manifest_dir.join("..").join("..").join("version.json");
     // Fall back to a sentinel so the crate still compiles in a standalone
     // `cargo build` without the repo root. The CI version-sync gate catches
     // any real drift, and the wizard surfaces a clear upgrade error if a
@@ -41,7 +43,7 @@ fn main() {
         .unwrap_or_else(|| "0.0.0-unknown".to_string());
     println!("cargo:rustc-env=TRIO_BRIDGE_TAG=bridge-v{}", trio_version);
     println!("cargo:rustc-env=TRIO_VERIFY_TAG=verify-v{}", trio_version);
-    println!("cargo:rerun-if-changed=../version.json");
+    println!("cargo:rerun-if-changed=../../version.json");
 }
 
 /// Extract the `"version": "X.Y.Z"` string from a version.json body without a

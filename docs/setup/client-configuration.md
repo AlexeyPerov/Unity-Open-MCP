@@ -4,8 +4,8 @@ Connect an MCP client to one Unity project: find your client, copy the snippet,
 set your project path, save the file, restart the client.
 
 For first-time setup with Cursor, Claude Code, ZCode, VS Code Copilot, Codex,
-OpenCode, or a generic agent, prefer the merge-safe [`unity-open-mcp setup`](agent-setup.md)
-command.
+OpenCode, or a generic agent, prefer the merge-safe
+[`unity-open-mcp setup`](portable-config.md#write-it-with-the-setup-cli) command.
 Use the catalog below for other clients or manual configuration.
 
 Every snippet on this page names **your** absolute project path, so the file
@@ -51,12 +51,15 @@ Prefer the project-local path when the client supports it.
 
 `<project>` is the folder your AI client is opened on, which is not always the
 Unity project. When the Unity project is a subfolder of a larger repository
-(`<repo>/Client`), put the config at the repository root and keep
-`UNITY_PROJECT_PATH` pointing at the Unity folder:
+(`<repo>/Client`), put the config at the repository root and point it at the
+Unity folder. A committed config names that folder relative to the workspace —
+see [Portable MCP config](portable-config.md) for every client's committable
+form; a config kept on one machine can use the absolute path instead:
 
 ```
 my-game/                    <- AI client opened here, config lives here
-  .cursor/mcp.json          <- UNITY_PROJECT_PATH = /abs/my-game/Client
+  .cursor/mcp.json          <- committed:     UNITY_PROJECT_PATH = ${workspaceFolder}/Client
+                               this machine:  UNITY_PROJECT_PATH = /abs/my-game/Client
   Client/                   <- Unity project (Assets/, Packages/)
   Server/
 ```
@@ -64,10 +67,6 @@ my-game/                    <- AI client opened here, config lives here
 The bridge window's **Configure AI client** panel searches the Unity project and
 up to four parent folders, so a layout like this reports **Configured: yes** and
 names the file it found under **Found in**.
-
-A repository-root config does not have to name an absolute path at all — see
-[Portable MCP config](portable-config.md) for the committable form of this
-layout.
 
 ## Copy these
 

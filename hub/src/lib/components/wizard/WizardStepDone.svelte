@@ -157,6 +157,24 @@
     </div>
   </dl>
 
+  {#if state.mcpPlan?.portable && state.mcpPlan.targetPath}
+    <div class="wiz-field">
+      <span class="wiz-label">Share with the team</span>
+      <p class="wiz-desc">
+        The MCP config carries no machine path. Commit
+        <code>{state.mcpPlan.targetPath}</code>{#if state.mcpPlan.wrapperPath},
+          the launch script <code>{state.mcpPlan.wrapperPath}</code>,{/if}
+        and the agent skill folder, and every teammate who opens
+        <code>{state.mcpPlan.configRoot}</code> gets the same setup.
+        {#if state.mcpClient === "claude-code" || state.mcpClient === "cursor"}
+          The client asks once to approve the project's MCP servers.
+        {:else if state.mcpClient === "codex"}
+          Codex reads a project config only after the project is trusted.
+        {/if}
+      </p>
+    </div>
+  {/if}
+
   <div class="wiz-field">
     <span class="wiz-label">Links</span>
     <div class="wiz-actions-row">

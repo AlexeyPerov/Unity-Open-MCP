@@ -155,7 +155,7 @@ pub enum BridgeStatusKind {
 /// "MCP configured?" and by the Done screen checklist.
 ///
 /// The original six flags cover the M4 client surface; the
-/// `other_clients` flag is a roll-up for every Ivan-parity client
+/// `other_clients` flag is a roll-up for every additional client
 /// added in M27 Plan 5 (Cline, Codex, Gemini, GitHub Copilot CLI,
 /// Kilo Code, Rider, Unity AI, VS Code Copilot, VS Copilot, ZooCode,
 /// Antigravity). A single roll-up keeps the wire shape stable while

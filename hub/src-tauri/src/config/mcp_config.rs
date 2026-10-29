@@ -121,12 +121,12 @@ pub const CLIENT_PATHS_MANIFEST_REL: &str = "skills/client-paths.json";
 /// Supported MCP client ids. Mirrors `McpClientId` in
 /// `ai_toolkit.ts` and the Step 4 picker catalog in
 /// `hub/src/lib/components/wizard/constants.ts`
-/// (`MCP_CLIENT_OPTIONS`). `claude-code` is CLI-only (renders a `claude mcp add`
-/// command); `manual` is clipboard-only. Every other variant is
-/// backed by a writable config file (JSON, or TOML for `Codex`).
+/// (`MCP_CLIENT_OPTIONS`). `manual` and `custom` are clipboard-only.
+/// Every other variant is backed by a writable config file (JSON, or
+/// TOML for `Codex`); Claude Code writes the project `.mcp.json`, the
+/// same file `claude mcp add --scope project` and the `setup` CLI write.
 ///
-/// The catalog covers the Ivan-named client surface (14+ agents)
-/// plus the Open MCP originals. Adding a client is a three-step
+/// The catalog covers 14+ agent clients. Adding a client is a three-step
 /// change: extend this enum and [`ALL_CLIENTS`], add a row to every
 /// `match` below (`client_format`, `resolve_target_path`,
 /// `merge_key_path`, `build_entry_json`), and add the skill target to
@@ -142,7 +142,7 @@ pub enum McpClientId {
     ZcodeGlobal,
     ZcodeProject,
     Manual,
-    // --- Ivan-parity breadth (M27 Plan 5) ---
+    // --- Additional agent clients ---
     /// Cline — VS Code globalStorage JSON (`mcpServers`).
     Cline,
     /// Codex — project `.codex/config.toml` (`[mcp_servers.*]`).
@@ -171,13 +171,12 @@ pub enum McpClientId {
 }
 
 /// Config format a client writes. Drives whether the planner / writer
-/// takes the JSON merge path or the Codex TOML path. `CliOnly` and
-/// `ClipboardOnly` never reach the file writer.
+/// takes the JSON merge path or the Codex TOML path. `ClipboardOnly`
+/// never reaches the file writer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClientFormat {
     Json,
     Toml,
-    CliOnly,
     ClipboardOnly,
 }
 
@@ -195,7 +194,6 @@ pub(crate) enum ClientScope {
 /// Codex-only; every other file-backed client writes JSON.
 pub(crate) fn client_format(client: McpClientId) -> ClientFormat {
     match client {
-        McpClientId::ClaudeCode => ClientFormat::CliOnly,
         McpClientId::Manual | McpClientId::Custom => ClientFormat::ClipboardOnly,
         McpClientId::Codex => ClientFormat::Toml,
         _ => ClientFormat::Json,
@@ -319,8 +317,7 @@ pub struct McpConfigPlan {
     /// The client id that produced this plan.
     pub client: McpClientId,
     /// Resolved absolute path of the config file the writer
-    /// would touch. `null` for `claude-code` and `manual`
-    /// (no file).
+    /// would touch. `null` for `manual` and `custom` (no file).
     pub target_path: Option<String>,
     /// `true` when the file exists on disk. `false` for
     /// CLI-only clients.
@@ -338,14 +335,7 @@ pub struct McpConfigPlan {
     /// wizard is leaving unrelated keys alone.
     pub preserved_keys: Vec<String>,
     /// The exact JSON the writer would emit, pretty-printed.
-    /// `None` for `claude-code` (CLI command) and `manual`
-    /// (clipboard-only); those clients populate
-    /// [`McpConfigPlan::command`] instead.
     pub proposed_json: Option<String>,
-    /// For `claude-code` only: the exact `claude mcp add`
-    /// command the user should paste. `None` for every other
-    /// client.
-    pub command: Option<String>,
     /// The MCP index.js path the wizard resolved for this
     /// run. Surfaced for debugging / "what did I just write"
     /// UX.
@@ -359,11 +349,14 @@ pub struct McpConfigPlan {
     /// installs the agent skill here, next to the config the client loads.
     /// A global config file lives under the home folder instead.
     pub config_root: String,
+    /// The committed launch script a portable Codex entry runs, written next
+    /// to the config. `None` for every other entry.
+    pub wrapper_path: Option<String>,
     /// Repository root the wizard detected above the Unity project
-    /// (nearest ancestor with a `.git` entry, within four levels).
-    /// `None` when the Unity project is the repository root or no
-    /// repository was found — the UI offers the portable path only
-    /// when this is set.
+    /// (nearest ancestor with a `.git` entry, within four levels, below
+    /// the home folder) — the Unity project itself when it is the
+    /// repository root. `None` outside any repository; the UI defaults
+    /// the commit-safe option on only when this is set.
     pub detected_workspace_root: Option<String>,
     /// Unity root relative to `detected_workspace_root`, POSIX
     /// separators. `None` alongside a `None` workspace root.
@@ -432,9 +425,8 @@ pub async fn plan_mcp_config(params: McpConfigParams) -> Result<McpConfigPlan, M
 ///   regular file (per `hub-wizard.md` Step 4 "MCP path
 ///   validation");
 /// - the target file's parent directory is not writable;
-/// - the client is `claude-code` or `manual` (no file is
-///   written for those — Step 4 should have rendered the
-///   CLI command or a snippet instead).
+/// - the client is `manual` or `custom` (no file is written
+///   for those — Step 4 renders a snippet instead).
 ///
 /// On success, leaves a `<target>.bak` next to the original
 /// when one existed and the merge actually mutates the
@@ -461,24 +453,6 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
     let detected = detect_layout(params);
     let scope = match resolve_scope(params) {
         Ok(s) => s,
-        Err(McpScopeSkip::CliOnly) => {
-            let resolved = resolve_index_for_mode(params)?;
-            let resolved_str = resolved.as_deref().unwrap_or(NPM_RESOLVED_LABEL).to_string();
-            return Ok(McpConfigPlan {
-                client: params.client,
-                target_path: None,
-                file_exists: false,
-                would_write: false,
-                preserved_keys: Vec::new(),
-                proposed_json: None,
-                command: Some(command_for(params, &resolved_str, true)),
-                resolved_mcp_index: resolved_str,
-                portable: effective_placement(params).is_some(),
-                config_root: config_root_for(params, ClientScope::Project),
-                detected_workspace_root: detected.root,
-                detected_unity_subpath: detected.subpath,
-            });
-        }
         Err(McpScopeSkip::Manual) => {
             let resolved = resolve_index_for_mode(params)?;
             let resolved_str = resolved.as_deref().unwrap_or(NPM_RESOLVED_LABEL).to_string();
@@ -497,10 +471,10 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
                 would_write: true,
                 preserved_keys: Vec::new(),
                 proposed_json: Some(proposed_str),
-                command: None,
                 resolved_mcp_index: resolved_str,
                 portable: effective_placement(params).is_some(),
                 config_root: config_root_for(params, ClientScope::Project),
+                wrapper_path: None,
                 detected_workspace_root: detected.root,
                 detected_unity_subpath: detected.subpath,
             });
@@ -541,6 +515,8 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
     } else {
         !file_exists || merged_differs(&existing_value, &merged, params.client, scope)
     };
+    let wrapper = planned_wrapper(params);
+    let would_write = would_write || wrapper.as_ref().is_some_and(wrapper_differs);
     Ok(McpConfigPlan {
         client: params.client,
         target_path: Some(target.to_string_lossy().into_owned()),
@@ -548,10 +524,10 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
         would_write,
         preserved_keys: existing_keys,
         proposed_json: Some(proposed_str),
-        command: None,
         resolved_mcp_index: resolved_str,
         portable: portable_placement(params, scope).is_some(),
         config_root,
+        wrapper_path: wrapper.map(|(path, _)| path.to_string_lossy().into_owned()),
         detected_workspace_root: detected.root,
         detected_unity_subpath: detected.subpath,
     })
@@ -563,7 +539,7 @@ fn write_mcp_config_at(
 ) -> Result<McpConfigWriteResult, McpConfigError> {
     let scope = match resolve_scope(params) {
         Ok(s) => s,
-        Err(McpScopeSkip::CliOnly { .. }) | Err(McpScopeSkip::Manual) => {
+        Err(McpScopeSkip::Manual) => {
             return Err(McpConfigError::new(
                 "noFileTarget",
                 format!(
@@ -633,6 +609,16 @@ fn write_mcp_config_at(
     } else {
         !file_exists || merged_differs(&existing_value, &merged, params.client, scope)
     };
+    // The script goes first: a config that runs a missing wrapper fails to
+    // start, a wrapper without its config is merely unused.
+    let wrapper = planned_wrapper(params);
+    let wrapper_written = match &wrapper {
+        Some(planned) if wrapper_differs(planned) => {
+            write_wrapper(&planned.0, &planned.1)?;
+            true
+        }
+        _ => false,
+    };
     let mut backup_path = String::new();
     if would_write && file_exists {
         let candidate = target.with_extension(
@@ -684,13 +670,42 @@ fn write_mcp_config_at(
         client: params.client,
         target_path: target.to_string_lossy().into_owned(),
         backup_path,
-        would_write,
+        would_write: would_write || wrapper_written,
         proposed_json: proposed_str,
     })
 }
 
+/// `true` when the wrapper at `path` is missing or differs from `body`.
+fn wrapper_differs((path, body): &(PathBuf, String)) -> bool {
+    fs::read_to_string(path).map_or(true, |existing| existing != *body)
+}
+
+/// Write the launch wrapper, executable where the platform has the bit.
+fn write_wrapper(path: &Path, body: &str) -> Result<(), McpConfigError> {
+    let fail = |e: std::io::Error| {
+        McpConfigError::new(
+            "writeFailed",
+            format!("cannot write the launch wrapper {}: {}", path.display(), e),
+        )
+    };
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(fail)?;
+    }
+    crate::config::persistence::atomic_write_at(path, body).map_err(|e| {
+        McpConfigError::new(
+            "writeFailed",
+            format!("cannot write the launch wrapper {}: {}", path.display(), e),
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).map_err(fail)?;
+    }
+    Ok(())
+}
+
 enum McpScopeSkip {
-    CliOnly,
     Manual,
 }
 
@@ -701,7 +716,6 @@ enum McpScopeSkip {
 /// project-only clients).
 fn resolve_scope(params: &McpConfigParams) -> Result<ClientScope, McpScopeSkip> {
     match client_format(params.client) {
-        ClientFormat::CliOnly => Err(McpScopeSkip::CliOnly),
         ClientFormat::ClipboardOnly => Err(McpScopeSkip::Manual),
         ClientFormat::Json | ClientFormat::Toml => {
             if params.client == McpClientId::Cursor {
@@ -729,19 +743,22 @@ fn resolve_scope(params: &McpConfigParams) -> Result<ClientScope, McpScopeSkip> 
 /// Desktop / Cline).
 /// How a client can be pointed at a Unity project without a machine path.
 ///
-/// Mirrors the catalog the `setup` CLI and the setup docs publish, with one
-/// Hub-specific narrowing: Codex, whose only portable form is the committed
-/// wrapper script, resolves to [`PortableStrategy::Absolute`] here, because the
-/// Hub writes config files but does not ship that script —
-/// `unity-open-mcp setup --wrapper` does. ZCode starts stdio servers in the
-/// session's working directory, so its workspace config takes the args form.
+/// Mirrors the catalog the `setup` CLI and the setup docs publish. Codex
+/// expands neither a workspace variable nor a spawn-directory flag, so its
+/// portable form is the committed wrapper script — on Windows, like the CLI's
+/// default, it stays absolute, since the script needs bash. ZCode starts stdio
+/// servers in the session's working directory, so its workspace config takes
+/// the args form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PortableStrategy {
     /// The client expands `${workspaceFolder}` inside env values.
     Interpolation,
     /// The server resolves the path from its own spawn cwd.
     Args,
-    /// No portable form: global config, wrapper-only client, or local launch.
+    /// A committed bash script resolves the path from its own location
+    /// ([`WRAPPER_TEMPLATE`]); the config runs `bash <script>`.
+    Wrapper,
+    /// No portable form: global config, or local launch.
     Absolute,
 }
 
@@ -772,11 +789,12 @@ pub(crate) fn portable_strategy(client: McpClientId, scope: ClientScope) -> Port
         | McpClientId::ZcodeProject
         | McpClientId::Manual
         | McpClientId::Custom => PortableStrategy::Args,
-        // Global-only clients, and Codex, which needs the wrapper script.
+        McpClientId::Codex if cfg!(windows) => PortableStrategy::Absolute,
+        McpClientId::Codex => PortableStrategy::Wrapper,
+        // Global-only clients.
         McpClientId::ClaudeDesktop
         | McpClientId::Cline
         | McpClientId::Antigravity
-        | McpClientId::Codex
         | McpClientId::ZcodeGlobal
         | McpClientId::OpencodeGlobal => PortableStrategy::Absolute,
     }
@@ -807,6 +825,11 @@ pub(crate) fn portable_placement(
     }
     let strategy = portable_strategy(params.client, scope);
     if matches!(strategy, PortableStrategy::Absolute) {
+        return None;
+    }
+    // The wrapper execs the pinned npm package itself; a global install has
+    // no portable form for it.
+    if matches!(strategy, PortableStrategy::Wrapper) && params.launch_mode != McpLaunchMode::Npx {
         return None;
     }
     let workspace = workspace_root_for(params);
@@ -877,9 +900,27 @@ pub(crate) fn relative_subpath(workspace: &Path, project: &Path) -> Option<Strin
 /// wizard offers (and defaults to) the commit-safe form for both layouts,
 /// matching the bridge window's `McpClientCatalog.FindWorkspaceRoot`.
 /// `None` when the project is not inside a repository.
+///
+/// The walk stops at the home folder, like the setup CLI and the bridge
+/// window: a dotfiles repository in `~` is not the project's repository, and
+/// treating it as one would aim commit-safe writes at the clients' global
+/// configs (`~/.cursor/mcp.json`, …).
 pub(crate) fn detect_workspace_root(project: &Path, max_depth: usize) -> Option<PathBuf> {
+    detect_workspace_root_below(project, max_depth, paths::home_dir().as_deref())
+}
+
+fn detect_workspace_root_below(
+    project: &Path,
+    max_depth: usize,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
     let mut current = project.to_path_buf();
     for _ in 0..=max_depth {
+        if home.is_some_and(|home| {
+            same_path(&current.to_string_lossy(), &home.to_string_lossy())
+        }) {
+            return None;
+        }
         if current.join(".git").exists() {
             return Some(current);
         }
@@ -1101,6 +1142,14 @@ pub(crate) fn entry_targets_project(entry: &Value, workspace: &Path, project: &P
         .flatten()
         .filter_map(Value::as_str)
         .collect();
+    // A wrapper entry (`bash scripts/mcp/unity-open-mcp.sh`) names the Unity
+    // folder inside the committed script.
+    if let Some(script) = argv.iter().find(|arg| arg.ends_with(".sh")) {
+        if let Some(subpath) = wrapper_default_subpath(&workspace.join(script)) {
+            let resolved = workspace.join(subpath);
+            return same_path(&resolved.to_string_lossy(), &project.to_string_lossy());
+        }
+    }
     if argv.contains(&"--project-from-cwd") {
         // Both spellings the server accepts; the last one wins, as there.
         let mut subpath = "";
@@ -1174,7 +1223,8 @@ fn resolve_target_path(
         McpClientId::Cline => Some(cline_settings_path(home)),
         McpClientId::Codex => Some(project.join(".codex").join("config.toml")),
         McpClientId::Gemini => Some(project.join(".gemini").join("settings.json")),
-        McpClientId::GithubCopilotCli => Some(project.join(".mcp.json")),
+        // Claude Code's project scope and Copilot CLI read the same file.
+        McpClientId::ClaudeCode | McpClientId::GithubCopilotCli => Some(project.join(".mcp.json")),
         McpClientId::KiloCode => Some(project.join(".kilocode").join("mcp.json")),
         McpClientId::Rider => Some(project.join(".junie").join("mcp").join("mcp.json")),
         McpClientId::UnityAi => Some(project.join("UserSettings").join("mcp.json")),
@@ -1186,8 +1236,8 @@ fn resolve_target_path(
                 .join("antigravity")
                 .join("mcp_config.json"),
         ),
-        // CLI-only / clipboard-only clients have no file target.
-        McpClientId::ClaudeCode | McpClientId::Manual | McpClientId::Custom => None,
+        // Clipboard-only clients have no file target.
+        McpClientId::Manual | McpClientId::Custom => None,
     }
 }
 
@@ -1286,10 +1336,25 @@ fn launch_command_parts(mode: McpLaunchMode, resolved_index: &str) -> (String, V
     }
 }
 
-fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
-    let env = build_env_map(params);
+/// `command` + `args` the entry runs: `bash <wrapper>` for a portable
+/// wrapper entry, else the launch mode's invocation plus any portable args.
+fn entry_command(params: &McpConfigParams, resolved_index: &str) -> (String, Vec<String>) {
+    if let Some(placement) = effective_placement(params) {
+        if matches!(placement.strategy, PortableStrategy::Wrapper) {
+            return (
+                "bash".to_string(),
+                vec![wrapper_rel_path(&placement.unity_subpath).to_string()],
+            );
+        }
+    }
     let (command, mut args) = launch_command_parts(params.launch_mode, resolved_index);
     args.extend(portable_server_args(params));
+    (command, args)
+}
+
+fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
+    let env = build_env_map(params);
+    let (command, args) = entry_command(params, resolved_index);
     let args_value: Value = args.into_iter().map(Value::String).collect();
     match params.client {
         McpClientId::Cursor | McpClientId::ClaudeDesktop => json!({
@@ -1321,7 +1386,7 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
         }),
         // The `type: "stdio"` family — Cline, Codex (when JSON-projected),
         // Gemini, Kilo Code, Rider, Unity AI, VS Code Copilot, VS Copilot,
-        // ZooCode. Ivan's configurators emit `type:"stdio"` + `command` +
+        // ZooCode. These clients take `type:"stdio"` + `command` +
         // `args` + `env` for this family; some add `disabled:false` /
         // `enabled:true`, but those are optional defaults so we keep the
         // minimal shape.
@@ -1340,7 +1405,7 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
         }),
         // Codex's JSON projection (used for the preview when the UI
         // shows JSON; the on-disk write is TOML via build_codex_toml).
-        // Ivan's Codex envelope: `enabled`, `command`, `args`, env under
+        // Codex envelope: `enabled`, `command`, `args`, env under
         // `env`. The real file is TOML — see [`build_codex_toml`].
         McpClientId::Codex => json!({
             "enabled": true,
@@ -1363,8 +1428,7 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
             "tools": ["*"],
             "env": Value::Object(env),
         }),
-        // CLI / clipboard clients never reach the file writer;
-        // they only consume the JSON via the snippet panel.
+        // Claude Code (`.mcp.json`), and the clipboard clients' snippet.
         _ => json!({
             "command": command,
             "args": args_value,
@@ -1418,6 +1482,63 @@ fn workspace_folder_value(unity_subpath: &str) -> String {
     }
 }
 
+/// The committed launch wrapper, byte for byte the template the `setup` CLI
+/// renders (`setup --client codex`) and the bridge window mirrors.
+pub(crate) const WRAPPER_TEMPLATE: &str =
+    include_str!("../../../../mcp-server/templates/mcp-wrapper.sh");
+
+/// Directories that must exist directly under a Unity project root; the
+/// wrapper refuses to start the server anywhere else.
+const UNITY_ROOT_MARKERS: &str = "Assets Packages ProjectSettings";
+
+/// Where the wrapper lives, relative to the workspace root — the same paths
+/// the `setup` CLI uses: `scripts/mcp/` in a monorepo, a dot folder when the
+/// Unity project is the repository.
+pub(crate) fn wrapper_rel_path(unity_subpath: &str) -> &'static str {
+    if unity_subpath.is_empty() {
+        ".unity-open-mcp/mcp-wrapper.sh"
+    } else {
+        "scripts/mcp/unity-open-mcp.sh"
+    }
+}
+
+/// [`WRAPPER_TEMPLATE`] with the hops back to the workspace root, the Unity
+/// subfolder and the npm pin filled in.
+pub(crate) fn render_wrapper_script(unity_subpath: &str) -> String {
+    let depth = wrapper_rel_path(unity_subpath).matches('/').count();
+    let upward = vec![".."; depth].join("/");
+    let version = NPM_PACKAGE.strip_prefix("unity-open-mcp@").unwrap_or(NPM_PACKAGE);
+    WRAPPER_TEMPLATE
+        .replacen("__WORKSPACE_FROM_SCRIPT__", &upward, 1)
+        .replacen("__UNITY_SUBPATH__", unity_subpath, 1)
+        .replacen("__UNITY_ROOT_MARKERS__", UNITY_ROOT_MARKERS, 1)
+        .replacen("__UNITY_OPEN_MCP_VERSION__", version, 1)
+}
+
+/// The wrapper a portable write puts beside the config, as
+/// `(absolute path, body)`. `None` for every other strategy.
+fn planned_wrapper(params: &McpConfigParams) -> Option<(PathBuf, String)> {
+    let placement = effective_placement(params)?;
+    if !matches!(placement.strategy, PortableStrategy::Wrapper) {
+        return None;
+    }
+    let path = Path::new(&workspace_root_for(params)).join(wrapper_rel_path(&placement.unity_subpath));
+    Some((path, render_wrapper_script(&placement.unity_subpath)))
+}
+
+/// The Unity subfolder a committed wrapper bakes in
+/// (`subpath="${UNITY_SUBPATH-Client}"`). `None` when the file is missing or
+/// is not a wrapper this writer recognises.
+fn wrapper_default_subpath(script: &Path) -> Option<String> {
+    let text = fs::read_to_string(script).ok()?;
+    text.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("subpath=\"${UNITY_SUBPATH-")?
+            .strip_suffix("}\"")
+            .map(str::to_string)
+    })
+}
+
 /// Extra server arguments a portable `args`-strategy entry needs. Empty for
 /// every other strategy and for absolute entries.
 fn portable_server_args(params: &McpConfigParams) -> Vec<String> {
@@ -1435,7 +1556,7 @@ fn portable_server_args(params: &McpConfigParams) -> Vec<String> {
 }
 
 /// Resolve the Cline global settings JSON path (VS Code globalStorage).
-/// OS-specific per Ivan's `ClineConfigurator`:
+/// OS-specific:
 /// - macOS: `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
 /// - Windows: `%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json`
 /// - Linux: `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
@@ -1462,8 +1583,8 @@ pub(crate) fn cline_settings_path(home: &Path) -> PathBuf {
 /// Uses the `toml` crate to parse the existing file (when present) into
 /// a `toml::Value`, merge our `[mcp_servers.unity-open-mcp]` table in,
 /// and re-serialize — preserving every unrelated top-level key and every
-/// sibling MCP server. This mirrors Ivan's `TomlAiAgentConfig` merge
-/// semantics (replace only the named entry, keep the rest verbatim).
+/// sibling MCP server (replace only the named entry, keep the rest
+/// verbatim).
 ///
 /// `existing_json` is the JSON projection the planner built from the
 /// same file; for TOML clients we ignore it and re-parse the raw text
@@ -1501,8 +1622,7 @@ fn build_codex_toml(
 
     // Build the unity-open-mcp entry as a toml::Value.
     let env = build_env_map(params);
-    let (command, mut args) = launch_command_parts(params.launch_mode, resolved_index);
-    args.extend(portable_server_args(params));
+    let (command, args) = entry_command(params, resolved_index);
     let mut entry = toml::value::Table::new();
     entry.insert("enabled".to_string(), toml::Value::Boolean(true));
     entry.insert("command".to_string(), toml::Value::String(command));
@@ -1543,6 +1663,7 @@ pub(crate) fn merge_key_path(client: McpClientId) -> Vec<&'static str> {
     match client {
         McpClientId::Cursor
         | McpClientId::ClaudeDesktop
+        | McpClientId::ClaudeCode
         | McpClientId::Cline
         | McpClientId::GithubCopilotCli
         | McpClientId::Antigravity
@@ -1574,8 +1695,6 @@ pub(crate) fn merge_key_path(client: McpClientId) -> Vec<&'static str> {
         // neither visits Manual / Custom targets (see `McpScopeSkip::Manual`
         // and `FILE_BACKED_CLIENTS` in clear.rs).
         McpClientId::Manual | McpClientId::Custom => vec!["mcpServers", MCP_SERVER_KEY],
-        // CLI-only clients (`ClaudeCode`) emit a shell command, not JSON.
-        McpClientId::ClaudeCode => Vec::new(),
     }
 }
 
@@ -1644,92 +1763,6 @@ fn manual_root_for(params: &McpConfigParams) -> PathBuf {
     PathBuf::from(&params.unity_project_path).join("manual-nonwritable")
 }
 
-/// Render the `claude mcp add` command for the Claude Code
-/// client. Two env keys are required; the launch invocation is
-/// keyed off the launch mode — `npx -y unity-open-mcp@1.6.0`
-/// for the bundled package, `unity-open-mcp` for a global
-/// install, and `node <path>` for a local checkout.
-pub fn claude_mcp_add_command(
-    unity_project_path: &str,
-    bridge_port: &str,
-    launch_mode: McpLaunchMode,
-    resolved_index: &str,
-) -> String {
-    let port = resolve_port(unity_project_path, parse_override(bridge_port)).to_string();
-    let invocation = launch_invocation(launch_mode, resolved_index);
-    format!(
-        "claude mcp add {name} --env UNITY_PROJECT_PATH={project} --env UNITY_OPEN_MCP_BRIDGE_PORT={port} -- {invocation}",
-        name = MCP_SERVER_KEY,
-        project = unity_project_path,
-        port = port,
-        invocation = invocation,
-    )
-}
-
-/// Portable variant: no `--env` pair at all. The server resolves the project
-/// from the directory Claude Code spawns it in, so the same command works on
-/// every machine. `--scope project` writes the entry to the workspace's
-/// `.mcp.json`, the file a team commits.
-pub fn claude_mcp_add_command_portable(
-    launch_mode: McpLaunchMode,
-    resolved_index: &str,
-    unity_subpath: &str,
-) -> String {
-    let mut command = format!(
-        "claude mcp add --scope project {name} -- {invocation} --project-from-cwd",
-        name = MCP_SERVER_KEY,
-        invocation = launch_invocation(launch_mode, resolved_index),
-    );
-    if !unity_subpath.is_empty() {
-        command.push_str(&format!(" --unity-subpath {}", shell_quote(unity_subpath)));
-    }
-    command
-}
-
-/// Quote one argument for the shell the operator pastes the command into: a
-/// Unity subfolder with a space (`My Client`) must stay one `--unity-subpath`
-/// value. Double quotes are understood by POSIX shells, PowerShell and cmd
-/// alike; anything without whitespace or quotes is left bare so the common
-/// case reads as documented.
-fn shell_quote(arg: &str) -> String {
-    if arg.is_empty() {
-        return "\"\"".to_string();
-    }
-    if !arg.chars().any(|c| c.is_whitespace() || c == '"') {
-        return arg.to_string();
-    }
-    format!("\"{}\"", arg.replace('"', "\\\""))
-}
-
-fn launch_invocation(launch_mode: McpLaunchMode, resolved_index: &str) -> String {
-    match launch_mode {
-        McpLaunchMode::Npx => format!("npx -y {}", NPM_PACKAGE),
-        McpLaunchMode::Global => "unity-open-mcp".to_string(),
-        McpLaunchMode::Local | McpLaunchMode::LocalOverride => {
-            format!("node {}", resolved_index)
-        }
-    }
-}
-
-fn command_for(params: &McpConfigParams, resolved_index: &str, _is_cli_only: bool) -> String {
-    match params.client {
-        McpClientId::ClaudeCode => match effective_placement(params) {
-            Some(placement) => claude_mcp_add_command_portable(
-                params.launch_mode,
-                resolved_index,
-                &placement.unity_subpath,
-            ),
-            None => claude_mcp_add_command(
-                &params.unity_project_path,
-                &params.bridge_port,
-                params.launch_mode,
-                resolved_index,
-            ),
-        },
-        _ => String::new(),
-    }
-}
-
 // --- Skill copy ----------------------------------------------------------
 //
 // Project-relative skill install paths and the MCP-client → skill-target
@@ -1790,6 +1823,83 @@ pub struct ClientPathsManifest {
 #[serde(rename_all = "camelCase")]
 pub struct ClientPathEntry {
     pub relative_path: String,
+}
+
+/// The template skill and its manifest as this Hub release ships them, for
+/// the default npm setup, which has no toolkit checkout to copy from. Same
+/// version as the packages and the `npx` pin the wizard installs, like the
+/// skill the `setup` CLI copies out of its npm package. A test keeps the
+/// reference files equal to [`SKILL_REFERENCE_FILES`].
+const BUNDLED_SKILL_FILES: &[(&str, &str)] = &[
+    (CLIENT_PATHS_MANIFEST_REL, include_str!("../../../../skills/client-paths.json")),
+    (
+        "skills/unity-open-mcp/SKILL.md",
+        include_str!("../../../../skills/unity-open-mcp/SKILL.md"),
+    ),
+    (
+        "skills/unity-open-mcp/references/batch-and-gates.md",
+        include_str!("../../../../skills/unity-open-mcp/references/batch-and-gates.md"),
+    ),
+    (
+        "skills/unity-open-mcp/references/compile-and-safe-mode.md",
+        include_str!("../../../../skills/unity-open-mcp/references/compile-and-safe-mode.md"),
+    ),
+    (
+        "skills/unity-open-mcp/references/discovery-and-groups.md",
+        include_str!("../../../../skills/unity-open-mcp/references/discovery-and-groups.md"),
+    ),
+    (
+        "skills/unity-open-mcp/references/routing-and-lifecycle.md",
+        include_str!("../../../../skills/unity-open-mcp/references/routing-and-lifecycle.md"),
+    ),
+    (
+        "skills/unity-open-mcp/references/senses-and-tests.md",
+        include_str!("../../../../skills/unity-open-mcp/references/senses-and-tests.md"),
+    ),
+    (
+        "skills/unity-open-mcp/references/yaml-and-offline-work.md",
+        include_str!("../../../../skills/unity-open-mcp/references/yaml-and-offline-work.md"),
+    ),
+];
+
+/// The folder skill copy reads its template from: the toolkit checkout when
+/// the wizard has one, else [`BUNDLED_SKILL_FILES`] laid out under `cache`
+/// with the checkout's shape, so the copy, the up-to-date check and the
+/// preview stay file-based either way.
+fn skill_source_root(toolkit_root: &str, cache: Option<&Path>) -> Result<String, SkillCopyError> {
+    if !toolkit_root.trim().is_empty() {
+        return Ok(toolkit_root.to_string());
+    }
+    let cache = cache.ok_or_else(|| {
+        SkillCopyError::new(
+            "sourceMissing",
+            "No toolkit root is set and the bundled skill has nowhere to unpack.",
+        )
+    })?;
+    let version = NPM_PACKAGE.strip_prefix("unity-open-mcp@").unwrap_or(NPM_PACKAGE);
+    let root = cache.join(format!("bundled-skill-{version}"));
+    for (rel, body) in BUNDLED_SKILL_FILES {
+        let path = root.join(rel);
+        if fs::read_to_string(&path).is_ok_and(|existing| existing == *body) {
+            continue;
+        }
+        let unpacked = path
+            .parent()
+            .map_or(Ok(()), fs::create_dir_all)
+            .and_then(|()| crate::config::persistence::atomic_write_at(&path, body));
+        unpacked.map_err(|e| {
+            SkillCopyError::new(
+                "writeFailed",
+                format!("cannot unpack the bundled skill to {}: {}", path.display(), e),
+            )
+        })?;
+    }
+    Ok(root.to_string_lossy().into_owned())
+}
+
+/// Where the Hub unpacks [`BUNDLED_SKILL_FILES`].
+fn bundled_skill_cache() -> Option<PathBuf> {
+    dirs::cache_dir().map(|dir| dir.join("unity-hub-pro"))
 }
 
 /// Load the manifest from `<toolkitRoot>/skills/client-paths.json`.
@@ -1938,7 +2048,9 @@ impl SkillCopyError {
 /// the per-target preview + "file exists" status.
 #[tauri::command]
 pub async fn plan_skill_copy(params: SkillCopyParams) -> Result<SkillCopyPlan, SkillCopyError> {
-    tauri::async_runtime::spawn_blocking(move || plan_skill_copy_at(&params))
+    tauri::async_runtime::spawn_blocking(move || {
+        plan_skill_copy_at(&with_skill_source(params, bundled_skill_cache().as_deref())?)
+    })
         .await
         .map_err(|e| SkillCopyError::new("planFailed", format!("task failed: {e}")))?
 }
@@ -1955,9 +2067,23 @@ pub async fn copy_skill_files(
     params: SkillCopyParams,
     overwrite_existing: bool,
 ) -> Result<SkillCopyResult, SkillCopyError> {
-    tauri::async_runtime::spawn_blocking(move || copy_skill_files_at(&params, overwrite_existing))
+    tauri::async_runtime::spawn_blocking(move || {
+        copy_skill_files_at(
+            &with_skill_source(params, bundled_skill_cache().as_deref())?,
+            overwrite_existing,
+        )
+    })
         .await
         .map_err(|e| SkillCopyError::new("copyFailed", format!("task failed: {e}")))?
+}
+
+/// `params` with an empty toolkit root replaced by the bundled skill.
+fn with_skill_source(
+    mut params: SkillCopyParams,
+    cache: Option<&Path>,
+) -> Result<SkillCopyParams, SkillCopyError> {
+    params.toolkit_root = skill_source_root(&params.toolkit_root, cache)?;
+    Ok(params)
 }
 
 /// Folder the skill targets go under. An explicit root must be the Unity
@@ -3033,118 +3159,29 @@ mod tests {
     }
 
     #[test]
-    fn write_refuses_for_claude_code_no_file_target() {
+    fn claude_code_writes_the_project_mcp_json() {
         let dir = tempdir().unwrap();
-        let project = dir.path();
-        let params = McpConfigParams {
-            workspace_path: String::new(),
-            portable: false,
-            project_path: project.to_string_lossy().into_owned(),
-            toolkit_root: "/repos/uai".to_string(),
-            mcp_index_override: String::new(),
-            unity_project_path: project.to_string_lossy().into_owned(),
-            bridge_port: String::new(),
-            include_unity_path: false,
-            unity_path: String::new(),
-            client: McpClientId::ClaudeCode,
-            cursor_project_scope: false,
-            launch_mode: McpLaunchMode::Local,
-        };
-        let err = write_mcp_config_at(&params, project).unwrap_err();
-        assert_eq!(err.kind, "noFileTarget");
-    }
-
-    #[test]
-    fn plan_claude_code_returns_command_not_file() {
-        let dir = tempdir().unwrap();
-        let project = dir.path();
-        fs::create_dir_all(project).unwrap();
-        // The MCP index path must resolve to a real file or
-        // the planner errors out with mcpPathInvalid. Create
-        // a fake toolkit root with a fake index.js so the
-        // validation passes for this test.
-        let fake_root = tempdir().unwrap();
-        let mcp_dir = fake_root.path().join("mcp-server").join("dist");
-        fs::create_dir_all(&mcp_dir).unwrap();
-        fs::write(mcp_dir.join("index.js"), "module.exports = {};").unwrap();
-        let params = McpConfigParams {
-            workspace_path: String::new(),
-            portable: false,
-            project_path: project.to_string_lossy().into_owned(),
-            toolkit_root: fake_root.path().to_string_lossy().into_owned(),
-            mcp_index_override: String::new(),
-            unity_project_path: project.to_string_lossy().into_owned(),
-            bridge_port: String::new(),
-            include_unity_path: false,
-            unity_path: String::new(),
-            client: McpClientId::ClaudeCode,
-            cursor_project_scope: false,
-            launch_mode: McpLaunchMode::Local,
-        };
-        let plan = plan_mcp_config_at(&params, project).unwrap();
-        assert!(plan.target_path.is_none());
-        assert!(plan.proposed_json.is_none());
-        let cmd = plan.command.expect("claude-code renders a command");
-        assert!(cmd.starts_with("claude mcp add unity-open-mcp"));
-        assert!(cmd.contains("--env UNITY_PROJECT_PATH="));
-        // Blank bridge_port → the per-project hash port for this fixture.
-        let expected_port = compute_port(&project.to_string_lossy());
-        assert!(cmd.contains(&format!(
-            "--env UNITY_OPEN_MCP_BRIDGE_PORT={expected_port}"
-        )));
-        assert!(cmd.contains("-- node "));
-        assert!(cmd.contains("index.js"));
-    }
-
-    #[test]
-    fn claude_mcp_add_command_uses_computed_port_when_blank() {
-        let cmd = claude_mcp_add_command(
-            "/games/MyGame",
-            "  ",
-            McpLaunchMode::Local,
-            "/u/mcp-server/dist/index.js",
+        let project = dir.path().join("MyGame");
+        fs::create_dir_all(&project).unwrap();
+        let mut params = make_client_params(McpClientId::ClaudeCode, &project);
+        params.launch_mode = McpLaunchMode::Npx;
+        let home = tempdir().unwrap();
+        let result = write_mcp_config_at(&params, home.path()).unwrap();
+        assert_eq!(
+            PathBuf::from(&result.target_path),
+            project.join(".mcp.json")
         );
-        // Blank → derived from the project path (cross-side formula).
-        assert!(cmd.contains(&format!(
-            "UNITY_OPEN_MCP_BRIDGE_PORT={}",
-            compute_port("/games/MyGame")
-        )));
-    }
-
-    #[test]
-    fn claude_mcp_add_command_honors_explicit_override() {
-        let cmd = claude_mcp_add_command(
-            "/games/MyGame",
-            "19199",
-            McpLaunchMode::Local,
-            "/u/mcp-server/dist/index.js",
+        let written: Value =
+            serde_json::from_str(&fs::read_to_string(project.join(".mcp.json")).unwrap()).unwrap();
+        let entry = &written["mcpServers"][MCP_SERVER_KEY];
+        assert_eq!(entry["command"], json!("npx"));
+        assert_eq!(entry["args"], json!(["-y", NPM_PACKAGE]));
+        assert_eq!(
+            entry["env"][PROJECT_PATH_ENV_VAR],
+            json!(project.to_string_lossy())
         );
-        // Explicit override wins over the per-project hash.
-        assert!(cmd.contains("UNITY_OPEN_MCP_BRIDGE_PORT=19199"));
-    }
-
-    #[test]
-    fn claude_mcp_add_command_npx_mode_omits_node_prefix() {
-        let cmd = claude_mcp_add_command(
-            "/games/MyGame",
-            "19199",
-            McpLaunchMode::Npx,
-            "/unused/local/index.js",
-        );
-        assert!(cmd.contains("-- npx -y unity-open-mcp@1.6.0"));
-        assert!(!cmd.contains("-- node "));
-    }
-
-    #[test]
-    fn claude_mcp_add_command_global_mode_uses_bare_binary() {
-        let cmd = claude_mcp_add_command(
-            "/games/MyGame",
-            "19199",
-            McpLaunchMode::Global,
-            "/unused/local/index.js",
-        );
-        assert!(cmd.contains("-- unity-open-mcp"));
-        assert!(!cmd.contains("npx"));
+        // Claude Code takes no Copilot-only `tools` key.
+        assert!(entry.get("tools").is_none());
     }
 
     #[test]
@@ -4225,15 +4262,117 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_portable_command_drops_the_env_pairs() {
+    fn claude_code_portable_entry_matches_the_setup_cli() {
+        // The committed `<repo>/.mcp.json` the `setup --client claude` CLI and
+        // `claude mcp add --scope project` produce: no machine path, no port.
         let (_tmp, workspace, project) = monorepo_tree();
         let params = portable_params(McpClientId::ClaudeCode, &workspace, &project);
         let home = tempfile::tempdir().unwrap();
         let plan = plan_mcp_config_at(&params, home.path()).unwrap();
-        let command = plan.command.unwrap();
-        assert!(!command.contains("--env"));
-        assert!(command.starts_with("claude mcp add --scope project unity-open-mcp -- "));
-        assert!(command.contains("--project-from-cwd --unity-subpath Client"));
+        assert!(plan.portable);
+        assert_eq!(
+            plan.target_path.as_deref().map(PathBuf::from),
+            Some(workspace.join(".mcp.json"))
+        );
+        let proposed: Value = serde_json::from_str(plan.proposed_json.as_deref().unwrap()).unwrap();
+        let entry = &proposed["mcpServers"][MCP_SERVER_KEY];
+        assert_eq!(
+            entry["args"],
+            json!(["-y", NPM_PACKAGE, "--project-from-cwd", "--unity-subpath", "Client"])
+        );
+        assert_eq!(entry["env"], json!({}));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn portable_codex_runs_the_committed_wrapper() {
+        let (_tmp, workspace, project) = monorepo_tree();
+        let params = portable_params(McpClientId::Codex, &workspace, &project);
+        let home = tempfile::tempdir().unwrap();
+        let plan = plan_mcp_config_at(&params, home.path()).unwrap();
+        assert!(plan.portable);
+        let wrapper = workspace.join("scripts").join("mcp").join("unity-open-mcp.sh");
+        assert_eq!(plan.wrapper_path.as_deref().map(PathBuf::from), Some(wrapper.clone()));
+        assert_eq!(
+            plan.target_path.as_deref().map(PathBuf::from),
+            Some(workspace.join(".codex").join("config.toml"))
+        );
+        let toml_body = plan.proposed_json.unwrap();
+        assert!(toml_body.contains("command = \"bash\""), "{toml_body}");
+        assert!(toml_body.contains("scripts/mcp/unity-open-mcp.sh"), "{toml_body}");
+        assert!(!toml_body.contains(PROJECT_PATH_ENV_VAR), "{toml_body}");
+        assert!(!toml_body.contains(&*project.to_string_lossy()), "{toml_body}");
+
+        write_mcp_config_at(&params, home.path()).unwrap();
+        let script = fs::read_to_string(&wrapper).unwrap();
+        assert!(script.contains("subpath=\"${UNITY_SUBPATH-Client}\""), "{script}");
+        assert!(script.contains("workspace_root=\"$(cd \"${script_dir}/../..\" && pwd)\""), "{script}");
+        assert!(script.contains(&format!("exec npx -y \"{NPM_PACKAGE}\"")), "{script}");
+        assert!(!script.contains("__"), "every placeholder is filled: {script}");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(&wrapper).unwrap().permissions().mode() & 0o111, 0o111);
+        }
+        // Detection reads the subfolder back out of the script.
+        let entry = read_config_entry(McpClientId::Codex, &workspace.join(".codex").join("config.toml"))
+            .unwrap();
+        assert!(entry_targets_project(&entry, &workspace, &project));
+        assert!(!entry_targets_project(&entry, &workspace, &workspace.join("Server")));
+        // A second run has nothing left to write.
+        assert!(!plan_mcp_config_at(&params, home.path()).unwrap().would_write);
+    }
+
+    #[test]
+    fn the_bundled_skill_carries_every_reference_file() {
+        let bundled: Vec<&str> = BUNDLED_SKILL_FILES
+            .iter()
+            .filter_map(|(rel, _)| rel.strip_prefix("skills/unity-open-mcp/references/"))
+            .collect();
+        assert_eq!(bundled, SKILL_REFERENCE_FILES);
+    }
+
+    #[test]
+    fn skill_copy_without_a_toolkit_root_uses_the_bundled_skill() {
+        let project = tempdir().unwrap();
+        fs::create_dir_all(project.path().join("Assets")).unwrap();
+        let cache = tempdir().unwrap();
+        let mut params = make_skill_params(project.path(), Path::new(""), McpClientId::ClaudeCode);
+        params.toolkit_root = String::new();
+        let params = with_skill_source(params, Some(cache.path())).unwrap();
+        let plan = plan_skill_copy_at(&params).unwrap();
+        assert!(plan.source_path.is_some());
+        assert_eq!(plan.targets.len(), 1);
+        copy_skill_files_at(&params, false).unwrap();
+        let skill_dir = project.path().join(".claude").join("skills").join("unity-open-mcp");
+        assert_eq!(
+            fs::read_to_string(skill_dir.join("SKILL.md")).unwrap(),
+            BUNDLED_SKILL_FILES[1].1
+        );
+        for reference in SKILL_REFERENCE_FILES {
+            assert!(skill_dir.join(SKILL_REFERENCES_DIR).join(reference).is_file(), "{reference}");
+        }
+        // A toolkit checkout, when set, stays the source.
+        let checkout = make_skill_params(project.path(), Path::new("/checkout"), McpClientId::ClaudeCode);
+        assert_eq!(
+            with_skill_source(checkout, Some(cache.path())).unwrap().toolkit_root,
+            "/checkout"
+        );
+    }
+
+    #[test]
+    fn the_wrapper_sits_in_a_dot_folder_when_the_project_is_the_repository() {
+        assert_eq!(wrapper_rel_path(""), ".unity-open-mcp/mcp-wrapper.sh");
+        let script = render_wrapper_script("");
+        assert!(script.contains("workspace_root=\"$(cd \"${script_dir}/..\" && pwd)\""), "{script}");
+        assert!(script.contains("subpath=\"${UNITY_SUBPATH-}\""), "{script}");
+    }
+
+    #[test]
+    fn a_global_codex_launch_stays_absolute() {
+        let (_tmp, workspace, project) = monorepo_tree();
+        let mut params = portable_params(McpClientId::Codex, &workspace, &project);
+        params.launch_mode = McpLaunchMode::Global;
+        assert!(effective_placement(&params).is_none());
     }
 
     /// Skill-copy targets for `client` under the plan's `config_root`, as the
@@ -4253,8 +4392,8 @@ mod tests {
 
     #[test]
     fn portable_skill_goes_to_the_workspace_root_beside_the_config() {
-        // Claude Code opened at `<repo>` runs the portable command there, so
-        // the skill must sit at `<repo>/.claude/skills`, not under `Client/`.
+        // Claude Code opened at `<repo>` reads `<repo>/.mcp.json`, so the
+        // skill must sit at `<repo>/.claude/skills`, not under `Client/`.
         // The wizard sends no workspace path; the writer detects `<repo>`.
         let (_tmp, workspace, project) = monorepo_tree();
         let home = tempfile::tempdir().unwrap();
@@ -4269,7 +4408,7 @@ mod tests {
             vec![claude_skill.to_string_lossy().into_owned()]
         );
 
-        // A file-backed client: the config and the skill share the root.
+        // Cursor: the config and the skill share the root too.
         let mut params = portable_params(McpClientId::Cursor, &workspace, &project);
         params.workspace_path = String::new();
         params.cursor_project_scope = true;
@@ -4380,19 +4519,26 @@ mod tests {
     }
 
     #[test]
+    fn a_repository_in_the_home_folder_is_not_the_workspace_root() {
+        let home = tempfile::tempdir().unwrap();
+        fs::create_dir_all(home.path().join(".git")).unwrap();
+        let project = home.path().join("Projects").join("MyGame");
+        fs::create_dir_all(project.join("Assets")).unwrap();
+        assert!(detect_workspace_root_below(&project, 4, Some(home.path())).is_none());
+        // A repository below home is still found.
+        fs::create_dir_all(home.path().join("Projects").join(".git")).unwrap();
+        assert_eq!(
+            detect_workspace_root_below(&project, 4, Some(home.path())).as_deref(),
+            Some(home.path().join("Projects").as_path())
+        );
+    }
+
+    #[test]
     fn no_workspace_root_outside_a_repository() {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path().join("MyGame");
         fs::create_dir_all(project.join("Assets")).unwrap();
         assert!(detect_workspace_root(&project, 0).is_none());
-    }
-
-    #[test]
-    fn the_portable_claude_command_quotes_a_subpath_with_spaces() {
-        let command = claude_mcp_add_command_portable(McpLaunchMode::Npx, "", "My Client");
-        assert!(command.ends_with("--project-from-cwd --unity-subpath \"My Client\""), "{command}");
-        let plain = claude_mcp_add_command_portable(McpLaunchMode::Npx, "", "Client");
-        assert!(plain.ends_with("--project-from-cwd --unity-subpath Client"), "{plain}");
     }
 
     #[test]
@@ -4478,6 +4624,7 @@ mod tests {
         for client in [
             McpClientId::Cursor,
             McpClientId::VscodeCopilot,
+            McpClientId::ClaudeCode,
             McpClientId::GithubCopilotCli,
             McpClientId::OpencodeProject,
             McpClientId::Gemini,
@@ -4485,13 +4632,11 @@ mod tests {
         ] {
             assert!(at_root(client), "{client:?}");
         }
-        // Unity AI keeps its config in the Unity project; the wrapper-only
-        // client and global clients have no commit-safe form.
-        for client in [
-            McpClientId::UnityAi,
-            McpClientId::Codex,
-            McpClientId::ClaudeDesktop,
-        ] {
+        // Codex's commit-safe form is the bash wrapper, which Windows skips.
+        assert_eq!(at_root(McpClientId::Codex), !cfg!(windows));
+        // Unity AI keeps its config in the Unity project; global clients
+        // have no commit-safe form.
+        for client in [McpClientId::UnityAi, McpClientId::ClaudeDesktop] {
             assert!(!at_root(client), "{client:?}");
         }
         let unity_ai: Vec<_> = locations

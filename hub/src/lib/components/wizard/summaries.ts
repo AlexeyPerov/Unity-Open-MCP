@@ -44,9 +44,6 @@ export function mcpSummary(input: McpSummaryInput): ToneLabel {
   if (input.mcpWritten) {
     return { tone: "ok", label: "written" };
   }
-  if (input.mcpClient === "claude-code") {
-    return { tone: "warn", label: "cli command" };
-  }
   if (input.mcpClient === "manual") {
     return { tone: "warn", label: "manual" };
   }

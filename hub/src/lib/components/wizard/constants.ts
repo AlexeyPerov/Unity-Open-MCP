@@ -55,7 +55,7 @@ export function stepLabel(id: StepId): string {
 export interface McpClientOption {
   id: McpClientId;
   label: string;
-  kind: "file" | "cli" | "clipboard";
+  kind: "file" | "clipboard";
   /** Category for the grouped picker: IDE-backed agents, CLI agents, or the
    *  manual/clipboard fallbacks. */
   category: "ide" | "cli" | "manual";
@@ -207,12 +207,12 @@ export const MCP_CLIENT_OPTIONS: McpClientOption[] = [
   // --- CLI agents ---
   {
     id: "claude-code",
-    label: "Claude Code (CLI only)",
-    kind: "cli",
+    label: "Claude Code",
+    kind: "file",
     category: "cli",
     popular: true,
     sharedWith:
-      "CLI-only: renders a `claude mcp add` command (no config file is written). Skill installs to .claude/skills/.",
+      "Format: mcpServers JSON at .mcp.json (project, the file `claude mcp add --scope project` writes; shared with GitHub Copilot CLI). Skill installs to .claude/skills/.",
   },
   {
     id: "github-copilot-cli",
@@ -254,9 +254,8 @@ export function mcpClientLabel(id: McpClientId): string {
   return MCP_CLIENT_OPTIONS.find((o) => o.id === id)?.label ?? id;
 }
 
-/** Config-format family (file-backed / cli command / clipboard snippet) for a
- *  client id. */
-export function clientKind(id: McpClientId): "file" | "cli" | "clipboard" {
+/** Config-format family (file-backed / clipboard snippet) for a client id. */
+export function clientKind(id: McpClientId): "file" | "clipboard" {
   return MCP_CLIENT_OPTIONS.find((o) => o.id === id)?.kind ?? "file";
 }
 

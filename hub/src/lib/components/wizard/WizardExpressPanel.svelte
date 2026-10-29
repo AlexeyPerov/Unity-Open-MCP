@@ -27,6 +27,7 @@
     idle: "Ready",
     packages: "Installing Unity packages",
     mcp: "Writing MCP client config",
+    skill: "Installing the agent skill",
     launch: "Launching Unity and verifying bridge",
     done: "Setup complete",
     error: "Setup failed",
@@ -35,6 +36,7 @@
   let phaseList = $derived([
     { id: "packages", label: PHASE_LABELS.packages },
     { id: "mcp", label: PHASE_LABELS.mcp },
+    { id: "skill", label: PHASE_LABELS.skill },
     { id: "launch", label: PHASE_LABELS.launch },
   ] as const);
 
@@ -56,7 +58,7 @@
     return state.expressPhase;
   }
 
-  const ORDER = ["idle", "packages", "mcp", "launch", "done", "error"];
+  const ORDER = ["idle", "packages", "mcp", "skill", "launch", "done", "error"];
 
   function isBefore(a: string, b: string): boolean {
     return ORDER.indexOf(a) < ORDER.indexOf(b);
@@ -68,8 +70,9 @@
     <span class="wiz-eyebrow">Express setup</span>
     <h3 class="wiz-express-title">Set up in one click</h3>
     <p class="wiz-desc">
-      Picks the recommended packages, writes the MCP client config, and
-      launches Unity to verify the bridge — all in one pass. Want control over
+      Picks the recommended packages, writes the MCP client config, installs
+      the agent skill, and launches Unity to verify the bridge — all in one
+      pass. Want control over
       each step? Choose <strong>Customize</strong> on the preset step, or use
       the progress strip to jump to any step.
     </p>

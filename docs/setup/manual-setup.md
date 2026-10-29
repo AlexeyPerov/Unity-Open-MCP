@@ -33,21 +33,24 @@ project folder (the one with `Assets/`, `Packages/`, and `ProjectSettings/`) and
 run:
 
 ```bash
-npx -y unity-open-mcp@1.6.0 setup --client cursor
+npx -y unity-open-mcp@latest setup --client cursor
 ```
 
 Use `claude`, `zcode`, `vscode`, `codex`, `opencode`, or `agents` instead of `cursor` for
 another client. When the Unity project is a subfolder of your repository, run it
 from the repository root and name the folder:
-`npx -y unity-open-mcp@1.6.0 setup --client cursor --unity-subpath Client`. Add
+`npx -y unity-open-mcp@latest setup --client cursor --unity-subpath Client`. Add
 `--dry-run` first to see every file it would change.
 
-The command pins the bridge, verify, and server to one version, merges the MCP
-entry without touching your other servers, and copies the agent skill. When
-the folder is a git repository root, or with `--unity-subpath`, it writes the
-[portable form](portable-config.md), safe to commit. Then go to [step 3](#3-open-unity-and-verify). Every option is described
-in [Agent setup](agent-setup.md#2-run-setup). For other clients, or to edit the
-files yourself, follow steps 1–2.
+The command pins the bridge, verify, and server to the version of the package
+it runs (`@latest` resolves the current release), merges the MCP entry without
+touching your other servers, and copies the agent skill. When the folder is a
+git repository root, or with `--unity-subpath`, it writes the
+[portable form](portable-config.md), safe to commit. Then go to
+[step 3](#3-open-unity-and-verify). Every option is described in
+[CLI and automation](../api/cli-automation.md#project-setup) and
+[Portable MCP config](portable-config.md#write-it-with-the-setup-cli). For other
+clients, or to edit the files yourself, follow steps 1–2.
 
 ## 1) Add the Unity packages
 
@@ -72,6 +75,15 @@ install.
 
 ## 2) Configure your MCP client
 
+**A config you commit** (a project-scoped file such as `.cursor/mcp.json` or
+`.mcp.json` in your repository): use the [portable form](portable-config.md).
+Find your client in its [client matrix](portable-config.md#client-matrix) and
+copy the matching snippet — it names the project without your machine's path,
+so every teammate gets a working config after checkout.
+
+**A per-machine config** (a global client config such as Claude Desktop's, or a
+file you keep out of version control):
+
 1. Open [MCP client configuration](client-configuration.md).
 2. Find your client in the table and note the config file path.
 3. Copy that client’s snippet.
@@ -80,13 +92,11 @@ install.
 5. Save the file (if it already has other MCP servers, add only the
    `unity-open-mcp` entry).
 
-Will this file be committed to your repository? Then skip step 4 and use the
-[portable form](portable-config.md) instead — it names the project without
-your machine's path, so every teammate gets a working config after checkout.
+Either way, pin the same server version as the packages from step 1.
 
 ## 3) Open Unity and verify
 
-1. Open the **same** Unity project (`UNITY_PROJECT_PATH`) in the Editor.
+1. Open the **same** Unity project your MCP config names in the Editor.
 2. Wait for scripts to compile (status bar, bottom-right).
 3. Restart your MCP client so it re-reads the config from step 2.
 4. In Unity, open **Tools → Unity Open MCP Bridge** — it should show
@@ -103,8 +113,8 @@ capabilities). If it returns Unity data, both halves are talking.
 
 ## Troubleshooting
 
-Confirm Unity is open on the same absolute `UNITY_PROJECT_PATH`, compilation
-finished, and the MCP client was restarted. Then follow
+Confirm Unity is open on the same Unity project your MCP config resolves to,
+compilation finished, and the MCP client was restarted. Then follow
 [Troubleshooting](../troubleshooting.md). Modal policy and macOS Accessibility
 details are in [Dialog policy](../dialog-policy.md).
 

@@ -111,12 +111,10 @@ export function buildOpenCodeMcpEntry(
   };
 }
 
-/** The supported MCP client identifiers. `claude-code` is
- *  CLI-only — the wizard shows a `claude mcp add` command
- *  instead of writing a config file. `manual` / `custom` are
+/** The supported MCP client identifiers. `manual` / `custom` are
  *  clipboard-only. Every other id is backed by a writable config
- *  file (JSON, or TOML for `codex`). The full catalog covers the
- *  Ivan-named client surface; see `skills/client-paths.json`. */
+ *  file (JSON, or TOML for `codex`); `claude-code` writes the
+ *  project `.mcp.json`. See `skills/client-paths.json`. */
 export type McpClientId =
   | "cursor"
   | "claude-desktop"
@@ -126,7 +124,7 @@ export type McpClientId =
   | "zcode-global"
   | "zcode-project"
   | "manual"
-  // --- Ivan-parity breadth ---
+  // --- Additional agent clients ---
   | "cline"
   | "codex"
   | "gemini"
@@ -141,11 +139,10 @@ export type McpClientId =
   | "custom";
 
 /** Per-client config-file path shape. `null` means the client is
- *  CLI-only or not backed by a writable JSON file. */
+ *  not backed by a writable config file. */
 export interface McpClientConfigTarget {
   /** OS-resolved absolute path to the config file the wizard will
-   *  merge into. `null` for `claude-code` (CLI only) and `manual`
-   *  (copy-to-clipboard only). */
+   *  merge into. `null` for `manual` (copy-to-clipboard only). */
   path: string | null;
   /** Whether the target is a project-scoped file the user might
    *  want to commit to a repo. Cursor + OpenCode offer both a
@@ -166,8 +163,7 @@ export interface McpClientConfigTarget {
  *  contract shape only; the wizard's Step 4 owns the platform
  *  path resolution and any user toggle for project-scoped writes.
  *
- *  The full catalog (M27 Plan 5) covers the Ivan-named client
- *  surface. Paths here mirror the Rust `resolve_target_path` so
+ *  Paths here mirror the Rust `resolve_target_path` so
  *  the TS preview and the on-disk writer agree. */
 export function mcpClientConfigTarget(
   client: McpClientId,
@@ -185,12 +181,6 @@ export function mcpClientConfigTarget(
         path: null, // OS-specific; resolved in Step 4
         scope: "global",
         mergeKey: "mcpServers.unity-open-mcp",
-      };
-    case "claude-code":
-      return {
-        path: null,
-        scope: "none",
-        mergeKey: "",
       };
     case "opencode-global":
       return {
@@ -242,6 +232,7 @@ export function mcpClientConfigTarget(
         scope: "project",
         mergeKey: "mcpServers.unity-open-mcp",
       };
+    case "claude-code":
     case "github-copilot-cli":
       return {
         path: ".mcp.json",
@@ -296,19 +287,21 @@ export function mcpClientConfigTarget(
 // --- Portable (committable) config ----------------------------------------
 //
 // A monorepo team wants ONE MCP client config in the repository, with no
-// per-developer absolute path in it. Two shapes make that possible; which one
+// per-developer absolute path in it. Three shapes make that possible; which one
 // a client accepts is fixed per client and mirrored in the Rust writer
 // (`hub/src-tauri/src/config/mcp_config.rs`) and the `setup` CLI catalog:
 //
 //   interpolation  the client expands `${workspaceFolder}` inside env values
 //   args           the server resolves the path from its own spawn cwd
 //                  (`--project-from-cwd [--unity-subpath Client]`)
-//   absolute       no portable form: a global config, or a client that needs
-//                  the committed wrapper script the `setup` CLI writes
+//   wrapper        a committed bash script resolves the path from its own
+//                  location; the config runs `bash <script>` (Codex; the
+//                  Rust writer keeps Codex absolute on Windows)
+//   absolute       no portable form: a global config
 //
 // These helpers are the preview side; the Rust writer owns the on-disk merge.
 
-export type PortableStrategy = "interpolation" | "args" | "absolute";
+export type PortableStrategy = "interpolation" | "args" | "wrapper" | "absolute";
 
 /** Workspace variable the interpolating clients expand. */
 export const WORKSPACE_FOLDER_VAR = "${workspaceFolder}";
@@ -340,6 +333,8 @@ export function portableStrategy(
     case "manual":
     case "custom":
       return "args";
+    case "codex":
+      return "wrapper";
     default:
       return "absolute";
   }

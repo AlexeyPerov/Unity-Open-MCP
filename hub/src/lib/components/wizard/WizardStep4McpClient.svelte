@@ -84,7 +84,6 @@
                   <strong>{opt.label}</strong>
                   <small>
                     {#if opt.kind === "file"}writes config file{/if}
-                    {#if opt.kind === "cli"}CLI command only{/if}
                     {#if opt.kind === "clipboard"}copy JSON to clipboard{/if}
                   </small>
                 </span>
@@ -124,7 +123,6 @@
                     <strong>{opt.label}</strong>
                     <small>
                       {#if opt.kind === "file"}writes config file{/if}
-                      {#if opt.kind === "cli"}CLI command only{/if}
                       {#if opt.kind === "clipboard"}copy JSON to clipboard{/if}
                     </small>
                   </span>
@@ -219,7 +217,7 @@
 
   <div class="wiz-field">
     <span class="wiz-label">
-      {state.mcpPlan?.command ? "Claude Code command" : "Generated config"}
+      Generated config
     </span>
     {#if state.mcpPlanning && !state.mcpPlan}
       <p class="wiz-hint">Planning…</p>
@@ -233,7 +231,7 @@
         {/if}
       </p>
     {:else}
-      <pre class="wiz-codeblock" aria-label={state.mcpPlan.command ? "Claude Code command" : "Generated MCP config"}>{state.mcpPreviewText || "—"}</pre>
+      <pre class="wiz-codeblock" aria-label="Generated MCP config">{state.mcpPreviewText || "—"}</pre>
       {#if state.mcpPlan.targetPath}
         <p class="wiz-hint">
           Target: <code>{state.mcpPlan.targetPath}</code>
@@ -258,11 +256,19 @@
           {/if}
         </p>
       {/if}
-      {#if state.mcpPlan.command}
+      {#if state.mcpPlan.wrapperPath}
         <p class="wiz-hint">
-          Claude Code is CLI-only — the wizard
-          renders the <code>claude mcp add</code> command
-          and never writes a config file.
+          Also writes the launch script <code>{state.mcpPlan.wrapperPath}</code>:
+          the config runs it with <code>bash</code>, and it finds the Unity
+          project from its own location. Commit both files.
+        </p>
+      {/if}
+      {#if state.mcpClient === "claude-code" && state.mcpPlan.targetPath}
+        <p class="wiz-hint">
+          Claude Code reads this <code>.mcp.json</code> when it is started
+          in <code>{state.mcpPlan.configRoot}</code>, and asks once to approve
+          the project's servers. It is the same file
+          <code>claude mcp add --scope project</code> writes.
         </p>
       {/if}
     {/if}

@@ -24,18 +24,50 @@ cd MyGame
 npx -y unity-open-mcp@latest setup --client cursor
 ```
 
-Run it in the Unity project folder, or pass `--project <path>`. Supported
-project-config ids are `cursor`, `claude`, `zcode`, `vscode`, `codex`,
-`opencode`, and `agents`.
+Run it in the Unity project folder, or pass `--project <path>`. When the Unity
+project is a subfolder of the repository your AI client opens (a monorepo), run
+it from the repository root and name the folder:
+
+```bash
+cd my-repo
+npx -y unity-open-mcp@latest setup --client cursor --unity-subpath Client
+```
+
+Supported project-config ids are `cursor`, `claude`, `zcode`, `vscode`, `codex`,
+`opencode`, and `agents`. Every npm and Unity package pin it writes is the
+version of the package that runs it.
 Run `npx -y unity-open-mcp@latest setup --help` for dry-run, skill-skip, JSON,
-and exit-code details.
+portable/absolute, and exit-code details.
 
 ### Configure your MCP client
 
-Pick your client and merge a `unity-open-mcp` entry using the canonical
-[MCP client configuration reference](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/client-configuration.md).
-It owns the client-specific paths and JSON/TOML/CLI envelopes. Set
-`UNITY_PROJECT_PATH` to the absolute Unity project root.
+`setup` writes the entry for you. To write it yourself, prefer the committable
+form: it names no machine path, because the server resolves the Unity project
+from the directory the client starts it in. For Claude Code (`.mcp.json`) and
+other clients that start servers in the workspace root:
+
+```json
+{
+  "mcpServers": {
+    "unity-open-mcp": {
+      "command": "npx",
+      "args": ["-y", "unity-open-mcp@1.6.0", "--project-from-cwd", "--unity-subpath", "Client"]
+    }
+  }
+}
+```
+
+Drop `--unity-subpath Client` when the client opens the Unity project itself, and
+keep the version equal to your bridge and verify packages.
+[Portable MCP config](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/portable-config.md)
+has the per-client matrix (`${workspaceFolder}` for Cursor and VS Code, the
+wrapper script for Codex).
+
+For a machine-wide config (Claude Desktop, Cline), or to override a committed
+config locally, set `UNITY_PROJECT_PATH` to the absolute Unity project root
+instead. The
+[MCP client configuration reference](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/client-configuration.md)
+owns the client-specific paths and JSON/TOML/CLI envelopes.
 
 > **Bridge port.** The bridge HTTP port is **derived from the project path**
 > (`20000 + sha256(path) % 10000`, so two projects never collide), and the
@@ -51,9 +83,12 @@ If you prefer a one-time install over `npx` re-resolving on each spawn:
 npm install -g unity-open-mcp
 ```
 
-Then use `"command": "unity-open-mcp", "args": []` (Cursor / Claude Desktop) or
-`"command": ["unity-open-mcp"]` (OpenCode) in your client config. Update with
-`unity-open-mcp update` (or `npm update -g unity-open-mcp`).
+Then use `"command": "unity-open-mcp", "args": ["--project-from-cwd"]` (Claude
+Code and other `mcpServers` clients that start servers in the workspace root) or
+`"command": ["unity-open-mcp", "--project-from-cwd"]` (OpenCode) in your client
+config. Add `--unity-subpath Client` for a monorepo; in a machine-wide config
+such as Claude Desktop, use `"args": []` with an absolute `UNITY_PROJECT_PATH`.
+Update with `unity-open-mcp update` (or `npm update -g unity-open-mcp`).
 
 Core environment variables and modal-policy options are documented in the
 [client configuration reference](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/client-configuration.md)
@@ -68,11 +103,10 @@ and [Dialog policy](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/do
 3. When the live Editor is unavailable, supported tools fall back to headless
    Unity (batch) or offline disk parsing.
 
-The bridge package must be installed in your Unity project. See the
-[agent setup guide](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/agent-setup.md)
-(paste the README prompt into your AI client) or the
-[manual setup guide](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/manual-setup.md)
-for the `Packages/manifest.json` entries.
+The bridge and verify packages must be installed in your Unity project; `setup`
+adds both pins to `Packages/manifest.json`. To add them by hand instead, see the
+[manual setup guide](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/manual-setup.md); for an AI-driven install, see the
+[agent setup guide](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/agent-setup.md).
 
 ## CLI
 

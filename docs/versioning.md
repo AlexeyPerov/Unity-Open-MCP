@@ -78,9 +78,10 @@ npm install -g unity-open-mcp@<bridge-version>
 ```
 
 Keep the MCP client command and both UPM pins aligned when moving to a new
-release. [Manual setup](setup/manual-setup.md) shows the package pins, and
-[MCP client configuration](setup/client-configuration.md) owns the client
-command shapes.
+release. [Manual setup](setup/manual-setup.md) shows the package pins;
+[MCP client configuration](setup/client-configuration.md) owns the per-machine
+client command shapes and [Portable MCP config](setup/portable-config.md) the
+committable ones.
 
 ## Switch a whole project to a release
 

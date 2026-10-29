@@ -7,6 +7,11 @@
 本页每个片段都写的是**你自己的**绝对项目路径，因此该文件只适合留在本机。若想为
 整个团队提交一份配置，见[可移植 MCP 配置](portable-config.md)。
 
+首次为 Cursor、Claude Code、ZCode、VS Code Copilot、Codex、OpenCode 或通用智能体
+安装时，优先使用可安全合并的
+[`unity-open-mcp setup`](portable-config.md#用-setup-cli-写入) 命令。下方目录适用于
+其他客户端或手动配置。
+
 ## 按这些步骤做
 
 1. 在[表格](#放在哪里)中找到你的客户端，记下配置文件路径。
@@ -44,12 +49,14 @@
 只要客户端支持，优先使用项目级路径。
 
 `<project>` 指 AI 客户端打开的文件夹，它并不总是 Unity 项目本身。当 Unity 项目
-是更大仓库的子文件夹（`<repo>/Client`）时，把配置放在仓库根目录，并让
-`UNITY_PROJECT_PATH` 继续指向 Unity 文件夹：
+是更大仓库的子文件夹（`<repo>/Client`）时，把配置放在仓库根目录，并让它指向
+Unity 文件夹。要提交的配置以相对工作区的方式指明该文件夹——各客户端的可提交形式见
+[可移植 MCP 配置](portable-config.md)；只在本机使用的配置可以改用绝对路径：
 
 ```
 my-game/                    <- AI 客户端在此打开，配置也放在这里
-  .cursor/mcp.json          <- UNITY_PROJECT_PATH = /abs/my-game/Client
+  .cursor/mcp.json          <- 提交到仓库：UNITY_PROJECT_PATH = ${workspaceFolder}/Client
+                               仅本机：    UNITY_PROJECT_PATH = /abs/my-game/Client
   Client/                   <- Unity 项目（Assets/、Packages/）
   Server/
 ```
@@ -57,9 +64,6 @@ my-game/                    <- AI 客户端在此打开，配置也放在这里
 桥接窗口的 **Configure AI client** 面板会搜索 Unity 项目本身以及最多四层父
 文件夹，因此这种布局会显示 **Configured: yes**，并在 **Found in** 中给出找到
 的文件路径。
-
-放在仓库根目录的配置完全不必写绝对路径 —— 可提交的形式见
-[可移植 MCP 配置](portable-config.md)。
 
 ## 复制这些
 

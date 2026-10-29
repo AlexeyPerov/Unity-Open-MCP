@@ -309,7 +309,7 @@
   let expressActive = $state(false);
   let expressRunning = $state(false);
   let expressPhase = $state<
-    "idle" | "packages" | "mcp" | "launch" | "done" | "error"
+    "idle" | "packages" | "mcp" | "skill" | "launch" | "done" | "error"
   >("idle");
   let expressError = $state<string | null>(null);
 
@@ -1111,11 +1111,13 @@
 
   $effect(() => {
     if (currentStep !== "step4b" && currentStep !== "done") return;
-    const root = toolkitRoot;
+    // An empty toolkit root plans from the template skill bundled with the
+    // Hub, so the default npm setup installs the skill without a checkout.
+    const root = toolkitRoot.trim();
     const projectPath = wizardProjectPath;
     const targetRoot = skillRoot;
     const client = mcpClient;
-    if (!projectPath || !root) {
+    if (!projectPath) {
       skillPlan = null;
       return;
     }
@@ -1157,7 +1159,7 @@
 
   let mcpPreviewText = $derived.by(() => {
     if (!mcpPlan) return "";
-    return mcpPlan.command ?? mcpPlan.proposedJson ?? "";
+    return mcpPlan.proposedJson ?? "";
   });
 
   function canWriteMcpConfig(): boolean {
@@ -1179,12 +1181,10 @@
 
   function primaryActionLabel(): string {
     if (clientKind(mcpClient) === "file") return "Write config";
-    if (clientKind(mcpClient) === "cli") return "Copy command";
     return "Copy to clipboard";
   }
 
   function secondaryActionLabel(): string {
-    if (mcpPlan?.command) return "Copy command";
     return "Copy JSON";
   }
 
@@ -1200,14 +1200,8 @@
     }
     try {
       await navigator.clipboard.writeText(text);
-      copyToast = mcpPlan?.command
-        ? "Copied claude mcp add command to clipboard"
-        : "Copied MCP config JSON to clipboard";
-      S.appendDrawerLog(
-        mcpPlan?.command
-          ? "copied claude mcp add command to clipboard"
-          : "copied MCP config JSON to clipboard"
-      );
+      copyToast = "Copied MCP config JSON to clipboard";
+      S.appendDrawerLog("copied MCP config JSON to clipboard");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       copyToast = `copy failed: ${msg}`;
@@ -1281,9 +1275,9 @@
 
   async function copySkillFilesClick() {
     if (skillCopying) return;
-    const root = toolkitRoot;
+    const root = toolkitRoot.trim();
     const projectPath = wizardProjectPath;
-    if (!projectPath || !root || !skillPlan) return;
+    if (!projectPath || !skillPlan) return;
     const needsOverwrite = skillPlanHasDiffering();
     if (needsOverwrite && !skillOverwriteAck) {
       skillError = {
@@ -1663,7 +1657,7 @@
       expressPhase = "packages";
       await runExpressPackages();
 
-      // Phase 2 — MCP config (file clients only; CLI/clipboard just copies).
+      // Phase 2 — MCP config (file clients only; clipboard clients just copy).
       expressPhase = "mcp";
       if (clientKind(mcpClient) === "file" && canWriteMcpConfig()) {
         await writeMcpConfigClick();
@@ -1671,7 +1665,11 @@
         await copyMcpJson();
       }
 
-      // Phase 3 — launch + verify the bridge.
+      // Phase 3 — the template skill, beside the config the client loads.
+      expressPhase = "skill";
+      await runExpressSkill();
+
+      // Phase 4 — launch + verify the bridge.
       expressPhase = "launch";
       await runStep5Verify();
 
@@ -1704,10 +1702,9 @@
    *  to install. If packages are already up to date (or no toolkit root is set
    *  to derive the git remote), this is a no-op. */
   async function runExpressPackages() {
-    // Without a toolkit root we cannot derive the git remote for the package
-    // install. If packages are already installed this is fine (nothing to do);
-    // otherwise the express path is not offered (see expressEligible).
-    if (!toolkitRoot.trim()) return;
+    // Local packages point `file:` paths into the checkout; the default git
+    // remote install needs no toolkit root (see expressEligible).
+    if (useLocalPackages && !toolkitRoot.trim()) return;
     if (!mergePlan) {
       // The merge plan is computed reactively when step3 is current; force a
       // plan now so the express path can install even without visiting step3.
@@ -1736,6 +1733,26 @@
       );
     }
     await installManifest();
+  }
+
+  /** Express skill phase — install the template skill for the chosen client.
+   *  Never overwrites: a skill the user already has (customised or not) is
+   *  left in place, and the Agent skill step can still replace it. */
+  async function runExpressSkill() {
+    const params: SkillCopyParamsWire = {
+      projectPath: wizardProjectPath,
+      skillRoot,
+      toolkitRoot: toolkitRoot.trim(),
+      mcpClient: clientToWire(mcpClient),
+    };
+    const plan = await planSkillCopy(params);
+    if (!plan.sourcePath || plan.targets.length === 0) return;
+    if (plan.targets.every((t) => t.exists)) return;
+    const result = await copySkillFiles(params, false);
+    skillResult = result;
+    S.appendDrawerLog(
+      `AI Setup: copied ${result.copied.length} skill file(s), skipped ${result.skipped.length} for ${wizardProjectName}`,
+    );
   }
 
   function skipSkillStep() {

@@ -97,14 +97,17 @@ Unity-пакеты и опциональное приложение [Unity Hub P
    npx -y unity-open-mcp@latest setup --client cursor
    ```
 
-   Вместо `cursor` можно использовать `claude`, `zcode`, `vscode`, `codex`,
-   `opencode` или `agents`. Команда установит согласованные pins, конфигурацию
-   проекта и встроенный скил; подробности — в
-   [Ручной установке](docs/ru/setup/manual-setup.md).
+   В монорепозитории запустите её из корня репозитория и назовите папку Unity:
+   `setup --client cursor --unity-subpath Client`. Вместо `cursor` можно
+   использовать `claude`, `zcode`, `vscode`, `codex`, `opencode` или `agents`.
+   Команда установит согласованные pins, конфигурацию проекта и встроенный скил.
+   Из корня репозитория она пишет конфигурацию без машинных путей, которую
+   команда может коммитить, — см.
+   [Переносимую конфигурацию MCP](docs/ru/setup/portable-config.md).
 2. **Unity Hub Pro:** используйте графический поток из
    [Установки через мастер](docs/ru/setup/wizard-setup.md).
-3. **Вручную:** скопируйте конфигурацию пакетов и клиента из
-   [Конфигурации MCP-клиента](docs/ru/setup/client-configuration.md).
+3. **Вручную:** добавьте пакеты Unity по [Ручной установке](docs/ru/setup/manual-setup.md),
+   затем запись клиента из [Конфигурации MCP-клиента](docs/ru/setup/client-configuration.md).
 4. **Локальный чекаут:** соберите и запустите репозиторий с помощью
    [Установки для разработки](docs/ru/setup/development-setup.md).
 5. **Экспериментально — ИИ-агент:** вставьте промпт ниже в ваш ИИ-клиент.
@@ -116,12 +119,15 @@ Unity-пакеты и опциональное приложение [Unity Hub P
 Установите Unity Open MCP в этот проект Unity, точно следуя
 https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/docs/setup/agent-setup.md
 (загрузите процедуру заново; не импровизируйте по памяти).
-Определите абсолютный корень проекта Unity и мой клиент, затем выполните
-npx -y unity-open-mcp@latest setup --project <абсолютный-проект> --client <id>.
+Определите мой клиент и корень проекта Unity, затем выполните шаг 2 этой страницы:
+npx -y unity-open-mcp@latest setup --project <абсолютный-проект-unity> --client <id>
+или, если мой клиент открыт на папке выше проекта Unity (монорепозиторий),
+из этой папки: npx -y unity-open-mcp@latest setup --client <id> --unity-subpath <относительная-папка-unity>
 Пусть этот пакет выберет все версии и скопирует встроенный SKILL.md; не
 выдумывайте версии, не переписывайте скил и не вызывайте generate_skill.
 Выполняйте шаги самостоятельно и остановитесь только для действия пользователя.
-Если монорепозиторий уже открыт локально, читайте docs/setup/agent-setup.md с диска.
+Если доступен локальный чекаут репозитория Unity-Open-MCP, читайте
+docs/setup/agent-setup.md с диска вместо загрузки.
 ```
 
 </details>

@@ -89,8 +89,12 @@ live tools time out. Errors mention **`dead_bridge`** or **`main_thread_blocked`
 ## MCP client cannot connect
 
 1. Confirm the bridge Status tab shows **Running** and **Ping** succeeds.
-2. Check your MCP client config uses the **same absolute project path** as the
-   open Unity project (`UNITY_PROJECT_PATH`).
+2. Check that your MCP client config resolves to the **same Unity project** that
+   is open in the Editor: the server prints
+   `[unity-open-mcp] Unity project resolved to … (source: …)` on stderr at
+   startup. A committed config resolves it from the client's working directory
+   (`--project-from-cwd`, `${workspaceFolder}`) — see
+   [Portable MCP config](setup/portable-config.md#how-the-project-path-is-resolved).
 3. See [MCP client configuration](setup/client-configuration.md) for client
    paths and snippets,
    [Agent setup](setup/agent-setup.md) for the AI-driven install path, and
@@ -105,9 +109,12 @@ The **Client** stage in the connection strip is a file heuristic. It searches th
 Unity project and up to four parent folders for a project-scoped client config,
 so a Unity project nested in a larger repository (`<repo>/Client` configured by
 `<repo>/.cursor/mcp.json`) reads as configured — the panel's **Found in** field
-names the file it matched. The heuristic still cannot see Claude Code (CLI-only,
-no file) or a config in a location outside that search, so a warning here is
-advisory: if tools work, the client is configured.
+names the file it matched. A project-scoped Claude Code config is a
+`<repo>/.mcp.json` file — written by `setup --client claude` or
+`claude mcp add --scope project` — and is found like the others. The heuristic
+cannot see an entry `claude mcp add` stored without `--scope project` (it lands
+in `~/.claude.json`) or a config in a location outside that search, so a warning
+here is advisory: if tools work, the client is configured.
 
 ## Node or `npx` problems
 

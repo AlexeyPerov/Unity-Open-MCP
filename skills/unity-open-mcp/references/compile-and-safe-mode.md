@@ -61,7 +61,7 @@ The lock at `~/.unity-open-mcp/instances/<sha256(projectPath)>.json` (lowercase 
 
 ### Step 3 — Port mismatch (`UNITY_OPEN_MCP_BRIDGE_PORT` trap)
 
-The lock's `port` is authoritative. An MCP-client config pinned `UNITY_OPEN_MCP_BRIDGE_PORT` to a stale value (the env var always wins on both sides). The agent cannot edit the MCP client config at runtime, so **tell the user** the bridge's actual port and that the `UNITY_OPEN_MCP_BRIDGE_PORT` value in their MCP client config (e.g. `.zcode/cli/config.json`, `.cursor/mcp.json`, `.claude.json`) is wrong — removing it lets both sides derive the per-project hash and agree.
+The lock's `port` is authoritative. An MCP-client config pinned `UNITY_OPEN_MCP_BRIDGE_PORT` to a stale value (the env var always wins on both sides). The agent cannot edit the MCP client config at runtime, so **tell the user** the bridge's actual port and that the `UNITY_OPEN_MCP_BRIDGE_PORT` value in their MCP client config (e.g. `.mcp.json` for a Claude Code project, `.cursor/mcp.json`, `.zcode/config.json`) is wrong — removing it lets both sides derive the per-project hash and agree.
 
 ### Step 4 — Safe Mode / `bridge_compile_failed` recovery
 
@@ -129,7 +129,7 @@ Use `**unity_open_mcp_compile_check**` only for a deliberate "does this build cl
 `compile_check` is always batch. Other batch-capable tools fall back to batch only when the live bridge is down. The MCP server auto-discovers Unity from OS-default Hub install paths (macOS `/Applications/Unity/Hub/Editor`, Windows `C:\Program Files\Unity\Hub\Editor`, Linux `~/Unity/Hub/Editor`) plus the `UNITY_HUB` override; picks the newest unless the lock records a `unityVersion`, then matches that minor line. Explicit env vars:
 
 - `UNITY_PATH` — **optional**, override auto-discovered Unity executable (highest priority).
-- `UNITY_PROJECT_PATH` — absolute project root (optional when a lock exists).
+- `UNITY_PROJECT_PATH` — Unity project root (absolute, or relative to the client's working directory). A committed config uses the server args `--project-from-cwd [--unity-subpath <rel>]` instead; the env var wins when both are set.
 - `UNITY_HUB` — **optional**, override Hub install root.
 
 If Unity can't be found, batch tools return `unity_not_discovered`; only offline reads + `read_compile_errors` still work.

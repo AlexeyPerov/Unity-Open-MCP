@@ -30,18 +30,19 @@ setup 命令会替你完成第 1、2 步。在 Unity 项目文件夹（包含 `A
 和 `ProjectSettings/` 的文件夹）中打开终端并运行：
 
 ```bash
-npx -y unity-open-mcp@1.6.0 setup --client cursor
+npx -y unity-open-mcp@latest setup --client cursor
 ```
 
 其他客户端请把 `cursor` 换成 `claude`、`zcode`、`vscode`、`codex`、`opencode` 或 `agents`。
 若 Unity 项目是仓库的子文件夹，请在仓库根目录运行并指明该文件夹：
-`npx -y unity-open-mcp@1.6.0 setup --client cursor --unity-subpath Client`。
+`npx -y unity-open-mcp@latest setup --client cursor --unity-subpath Client`。
 建议先加 `--dry-run` 查看它将修改的所有文件。
 
-该命令把 bridge、verify 与服务器锁定到同一版本，合并 MCP 条目而不改动其他服务器，
-并复制智能体技能。当该文件夹是 git 仓库根目录或使用了 `--unity-subpath` 时，它会写入
-[可移植形式](portable-config.md)，可以直接提交。随后请继续[第 3 步](#3-打开-unity-并校验)。所有选项见
-[智能体安装](agent-setup.md#2运行-setup)。其他客户端或想手动编辑文件时，请按第 1–2 步操作。
+该命令把 bridge、verify 与服务器锁定到它自身运行的包版本（`@latest` 解析为当前发布版本），
+合并 MCP 条目而不改动其他服务器，并复制智能体技能。当该文件夹是 git 仓库根目录或使用了
+`--unity-subpath` 时，它会写入[可移植形式](portable-config.md)，可以直接提交。随后请继续
+[第 3 步](#3-打开-unity-并校验)。所有选项见 [CLI 与自动化](../../api/cli-automation.md#project-setup)（英文）
+与[可移植 MCP 配置](portable-config.md#用-setup-cli-写入)。其他客户端或想手动编辑文件时，请按第 1–2 步操作。
 
 ## 1) 添加 Unity 包
 
@@ -65,6 +66,12 @@ npx -y unity-open-mcp@1.6.0 setup --client cursor
 
 ## 2) 配置 MCP 客户端
 
+**要提交到仓库的配置**（项目级文件，例如仓库中的 `.cursor/mcp.json` 或 `.mcp.json`）：
+使用[可移植形式](portable-config.md)。在其[客户端能力矩阵](portable-config.md#客户端能力矩阵)
+中找到你的客户端并复制对应片段——它不含本机路径，每位同事检出后即可直接使用。
+
+**仅本机使用的配置**（客户端的全局配置，例如 Claude Desktop，或不纳入版本控制的文件）：
+
 1. 打开 [MCP 客户端配置](client-configuration.md)。
 2. 在表格中找到你的客户端，记下配置文件路径。
 3. 复制该客户端的片段。
@@ -72,12 +79,11 @@ npx -y unity-open-mcp@1.6.0 setup --client cursor
    `Assets/`、`Packages/`、`ProjectSettings/` 的文件夹）。
 5. 保存文件（若已有其他 MCP 服务器，只添加 `unity-open-mcp` 条目）。
 
-这个文件会提交到仓库吗？那就跳过第 4 步，改用[可移植形式](portable-config.md)：
-它不含本机路径，每位同事检出后即可直接使用。
+无论哪种方式，服务器版本都应与第 1 步中的包版本一致。
 
 ## 3) 打开 Unity 并校验
 
-1. 在编辑器中打开**同一个** Unity 项目（`UNITY_PROJECT_PATH`）。
+1. 在编辑器中打开 MCP 配置所指向的**同一个** Unity 项目。
 2. 等待脚本编译完成（右下角状态栏）。
 3. 重启 MCP 客户端，使其重新读取第 2 步的配置。
 4. 在 Unity 中打开 **Tools → Unity Open MCP Bridge** — 应显示 **connected**。
@@ -94,7 +100,7 @@ npx -y unity-open-mcp@1.6.0 setup --client cursor
 
 ## 故障排查
 
-先确认 Unity 已在同一绝对路径 `UNITY_PROJECT_PATH` 上打开、编译完成、且 MCP
+先确认 Unity 打开的是 MCP 配置所解析到的同一个 Unity 项目、编译完成、且 MCP
 客户端已重启。然后遵循 [故障排查](../../troubleshooting.md)。模态框策略与
 macOS 辅助功能细节见 [对话框策略](../../dialog-policy.md)。
 

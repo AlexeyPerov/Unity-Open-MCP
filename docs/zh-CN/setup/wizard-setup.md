@@ -66,7 +66,7 @@
 
 **已经配置过了？** 如果 bridge、verify 和某个 MCP 客户端都已为该项目配置好，Preflight 会显示 **You're ready** 横幅，并提供 **Go to Verify** 快捷方式以跳过应用步骤。
 
-**Express setup：** 当环境检查通过时，Preflight 会提供 **Express setup** — 一次 **Set up** 点击即依次完成包安装 → MCP 客户端写入 → 启动/校验，并附带实时进度列表。完整的逐步路径仍可通过进度条访问。
+**Express setup：** 当环境检查通过时，Preflight 会提供 **Express setup** — 一次 **Set up** 点击即依次完成包安装 → MCP 客户端写入 → 模板技能安装 → 启动/校验，并附带实时进度列表。无需克隆仓库，且不会覆盖已存在的技能。完整的逐步路径仍可通过进度条访问。
 
 ![plot](../../../screenshots/hub-wizard-1.png)
 
@@ -74,7 +74,7 @@
 
 选择 `unity-open-mcp` 服务器的启动方式。默认（`npx`）无需在此配置，向导在 Recommended 路径上会自动跳过此步骤 — 你只会在通过进度条或 **Custom / skip** / **Contributor** 预设时才到达这里。
 
-- **npx (published npm)** *(默认)* — 首次启动时从 npm 拉取最新 `unity-open-mcp`。无需克隆仓库。
+- **npx (published npm)** *(默认)* — 从 npm 运行 `unity-open-mcp`，并固定为与 Unity 包相同的版本（`npx -y unity-open-mcp@1.6.0`）。无需克隆仓库。
 - **Global install** — 启动裸 `unity-open-mcp` 可执行文件（假设 `npm i -g unity-open-mcp`）。适合 CI 镜像的稳定路径。
 - **Local checkout** — 指向一个克隆的 `unity-open-mcp` monorepo。包与技能复制使用工具包根目录。
 - **Custom entrypoint (advanced)** — 指向工具包根目录之外的某个 `mcp-server/dist/index.js` 路径。
@@ -110,12 +110,12 @@ npm run build
 
 选择要连接的 AI 客户端。首屏显示简短的 **Popular** 列表（Cursor、Claude Desktop、VS Code Copilot、Codex、ZCode、Claude Code、Manual）；完整目录在 **Show all clients** 之后，带搜索框。
 
-每个选项都显示它是写入配置文件、仅 CLI，还是复制片段，并在其工具提示里给出目标路径与格式。完整的路径与片段目录见
+每个选项都显示它是写入配置文件还是复制片段，并在其工具提示里给出目标路径与格式。完整的路径与片段目录见
 [MCP 客户端配置](client-configuration.md)。
 
-审阅生成的配置预览（JSON 或 TOML，或 Claude Code 的 CLI 命令），然后写入。写入是合并安全的：无关键和其他 MCP 服务器会被保留，并在原文件旁留下一份 `.bak` 备份。
+审阅生成的配置预览（JSON 或 TOML），然后写入。Claude Code 写入项目的 `.mcp.json`——与 `claude mcp add --scope project` 和 `setup --client claude` 写入的是同一个文件——客户端会请求一次批准项目的服务器。写入是合并安全的：无关键和其他 MCP 服务器会被保留，并在原文件旁留下一份 `.bak` 备份。
 
-当 Unity 项目位于 git 仓库内（例如 `<repo>/Client`，或项目本身就是仓库）时，会出现默认开启的 **Commit-safe config** 选项：条目写入仓库根目录，不含本机路径和 bridge 端口，因此可以提交并与团队共享。如需仅限本机的绝对路径条目，请关闭它。参见[可移植 MCP 配置](portable-config.md)。
+当 Unity 项目位于 git 仓库内（例如 `<repo>/Client`，或项目本身就是仓库）时，会出现默认开启的 **Commit-safe config** 选项：条目写入仓库根目录，不含本机路径和 bridge 端口，因此可以提交并与团队共享。Codex 既不支持工作区变量也不支持启动目录参数，因此它的 commit-safe 形式还会写入启动脚本（`scripts/mcp/unity-open-mcp.sh`；项目本身就是仓库时为 `.unity-open-mcp/mcp-wrapper.sh`），并通过 `bash` 运行；在 Windows 上 Codex 保持本机条目。如需仅限本机的绝对路径条目，请关闭它。Done 页面会列出需要提交的文件。参见[可移植 MCP 配置](portable-config.md)。
 
 **Advanced (optional)：** **Bridge HTTP port** 覆盖位于此处（默认折叠；端口会从项目路径自动推导）。
 
@@ -125,7 +125,7 @@ npm run build
 
 智能体技能为你的 AI 客户端提供 Unity MCP 工具的工作流指引 — mutate→gate→fix 循环、capabilities 优先发现，以及智能体感知（测试、profiler、截图）。此步骤始终显示在进度条中；若你自行管理技能，可跳过。有两个选项写入你所选客户端的同一个项目级技能文件夹（ZCode → `.agents/skills/`，Cursor → `.cursor/skills/` 等）：
 
-- **Install template skill** — 写入模板操作手册（`skills/unity-open-mcp/SKILL.md`）。适用于每个项目的同一份工作流指引；无需构建。可展开 **Preview template skill** 在写入前查看内容。
+- **Install template skill** — 写入模板操作手册（`skills/unity-open-mcp/SKILL.md`）。适用于每个项目的同一份工作流指引；无需构建。没有本地克隆时，Hub 会安装随自身附带的副本，其版本与 Hub 的包和服务器固定版本一致。可展开 **Preview template skill** 在写入前查看内容。
 - **Write project skill** — 生成项目专属的 `SKILL.md`，将模板操作手册与本项目的清单（Unity 版本、已安装的包、关键 MonoBehaviour / ScriptableObject 类型）合并。需要已构建的 MCP 服务器（`mcp-server/dist/index.js`）。
 
 两者都写在上一步写入的 MCP 配置旁边：通常在 Unity 项目中；当提交安全（commit-safe）配置写到仓库根目录时则写在根目录，这样在根目录打开的客户端也能找到技能。Unity AI 会把两者都保留在 Unity 项目中。安装状态检测与 **Clear AI Setup** 查看的是相同位置，因此仓库根目录中的配置和技能都算作本项目的设置。

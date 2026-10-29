@@ -129,14 +129,14 @@ test("mcpSummary: written when just wrote config", () => {
   );
 });
 
-test("mcpSummary: claude-code → cli command tone", () => {
+test("mcpSummary: claude-code is a file client → not configured until written", () => {
   assert.deepEqual(
     mcpSummary({
       detection: detection({ mcpConfigured: HEUR }),
       mcpWritten: false,
       mcpClient: "claude-code",
     }),
-    { tone: "warn", label: "cli command" },
+    { tone: "warn", label: "not configured" },
   );
 });
 

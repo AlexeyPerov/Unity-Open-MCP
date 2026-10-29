@@ -257,7 +257,7 @@ npx -y unity-open-mcp@latest setup --client cursor --unity-subpath Client
 
 只读取机器级配置的客户端（Claude Desktop、Cline、Antigravity，以及全局的
 Cursor/OpenCode/ZCode）保持绝对路径形式，面板会给出说明。Hub 设置向导中的
-**Commit-safe config** 选项在 Unity 项目所在目录或其上方检测到仓库时同样默认开启。
+**Commit-safe config** 选项在 Unity 项目所在目录或其上方（主目录以下）检测到仓库时同样默认开启。向导会自行写入文件：Claude Code 直接写入 `<repo>/.mcp.json` 而不是给出命令，Codex 则在 `.codex/config.toml` 旁写入包装脚本。
 
 ## 保持版本号最新
 

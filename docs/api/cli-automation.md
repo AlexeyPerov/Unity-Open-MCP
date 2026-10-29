@@ -26,6 +26,12 @@ Use `unity-open-mcp --help` or
 
 - `--project <path>` selects the Unity project, absolute or relative to the
   current directory.
+- `--project-from-cwd` uses the current directory as the Unity project; add
+  `--unity-subpath <rel>` when the Unity project is a subfolder of it (a
+  monorepo, run from the repository root). `--unity-subpath` needs
+  `--project-from-cwd` on every command except `setup`. Resolution order and the
+  stderr `Unity project resolved to … (source: …)` line are described in
+  [Portable MCP config](../setup/portable-config.md#how-the-project-path-is-resolved).
 - `--json` emits machine-readable JSON.
 - `--arg key=value` supplies a `run-tool` argument; repeat it for multiple
   arguments.
@@ -56,8 +62,42 @@ npx -y unity-open-mcp@latest setup --client cursor
 
 Without `--project`, the current directory is the Unity project; with
 `--unity-subpath Client` it is that folder below the current directory, and the
-current directory is the repository root the config goes to. `setup` ignores
-`UNITY_PROJECT_PATH` and warns when it names a different project.
+current directory is the repository root the config goes to:
+
+```bash
+cd my-repo
+npx -y unity-open-mcp@latest setup --client cursor --unity-subpath Client
+```
+
+`setup` ignores `UNITY_PROJECT_PATH` and warns when it names a different project.
+
+Client config and the skill are written under the workspace root; the Unity
+package pins always go to the Unity project's `Packages/manifest.json`. Whether
+the entry is committable depends on the layout:
+
+- **Portable by default** when `--unity-subpath` is given (a monorepo) or the
+  workspace is itself a git repository root. The entry names no machine path —
+  `${workspaceFolder}`, `--project-from-cwd [--unity-subpath …]`, or the wrapper
+  script, depending on the client.
+- **Absolute** otherwise, and always for a client that has no portable form.
+  Codex's portable form is a bash wrapper, so on Windows setup writes the
+  absolute entry unless you pass `--portable`.
+- `--portable` / `--no-portable` force the committable or the absolute form.
+- A `--project` (or current directory) inside a larger repository is configured
+  where it is; setup only warns and prints the command to run from the
+  repository root.
+
+Placement options:
+
+- `--workspace <path>` names the repository root explicitly; by default it is
+  the Unity project minus `--unity-subpath`.
+- `--layout unity-root|monorepo` is inferred (`monorepo` when a subpath is
+  set); pass it only to make a mismatch an error.
+- `--wrapper` also writes the committed wrapper script, for clients that expand
+  neither a workspace variable nor an environment variable.
+
+The per-client shapes and the wrapper script are in
+[Portable MCP config](../setup/portable-config.md#write-it-with-the-setup-cli).
 
 `setup` pins the bridge, verify package, and MCP server to the version of the
 package currently running. It accepts the project-config writers `cursor`,

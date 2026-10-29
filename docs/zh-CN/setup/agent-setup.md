@@ -69,16 +69,16 @@ npx -y unity-open-mcp@latest setup \
 
 ### 单体仓库：写入可提交的配置
 
-当 Unity 项目是仓库的子文件夹时，请写明布局。这样配置和技能会写到仓库根目录
-（客户端打开的位置），Unity 版本锁定仍写入 Unity 项目，而写入的条目不含任何
-机器路径 —— 团队提交一次即可：
+当 Unity 项目是仓库的子文件夹时，请在仓库根目录运行 setup 并指明 Unity 文件夹。
+这样配置和技能会写到仓库根目录（客户端打开的位置），Unity 版本锁定仍写入 Unity
+项目，而写入的条目不含任何机器路径 —— 团队提交一次即可：
 
 ```bash
-npx -y unity-open-mcp@latest setup \
-  --project /absolute/path/to/repo/Client \
-  --client cursor \
-  --layout monorepo --unity-subpath Client
+cd /absolute/path/to/repo && npx -y unity-open-mcp@latest setup --client cursor --unity-subpath Client
 ```
+
+`--unity-subpath` 已隐含 monorepo 布局，无需再传 `--layout`。在其他目录中运行时，
+`--project /absolute/path/to/repo/Client --unity-subpath Client` 效果相同。
 
 这是单体仓库的首选路径，优于让每位开发者各自修改绝对路径。若 Unity 项目本身
 就是仓库（`Assets/` 旁有 `.git`），默认命令已会写入可提交形式。细节与客户端矩阵见
@@ -88,7 +88,7 @@ npx -y unity-open-mcp@latest setup \
 不会读取刚写入的文件。询问用户一次，然后运行警告中给出的命令。
 
 选项：`--dry-run` 只报告而不写文件；`--skip-skill` 不修改技能；
-`--json` 输出稳定的机器可读报告；`--layout monorepo --unity-subpath <rel>`
+`--json` 输出稳定的机器可读报告；`--unity-subpath <rel>`
 写入上述可提交形式（工作区为 git 仓库根目录时也是默认行为），`--portable`
 在其他情况下强制该形式，`--no-portable` 强制写绝对路径；`--workspace <path>`
 显式指定仓库根目录；`--wrapper` 额外写出包装脚本；`setup --help` 无需其他必填参数。

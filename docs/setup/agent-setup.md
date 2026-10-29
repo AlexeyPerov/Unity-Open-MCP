@@ -79,17 +79,19 @@ The downloaded package pins all three components to **its own version**. It:
 
 ### Monorepo: write a committed config
 
-When the Unity project is a subfolder of the repository, name the layout. The
-config and skill then go to the repository root (where the client is opened),
-the Unity pins still go to the Unity project, and the written entry carries no
-machine-specific path — so the team commits it once:
+When the Unity project is a subfolder of the repository, run setup from the
+repository root and name the Unity folder. The config and skill then go to the
+repository root (where the client is opened), the Unity pins still go to the
+Unity project, and the written entry carries no machine-specific path — so the
+team commits it once:
 
 ```bash
-npx -y unity-open-mcp@latest setup \
-  --project /absolute/path/to/repo/Client \
-  --client cursor \
-  --layout monorepo --unity-subpath Client
+cd /absolute/path/to/repo && npx -y unity-open-mcp@latest setup --client cursor --unity-subpath Client
 ```
+
+`--unity-subpath` implies the monorepo layout, so `--layout` is not needed.
+From another directory,
+`--project /absolute/path/to/repo/Client --unity-subpath Client` is equivalent.
 
 This is the happy path for a monorepo: prefer it over asking every developer to
 edit an absolute path. When the Unity project IS the repository (a `.git` next
@@ -106,9 +108,9 @@ Useful options:
 - `--skip-skill` installs packages and MCP config without touching a skill.
 - `--json` returns a stable report containing the package version, project,
   client, target paths, pins, byte count, and warnings.
-- `--layout monorepo --unity-subpath <rel>` writes the committed form described
-  above. It is also the default when the workspace is a git repository root;
-  `--portable` forces it elsewhere and `--no-portable` forces the absolute path.
+- `--unity-subpath <rel>` writes the committed form described above. That form
+  is also the default when the workspace is a git repository root; `--portable`
+  forces it elsewhere and `--no-portable` forces the absolute path.
 - `--workspace <path>` names the repository root explicitly instead of deriving
   it from `--project` minus `--unity-subpath`.
 - `--wrapper` also writes the committed wrapper script, for clients that expand

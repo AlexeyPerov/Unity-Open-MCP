@@ -276,7 +276,10 @@ machine path and no bridge port:
 Clients that only read a machine-wide config (Claude Desktop, Cline,
 Antigravity, the global Cursor/OpenCode/ZCode rows) keep the absolute form, and
 the panel says so. The Hub setup wizard's **Commit-safe config** option follows
-the same default when it detects a repository at or above the Unity project.
+the same default when it detects a repository at or above the Unity project
+(below the home folder). The wizard writes the files itself: Claude Code's
+`<repo>/.mcp.json` directly instead of a command, and for Codex the wrapper
+script next to `.codex/config.toml`.
 
 ## Keeping the pin current
 

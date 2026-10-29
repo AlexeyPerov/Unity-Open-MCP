@@ -78,14 +78,15 @@ export interface SetupCommandOptions {
    * Unity root is below the workspace root, otherwise `unity-root`.
    */
   layout?: ProjectLayout;
-  /** Repository root the AI client is opened on. Defaults to the Unity root. */
+  /** Repository root the AI client is opened on. Defaults to the Unity root minus `unitySubpath`. */
   workspacePath?: string;
   /** Unity project folder relative to the workspace root (for example "Client"). */
   unitySubpath?: string;
   /**
    * Force a committable config with no machine path (`--portable`) or the
-   * absolute form (`--no-portable`). Defaults to portable for monorepo
-   * layouts and absolute for a plain Unity-root workspace.
+   * absolute form (`--no-portable`). Defaults to portable for a monorepo
+   * layout or a workspace that is itself a git repository root, and to
+   * absolute otherwise.
    */
   portable?: boolean;
   /** Also write the shipped wrapper script, even when the client does not need it. */

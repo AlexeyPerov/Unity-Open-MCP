@@ -1761,7 +1761,7 @@ export type McpClientIdWire =
   | "zcodeGlobal"
   | "zcodeProject"
   | "manual"
-  // --- Ivan-parity breadth (M27 Plan 5). Mirrors the Rust
+  // --- Additional agent clients. Mirrors the Rust
   //     McpClientId camelCase serialization. ---
   | "cline"
   | "codex"
@@ -1782,7 +1782,8 @@ export type McpClientIdWire =
 /**
  * How the MCP server is launched. Mirrors the Rust `McpLaunchMode`
  * (camelCase serialisation). The default (`npx`) resolves the published
- * npm package via `npx -y unity-open-mcp@0.8.2`; `global` assumes a
+ * npm package via `npx -y unity-open-mcp@<version>` (pinned to the trio
+ * version); `global` assumes a
  * `npm i -g unity-open-mcp` install; the two `local*` modes point at an
  * on-disk `mcp-server/dist/index.js` from a toolkit checkout. The Step 4
  * advanced override field promotes `local` to `localOverride`.
@@ -1824,7 +1825,6 @@ export interface McpConfigPlan {
   wouldWrite: boolean;
   preservedKeys: string[];
   proposedJson: string | null;
-  command: string | null;
   resolvedMcpIndex: string;
   /** `true` when the emitted entry really carries no machine path. */
   portable: boolean;
@@ -1835,9 +1835,15 @@ export interface McpConfigPlan {
    */
   configRoot: string;
   /**
+   * The committed launch script a portable Codex entry runs (`bash <script>`),
+   * written next to the config. `null` for every other entry.
+   */
+  wrapperPath: string | null;
+  /**
    * Repository root detected above the Unity project (nearest ancestor with a
-   * `.git` entry, within four levels). `null` when the Unity project is the
-   * repository root — the portable option is offered only when this is set.
+   * `.git` entry, within four levels, below the home folder) — the Unity
+   * project itself when it is the repository root. `null` outside any
+   * repository; the commit-safe option defaults on only when this is set.
    */
   detectedWorkspaceRoot: string | null;
   /** Unity root relative to `detectedWorkspaceRoot`, POSIX separators. */
@@ -1871,8 +1877,8 @@ export async function planMcpConfig(
 /**
  * Tauri command: apply the Step 4 MCP config merge. Refuses
  * when the MCP index path is missing, when the target client
- * is CLI-only (`claude-code`) or clipboard-only (`manual`),
- * and when the parent folder is not writable.
+ * is clipboard-only (`manual`, `custom`), and when the parent
+ * folder is not writable.
  */
 export async function writeMcpConfig(
   params: McpConfigParamsWire
@@ -1925,7 +1931,7 @@ export type McpClientWire =
   | "zcodeGlobal"
   | "zcodeProject"
   | "manual"
-  // --- Ivan-parity breadth (M27 Plan 5). Mirrors the Rust
+  // --- Additional agent clients. Mirrors the Rust
   //     McpClientId camelCase serialization. ---
   | "cline"
   | "codex"

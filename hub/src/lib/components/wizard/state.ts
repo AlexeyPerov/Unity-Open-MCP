@@ -166,7 +166,7 @@ export interface WizardState {
   // --- Express path (Plan 2 T28.2.4) ---
   expressActive: boolean;
   expressRunning: boolean;
-  expressPhase: "idle" | "packages" | "mcp" | "launch" | "done" | "error";
+  expressPhase: "idle" | "packages" | "mcp" | "skill" | "launch" | "done" | "error";
   expressError: string | null;
   expressEligible: boolean;
 

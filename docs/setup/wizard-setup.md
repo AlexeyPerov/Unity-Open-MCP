@@ -68,7 +68,7 @@ A single **Re-check** button re-runs project detection and the Node probe. Detec
 
 **Already configured?** If the bridge, verify, and an MCP client are all already set up for the project, Preflight offers a **You're ready** banner with a **Go to Verify** shortcut that skips the apply steps.
 
-**Express setup:** when the environment checks pass, Preflight offers **Express setup** — one **Set up** click runs package install → MCP client write → launch/verify with a live progress list. The full step-by-step path stays available via the progress strip.
+**Express setup:** when the environment checks pass, Preflight offers **Express setup** — one **Set up** click runs package install → MCP client write → template skill install → launch/verify with a live progress list. It needs no toolkit checkout, and it never overwrites a skill that is already there. The full step-by-step path stays available via the progress strip.
 
 ![plot](../../screenshots/hub-wizard-1.png)
 
@@ -76,7 +76,7 @@ A single **Re-check** button re-runs project detection and the Node probe. Detec
 
 Choose how the `unity-open-mcp` server is launched. The default (`npx`) needs no configuration here and the wizard auto-skips this step on the Recommended path — you only land here via the progress strip or the **Custom / skip** / **Contributor** preset.
 
-- **npx (published npm)** *(default)* — fetches the latest `unity-open-mcp` from npm on first spawn. No repo clone needed.
+- **npx (published npm)** *(default)* — runs `unity-open-mcp` from npm, pinned to the same release as the Unity packages (`npx -y unity-open-mcp@1.6.0`). No repo clone needed.
 - **Global install** — launches the bare `unity-open-mcp` binary (assumes `npm i -g unity-open-mcp`). Stable path for CI images.
 - **Local checkout** — points at a cloned `unity-open-mcp` monorepo. Packages and skill copy use the toolkit root.
 - **Custom entrypoint (advanced)** — a specific `mcp-server/dist/index.js` path for builds outside the toolkit root.
@@ -112,14 +112,13 @@ For the contributor / community-pack `file:` workflow, see [Development setup](d
 
 Pick the AI client to connect. The first viewport shows a short **Popular** list (Cursor, Claude Desktop, VS Code Copilot, Codex, ZCode, Claude Code, Manual); the full catalog is behind **Show all clients** with a search box.
 
-Each option shows whether it writes a config file, is CLI-only, or copies a
-snippet, with the target path and format in its tooltip. The complete path and
+Each option shows whether it writes a config file or copies a snippet, with the target path and format in its tooltip. The complete path and
 snippet catalog lives in
 [MCP client configuration](client-configuration.md).
 
-Review the generated config preview (JSON or TOML, or a CLI command for Claude Code), then write it. Writes are merge-safe: unrelated keys and sibling MCP servers are preserved, and a `.bak` backup is left next to the original file.
+Review the generated config preview (JSON or TOML), then write it. Claude Code gets the project `.mcp.json` — the same file `claude mcp add --scope project` and `setup --client claude` write — and asks once to approve the project's servers. Writes are merge-safe: unrelated keys and sibling MCP servers are preserved, and a `.bak` backup is left next to the original file.
 
-When the Unity project sits inside a git repository (for example `<repo>/Client`, or the project is the repository itself), a **Commit-safe config** option appears and starts on: the entry goes to the repository root with no machine path and no bridge port, so the file can be committed and shared. Turn it off for a machine-local absolute entry. See [Portable MCP config](portable-config.md).
+When the Unity project sits inside a git repository (for example `<repo>/Client`, or the project is the repository itself), a **Commit-safe config** option appears and starts on: the entry goes to the repository root with no machine path and no bridge port, so the file can be committed and shared. Codex has no workspace variable or spawn-directory flag, so its commit-safe form also writes the launch script (`scripts/mcp/unity-open-mcp.sh`, or `.unity-open-mcp/mcp-wrapper.sh` when the project is the repository) and runs it with `bash`; on Windows Codex stays machine-local. Turn the option off for a machine-local absolute entry. The Done screen lists the files to commit. See [Portable MCP config](portable-config.md).
 
 **Advanced (optional):** the **Bridge HTTP port** override lives here (collapsed by default; the port auto-derives from the project path).
 
@@ -129,7 +128,7 @@ When the Unity project sits inside a git repository (for example `<repo>/Client`
 
 The agent skill gives your AI client workflow guidance for the Unity MCP tools — the mutate→gate→fix loop, capabilities-first discovery, and the agent senses (tests, profiler, screenshots). This step stays visible in the progress strip; skip it if you manage skills yourself. Two options write to the same project-relative skill folder(s) for your selected client (ZCode → `.agents/skills/`, Cursor → `.cursor/skills/`, etc.):
 
-- **Install template skill** — writes the template playbook (`skills/unity-open-mcp/SKILL.md`). The same workflow guidance for every project; no build required. Expand **Preview template skill** to read the content before writing.
+- **Install template skill** — writes the template playbook (`skills/unity-open-mcp/SKILL.md`). The same workflow guidance for every project; no build required. Without a toolkit checkout the Hub installs the copy it ships with, which matches its package and server pins. Expand **Preview template skill** to read the content before writing.
 - **Write project skill** — produces a project-specific `SKILL.md` that merges the template playbook with this project's inventory (Unity version, installed packages, key MonoBehaviour / ScriptableObject types). Requires the built MCP server (`mcp-server/dist/index.js`).
 
 Both options write next to the MCP config the previous step wrote: normally under the Unity project, and under the repository root when a commit-safe config went there, so the client opened at the root also finds the skill. Unity AI keeps both in the Unity project. Setup detection and **Clear AI Setup** look in the same places, so a repository-root config and skill count as this project's setup.

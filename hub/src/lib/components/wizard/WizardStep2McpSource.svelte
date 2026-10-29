@@ -22,7 +22,7 @@
       id: "npx",
       label: "npx (published npm)",
       blurb:
-        "Fetches the latest unity-open-mcp from npm on first spawn. No repo clone needed — the default for most users.",
+        "Runs unity-open-mcp from npm, pinned to the same version as the Unity packages. No repo clone needed — the default for most users.",
     },
     {
       id: "global",

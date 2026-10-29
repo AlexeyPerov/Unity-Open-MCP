@@ -350,6 +350,12 @@ const TRIO_TARGETS = [
     replace: replaceNpmPin,
   },
   {
+    file: "mcp-server/README.md",
+    kind: "md-npm",
+    description: "npm package README portable config example pin (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
     file: "docs/ci/github-actions/unity-verify.yml",
     kind: "md-npm",
     description: "GitHub Actions CI template npm pins (unity-open-mcp@<ver>)",

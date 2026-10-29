@@ -103,13 +103,16 @@ Requires **Unity 2022.3 LTS or newer** and **Node.js 18+** for the MCP server.
    npx -y unity-open-mcp@latest setup --client cursor
    ```
 
-   Use `claude`, `zcode`, `vscode`, `codex`, `opencode`, or `agents` for another
-   supported writer. The command installs matching pins, project config, and the
-   bundled skill; see [Manual setup](docs/setup/manual-setup.md) for details.
+   In a monorepo, run it from the repository root and name the Unity folder:
+   `setup --client cursor --unity-subpath Client`. Use `claude`, `zcode`,
+   `vscode`, `codex`, `opencode`, or `agents` for another supported writer. The
+   command installs matching pins, project config, and the bundled skill. Run
+   from a repository root, it writes a config with no machine path that the team
+   can commit — see [Portable MCP config](docs/setup/portable-config.md).
 2. **Unity Hub Pro:** use the graphical flow in
    [Wizard setup](docs/setup/wizard-setup.md).
-3. **Manual:** copy the package and client configuration yourself from
-   [MCP client configuration](docs/setup/client-configuration.md).
+3. **Manual:** add the Unity packages with [Manual setup](docs/setup/manual-setup.md),
+   then the client entry from [MCP client configuration](docs/setup/client-configuration.md).
 4. **Local checkout:** build and run the repository with
    [Development setup](docs/setup/development-setup.md).
 5. **Experimental — AI agent:** paste the prompt below into your AI client.
@@ -121,12 +124,15 @@ Requires **Unity 2022.3 LTS or newer** and **Node.js 18+** for the MCP server.
 Install Unity Open MCP in this Unity project by following
 https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/docs/setup/agent-setup.md
 exactly (fetch it fresh; do not improvise from memory).
-Resolve this project's absolute Unity root and my client, then run
-npx -y unity-open-mcp@latest setup --project <absolute-project> --client <id>.
+Resolve my client and the Unity project root, then run step 2 of that page:
+npx -y unity-open-mcp@latest setup --project <absolute-unity-project> --client <id>
+or, if my client is opened on a folder above the Unity project (monorepo),
+from that folder: npx -y unity-open-mcp@latest setup --client <id> --unity-subpath <relative-unity-folder>
 Let that package choose all version pins and copy its bundled SKILL.md; do not
 invent versions, rewrite the skill, or call generate_skill. Do every agent step
-yourself and stop only when human action is required. If this monorepo is already
-open locally, read docs/setup/agent-setup.md from disk instead of fetching it.
+yourself and stop only when human action is required. If a local checkout of the
+Unity-Open-MCP repository is available, read docs/setup/agent-setup.md from disk
+instead of fetching it.
 ```
 
 </details>

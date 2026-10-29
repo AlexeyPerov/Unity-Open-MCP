@@ -50,8 +50,9 @@
   {:else if state.skillPlan}
     {#if !state.skillPlan.sourcePath}
       <div class="wiz-block wiz-block-error" role="alert">
-        Source skill file is missing in the toolkit root. Run
-        the wizard again with a valid toolkit checkout.
+        Source skill file is missing in the toolkit root. Clear the
+        toolkit root to use the skill bundled with the Hub, or point it at a
+        valid checkout.
       </div>
     {:else if state.skillPlan.targets.length === 0}
       <p class="wiz-hint wiz-hint-warn">

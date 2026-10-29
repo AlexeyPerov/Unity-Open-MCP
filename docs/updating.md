@@ -35,7 +35,9 @@ Use this order so each step can report any remaining version drift:
    A global or project-local npm installation is updated in place. An `npx`
    process cannot safely replace its own cache, so the command prints the exact
    version and tells you to update the `unity-open-mcp@X.Y.Z` pin in the MCP
-   client configuration (or run with `@latest`). Restart the MCP client after
+   client configuration. Keep that pin exact rather than `@latest`: it must
+   match the bridge and verify pins from step 3, and the bridge window's
+   **Updates** flow moves all three together. Restart the MCP client after
    changing its server install or pin.
 3. **Unity project:** in **Tools → Unity Open MCP Bridge**, use the **Updates**
    section when it is present in the installed bridge. Review the preview, then
@@ -141,4 +143,5 @@ same version.
 
 For an offline first install, the same artifacts and local package entries work;
 the detailed MCP client shapes remain in
-[MCP client configuration](setup/client-configuration.md).
+[MCP client configuration](setup/client-configuration.md), and the committable
+forms for a shared repository are in [Portable MCP config](setup/portable-config.md).

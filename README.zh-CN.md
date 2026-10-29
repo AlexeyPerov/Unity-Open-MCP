@@ -85,13 +85,15 @@ Shader Graph、VFX Graph 与 Memory Profiler 分组会自动激活，其他领�
    npx -y unity-open-mcp@latest setup --client cursor
    ```
 
-   其他受支持的写入器可使用 `claude`、`zcode`、`vscode`、`codex`、
-   `opencode` 或 `agents`。命令会安装匹配的版本锁定、项目配置与内置技能；
-   详见[手动安装](docs/zh-CN/setup/manual-setup.md)。
+   在 monorepo 中，请在仓库根目录运行并指定 Unity 子文件夹：
+   `setup --client cursor --unity-subpath Client`。其他受支持的写入器可使用
+   `claude`、`zcode`、`vscode`、`codex`、`opencode` 或 `agents`。命令会安装匹配的
+   版本锁定、项目配置与内置技能。在仓库根目录运行时，写入的配置不含本机路径，
+   可由团队提交到仓库——参见[可移植 MCP 配置](docs/zh-CN/setup/portable-config.md)。
 2. **Unity Hub Pro：** 使用图形化流程，参见
    [向导安装](docs/zh-CN/setup/wizard-setup.md)。
-3. **手动安装：**从 [MCP 客户端配置](docs/zh-CN/setup/client-configuration.md)
-   复制包与客户端配置。
+3. **手动安装：**按[手动安装](docs/zh-CN/setup/manual-setup.md)添加 Unity 包，
+   再从 [MCP 客户端配置](docs/zh-CN/setup/client-configuration.md)添加客户端条目。
 4. **本地检出：** 构建并运行本仓库，参见
    [开发安装](docs/zh-CN/setup/development-setup.md)。
 5. **实验性 — AI 智能体：**把下面的提示词粘贴到你的 AI 客户端。
@@ -103,11 +105,13 @@ Shader Graph、VFX Graph 与 Memory Profiler 分组会自动激活，其他领�
 按照
 https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/docs/setup/agent-setup.md
 的说明，在这个 Unity 项目中安装 Unity Open MCP（重新获取该流程；不要凭记忆即兴安装）。
-确定此 Unity 项目的绝对根目录和我的客户端，然后运行
-npx -y unity-open-mcp@latest setup --project <绝对项目路径> --client <id>。
+确定我的客户端和 Unity 项目根目录，然后执行该页面的第 2 步：
+npx -y unity-open-mcp@latest setup --project <Unity 项目绝对路径> --client <id>
+或者，如果我的客户端打开的是 Unity 项目上层的文件夹（monorepo），在该文件夹中运行：
+npx -y unity-open-mcp@latest setup --client <id> --unity-subpath <Unity 子文件夹相对路径>
 让该包决定所有版本锁定并复制其内置 SKILL.md；不要编造版本、重写技能或调用 generate_skill。
-自行完成所有智能体步骤，只在需要用户操作时停下。如果 monorepo 已在本地打开，
-请从磁盘读取 docs/setup/agent-setup.md。
+自行完成所有智能体步骤，只在需要用户操作时停下。如果本地有 Unity-Open-MCP
+仓库的检出，请从磁盘读取 docs/setup/agent-setup.md，而不是重新获取。
 ```
 
 </details>

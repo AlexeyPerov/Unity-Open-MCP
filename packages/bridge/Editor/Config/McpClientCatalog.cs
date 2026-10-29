@@ -409,7 +409,8 @@ namespace UnityOpenMcpBridge.Config
 
         /// <summary>
         /// Render the <c>claude mcp add</c> CLI command for the Claude Code
-        /// client. Matches the Hub Rust <c>claude_mcp_add_command</c>.
+        /// client. No <c>--scope</c>: the entry stays machine-local (Claude
+        /// Code's default local scope), as an absolute path must.
         /// </summary>
         public static string ClaudeMcpAddCommand(string unityProjectPath, int bridgePort, string command, IReadOnlyList<string> args)
         {
@@ -430,8 +431,8 @@ namespace UnityOpenMcpBridge.Config
         /// <summary>
         /// Portable <c>claude mcp add</c>: no env pairs, and
         /// <c>--scope project</c> so Claude Code writes the workspace
-        /// <c>.mcp.json</c> the team commits. Matches the Hub Rust
-        /// <c>claude_mcp_add_command_portable</c>.
+        /// <c>.mcp.json</c> the team commits — the file the Hub wizard and
+        /// <c>setup --client claude</c> write directly.
         /// </summary>
         public static string ClaudeMcpAddCommandPortable(string command, IReadOnlyList<string> args)
         {
