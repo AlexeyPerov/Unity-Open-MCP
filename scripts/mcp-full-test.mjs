@@ -961,7 +961,10 @@ function buildSuite() {
   // specs/feedback.md §2C). ok_or_timeout stays because the hang is itself the
   // finding, surfaced in the report.
   // =====================================================================
-  s("run_tests", "G", "unity_senses_run_tests", { mode: "EditMode" }, { timeoutMs: 120_000, expect: "ok_or_timeout", tolerate: ["execution_error"] });
+  // One small fixture: `mode` is now an accepted alias of play_mode, so an
+  // unfiltered call really starts the WHOLE EditMode suite in the live Editor
+  // (it used to be refused as an unknown key and run nothing).
+  s("run_tests", "G", "unity_senses_run_tests", { play_mode: false, test_class: "UnityOpenMcpBridge.Tests.RunIdValidationTests", include_passes: false }, { timeoutMs: 120_000, expect: "ok_or_timeout", tolerate: ["execution_error"] });
 
   return steps;
 }
