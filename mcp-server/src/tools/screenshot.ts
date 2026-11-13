@@ -1,4 +1,5 @@
 import { makeTool } from "./schema-fragments.js";
+import { IMAGE_REGION_PROP, IMAGE_SCALE_PROP, IMAGE_MAX_EDGE_PROP, IMAGE_SAVE_TO_PROP } from "./image-post-process.js";
 
 export const screenshot = makeTool(
   "unity_senses_screenshot",
@@ -14,7 +15,9 @@ export const screenshot = makeTool(
     "is the frame the game rendered, without Editor chrome or the Simulator's device bezel. A " +
     "width/height of another aspect is padded (letterbox), never stretched, and reported as " +
     "scaled_from + content_rect. Game/composed responses name what they were taken at in `capturedAt` " +
-    "(mode, device or size entry, orientation, screen). Returns the saved PNG file path. Requires a " +
+    "(mode, device or size entry, orientation, screen). Post-processing: region crops, scale / max_edge " +
+    "shrink, save_to copies the final PNG (e.g. into a task folder) — no shell image tools needed; " +
+    "`postProcess` reports source_size, region and size. Returns the saved PNG file path. Requires a " +
     "live Unity Editor connection.",
   {
     properties: {
@@ -77,6 +80,10 @@ export const screenshot = makeTool(
             default: "skybox",
             description: "Background for 'isolated' view. Ignored for scene/game/composed.",
           },
+          region: { ...IMAGE_REGION_PROP },
+          scale: { ...IMAGE_SCALE_PROP },
+          max_edge: { ...IMAGE_MAX_EDGE_PROP },
+          save_to: { ...IMAGE_SAVE_TO_PROP },
         },
   },
 );

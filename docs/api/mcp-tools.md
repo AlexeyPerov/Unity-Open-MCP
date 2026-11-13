@@ -544,6 +544,17 @@ Space Overlay UI.
   `device`, `orientation`, `screen` `[w, h]`, the Simulator `safe_area`, and
   `playing`. `unity_senses_visual_compare` adds the same block for `view: "game"`.
   On an Editor without the Game view adapter `mode` is `unknown` with a `note`.
+- **Crop, shrink, save.** Every view takes `region` `[x, y, w, h]` (image
+  pixels, bottom-left origin — for `composed` at native size the game screen,
+  the space of `ui_snapshot` rects; clipped to the image, a rect entirely outside
+  it is `invalid_arguments`), `scale` (0.05–1) and `max_edge` (longest edge in
+  pixels, never upscales), applied in that order to the returned image;
+  `postProcess` reports `source_size`, the applied `region` and the final `size`,
+  while `width` / `height` / `resolution` keep describing the capture.
+  `unity_senses_screenshot` also takes `save_to`: a `.png` path or a directory
+  (trailing slash or existing) the final file is copied to, relative to the
+  project root unless absolute; `Assets/` and `Packages/` are refused (the image
+  would be imported). The response's `savedTo` is the full path.
 
 Set the device or resolution first with
 [`unity_open_mcp_game_view`](playtest.md#unity_open_mcp_game_view), then capture.

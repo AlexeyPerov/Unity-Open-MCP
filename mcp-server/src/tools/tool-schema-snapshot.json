@@ -1100,7 +1100,7 @@
     }
   },
   "unity_senses_screenshot": {
-    "description": "Capture a screenshot from the Unity Editor. Supports four views: 'scene' (the Scene view), 'game' (renders Camera.main only — NOT the full Game view; Screen-Space Overlay UI and multi-camera compositions are NOT included), 'composed' (the player's full composite frame — every camera by depth plus Screen-Space Overlay canvases; use this to verify UI edits), and 'isolated' (a clean 2x2 composite — Front/Right/Back/Top — of a single GameObject with layer culling and background choice). 'composed' without width/height returns the frame at the game's own resolution (the Game view size or the Device Simulator screen — set it first with unity_open_mcp_game_view); in play mode it is the frame the game rendered, without Editor chrome or the Simulator's device bezel. A width/height of another aspect is padded (letterbox), never stretched, and reported as scaled_from + content_rect. Game/composed responses name what they were taken at in `capturedAt` (mode, device or size entry, orientation, screen). Returns the saved PNG file path. Requires a live Unity Editor connection.",
+    "description": "Capture a screenshot from the Unity Editor. Supports four views: 'scene' (the Scene view), 'game' (renders Camera.main only — NOT the full Game view; Screen-Space Overlay UI and multi-camera compositions are NOT included), 'composed' (the player's full composite frame — every camera by depth plus Screen-Space Overlay canvases; use this to verify UI edits), and 'isolated' (a clean 2x2 composite — Front/Right/Back/Top — of a single GameObject with layer culling and background choice). 'composed' without width/height returns the frame at the game's own resolution (the Game view size or the Device Simulator screen — set it first with unity_open_mcp_game_view); in play mode it is the frame the game rendered, without Editor chrome or the Simulator's device bezel. A width/height of another aspect is padded (letterbox), never stretched, and reported as scaled_from + content_rect. Game/composed responses name what they were taken at in `capturedAt` (mode, device or size entry, orientation, screen). Post-processing: region crops, scale / max_edge shrink, save_to copies the final PNG (e.g. into a task folder) — no shell image tools needed; `postProcess` reports source_size, region and size. Returns the saved PNG file path. Requires a live Unity Editor connection.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1120,6 +1120,12 @@
           "minimum": 64,
           "type": "integer"
         },
+        "max_edge": {
+          "description": "Downscale so the longest edge is at most this many pixels (applied after scale; never upscales).",
+          "maximum": 8192,
+          "minimum": 16,
+          "type": "integer"
+        },
         "object_path": {
           "description": "Required for 'isolated' view. Hierarchy path of the target GameObject (e.g. \"Player\" or \"Enemies/Goblin\").",
           "type": "string"
@@ -1130,6 +1136,26 @@
             "safe_area"
           ],
           "type": "string"
+        },
+        "region": {
+          "description": "Crop the captured image to [x, y, w, h] in image pixels, bottom-left origin — for 'composed' at native size that is the game screen, the space of ui_snapshot rects, so a node's rect can be passed as is. Clipped to the image; a rect entirely outside it is invalid_arguments.",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "save_to": {
+          "description": "Also copy the final PNG here: a .png path, or a directory (trailing slash or existing) that keeps the file name. Relative paths resolve against the project root; Assets/ and Packages/ are refused (the image would be imported). The response's savedTo is the full path.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "scale": {
+          "description": "Downscale the (cropped) image by this factor (1 = captured size, the default).",
+          "maximum": 1,
+          "minimum": 0.05,
+          "type": "number"
         },
         "size": {
           "description": "'native' = the game's own resolution (the Game view size or the simulated device screen), no scaling. Implied for 'composed' when width/height are omitted; also valid for 'game' (Camera.main rendered at that size). Do not combine with width/height.",
@@ -1551,6 +1577,12 @@
           "minimum": 64,
           "type": "integer"
         },
+        "max_edge": {
+          "description": "Downscale so the longest edge is at most this many pixels (applied after scale; never upscales).",
+          "maximum": 8192,
+          "minimum": 16,
+          "type": "integer"
+        },
         "object_path": {
           "description": "Required for 'isolated' view. Hierarchy path of the target GameObject (e.g. \"Player\" or \"Enemies/Goblin\").",
           "type": "string"
@@ -1561,6 +1593,21 @@
             "safe_area"
           ],
           "type": "string"
+        },
+        "region": {
+          "description": "Crop the captured image to [x, y, w, h] in image pixels, bottom-left origin — for 'composed' at native size that is the game screen, the space of ui_snapshot rects, so a node's rect can be passed as is. Clipped to the image; a rect entirely outside it is invalid_arguments.",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "scale": {
+          "description": "Downscale the (cropped) image by this factor (1 = captured size, the default).",
+          "maximum": 1,
+          "minimum": 0.05,
+          "type": "number"
         },
         "size": {
           "description": "'native' = the game's own resolution (the Game view size or the simulated device screen), no scaling. Implied for 'composed' when width/height are omitted; also valid for 'game' (Camera.main rendered at that size). Do not combine with width/height.",

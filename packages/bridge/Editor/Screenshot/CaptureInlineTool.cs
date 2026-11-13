@@ -36,11 +36,16 @@ namespace UnityOpenMcpBridge.Screenshot
             string object_path = null,
             string background = "skybox",
             string size = null,
-            string overlay = null)
+            string overlay = null,
+            string region = null,
+            float? scale = null,
+            int? max_edge = null)
         {
             view = (view ?? "scene").ToLowerInvariant();
             var argError = ScreenshotService.ValidateFrameArgs(view, width, height, size, overlay);
             if (argError != null) return ErrorJson("validation_error", argError);
+            var postError = ImagePostProcess.Parse(region, scale, max_edge, null, out var post);
+            if (postError != null) return ErrorJson("invalid_arguments", postError);
             // scene / game / isolated default each missing axis to 1280 / 720; composed defaults to native.
             int w = width ?? 1280, h = height ?? 720;
 
@@ -56,11 +61,11 @@ namespace UnityOpenMcpBridge.Screenshot
                     case "game":
                         if (size == "native" && !ScreenshotService.TryNativeSize(out w, out h))
                             return ErrorJson("native_size_unavailable", "The Game view reports no size yet; open the Game view or pass width/height.");
-                        return BuildFrameJson(view, ScreenshotService.CaptureGameViewFrame(w, h));
+                        return BuildFrameJson(view, ScreenshotService.CaptureGameViewFrame(w, h), post);
                     // Composed view: the full player frame (all cameras + Overlay
                     // UI) at native size unless width/height are passed.
                     case "composed":
-                        return BuildFrameJson(view, ScreenshotService.CaptureComposed(width, height, overlay == "safe_area"));
+                        return BuildFrameJson(view, ScreenshotService.CaptureComposed(width, height, overlay == "safe_area"), post);
                     case "isolated":
                         if (string.IsNullOrEmpty(object_path))
                             return ErrorJson("missing_parameter",
@@ -78,7 +83,7 @@ namespace UnityOpenMcpBridge.Screenshot
                             $"Unknown view '{view}'. Use 'scene', 'game', 'composed', or 'isolated'.");
                 }
 
-                return BuildSuccessJson(view, w, h, png);
+                return BuildSuccessJson(view, w, h, png, post);
             }
             catch (CaptureRefusedException e)
             {
@@ -124,8 +129,9 @@ namespace UnityOpenMcpBridge.Screenshot
             return null;
         }
 
-        private static string BuildSuccessJson(string view, int width, int height, byte[] png)
+        private static string BuildSuccessJson(string view, int width, int height, byte[] png, ImagePostProcess post = null)
         {
+            if (post != null && post.ChangesPixels) png = post.Apply(png);
             var sb = new StringBuilder(png.Length * 2 + 256);
             sb.Append('{');
             sb.Append("\"status\":\"ok\",");
@@ -139,12 +145,14 @@ namespace UnityOpenMcpBridge.Screenshot
             sb.Append("\"mimeType\":\"image/png\",");
             sb.Append("\"byteLength\":").Append(png.Length).Append(',');
             sb.Append("\"inlineImage\":\"").Append(Convert.ToBase64String(png)).Append('"');
+            post?.AppendJson(sb, null);
             sb.Append('}');
             return sb.ToString();
         }
 
-        private static string BuildFrameJson(string view, FrameCapture capture)
+        private static string BuildFrameJson(string view, FrameCapture capture, ImagePostProcess post = null)
         {
+            if (post != null && post.ChangesPixels) capture.Png = post.Apply(capture.Png);
             var sb = new StringBuilder(capture.Png.Length * 2 + 512);
             sb.Append("{\"status\":\"ok\",\"view\":").Append(Esc(view));
             sb.Append(",\"resolution\":\"").Append(capture.Width).Append('x').Append(capture.Height).Append('"');
@@ -152,6 +160,7 @@ namespace UnityOpenMcpBridge.Screenshot
             sb.Append(",\"mimeType\":\"image/png\"");
             sb.Append(",\"byteLength\":").Append(capture.Png.Length);
             sb.Append(",\"inlineImage\":\"").Append(Convert.ToBase64String(capture.Png)).Append('"');
+            post?.AppendJson(sb, null);
             sb.Append('}');
             return sb.ToString();
         }

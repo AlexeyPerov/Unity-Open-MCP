@@ -32,11 +32,17 @@ namespace UnityOpenMcpBridge.Screenshot
             string object_path = null,
             string background = "skybox",
             string size = null,
-            string overlay = null)
+            string overlay = null,
+            string region = null,
+            float? scale = null,
+            int? max_edge = null,
+            string save_to = null)
         {
             view = (view ?? "scene").ToLowerInvariant();
             var argError = ScreenshotService.ValidateFrameArgs(view, width, height, size, overlay);
             if (argError != null) return ErrorJson("validation_error", argError);
+            var postError = ImagePostProcess.Parse(region, scale, max_edge, save_to, out var post);
+            if (postError != null) return ErrorJson("invalid_arguments", postError);
             // scene / game / isolated default each missing axis to 1280 / 720; composed defaults to native.
             int w = width ?? 1280, h = height ?? 720;
 
@@ -54,13 +60,13 @@ namespace UnityOpenMcpBridge.Screenshot
                             return ErrorJson("native_size_unavailable", "The Game view reports no size yet; open the Game view or pass width/height.");
                         var game = ScreenshotService.CaptureGameViewFrame(w, h);
                         game.FilePath = ScreenshotService.SavePng(game.Png, "game");
-                        return BuildFrameJson(view, game);
+                        return BuildFrameJson(view, game, post);
                     // The player's composite frame: every camera by depth +
                     // Screen-Space Overlay canvases (in play mode, the play-mode
                     // view's own render target). Native size unless width/height
                     // are passed; another aspect is padded, never stretched.
                     case "composed":
-                        return BuildFrameJson(view, ScreenshotService.CaptureComposedView(width, height, overlay == "safe_area"));
+                        return BuildFrameJson(view, ScreenshotService.CaptureComposedView(width, height, overlay == "safe_area"), post);
                     case "isolated":
                         if (string.IsNullOrEmpty(object_path))
                             return ErrorJson("missing_parameter",
@@ -78,7 +84,7 @@ namespace UnityOpenMcpBridge.Screenshot
                             $"Unknown view '{view}'. Use 'scene', 'game', 'composed', or 'isolated'.");
                 }
 
-                return BuildSuccessJson(view, w, h, filePath);
+                return BuildSuccessJson(view, w, h, filePath, post);
             }
             catch (CaptureRefusedException e)
             {
@@ -124,8 +130,21 @@ namespace UnityOpenMcpBridge.Screenshot
             return null;
         }
 
-        private static string BuildSuccessJson(string view, int width, int height, string filePath)
+        // Crop / downscale the saved file in place, then copy it to save_to.
+        // Returns the save_to path (null when none was asked for).
+        private static string PostProcessFile(string filePath, ImagePostProcess post)
         {
+            if (post == null || !post.Any) return null;
+            if (post.ChangesPixels)
+                System.IO.File.WriteAllBytes(filePath, post.Apply(System.IO.File.ReadAllBytes(filePath)));
+            if (string.IsNullOrEmpty(post.SaveTo)) return null;
+            var projectRoot = System.IO.Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
+            return post.Save(filePath, projectRoot);
+        }
+
+        private static string BuildSuccessJson(string view, int width, int height, string filePath, ImagePostProcess post = null)
+        {
+            var savedTo = PostProcessFile(filePath, post);
             var sb = new StringBuilder(256);
             sb.Append('{');
             sb.Append("\"status\":\"ok\",");
@@ -137,17 +156,20 @@ namespace UnityOpenMcpBridge.Screenshot
             else
                 sb.Append("\"resolution\":\"").Append(width).Append('x').Append(height).Append("\",");
             sb.Append("\"filePath\":").Append(Esc(filePath));
+            post?.AppendJson(sb, savedTo);
             sb.Append('}');
             return sb.ToString();
         }
 
-        private static string BuildFrameJson(string view, FrameCapture capture)
+        private static string BuildFrameJson(string view, FrameCapture capture, ImagePostProcess post = null)
         {
+            var savedTo = PostProcessFile(capture.FilePath, post);
             var sb = new StringBuilder(512);
             sb.Append("{\"status\":\"ok\",\"view\":").Append(Esc(view));
             sb.Append(",\"resolution\":\"").Append(capture.Width).Append('x').Append(capture.Height).Append('"');
             ScreenshotService.AppendCaptureFields(sb, capture);
             sb.Append(",\"filePath\":").Append(Esc(capture.FilePath));
+            post?.AppendJson(sb, savedTo);
             sb.Append('}');
             return sb.ToString();
         }

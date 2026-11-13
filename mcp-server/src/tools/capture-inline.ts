@@ -1,4 +1,5 @@
 import { makeTool } from "./schema-fragments.js";
+import { IMAGE_REGION_PROP, IMAGE_SCALE_PROP, IMAGE_MAX_EDGE_PROP } from "./image-post-process.js";
 
 // M20 Plan 1 / T20.1.1 — inline-image capture. Same targets as
 // unity_senses_screenshot (scene / game / composed / isolated) but returns the PNG as an
@@ -76,6 +77,9 @@ export const captureInline = makeTool(
             default: "skybox",
             description: "Background for 'isolated' view. Ignored for scene/game.",
           },
+          region: { ...IMAGE_REGION_PROP },
+          scale: { ...IMAGE_SCALE_PROP },
+          max_edge: { ...IMAGE_MAX_EDGE_PROP },
         },
   },
 );
