@@ -190,9 +190,15 @@ group, tags, availability, activation state, route policy, and minimal argument
 example. Unknown names return `unknown_tool`. The example uses illustrative
 locators: replace them with paths from your project before invocation.
 
-For browsing, combine `query` (case-insensitive name/description substring),
-`group`, `tag`, `available`, `active`, `route`, and `mutating`. Results sort by
-tool name and default to 20 per page; use `page_size` and `pagination.next_cursor`.
+For browsing, combine `query`, `group`, `tag`, `available`, `active`, `route`,
+and `mutating`. `query` is split on whitespace, commas, semicolons and pipes; a
+tool matches when its name or description contains any term (case-insensitive),
+so `"component_add component_modify"` lists both tools. With a query, tools whose
+name equals a term (with or without the `unity_open_mcp_` / `unity_senses_`
+prefix) come first, then name hits, then description hits; ties and queryless
+lists sort by tool name. Results default to 20 per page; use `page_size` and
+`pagination.next_cursor`. An empty page carries `emptyReason` naming the terms
+and filters that matched nothing.
 `available: null` means the live inventory is unknown, and does not match either
 boolean filter. Local/offline-capable routes stay available without an Editor.
 Batch-route tools are never in the live inventory; they are available when a

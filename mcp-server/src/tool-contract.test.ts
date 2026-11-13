@@ -50,6 +50,19 @@ test("discovery filters and deterministic pages compose", () => {
   assert.deepEqual(first, discoverTools(ALL_TOOLS, new Set(), session, new Set(), args));
 });
 
+test("a multi-word discovery query ORs its terms and ranks exact names first", () => {
+  const session = new ToolSessionState();
+  const query = "prefab_create prefab_instantiate gameobject_create component_add component_modify prefab_open prefab_save";
+  const result = discoverTools(ALL_TOOLS, new Set(), session, undefined, { query, kind: "tools", page_size: 10 });
+  const names = result.tools.slice(0, 7).map(t => t.name).sort();
+  assert.deepEqual(names, ["component_add", "component_modify", "gameobject_create", "prefab_create", "prefab_instantiate", "prefab_open", "prefab_save"].map(n => `unity_open_mcp_${n}`).sort());
+  const commas = discoverTools(ALL_TOOLS, new Set(), session, undefined, { query: "component_add,component_modify" });
+  assert.deepEqual(commas.tools.slice(0, 2).map(t => t.name).sort(), ["unity_open_mcp_component_add", "unity_open_mcp_component_modify"]);
+  const empty = discoverTools(ALL_TOOLS, new Set(), session, undefined, { query: "zzzz-not-a-word", group: "typed-editor" });
+  assert.equal(empty.tools.length, 0);
+  assert.match(String((empty as any).emptyReason), /"zzzz-not-a-word".*group="typed-editor"/);
+});
+
 test("null property values remain valid; shadowed selectors are rejected", () => {
   const schema = tool("component_modify").inputSchema;
   const args = { game_object_path: "A", component_type: "UnityEngine.Transform", fields: [{ property_path: "m_Reference", value: null }], paths_hint: ["Assets/A.unity"] };

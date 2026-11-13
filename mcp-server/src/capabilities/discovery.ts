@@ -5,7 +5,7 @@ import { INTENT_TAGS } from "./intent-groups.js";
 import { filterVisibleTools, type ToolSessionState } from "../tool-session-state.js";
 import { applyPaging } from "../output-profile.js";
 import { isLocalTool } from "../local-tools.js";
-import { closeToolNames } from "../tool-name-suggest.js";
+import { closeToolNames, toolStem } from "../tool-name-suggest.js";
 
 const POTENTIALLY_MUTATING_LOCAL = new Set(["unity_open_mcp_jobs", "unity_open_mcp_restart_editor", "unity_open_mcp_hub_install_editor", "unity_open_mcp_hub_install_modules", "unity_open_mcp_hub_set_install_path"]);
 
@@ -36,6 +36,7 @@ export function exampleFor(schema: any): Record<string, unknown> {
  * instead (BatchSpawn.headlessAvailable; undefined when not probed).
  */
 export function discoverTools(tools: Tool[], batch: ReadonlySet<string>, session: ToolSessionState, inventory: ReadonlySet<string> | undefined, args: Record<string, any>, headless?: boolean) {
+  const terms = queryTerms(args.query);
   const visible = new Set(filterVisibleTools(tools, session).map(t => t.name));
   const built = buildCapabilities({ tools, batchToolNames: batch, rules: [], fixes: [], availableBridgeTools: inventory }, { kind: "tools", includePlanned: false });
   const rows = (built.tools ?? []).map(t => {
@@ -48,21 +49,59 @@ export function discoverTools(tools: Tool[], batch: ReadonlySet<string>, session
       available: local || t.routePolicy === "offline" || t.routePolicy === "offline-first" ? true
         : routePolicy === "batch" ? headless ?? null : inventory ? inventory.has(t.name) : null,
       tags, example: exampleFor(t.inputSchema) };
-  }).filter(t => (!args.tool_name || t.name === args.tool_name)
-    && (!args.query || `${t.name} ${t.description}`.toLowerCase().includes(String(args.query).toLowerCase()))
+  }).map(t => ({ ...t, queryScore: terms.length ? queryScore(t.name, t.description ?? "", terms) : 0 }))
+    .filter(t => (!args.tool_name || t.name === args.tool_name)
+    && (!terms.length || t.queryScore > 0)
     && (!args.group || t.group === args.group) && (!args.groups || args.groups.includes(t.group))
     && (!args.tag || t.tags.includes(args.tag))
     && (args.available === undefined || t.available === args.available)
     && (args.active === undefined || t.active === args.active)
     && (!args.route || t.routePolicy === args.route)
     && (args.mutating === undefined || t.mutating === args.mutating))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => b.queryScore - a.queryScore || a.name.localeCompare(b.name))
+    .map(({ queryScore: _score, ...t }) => t);
   const page = applyPaging(rows, "tool-discovery", { page_size: args.tool_name ? 1 : Math.min(args.page_size ?? 20, 1000), cursor: args.tool_name ? undefined : args.cursor });
   return { tools: page.page.map(t => {
     if (args.tool_name || args.profile === "full") return t;
     const { inputSchema, description, ...compact } = t;
     return args.profile === "balanced" ? { ...compact, description } : compact;
-  }), pagination: page.block, ...(args.tool_name && !rows.length ? unknownToolError(String(args.tool_name), tools) : {}) };
+  }), pagination: page.block, ...(args.tool_name && !rows.length ? unknownToolError(String(args.tool_name), tools) : {}),
+    ...(!args.tool_name && !rows.length ? { emptyReason: emptyReason(args, terms) } : {}) };
+}
+
+/**
+ * `query` terms: split on whitespace, commas, semicolons and pipes so a list
+ * of tool names (`"prefab_create component_add"`) finds every one of them.
+ */
+export function queryTerms(query: unknown): string[] {
+  if (typeof query !== "string") return [];
+  return [...new Set(query.toLowerCase().split(/[\s,;|]+/).filter(Boolean))];
+}
+
+/**
+ * 0 = no term matched. A term naming the tool exactly (with or without its
+ * prefix) outranks a name substring, which outranks a description hit, so
+ * the tools an agent listed by name come first.
+ */
+function queryScore(name: string, description: string, terms: string[]): number {
+  const lowerName = name.toLowerCase();
+  const stem = toolStem(name);
+  const lowerDescription = description.toLowerCase();
+  let score = 0;
+  for (const term of terms) {
+    if (term === lowerName || term === stem) score += 100;
+    else if (lowerName.includes(term)) score += 10;
+    else if (lowerDescription.includes(term)) score += 1;
+  }
+  return score;
+}
+
+function emptyReason(args: Record<string, any>, terms: string[]): string {
+  const filters = ["group", "groups", "tag", "available", "active", "route", "mutating"]
+    .filter(key => args[key] !== undefined)
+    .map(key => `${key}=${JSON.stringify(args[key])}`);
+  const what = terms.length ? `No tool name or description contains any of ${terms.map(t => JSON.stringify(t)).join(", ")}` : "No tool matched";
+  return `${what}${filters.length ? ` with ${filters.join(", ")}` : ""}. Drop a filter, or try a shorter term (e.g. "prefab").`;
 }
 
 function unknownToolError(name: string, tools: Tool[]) {

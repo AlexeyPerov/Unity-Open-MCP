@@ -57,7 +57,7 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_build_set_scenes", 347 },
             { "unity_open_mcp_build_set_target", 402 },
             { "unity_open_mcp_build_start", 573 },
-            { "unity_open_mcp_capabilities", 692 },
+            { "unity_open_mcp_capabilities", 731 },
             { "unity_open_mcp_checkpoint_create", 145 },
             { "unity_open_mcp_cinemachine_brain_ensure", 318 },
             { "unity_open_mcp_cinemachine_camera_list", 88 },

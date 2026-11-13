@@ -15,7 +15,7 @@ export const agentCapabilities = makeTool(
   {
     properties: {
           tool_name: { type: "string", description: "Exact lookup: one full schema and its lifecycle, route, availability, tags and example." },
-          query: { type: "string" },
+          query: { type: "string", description: "Words or tool names separated by spaces/commas; a tool matches when its name or description contains any of them. Exact names rank first." },
           group: { type: "string" },
           tag: { type: "string" },
           available: { type: "boolean" },
