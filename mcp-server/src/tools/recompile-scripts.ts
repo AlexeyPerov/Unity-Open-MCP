@@ -1,5 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
+import { IGNORE_SCENE_DIRTY_BASE, GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 
 // feedback-01-08-glm §5 — a first-class "force a real recompile and wait for
 // it" primitive. Fills the gap left by assets_refresh / execute_csharp, which
@@ -28,6 +28,7 @@ export const recompileScripts = makeTool(
   {
     required: ["paths_hint"],
         properties: {
+          ignore_scene_dirty: { ...IGNORE_SCENE_DIRTY_BASE, description: "Opt out of the active-scene dirty guard. When false (default), the call is refused with code `scene_dirty` if any loaded scene has unsaved changes (the reload this call triggers could raise Unity's native save modal). Set true to proceed and accept the risk." },
           paths_hint: {
             ...PATHS_HINT_TYPE,
             description:

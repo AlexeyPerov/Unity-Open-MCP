@@ -1,5 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
+import { IGNORE_SCENE_DIRTY_BASE, GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 
 // M16 Plan 4 — typed UPM package add. Mutating: writes Packages/manifest.json
 // and triggers package resolution (may domain-reload). Runs the full gate
@@ -26,6 +26,7 @@ export const packageAdd = makeTool(
               "'https://github.com/user/repo.git#v1.0.0'; local path 'file:../MyPackage'; local " +
               "tarball 'file:../MyPackage.tgz'.",
           },
+          ignore_scene_dirty: { ...IGNORE_SCENE_DIRTY_BASE, description: "Opt out of the active-scene dirty guard. When false (default), the call is refused with code `scene_dirty` if any loaded scene has unsaved changes (the reload this call triggers could raise Unity's native save modal). Set true to proceed and accept the risk." },
           paths_hint: { ...PATHS_HINT_TYPE, description: "Mutation scope — pass [\"Packages/manifest.json\"]. The gate validates against this " + "scope; packages-lock.json is touched implicitly by UPM resolution and does not need " + "to be listed. There is no whole-project fallback." },
           gate: { ...GATE_PROP, description: "Gate mode. Default 'enforce' — fails the call if the add surfaces new errors." },
         },

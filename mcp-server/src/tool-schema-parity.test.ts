@@ -12,7 +12,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -319,4 +319,53 @@ test("execute_menu's description names the ceiling it tells the caller to raise"
     description.includes(String(BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS)),
     "execute_menu must name the transport cap where it invites a larger timeout_ms",
   );
+});
+
+// ---------------------------------------------------------------------------
+// Every tool the bridge's dirty-scene guard can refuse must publish its opt-out.
+// The guard preflights the RestartThenSettle lifecycle (SceneDirtyGuard.AppliesTo)
+// and its refusal tells the caller to "retry with ignore_scene_dirty: true"; a
+// schema without the key turned that hint into invalid_arguments. The set is
+// read from the bridge source (the ToolLifecycle.cs table + [BridgeTool]
+// attributes) so a new RestartThenSettle tool cannot ship without the key.
+// run_tests runs the same guard inside the tool.
+// ---------------------------------------------------------------------------
+
+function findRepoFile(relative: string): string | null {
+  let dir = HERE;
+  for (let i = 0; i < 10; i++) {
+    const candidate = join(dir, relative);
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+function walkCs(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) walkCs(path, out);
+    else if (entry.name.endsWith(".cs")) out.push(path);
+  }
+  return out;
+}
+
+test("every dirty-guarded tool declares ignore_scene_dirty", () => {
+  const lifecycle = findRepoFile(join("packages", "bridge", "Editor", "Bridge", "ToolLifecycle.cs"));
+  assert.ok(lifecycle, "bridge source not found — run from a checkout");
+  const guarded = new Set<string>(["unity_senses_run_tests"]);
+  for (const m of readFileSync(lifecycle!, "utf-8").matchAll(/\{\s*"(unity_[a-z_]+)",\s*LifecyclePolicy\.RestartThenSettle\s*\}/g))
+    guarded.add(m[1]);
+  for (const file of walkCs(dirname(dirname(lifecycle!)))) {
+    for (const m of readFileSync(file, "utf-8").matchAll(/\[BridgeTool\("(unity_[a-z_]+)"[^\]]*Lifecycle\s*=\s*LifecyclePolicy\.RestartThenSettle/g))
+      guarded.add(m[1]);
+  }
+  assert.ok(guarded.has("unity_open_mcp_recompile_scripts") && guarded.has("unity_open_mcp_upgrade"), [...guarded].join(", "));
+  const missing = [...guarded].filter((name) => {
+    const tool = ALL_TOOLS.find((t) => t.name === name);
+    return tool && !(tool.inputSchema.properties as Record<string, unknown> | undefined)?.ignore_scene_dirty;
+  });
+  assert.deepEqual(missing, [], `guarded tools without ignore_scene_dirty: ${missing.join(", ")}`);
 });

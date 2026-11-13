@@ -1,5 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { makeTool } from "./schema-fragments.js";
+import { IGNORE_SCENE_DIRTY_BASE, makeTool } from "./schema-fragments.js";
 
 export const runTests = makeTool(
   "unity_senses_run_tests",
@@ -17,6 +17,7 @@ export const runTests = makeTool(
     "failures come back verbatim in the error. " +
     "This call is terminal: it starts the run AND waits for the results file, so there is no " +
     "polling step for the caller to perform — `run_id` starts a run, it does not read one. " +
+    "A loaded scene with unsaved changes refuses the run with scene_dirty (save it first, or ignore_scene_dirty). " +
     "It also cannot be a nested unity_open_mcp_batch_execute step (the batch route has no " +
     "results poller and is refused up-front with batch_step_requires_server_poll).",
   {
@@ -62,6 +63,14 @@ export const runTests = makeTool(
               "Client-side polling budget (milliseconds) the server waits for the results file. " +
               "Not a bridge parameter — the bridge run is async and writes a results file " +
               "the server polls. Raise for PlayMode (domain reload) or large suites.",
+          },
+          ignore_scene_dirty: {
+            ...IGNORE_SCENE_DIRTY_BASE,
+            description:
+              "Opt out of the dirty-scene preflight. When false (default), the run is refused with scene_dirty " +
+              "while a loaded scene has unsaved changes: the Test Framework would ask \"Scene(s) Have Been " +
+              "Modified\" and that native prompt blocks the Editor until a human answers. Save first " +
+              "(unity_open_mcp_scene_save); true starts the run anyway and the prompt appears.",
           },
           mode: {
             type: "string",

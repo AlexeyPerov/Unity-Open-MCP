@@ -10,7 +10,7 @@ import { EditorWedgeCache, scanForFdExhaustion } from "./editor-wedge.js";
 import type { FdExhaustionScan } from "./editor-wedge.js";
 import { detectStaleAssembly } from "./unity-log.js";
 import { deriveIsError } from "./gate-error.js";
-import { readFileSync, readdirSync, realpathSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -708,6 +708,51 @@ export class LiveClient implements Router {
     return this.pollTestResults(body.runId, args);
   }
 
+  /** How long the run-never-began signature must hold before the poll gives up. */
+  testStartBlockedAfterMs = 15_000;
+  /** How often the poll looks for that signature (it costs a lock read and maybe a /ping). */
+  testStartBlockedCheckMs = 2_000;
+
+  /**
+   * True when the run has not reached RunStarted and the Editor shows the
+   * main_thread_wedged signature (bridge_status uses the same pair): a stale
+   * instance heartbeat while the listener still answers /ping. A stale
+   * heartbeat alone is normal once tests execute (they hold the main thread),
+   * which is why the started marker gates this.
+   */
+  private async testRunBlockedBeforeStart(startedPath: string): Promise<boolean> {
+    if (!this.projectPath || existsSync(startedPath)) return false;
+    if (classifyInstance(readInstanceLock(this.projectPath)) !== "dead_bridge") return false;
+    try {
+      const res = await this.fetchWithTimeout("/ping", { method: "GET" }, 2000);
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  private testRunBlockedResult(runId: string, blockedMs: number): CallToolResult {
+    const seconds = Math.round(blockedMs / 1000);
+    const message =
+      `Test run ${runId} never started: the Unity main thread has been blocked for ${seconds}s+ before the ` +
+      "Test Framework began the run (heartbeat stale, listener alive) — almost always a modal dialog, e.g. " +
+      "\"Scene(s) Have Been Modified\" for a scene with unsaved changes. Do NOT raise timeout_ms. An operator " +
+      "must close the dialog in the Unity UI; the run may then start and write its results file unread. " +
+      "Save dirty scenes (unity_open_mcp_scene_save) before running tests again.";
+    return makeErrorResult({
+      code: "main_thread_blocked",
+      message,
+      detail: {
+        error: { code: "main_thread_blocked", message },
+        runId,
+        agentNextSteps: [
+          "Tell the operator a Unity dialog is open and must be closed in the Unity UI (no tool can dismiss it).",
+          "Then call unity_open_mcp_bridge_status until status is running, save dirty scenes with unity_open_mcp_scene_save, and re-run the tests.",
+        ],
+      },
+    });
+  }
+
   private async pollTestResults(
     runId: string,
     args: Record<string, unknown>,
@@ -726,6 +771,18 @@ export class LiveClient implements Router {
       statusDir(),
       `test-results-${runId}.json`,
     );
+
+    // A run that never begins: the Test Framework can raise a native modal
+    // before RunStarted ("Scene(s) Have Been Modified" when a dirty scene was
+    // run with ignore_scene_dirty, or any other prompt). Without this check the
+    // poll waited out the whole timeout_ms while every other tool already
+    // answered main_thread_blocked. Signature, sustained for
+    // testStartBlockedAfterMs: no test-started marker, a stale heartbeat (main
+    // thread not ticking) and a listener that still answers /ping.
+    const startedPath = join(statusDir(), `test-started-${runId}.json`);
+    let blockedSince: number | null = null;
+    let lastBlockedCheck = 0;
+
 
     // M9 (round-2 review) — read the results file atomically. The bridge writes
     // it with a plain `File.WriteAllText` (TestRunnerService.cs:104), which is
@@ -796,6 +853,7 @@ export class LiveClient implements Router {
       } catch {
         // best-effort cleanup — the result is already in hand
       }
+      try { unlinkSync(startedPath); } catch { /* the bridge clears it on finish too */ }
       prevSnapshot = null;
       return {
         content: [{ type: "text", text: content }],
@@ -805,6 +863,16 @@ export class LiveClient implements Router {
 
     let intervalMs = minIntervalMs;
     while (Date.now() < deadline) {
+      if (Date.now() - lastBlockedCheck >= this.testStartBlockedCheckMs) {
+        lastBlockedCheck = Date.now();
+        if (await this.testRunBlockedBeforeStart(startedPath)) {
+          blockedSince ??= lastBlockedCheck;
+          if (Date.now() - blockedSince >= this.testStartBlockedAfterMs && !existsSync(resultsPath))
+            return this.testRunBlockedResult(runId, Date.now() - blockedSince);
+        } else {
+          blockedSince = null;
+        }
+      }
       let snapshot: { size: number; mtimeMs: number } | null = null;
       try {
         const st = statSync(resultsPath);

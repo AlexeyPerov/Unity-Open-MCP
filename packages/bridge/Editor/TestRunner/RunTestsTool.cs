@@ -25,8 +25,20 @@ namespace UnityOpenMcpBridge.TestRunner
             string test_class = null,
             string test_method = null,
             string run_id = null,
-            bool include_passes = true)
+            bool include_passes = true,
+            bool ignore_scene_dirty = false)
         {
+            // The Test Framework asks "Scene(s) Have Been Modified" before a run
+            // (EditMode and PlayMode alike). That native modal blocks the main
+            // thread until a human answers, so preflight the same dirty-scene
+            // guard the disruptive tools use and refuse BEFORE scheduling
+            // anything. ignore_scene_dirty: true proceeds and accepts the prompt.
+            if (!ignore_scene_dirty)
+            {
+                var guard = SceneDirtyGuard.CheckWithAutoSave();
+                if (!guard.Allowed) return TestRunnerService.BuildSceneDirtyJson(guard);
+            }
+
             bool callerSuppliedRunId = !string.IsNullOrEmpty(run_id);
             if (!callerSuppliedRunId)
                 run_id = System.Diagnostics.Process.GetCurrentProcess().Id + "-"
@@ -121,6 +133,7 @@ namespace UnityOpenMcpBridge.TestRunner
             TestCallbacks callbacks = null;
 
             callbacks = new TestCallbacks(
+                onStarted: () => TestRunnerState.MarkStarted(runId),
                 onResult: r => TestRunnerService.CollectResult(r, results),
                 onFinished: _ =>
                 {

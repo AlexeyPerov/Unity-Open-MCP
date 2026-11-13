@@ -74,12 +74,7 @@ namespace UnityOpenMcpBridge
         internal static GateDispatchResult Refuse(ToolRequestContract contract, string body)
         {
             if (!AppliesTo(contract, body)) return null;
-            var guard = Check();
-            if (!guard.Allowed && SceneDirtyAutoSave.IsEnabled)
-            {
-                SceneDirtyAutoSave.TrySaveAllDirty(out _, out _);
-                guard = Check();
-            }
+            var guard = CheckWithAutoSave();
             if (guard.Allowed) return null;
             return new GateDispatchResult
             {
@@ -91,6 +86,21 @@ namespace UnityOpenMcpBridge
                 DirtyScenePaths = guard.DirtyScenePaths,
                 AgentNextSteps = BridgeJson.BuildSceneDirtyNextSteps(guard.DirtyScenePaths)
             };
+        }
+
+        // Check() plus the opt-in auto-save retry. Shared by the gate path above
+        // and by guarded tools that answer outside the gate envelope (run_tests:
+        // the Test Framework raises its own "Scene(s) Have Been Modified" prompt
+        // before a run). Must be called on the main thread.
+        internal static GuardResult CheckWithAutoSave()
+        {
+            var guard = Check();
+            if (!guard.Allowed && SceneDirtyAutoSave.IsEnabled)
+            {
+                SceneDirtyAutoSave.TrySaveAllDirty(out _, out _);
+                guard = Check();
+            }
+            return guard;
         }
 
         // scene_create and scene_open accept a `mode` parameter whose "additive"
@@ -240,7 +250,7 @@ namespace UnityOpenMcpBridge
                 if (i > 0) sb.Append(", ");
                 sb.Append(dirty[i]);
             }
-            sb.Append(". A disruptive op (recompile / scene switch / play mode) could " +
+            sb.Append(". A disruptive op (recompile / scene switch / play mode / test run) could " +
                       "trigger Unity's native save modal and interrupt the flow. " +
                       "Save or discard first, or retry with ignore_scene_dirty: true " +
                       "to proceed and accept the risk.");

@@ -1,5 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
+import { IGNORE_SCENE_DIRTY_BASE, GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 
 // Force a reimport of a LOCAL (file:-linked) package so Unity recompiles its
 // assembly. Fills the gap left by assets_refresh / execute_csharp, which no-op
@@ -36,6 +36,7 @@ export const reimportPackage = makeTool(
               "A trailing '@<version>' is stripped. Must resolve to an installed LOCAL (file:-linked) package; " +
               "non-local packages return not_local_package.",
           },
+          ignore_scene_dirty: { ...IGNORE_SCENE_DIRTY_BASE, description: "Opt out of the active-scene dirty guard. When false (default), the call is refused with code `scene_dirty` if any loaded scene has unsaved changes (the reload this call triggers could raise Unity's native save modal). Set true to proceed and accept the risk." },
           paths_hint: { ...PATHS_HINT_TYPE, description: "Optional mutation scope. Defaults to [\"Packages/<package_id>\"] — the bridge fills it in from " + "package_id, so callers usually omit it. The package's real source lives outside Assets/, so " + "there is no Assets/ path for the gate to validate; the default scope exists only to give the " + "gate a non-empty hint." },
           gate: { ...GATE_PROP, description: "Gate mode. Default 'enforce' — fails the call if the reimport surfaces new errors." },
         },

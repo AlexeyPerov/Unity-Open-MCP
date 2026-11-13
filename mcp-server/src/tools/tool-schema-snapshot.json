@@ -1025,7 +1025,7 @@
     }
   },
   "unity_senses_run_tests": {
-    "description": "Run Unity EditMode or PlayMode tests and return structured results. EditMode runs in-process and results are available within seconds. PlayMode survives domain reload via file handoff. Filter by assembly, namespace, class, or method name. Results are retrieved by the server polling a results file (NOT via unity_senses_pull_events, which streams only console/editor-state). Note: when the filter matches ZERO tests, Execute runs nothing and the result carries status completed with summary.total:0 and a note — this looks like 'no results' but is a no-match filter, not a failure. Tip: to run a single test method deterministically, invoke the test class/method directly via unity_open_mcp_invoke_method — NUnit assertion failures come back verbatim in the error. This call is terminal: it starts the run AND waits for the results file, so there is no polling step for the caller to perform — `run_id` starts a run, it does not read one. It also cannot be a nested unity_open_mcp_batch_execute step (the batch route has no results poller and is refused up-front with batch_step_requires_server_poll).",
+    "description": "Run Unity EditMode or PlayMode tests and return structured results. EditMode runs in-process and results are available within seconds. PlayMode survives domain reload via file handoff. Filter by assembly, namespace, class, or method name. Results are retrieved by the server polling a results file (NOT via unity_senses_pull_events, which streams only console/editor-state). Note: when the filter matches ZERO tests, Execute runs nothing and the result carries status completed with summary.total:0 and a note — this looks like 'no results' but is a no-match filter, not a failure. Tip: to run a single test method deterministically, invoke the test class/method directly via unity_open_mcp_invoke_method — NUnit assertion failures come back verbatim in the error. This call is terminal: it starts the run AND waits for the results file, so there is no polling step for the caller to perform — `run_id` starts a run, it does not read one. A loaded scene with unsaved changes refuses the run with scene_dirty (save it first, or ignore_scene_dirty). It also cannot be a nested unity_open_mcp_batch_execute step (the batch route has no results poller and is refused up-front with batch_step_requires_server_poll).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1038,6 +1038,11 @@
           "description": "Deprecated alias; use test_class.",
           "type": "string",
           "x-alias-for": "test_class"
+        },
+        "ignore_scene_dirty": {
+          "default": false,
+          "description": "Opt out of the dirty-scene preflight. When false (default), the run is refused with scene_dirty while a loaded scene has unsaved changes: the Test Framework would ask \"Scene(s) Have Been Modified\" and that native prompt blocks the Editor until a human answers. Save first (unity_open_mcp_scene_save); true starts the run anyway and the prompt appears.",
+          "type": "boolean"
         },
         "include_passes": {
           "default": true,
@@ -4490,6 +4495,11 @@
             "off"
           ]
         },
+        "ignore_scene_dirty": {
+          "default": false,
+          "description": "Opt out of the active-scene dirty guard. When false (default), the call is refused with code `scene_dirty` if any loaded scene has unsaved changes (the reload this call triggers could raise Unity's native save modal). Set true to proceed and accept the risk.",
+          "type": "boolean"
+        },
         "package_id": {
           "description": "Package specifier. Accepted formats: plain package id 'com.unity.textmeshpro' (latest compatible version); pinned version 'com.unity.textmeshpro@3.0.6'; Git URL 'https://github.com/user/repo.git'; Git URL with branch/tag 'https://github.com/user/repo.git#v1.0.0'; local path 'file:../MyPackage'; local tarball 'file:../MyPackage.tgz'.",
           "type": "string"
@@ -4523,6 +4533,11 @@
             "off"
           ]
         },
+        "ignore_scene_dirty": {
+          "default": false,
+          "description": "Opt out of the active-scene dirty guard. When false (default), the call is refused with code `scene_dirty` if any loaded scene has unsaved changes (the reload this call triggers could raise Unity's native save modal). Set true to proceed and accept the risk.",
+          "type": "boolean"
+        },
         "package_id": {
           "description": "Package name to remove, e.g. 'com.unity.textmeshpro'. A trailing '@<version>' is stripped before being passed to Client.Remove. Use the bare package name (not the versioned form).",
           "type": "string"
@@ -4555,6 +4570,11 @@
             "warn",
             "off"
           ]
+        },
+        "ignore_scene_dirty": {
+          "default": false,
+          "description": "Opt out of the active-scene dirty guard. When false (default), the call is refused with code `scene_dirty` if any loaded scene has unsaved changes (the reload this call triggers could raise Unity's native save modal). Set true to proceed and accept the risk.",
+          "type": "boolean"
         },
         "package_id": {
           "description": "Package name, packageId, or displayName to reimport, e.g. 'com.alexeyperov.unity-open-mcp-bridge'. A trailing '@<version>' is stripped. Must resolve to an installed LOCAL (file:-linked) package; non-local packages return not_local_package.",
@@ -4633,6 +4653,11 @@
             "off"
           ]
         },
+        "ignore_scene_dirty": {
+          "default": false,
+          "description": "Opt out of the active-scene dirty guard. When false (default), the call is refused with code `scene_dirty` if any loaded scene has unsaved changes (the reload this call triggers could raise Unity's native save modal). Set true to proceed and accept the risk.",
+          "type": "boolean"
+        },
         "paths_hint": {
           "description": "Mutation scope — the script asset(s) you edited (e.g. [\"Assets/Scripts/MyClass.cs\"]). The gate validates the post-recompile state of these paths. The recompile itself is project-wide; paths_hint exists to give the gate a non-empty, scoped hint.",
           "items": {
@@ -4650,59 +4675,64 @@
   "unity_open_mcp_upgrade": {
     "description": "Preview or apply a coordinated update of the open Unity project to one trio version. Scans project and home-scoped MCP client configs, agent-facing prose/examples, and the bridge + verify UPM pins. Home configs are rewritten only when their UNITY_PROJECT_PATH belongs exclusively to the open project. `dry_run` defaults true and returns the exact per-file report without writing. With `dry_run:false`, config/prose files receive one-time `.bak` backups before rewriting; a Git-installed bridge and verify pair are then re-pinned atomically through Unity Package Manager, which may reload the Editor. Embedded/file bridge installs are preserved and reported while selected config/prose updates remain available. Omit `target_version` to resolve the latest published npm version explicitly for this call.",
     "inputSchema": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
-        "target_version": {
-          "type": "string",
-          "pattern": "^\\d+\\.\\d+\\.\\d+$",
-          "description": "Target trio version (X.Y.Z). Omit to query the latest npm release."
-        },
         "dry_run": {
-          "type": "boolean",
           "default": true,
-          "description": "Preview only by default. Set false to write selected files and schedule UPM."
-        },
-        "update_upm": {
-          "type": "boolean",
-          "default": true,
-          "description": "Update the bridge + verify Git packages atomically when the bridge source is Git."
-        },
-        "update_project_configs": {
-          "type": "boolean",
-          "default": true,
-          "description": "Update MCP client configs found in this project or its repository ancestors."
-        },
-        "update_home_configs": {
-          "type": "boolean",
-          "default": true,
-          "description": "Update home-scoped configs only when the entry belongs exclusively to this project."
-        },
-        "update_prose": {
-          "type": "boolean",
-          "default": true,
-          "description": "Update allowlisted agent prose, installed core skills, and MCP config examples."
-        },
-        "paths_hint": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [
-            "Packages/manifest.json"
-          ],
-          "description": "Audit scope materialized automatically. The gate is off because this workflow mutates package/configuration pins rather than Unity assets; packages-lock.json is implicit."
+          "description": "Preview only by default. Set false to write selected files and schedule UPM.",
+          "type": "boolean"
         },
         "gate": {
+          "default": "off",
+          "description": "Defaults off: project-asset validation does not model external configs or UPM pins.",
           "enum": [
             "enforce",
             "warn",
             "off"
+          ]
+        },
+        "ignore_scene_dirty": {
+          "default": false,
+          "description": "Opt out of the active-scene dirty guard. When false (default), the call is refused with code `scene_dirty` if any loaded scene has unsaved changes (the reload this call triggers could raise Unity's native save modal). Set true to proceed and accept the risk.",
+          "type": "boolean"
+        },
+        "paths_hint": {
+          "default": [
+            "Packages/manifest.json"
           ],
-          "default": "off",
-          "description": "Defaults off: project-asset validation does not model external configs or UPM pins."
+          "description": "Audit scope materialized automatically. The gate is off because this workflow mutates package/configuration pins rather than Unity assets; packages-lock.json is implicit.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "target_version": {
+          "description": "Target trio version (X.Y.Z). Omit to query the latest npm release.",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "type": "string"
+        },
+        "update_home_configs": {
+          "default": true,
+          "description": "Update home-scoped configs only when the entry belongs exclusively to this project.",
+          "type": "boolean"
+        },
+        "update_project_configs": {
+          "default": true,
+          "description": "Update MCP client configs found in this project or its repository ancestors.",
+          "type": "boolean"
+        },
+        "update_prose": {
+          "default": true,
+          "description": "Update allowlisted agent prose, installed core skills, and MCP config examples.",
+          "type": "boolean"
+        },
+        "update_upm": {
+          "default": true,
+          "description": "Update the bridge + verify Git packages atomically when the bridge source is Git.",
+          "type": "boolean"
         }
       },
-      "additionalProperties": false
+      "type": "object"
     }
   },
   "unity_open_mcp_console_clear": {

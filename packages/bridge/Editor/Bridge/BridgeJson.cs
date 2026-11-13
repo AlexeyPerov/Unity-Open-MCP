@@ -943,9 +943,17 @@ namespace UnityOpenMcpBridge
                 list.Add("Save or discard changes to the dirty scene(s) before retrying: "
                     + string.Join(", ", dirtyPaths) + ".");
             }
-            list.Add("To save via the bridge: unity_open_mcp_execute_csharp with " +
-                     "EditorSceneManager.SaveScene(EditorSceneManager.GetSceneManagerSetup()[0].path) " +
-                     "(or MarkSceneDirty + SaveScene for an unsaved scene).");
+            // Name a saved scene by its own path; an untitled scene ("(unsaved scene)")
+            // has none, so it gets a save-as placeholder instead.
+            string saved = null;
+            if (dirtyPaths != null)
+                foreach (var path in dirtyPaths)
+                    if (!string.IsNullOrEmpty(path) && path.EndsWith(".unity", System.StringComparison.OrdinalIgnoreCase)) { saved = path; break; }
+            list.Add(saved != null
+                ? "To save: unity_open_mcp_scene_save {\"asset_path\":\"" + saved + "\",\"paths_hint\":[\"" + saved +
+                  "\"]} for each dirty scene."
+                : "To save the untitled scene: unity_open_mcp_scene_save {\"asset_path\":\"Assets/Scenes/<Name>.unity\"," +
+                  "\"paths_hint\":[\"Assets/Scenes/<Name>.unity\"]} (save-as).");
             list.Add("To discard: EditorSceneManager.RestoreSavedSceneState(), or retry the " +
                      "original call with ignore_scene_dirty: true to proceed and accept the risk.");
             return list.ToArray();

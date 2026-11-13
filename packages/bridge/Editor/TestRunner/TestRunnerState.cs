@@ -219,6 +219,21 @@ namespace UnityOpenMcpBridge.TestRunner
             {
                 var path = PendingFilePath(runId);
                 if (File.Exists(path)) File.Delete(path);
+                var started = TestRunnerService.StartedFilePath(runId);
+                if (File.Exists(started)) File.Delete(started);
+            }
+            catch { }
+        }
+
+        // RunStarted reached for `runId` (see TestRunnerService.StartedFilePath).
+        internal static void MarkStarted(string runId)
+        {
+            try
+            {
+                Directory.CreateDirectory(TestRunnerService.StatusDir);
+                File.WriteAllText(TestRunnerService.StartedFilePath(runId),
+                    "{\"runId\":" + TestRunnerService.EscapeString(runId) + ",\"startedAt\":" +
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture) + "}");
             }
             catch { }
         }
@@ -451,6 +466,7 @@ namespace UnityOpenMcpBridge.TestRunner
             TestCallbacks callbacks = null;
 
             callbacks = new TestCallbacks(
+                onStarted: () => MarkStarted(runId),
                 onResult: r => TestRunnerService.CollectResult(r, results),
                 onFinished: _ =>
                 {

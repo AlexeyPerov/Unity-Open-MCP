@@ -441,6 +441,19 @@ superseding the first and rewriting its pending marker with the second call's
 (empty) filters — which read as "the declared params were dropped". The bridge now
 refuses a `run_id` whose run is still in flight and says what the id is for.
 
+A loaded scene with unsaved changes refuses the run with `scene_dirty` (code,
+`dirtyScenes`, and `agentNextSteps` naming the `scene_save` call) before
+anything is scheduled: the Test Framework asks "Scene(s) Have Been Modified"
+before EditMode and PlayMode runs, and that native prompt blocks the Editor
+until a human answers. `ignore_scene_dirty: true` starts the run anyway. The
+bridge writes `test-started-<runId>.json` when the Test Framework reports
+`RunStarted`; while that marker is missing, the results poll watches for the
+blocked-main-thread signature (stale instance heartbeat with the listener still
+answering `/ping`). Sustained for 15 s, the call fails with
+`main_thread_blocked` naming the run instead of waiting out `timeout_ms` — a
+stale heartbeat after `RunStarted` is the tests themselves holding the main
+thread and is not treated as blocked.
+
 `run_tests` also cannot be a nested `unity_open_mcp_batch_execute` step; the batch
 route has no results poller and refuses it up-front with
 `batch_step_requires_server_poll`.

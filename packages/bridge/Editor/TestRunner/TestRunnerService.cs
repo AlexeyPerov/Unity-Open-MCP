@@ -43,6 +43,14 @@ namespace UnityOpenMcpBridge.TestRunner
         internal static string PendingFilePath(string runId) =>
             Path.Combine(StatusDir, $"test-pending-{runId}.json");
 
+        // Written when the Test Framework reports RunStarted — i.e. it got past
+        // its pre-run steps, including the "Scene(s) Have Been Modified" prompt.
+        // The MCP results poll reads it to tell a run whose tests are executing
+        // (main thread busy) from one that never began (main thread held by a
+        // modal) — both leave the instance heartbeat stale.
+        internal static string StartedFilePath(string runId) =>
+            Path.Combine(StatusDir, $"test-started-{runId}.json");
+
         // B41 — run_id is caller-supplied (via the bridge body, bypassing the
         // MCP schema under batch_execute) and interpolated straight into a
         // filesystem path under StatusDir (~/.unity-open-mcp). Without
@@ -213,6 +221,34 @@ namespace UnityOpenMcpBridge.TestRunner
             catch { }
         }
 
+        // run_tests refusal when a loaded scene is dirty: same code, dirty list
+        // and recovery steps as the gate path's scene_dirty envelope.
+        internal static string BuildSceneDirtyJson(SceneDirtyGuard.GuardResult guard)
+        {
+            var sb = new StringBuilder(512);
+            sb.Append("{\"error\":{\"code\":\"scene_dirty\",\"message\":");
+            sb.Append(EscapeString(guard.RefusalMessage +
+                " Before a run the Test Framework asks \"Scene(s) Have Been Modified\"; that native prompt blocks " +
+                "the Editor until a human answers it, so the run was not started. With ignore_scene_dirty: true " +
+                "the run starts anyway and the prompt appears."));
+            sb.Append("},\"dirtyScenes\":[");
+            var paths = guard.DirtyScenePaths ?? Array.Empty<string>();
+            for (int i = 0; i < paths.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(EscapeString(paths[i]));
+            }
+            sb.Append("],\"agentNextSteps\":[");
+            var steps = BridgeJson.BuildSceneDirtyNextSteps(paths);
+            for (int i = 0; i < steps.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(EscapeString(steps[i]));
+            }
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
         internal static string BuildStartedJson(string runId, string mode)
         {
             var sb = new StringBuilder(128);
@@ -312,16 +348,21 @@ namespace UnityOpenMcpBridge.TestRunner
 
     internal class TestCallbacks : ICallbacks
     {
+        private readonly Action _onStarted;
         private readonly Action<ITestResultAdaptor> _onResult;
         private readonly Action<ITestResultAdaptor> _onFinished;
 
-        public TestCallbacks(Action<ITestResultAdaptor> onResult, Action<ITestResultAdaptor> onFinished)
+        public TestCallbacks(Action<ITestResultAdaptor> onResult, Action<ITestResultAdaptor> onFinished, Action onStarted = null)
         {
+            _onStarted = onStarted;
             _onResult = onResult;
             _onFinished = onFinished;
         }
 
-        public void RunStarted(ITestAdaptor testsToRun) { }
+        public void RunStarted(ITestAdaptor testsToRun)
+        {
+            try { _onStarted?.Invoke(); } catch { /* the started marker is advisory */ }
+        }
         public void RunFinished(ITestResultAdaptor result) => _onFinished(result);
         public void TestStarted(ITestAdaptor test) { }
         public void TestFinished(ITestResultAdaptor result) => _onResult(result);

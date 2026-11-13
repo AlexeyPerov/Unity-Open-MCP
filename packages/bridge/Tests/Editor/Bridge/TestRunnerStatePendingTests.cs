@@ -50,6 +50,34 @@ namespace UnityOpenMcpBridge.Tests
         // only re-register callbacks rather than starting a fresh run).
         // -------------------------------------------------------------------
 
+        // The started marker tells the MCP results poll that the Test Framework
+        // got past its pre-run prompt; ClearPending removes it with the pending file.
+        [Test]
+        public void MarkStarted_WritesMarkerThatClearPendingRemoves()
+        {
+            var runId = RunId("started");
+            TestRunnerState.MarkPending(runId, null, null, "X", null, playMode: false);
+            TestRunnerState.MarkStarted(runId);
+            var started = TestRunnerService.StartedFilePath(runId);
+            Assert.IsTrue(File.Exists(started));
+            StringAssert.Contains("\"runId\":\"" + runId + "\"", File.ReadAllText(started));
+            TestRunnerState.ClearPending(runId);
+            Assert.IsFalse(File.Exists(started));
+            Assert.IsFalse(File.Exists(TestRunnerService.PendingFilePath(runId)));
+        }
+
+        [Test]
+        public void SceneDirtyRefusal_CarriesCodeDirtyScenesAndSaveStep()
+        {
+            var guard = SceneDirtyGuard.GuardResult.Refuse(new[] { "Assets/Scenes/Main.unity" }, "Active scene has unsaved changes.");
+            var json = TestRunnerService.BuildSceneDirtyJson(guard);
+            StringAssert.Contains("\"code\":\"scene_dirty\"", json);
+            StringAssert.Contains("Scene(s) Have Been Modified", json);
+            StringAssert.Contains("\"dirtyScenes\":[\"Assets/Scenes/Main.unity\"]", json);
+            StringAssert.Contains("unity_open_mcp_scene_save", json);
+            Assert.IsTrue(BridgeJson.IsValidJsonObject(json), json);
+        }
+
         [Test]
         public void MarkPending_PlayMode_PersistsPlayModeTrue()
         {
