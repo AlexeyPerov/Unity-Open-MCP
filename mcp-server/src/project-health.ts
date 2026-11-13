@@ -15,6 +15,11 @@
 //     receiving updates and often precede a forced upgrade.
 //   - Package Manager errors / conflicts — anything tagged `[Package Manager]`
 //     that contains "error", "conflict", or "cannot resolve".
+//   - Package install failures — UPM's untagged "One or more packages could
+//     not be added to the local file system:" block, one indented
+//     `<package>: <reason>` line per package (ENOSPC on a full disk, a tar or
+//     network error). The missing package then surfaces as CS0234/CS0246 in a
+//     package that depends on it, so this is the root cause to report first.
 //   - Editor file-descriptor exhaustion — `System.NotSupportedException: Could
 //     not register to wait for file descriptor <N>` thrown from the Bee build
 //     driver's named-pipe IPC. This is a Mono runtime / kqueue failure: after
@@ -31,6 +36,8 @@
 // "editor_fd_exhaustion → restart the Editor"). The list is bounded so
 // a giant wall of log lines cannot blow up the tool response.
 
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { extractStructuredCompilerErrors, type CompilerError } from "./compiler-errors.js";
 
 /** Maximum number of non-compiler health issues we surface. */
@@ -40,6 +47,7 @@ export type HealthIssueKind =
   | "assembly_resolution"
   | "package_deprecated"
   | "package_manager_error"
+  | "package_install_failed"
   | "editor_fd_exhaustion";
 
 export interface HealthIssue {
@@ -58,6 +66,10 @@ export interface HealthIssue {
   raw: string;
   /** Optional hint pointing at the most likely remediation. */
   hint?: string;
+  /** package_install_failed only: the package that could not be installed. */
+  package?: string;
+  /** package_install_failed only: UPM's reason, verbatim (e.g. "TAR_ENTRY_ERROR: ENOSPC: ..."). */
+  reason?: string;
 }
 
 export interface ProjectHealth {
@@ -134,6 +146,38 @@ const PACKAGE_MANAGER_ERROR_RE =
 const FD_EXHAUSTION_RE =
   /System\.NotSupportedException:\s*Could not register to wait for file descriptor \d+/g;
 
+// ---------------------------------------------------------------------------
+// Package install failures. UPM writes, with no `[Package Manager]` prefix:
+//
+//   An error occurred while resolving packages:
+//     One or more packages could not be added to the local file system:
+//       com.unity.burst: TAR_ENTRY_ERROR: ENOSPC: no space left on device, write
+//       com.unity.shadergraph: TAR_ENTRY_ERROR: ENOSPC: no space left on device, write
+//
+// The header is matched anywhere; every following line that is a
+// `<package id>: <reason>` pair belongs to it.
+// ---------------------------------------------------------------------------
+
+const PACKAGE_INSTALL_HEADER_RE =
+  /One or more packages could not be added to the local file system:[^\n]*\n/g;
+
+const PACKAGE_INSTALL_LINE_RE = /^\s+([a-z0-9][\w.-]*(?:@[^\s:]+)?):\s*(\S[^\n]*)$/i;
+
+/** Remediation for one failed package install, keyed off UPM's reason text. */
+export function packageInstallHint(pkg: string, reason: string): string {
+  if (/ENOSPC|no space left/i.test(reason)) {
+    return `${pkg} could not be unpacked because the disk is full. Free disk space, then reopen the ` +
+      "project (or run unity_open_mcp_compile_check headless) so the Package Manager re-resolves it. " +
+      "The CS0234/CS0246 errors in packages that depend on it are a consequence, not code to fix.";
+  }
+  if (/ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|network|socket|proxy|certificate|\b(?:401|403|404|5\d\d)\b/i.test(reason)) {
+    return `${pkg} could not be downloaded (network or registry error). Check the network, proxy and ` +
+      "scoped-registry settings, then reopen the project so the Package Manager retries.";
+  }
+  return `${pkg} could not be added to Library/PackageCache. Delete Library/PackageCache/${pkg.split("@")[0]}@* ` +
+    "if it exists, then reopen the project so the Package Manager re-installs it.";
+}
+
 /** Parse the simple assembly name out of a full assembly identity string. */
 function simpleAssemblyName(identity: string): string {
   // "Unity.ProBuilder.AddOns.Editor, Version=0.0.0.0, ..." -> "Unity.ProBuilder.AddOns.Editor"
@@ -177,9 +221,35 @@ export function extractProjectHealthIssues(log: string): HealthIssue[] {
     });
   }
 
+  let m: RegExpExecArray | null;
+
+  // Package install failures come before every other package notice: the
+  // missing package is the root cause of the compile errors around it.
+  PACKAGE_INSTALL_HEADER_RE.lastIndex = 0;
+  while ((m = PACKAGE_INSTALL_HEADER_RE.exec(log)) !== null) {
+    const lines = log.slice(m.index + m[0].length).split("\n");
+    for (const line of lines) {
+      const entry = PACKAGE_INSTALL_LINE_RE.exec(line.replace(/\r$/, ""));
+      if (!entry) break;
+      const pkg = entry[1];
+      const reason = entry[2].trim();
+      const summary = `Package install failed: ${pkg}`;
+      if (seen.has(summary)) continue;
+      seen.add(summary);
+      issues.push({
+        kind: "package_install_failed",
+        summary,
+        raw: line.trim(),
+        package: pkg,
+        reason,
+        hint: packageInstallHint(pkg, reason),
+      });
+      if (issues.length >= MAX_HEALTH_ISSUES) return issues;
+    }
+  }
+
   // Assembly resolution failures.
   ASSEMBLY_RESOLUTION_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
   while ((m = ASSEMBLY_RESOLUTION_RE.exec(log)) !== null) {
     const identity = m[1];
     const name = simpleAssemblyName(identity);
@@ -244,18 +314,81 @@ export function extractProjectHealthIssues(log: string): HealthIssue[] {
   return issues;
 }
 
+/** Lock-file sources UPM installs into Library/PackageCache. */
+const CACHED_PACKAGE_SOURCES = new Set(["registry", "git"]);
+
+/**
+ * Cross-check Packages/packages-lock.json against Library/PackageCache: a
+ * registry or git package with no `Library/PackageCache/<name>@*` folder was
+ * never installed (a failed unpack whose log lines rotated away, a cache
+ * cleared by hand). Skipped when the cache folder does not exist or is empty
+ * (the project was never opened, or the Library was deleted), and fails open
+ * to `[]` on any read or parse error.
+ */
+export function detectMissingCachedPackages(projectPath: string | undefined | null): HealthIssue[] {
+  if (!projectPath) return [];
+  try {
+    const cacheDir = join(projectPath, "Library", "PackageCache");
+    const lockPath = join(projectPath, "Packages", "packages-lock.json");
+    if (!existsSync(cacheDir) || !existsSync(lockPath)) return [];
+    const cached = readdirSync(cacheDir);
+    if (cached.length === 0) return [];
+    const cachedNames = new Set(cached.map((entry) => entry.split("@")[0]));
+    const lock = JSON.parse(readFileSync(lockPath, "utf-8")) as { dependencies?: Record<string, { source?: unknown }> };
+    const issues: HealthIssue[] = [];
+    for (const [name, info] of Object.entries(lock.dependencies ?? {})) {
+      if (!CACHED_PACKAGE_SOURCES.has(String(info?.source)) || cachedNames.has(name)) continue;
+      const reason = "listed in Packages/packages-lock.json but missing from Library/PackageCache";
+      issues.push({
+        kind: "package_install_failed",
+        summary: `Package install failed: ${name}`,
+        raw: `${name}: ${reason}`,
+        package: name,
+        reason,
+        hint: packageInstallHint(name, reason),
+      });
+      if (issues.length >= MAX_HEALTH_ISSUES) break;
+    }
+    return issues;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Merge the PackageCache cross-check into log-derived issues: one issue per
+ * package, the log's (more specific) reason wins.
+ */
+export function mergePackageCacheIssues(issues: HealthIssue[], cacheIssues: HealthIssue[]): HealthIssue[] {
+  if (!cacheIssues.length) return issues;
+  const known = new Set(issues.filter((i) => i.kind === "package_install_failed").map((i) => (i.package ?? "").split("@")[0]));
+  const extra = cacheIssues.filter((i) => !known.has(i.package ?? ""));
+  return extra.length ? [...extra, ...issues].slice(0, MAX_HEALTH_ISSUES) : issues;
+}
+
 /**
  * Build the full ProjectHealth summary from a log tail. Combines the CSxxxx
  * compiler errors with the package/assembly health issues and produces a
  * single aggregate verdict + headline. Pure function.
  */
-export function summarizeProjectHealth(log: string): ProjectHealth {
+export function summarizeProjectHealth(log: string, projectPath?: string | null): ProjectHealth {
   const compilerErrors = extractStructuredCompilerErrors(log);
-  const issues = extractProjectHealthIssues(log);
+  const issues = mergePackageCacheIssues(extractProjectHealthIssues(log), detectMissingCachedPackages(projectPath));
   const unhealthy = compilerErrors.length > 0 || issues.length > 0;
 
   let headline = "";
-  if (unhealthy) {
+  const failedInstalls = issues.filter((i) => i.kind === "package_install_failed");
+  if (failedInstalls.length > 0) {
+    const names = failedInstalls.map((i) => i.package).join(", ");
+    const diskFull = failedInstalls.some((i) => /ENOSPC|no space left/i.test(i.reason ?? ""));
+    headline =
+      `${failedInstalls.length} package(s) could not be installed (${names})` +
+      (diskFull ? " — the disk is full" : "") +
+      ". Fix the install first" +
+      (compilerErrors.length > 0
+        ? `; the ${compilerErrors.length} compiler error(s) in packages that depend on them are a consequence.`
+        : ".");
+  } else if (unhealthy) {
     if (compilerErrors.length > 0 && issues.length > 0) {
       headline =
         `${compilerErrors.length} compiler error(s) and ` +

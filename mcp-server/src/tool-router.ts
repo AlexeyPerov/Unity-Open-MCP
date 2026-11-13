@@ -1472,7 +1472,7 @@ export class ToolRouter implements Router {
 
     const compile = await live.readCompileState?.();
     if (compile && compile.status !== "indeterminate") {
-      const historical = summarizeProjectHealth(tail.content);
+      const historical = summarizeProjectHealth(tail.content, this.projectPath);
       const failed = compile.status === "compile_failed";
       const pipelineErrors = failed && Array.isArray(compile.errors) ? compile.errors : [];
       // Unity can report a failed compile the bridge never observed (it ran
@@ -1548,7 +1548,7 @@ export class ToolRouter implements Router {
     // deprecation, Package Manager errors) from the SAME log tail. The
     // compilerErrors list is the same shape as before (kept as `errors` for
     // backward compatibility) so existing callers do not break.
-    const health = summarizeProjectHealth(tail.content);
+    const health = summarizeProjectHealth(tail.content, this.projectPath);
     const errors = health.compilerErrors;
 
     // specs/feedback.md 2026-07-05 — stale-log detection. When an assembly is

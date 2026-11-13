@@ -603,6 +603,22 @@ for that result.
 Old log errors and issues remain separately in `historicalLogErrors` and
 `historicalLogIssues`; they do not override a confirmed current compile.
 
+Besides CSxxxx diagnostics, the log scan reports package- and assembly-level
+`issues` (`kind`: `editor_fd_exhaustion`, `package_install_failed`,
+`assembly_resolution`, `package_deprecated`, `package_manager_error`).
+`package_install_failed` carries `package` and `reason` and comes from two
+sources: UPM's untagged "One or more packages could not be added to the local
+file system:" block (one issue per indented `<package>: <reason>` line, e.g.
+`TAR_ENTRY_ERROR: ENOSPC` on a full disk), and a cross-check of
+`Packages/packages-lock.json` against `Library/PackageCache` (a `registry` or
+`git` package with no `<name>@*` folder; skipped while the cache folder is
+absent or empty). A missing package surfaces as CS0234/CS0246 in the packages
+that depend on it, so when an install failure is present the `headline` names
+it first and calls those compiler errors a consequence. The `hint` points at
+the remedy: free disk space for ENOSPC, check the network for download
+errors, otherwise delete the package's cache folder; then reopen the project
+(or run `compile_check` headless) so UPM re-resolves.
+
 If the bridge cannot provide a confirmed generation, the tool falls back to
 log evidence with the following freshness and authorship caveats. It never spawns Unity.
 

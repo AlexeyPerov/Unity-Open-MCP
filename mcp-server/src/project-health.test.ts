@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import {
+  detectMissingCachedPackages,
   extractProjectHealthIssues,
   summarizeProjectHealth,
   MAX_HEALTH_ISSUES,
@@ -76,6 +81,70 @@ test("extractProjectHealthIssues captures a Package Manager conflict line", () =
   assert.equal(issues.length, 1);
   assert.equal(issues[0].kind, "package_manager_error");
   assert.ok(issues[0].raw.includes("dependency conflict"));
+});
+
+test("extractProjectHealthIssues reports each package UPM could not add to the local file system", () => {
+  // Editor.log after an Editor upgrade on a full disk (demo, 2026-11-13).
+  const log = [
+    "[Package Manager] Done resolving packages in 4.21 seconds",
+    "An error occurred while resolving packages:",
+    "  One or more packages could not be added to the local file system:",
+    "    com.unity.burst: TAR_ENTRY_ERROR: ENOSPC: no space left on device, write",
+    "    com.unity.shadergraph: TAR_ENTRY_ERROR: ENOSPC: no space left on device, write",
+    "",
+    "A re-import of the project may be required to fix the issue or a manual modification of Packages/manifest.json file.",
+    "[Package Manager] com.unity.ide.vscode is deprecated: no longer supported",
+    "Library/PackageCache/com.unity.collections@88d5bf65ce66/Unity.Collections/AutoFreeAllocator.cs(5,13): error CS0234: The type or namespace name 'Burst' does not exist in the namespace 'Unity' (are you missing an assembly reference?)",
+  ].join("\n");
+  const issues = extractProjectHealthIssues(log);
+  const installs = issues.filter((i) => i.kind === "package_install_failed");
+  assert.deepEqual(installs.map((i) => i.package), ["com.unity.burst", "com.unity.shadergraph"]);
+  assert.equal(installs[0].reason, "TAR_ENTRY_ERROR: ENOSPC: no space left on device, write");
+  assert.match(installs[0].hint ?? "", /disk is full/);
+  assert.equal(issues[0].kind, "package_install_failed", "install failures come before other package notices");
+  assert.ok(issues.some((i) => i.kind === "package_deprecated"));
+  const health = summarizeProjectHealth(log);
+  assert.match(health.headline, /2 package\(s\) could not be installed \(com\.unity\.burst, com\.unity\.shadergraph\) — the disk is full/);
+  assert.match(health.headline, /1 compiler error\(s\).*consequence/);
+});
+
+test("package install failures name a network cause", () => {
+  const log = [
+    "One or more packages could not be added to the local file system:",
+    "  com.example.tool@1.2.3: ECONNRESET: socket hang up",
+    "Some unrelated line",
+  ].join("\n");
+  const issues = extractProjectHealthIssues(log);
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].package, "com.example.tool@1.2.3");
+  assert.match(issues[0].hint ?? "", /network/);
+});
+
+test("detectMissingCachedPackages flags a registry package with no PackageCache folder", () => {
+  const root = mkdtempSync(join(tmpdir(), "uom-pkgcache-"));
+  try {
+    assert.deepEqual(detectMissingCachedPackages(root), [], "no Library yet → skipped");
+    mkdirSync(join(root, "Packages"), { recursive: true });
+    mkdirSync(join(root, "Library", "PackageCache", "com.unity.collections@88d5bf65ce66"), { recursive: true });
+    writeFileSync(join(root, "Packages", "packages-lock.json"), JSON.stringify({ dependencies: {
+      "com.unity.burst": { version: "1.8.25", source: "registry" },
+      "com.unity.collections": { version: "2.5.7", source: "registry" },
+      "com.unity.modules.ui": { version: "1.0.0", source: "builtin" },
+      "com.example.local": { version: "file:../x", source: "local" },
+    } }));
+    const issues = detectMissingCachedPackages(root);
+    assert.deepEqual(issues.map((i) => i.package), ["com.unity.burst"]);
+    assert.equal(issues[0].kind, "package_install_failed");
+    const health = summarizeProjectHealth("", root);
+    assert.equal(health.unhealthy, true);
+    assert.match(health.headline, /com\.unity\.burst/);
+    // The log's own reason wins over the cache cross-check for the same package.
+    const fromLog = summarizeProjectHealth("One or more packages could not be added to the local file system:\n  com.unity.burst: TAR_ENTRY_ERROR: ENOSPC: no space left on device\n", root);
+    assert.equal(fromLog.issues.filter((i) => i.kind === "package_install_failed").length, 1);
+    assert.match(fromLog.issues[0].reason ?? "", /ENOSPC/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("extractProjectHealthIssues ignores benign Package Manager log lines", () => {
