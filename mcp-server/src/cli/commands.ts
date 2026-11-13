@@ -36,6 +36,7 @@ import {
   type PingBody,
 } from "./ping-poller.js";
 import { checkBridgeCompat } from "../compat.js";
+import { closeToolNames } from "../tool-name-suggest.js";
 import {
   EXIT,
   classifyBySeverity,
@@ -329,6 +330,7 @@ export async function runRunToolCommand(
       error: {
         code: "unknown_tool",
         message: `Unknown tool '${opts.toolName}'.`,
+        closeMatches: closeToolNames(opts.toolName, ALL_TOOLS.map((t) => t.name)),
         available: ALL_TOOLS.map((t) => t.name),
       },
     };

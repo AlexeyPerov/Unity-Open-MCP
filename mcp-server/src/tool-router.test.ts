@@ -5051,9 +5051,18 @@ test("route: stable invoke reaches activated tools without a list refresh", asyn
 
 test("route: invoke refuses inactive targets and recursion; activation carries schemas", async () => {
   const router = makeRouter(makeFakeLive(), makeFakeBatch(), "/proj", makeFakeEventStream());
-  for (const tool_name of ["unity_open_mcp_component_get", "unity_open_mcp_manage_tools", "invented"]) {
-    assert.equal(errorCode(await router.route("unity_open_mcp_manage_tools", { action: "invoke", tool_name })), "tool_not_active");
-  }
+  const inactive = parseBody(await router.route("unity_open_mcp_manage_tools", { action: "invoke", tool_name: "unity_open_mcp_component_get" }));
+  assert.equal((inactive.error as any).code, "tool_not_active");
+  assert.equal(inactive.group, "typed-editor");
+  assert.match((inactive.error as any).message, /group 'typed-editor'.*"action":"activate","group":"typed-editor"/);
+  assert.doesNotMatch((inactive.error as any).message, /recursive/);
+  const recursive = parseBody(await router.route("unity_open_mcp_manage_tools", { action: "invoke", tool_name: "unity_open_mcp_manage_tools" }));
+  assert.equal((recursive.error as any).code, "invalid_arguments");
+  assert.match((recursive.error as any).message, /cannot invoke itself/);
+  const unknown = parseBody(await router.route("unity_open_mcp_manage_tools", { action: "invoke", tool_name: "unity_senses_console_clear" }));
+  assert.equal((unknown.error as any).code, "unknown_tool");
+  assert.ok((unknown.closeMatches as string[]).includes("unity_open_mcp_console_clear"));
+  assert.equal(errorCode(await router.route("unity_open_mcp_manage_tools", { action: "invoke", tool_name: "invented" })), "unknown_tool");
   const result = parseBody(await router.route("unity_open_mcp_manage_tools", { action: "activate_for", tags: ["scene"] }));
   assert.ok((result.tools as any[]).some(t => t.name === "unity_open_mcp_component_get" && t.inputSchema));
   const again = parseBody(await router.route("unity_open_mcp_manage_tools", { action: "activate_for", tags: ["scene"] }));

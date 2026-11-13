@@ -5,6 +5,7 @@ import { INTENT_TAGS } from "./intent-groups.js";
 import { filterVisibleTools, type ToolSessionState } from "../tool-session-state.js";
 import { applyPaging } from "../output-profile.js";
 import { isLocalTool } from "../local-tools.js";
+import { closeToolNames } from "../tool-name-suggest.js";
 
 const POTENTIALLY_MUTATING_LOCAL = new Set(["unity_open_mcp_jobs", "unity_open_mcp_restart_editor", "unity_open_mcp_hub_install_editor", "unity_open_mcp_hub_install_modules", "unity_open_mcp_hub_set_install_path"]);
 
@@ -61,7 +62,12 @@ export function discoverTools(tools: Tool[], batch: ReadonlySet<string>, session
     if (args.tool_name || args.profile === "full") return t;
     const { inputSchema, description, ...compact } = t;
     return args.profile === "balanced" ? { ...compact, description } : compact;
-  }), pagination: page.block, ...(args.tool_name && !rows.length ? { error: { code: "unknown_tool", message: `Unknown tool ${args.tool_name}` } } : {}) };
+  }), pagination: page.block, ...(args.tool_name && !rows.length ? unknownToolError(String(args.tool_name), tools) : {}) };
+}
+
+function unknownToolError(name: string, tools: Tool[]) {
+  const matches = closeToolNames(name, tools.map(t => t.name));
+  return { error: { code: "unknown_tool", message: `Unknown tool ${name}${matches.length ? `. Did you mean ${matches.join(", ")}?` : ""}`, ...(matches.length ? { closeMatches: matches } : {}) } };
 }
 
 /** Compact activation schemas retain validation constraints, dropping field prose. */

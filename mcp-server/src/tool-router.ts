@@ -33,7 +33,9 @@ import {
   AUTO_ACTIVATE_GROUPS,
   groupToTools,
   getGroup,
+  groupFor,
 } from "./capabilities/tool-groups.js";
+import { closeToolNames } from "./tool-name-suggest.js";
 import {
   recommendGroups,
   type Recommendation,
@@ -2119,8 +2121,8 @@ export class ToolRouter implements Router {
     }
     if (action === "invoke") {
       const name = typeof args.tool_name === "string" ? args.tool_name : "";
-      if (name === "unity_open_mcp_manage_tools" || !filterVisibleTools(ALL_TOOLS, this.sessionState).some(t => t.name === name))
-        return this.manageToolsError("tool_not_active", "Activate the target group first; recursive manage_tools invocation is forbidden.");
+      const refusal = this.invokeTargetRefusal(name);
+      if (refusal) return refusal;
       return this.routeCore(live, name, withSchemaDefaults(ALL_TOOLS.find(t => t.name === name)!, (args.arguments ?? {}) as Record<string, unknown>), identity);
     }
     if (action === "list_groups") {
@@ -2654,8 +2656,36 @@ export class ToolRouter implements Router {
     return sourceResult(body, "local");
   }
 
-  private manageToolsError(code: string, message: string): CallToolResult {
-    return sourceResult({ error: { code, message } }, "local", true);
+  private manageToolsError(code: string, message: string, extra: Record<string, unknown> = {}): CallToolResult {
+    return sourceResult({ error: { code, message }, ...extra }, "local", true);
+  }
+
+  /**
+   * Why `manage_tools(action:"invoke")` cannot reach `name`, or null when it
+   * can. Three different causes get three different answers: recursion into
+   * manage_tools itself, a name that is not a tool at all (with close
+   * matches), and a real tool whose group is not active (naming the group and
+   * the exact activation call).
+   */
+  private invokeTargetRefusal(name: string): CallToolResult | null {
+    if (name === "unity_open_mcp_manage_tools")
+      return this.manageToolsError("invalid_arguments", "manage_tools cannot invoke itself; call unity_open_mcp_manage_tools directly with the inner action.");
+    const tool = ALL_TOOLS.find(t => t.name === name);
+    if (!tool) {
+      const matches = closeToolNames(name, ALL_TOOLS.map(t => t.name));
+      const hint = matches.length ? ` Did you mean ${matches.join(", ")}?` : " List tools with unity_open_mcp_capabilities {\"kind\":\"tools\",\"query\":\"…\"}.";
+      return this.manageToolsError("unknown_tool", `'${name}' is not a tool.${hint}`, matches.length ? { closeMatches: matches } : {});
+    }
+    if (filterVisibleTools(ALL_TOOLS, this.sessionState).some(t => t.name === name)) return null;
+    const group = groupFor(name);
+    if (!group)
+      return this.manageToolsError("tool_not_active", `'${name}' is not visible in this session.`);
+    const activate = `unity_open_mcp_manage_tools {"action":"activate","group":"${group}"}`;
+    return this.manageToolsError(
+      "tool_not_active",
+      `'${name}' belongs to the inactive group '${group}'. Activate it with ${activate}, then repeat this invoke.`,
+      { group, agentNextSteps: [`Call ${activate}, then repeat the same manage_tools invoke.`] },
+    );
   }
 
   // testsuite-tauri phase-3 — bridge_status. Combines the instance-lock

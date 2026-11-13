@@ -207,9 +207,14 @@ repeat activation is idempotent and returns no already-active tools. Clients
 that ignore `notifications/tools/list_changed` can call the always-visible
 `manage_tools(action: "invoke", tool_name: "…", arguments: {...})`. The target
 must be active. Its schema, normal live/local/offline routing, scope, gate,
-denial, and lifecycle checks all still apply. Recursive invocation of
-`manage_tools` is rejected. Use this for activated recovery tools instead of
-putting them in a live batch.
+denial, and lifecycle checks all still apply. Use this for activated recovery
+tools instead of putting them in a live batch. A refused invoke says why:
+
+| Code | Cause | Extra fields |
+|---|---|---|
+| `tool_not_active` | A real tool whose group is inactive; the message names the group and the exact `activate` call | `group`, `agentNextSteps` |
+| `unknown_tool` | The name is not a tool | `closeMatches` when similar names exist |
+| `invalid_arguments` | `tool_name` is `manage_tools` itself (recursion) | — |
 
 ## Human-facing Unity Search
 
