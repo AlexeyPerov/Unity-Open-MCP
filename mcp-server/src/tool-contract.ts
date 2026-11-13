@@ -204,6 +204,12 @@ export function validateSchema(value: any, schema: Schema, path = "args"): strin
   return errors;
 }
 
+/**
+ * Rename aliases to their wire keys. An alias may also translate its value:
+ * `x-alias-values` maps each accepted alias value to the canonical value
+ * (`mode: "EditMode"` → `play_mode: false`). The bridge's
+ * BatchSchemaValidator.WireArguments mirrors this for direct HTTP callers.
+ */
 export function wireArguments(value: any, schema: Schema, notes: string[] = []): any {
   if (Array.isArray(value)) return value.map(v => wireArguments(v, schema.items ?? {}, notes));
   if (!value || typeof value !== "object" || !schema.properties) return value;
@@ -213,9 +219,11 @@ export function wireArguments(value: any, schema: Schema, notes: string[] = []):
   for (const [key, v] of Object.entries(withoutNullOmitted(value, schema))) {
     const p = schema.properties[key] ?? {};
     const canonical = p["x-alias-for"];
-    if (canonical) notes.push(`${key} is deprecated; use ${canonical}.`);
+    const valueMap = canonical ? p["x-alias-values"] : undefined;
+    const mapped = valueMap && typeof v === "string" && Object.prototype.hasOwnProperty.call(valueMap, v);
+    if (canonical) notes.push(mapped ? `${key}: ${JSON.stringify(v)} is deprecated; use ${canonical}: ${JSON.stringify(valueMap[v])}.` : `${key} is deprecated; use ${canonical}.`);
     const target = p["x-wire-key"] ?? (canonical ? schema.properties[canonical]?.["x-wire-key"] ?? canonical : key);
-    out[target] = wireArguments(v, p, notes);
+    out[target] = mapped ? valueMap[v] : wireArguments(v, p, notes);
   }
   return out;
 }

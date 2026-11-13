@@ -1,13 +1,17 @@
 // Condition shapes shared by unity_open_mcp_playtest_wait (`condition`) and
 // unity_senses_capture_series (`start_on`). A condition is an object with
 // exactly one key: a leaf (log / ui / object / project_command / frames / ms)
-// or `all` / `any` over leaves (one level deep). The bridge parses and
-// enforces the one-key rule; the schema publishes the vocabulary.
+// or `all` / `any` over conditions, where a child may itself be all / any
+// over leaves (one nested level, at most CONDITION_MAX_LEAVES leaves). The
+// bridge parses and enforces the one-key rule and the bounds; the schema
+// publishes the vocabulary.
 
 export const OBJECT_STATES = ["exists", "active", "inactive", "destroyed"] as const;
 export const LOG_LEVELS = ["any", "log", "warning", "error", "exception"] as const;
 export const CONDITION_LEAVES = ["log", "ui", "object", "project_command", "frames", "ms"] as const;
 export const CONDITION_MAX_CHILDREN = 16;
+/** Mirrors the bridge's WaitConditionParser.MaxLeaves (whole tree). */
+export const CONDITION_MAX_LEAVES = 32;
 
 const leafProperties = {
   log: {
@@ -74,7 +78,31 @@ const leafCondition = {
   additionalProperties: false,
 } as const;
 
-/** The condition object schema (leaf, or all / any over leaves). */
+/** A child of the root all / any: a leaf, or all / any over leaves. */
+const nestedCondition = {
+  type: "object",
+  description: "Exactly one of log, ui, object, project_command, frames, ms — or all / any over those leaves.",
+  properties: {
+    ...leafProperties,
+    all: {
+      type: "array",
+      minItems: 1,
+      maxItems: CONDITION_MAX_CHILDREN,
+      items: leafCondition,
+      description: "Nested: holds when every leaf holds at the same poll.",
+    },
+    any: {
+      type: "array",
+      minItems: 1,
+      maxItems: CONDITION_MAX_CHILDREN,
+      items: leafCondition,
+      description: "Nested: holds when one leaf holds.",
+    },
+  },
+  additionalProperties: false,
+} as const;
+
+/** The condition object schema (leaf, or all / any over conditions nested one level). */
 export function conditionSchema(description: string) {
   return {
     type: "object",
@@ -85,15 +113,19 @@ export function conditionSchema(description: string) {
         type: "array",
         minItems: 1,
         maxItems: CONDITION_MAX_CHILDREN,
-        items: leafCondition,
-        description: "Holds when every leaf holds at the same poll (log leaves latch once seen).",
+        items: nestedCondition,
+        description:
+          "Holds when every child holds at the same poll (log leaves latch once seen). A child may be all / any over " +
+          `leaves, e.g. {"all":[{"ms":800},{"any":[{"object":{…}},{"object":{…}}]}]}; at most ${CONDITION_MAX_LEAVES} leaves in all.`,
       },
       any: {
         type: "array",
         minItems: 1,
         maxItems: CONDITION_MAX_CHILDREN,
-        items: leafCondition,
-        description: "Holds when one leaf holds; the result names it (fired.path, e.g. condition.any[1]).",
+        items: nestedCondition,
+        description:
+          "Holds when one child holds; the result names it (fired.path, e.g. condition.any[1], or condition.any[0].all " +
+          "for a nested set). A child may be all / any over leaves.",
       },
     },
     additionalProperties: false,

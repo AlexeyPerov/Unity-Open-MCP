@@ -132,12 +132,14 @@ namespace UnityOpenMcpBridge.Playtest
             return null;
         }
 
-        // The leaf (or composite) that fired: an `any` names its child.
+        // The leaf (or composite) that fired: an `any` names its child, through
+        // a nested `any` down to the leaf; a nested `all` is named as the set.
         internal WaitCondition FiredNode()
         {
             if (Root == null || !Root.Met) return null;
-            if (Root is CompositeCondition c && c.FiredChild != null) return c.FiredChild;
-            return Root;
+            var node = Root;
+            while (node is CompositeCondition c && c.FiredChild != null) node = c.FiredChild;
+            return node;
         }
 
         internal void AppendFired(StringBuilder sb)

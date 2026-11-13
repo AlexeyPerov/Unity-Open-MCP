@@ -168,6 +168,8 @@ const TERMINAL_JOB_STATES = new Set(["succeeded", "failed", "cancelled", "orphan
 /** Errors are told apart by their first message line; the stream says Exception where logs[] says error. */
 const messageKey = (message: string) => message.split("\n")[0].trim().slice(0, 200);
 const clip = (value: string, max: number) => (value.length > max ? `${value.slice(0, max)}…` : value);
+/** Longest mark label kept verbatim; longer labels are cut and moved into the note. */
+export const MARK_LABEL_MAX = 120;
 
 function boundedJson(value: unknown, max: number): unknown {
   const text = JSON.stringify(value);
@@ -415,12 +417,20 @@ export class PlaytestRecorder {
     session.marks++;
     const since = { ...session.sinceMark };
     session.sinceMark = { calls: 0, errors: 0, captures: 0, failed: 0 };
+    // A sentence-long label is kept, not refused: the label is cut to
+    // MARK_LABEL_MAX and the full text leads the note, so nothing is lost.
+    const fullLabel = String(args.label ?? "");
+    const labelTruncated = fullLabel.length > MARK_LABEL_MAX;
+    const label = labelTruncated ? `${fullLabel.slice(0, MARK_LABEL_MAX - 1)}…` : fullLabel;
+    const givenNote = typeof args.note === "string" ? args.note : "";
+    const note = labelTruncated ? (givenNote ? `${fullLabel}\n\n${givenNote}` : fullLabel) : givenNote;
     this.append(session, {
-      k: "mark", step, at: iso(this.now()), label: this.redactor.text(String(args.label ?? "")).slice(0, 120), verdict,
-      ...(typeof args.note === "string" && args.note ? { note: this.redactor.text(clip(args.note, 2_000)) } : {}),
+      k: "mark", step, at: iso(this.now()), label: this.redactor.text(label), verdict,
+      ...(note ? { note: this.redactor.text(clip(note, 2_000)) } : {}),
     });
     return {
-      status: "ok", action: "mark", session: session.meta.id, step, label: args.label, verdict,
+      status: "ok", action: "mark", session: session.meta.id, step, label, verdict,
+      ...(labelTruncated ? { labelTruncated: { maxLength: MARK_LABEL_MAX, message: `label was ${fullLabel.length} characters; it is cut to ${MARK_LABEL_MAX} and the full text starts the note. Keep labels to a short step name.` } } : {}),
       since_last_mark: since,
       ...(since.errors > 0 ? { note: `${since.errors} console error(s) / exception(s) were logged during this step — treat them as findings (they are in the report with the call that caused them).` } : {}),
     };

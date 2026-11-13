@@ -144,7 +144,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                     if (last && key.Phase != "up")
                         return Fail("invalid_arguments", where + ": the last keyframe must be phase up.", out code, out message);
                     if (!first && !last && (key.Phase == "down" || key.Phase == "up"))
-                        return Fail("invalid_arguments", where + ": down/up are only allowed on the first/last keyframe (one contact per finger).", out code, out message);
+                        return Fail("invalid_arguments", where + ": down/up are only allowed on the first/last keyframe (one contact per finger). " +
+                            "For several taps, give each tap its own finger (fingers[1], fingers[2] … with later at_ms) or send one gesture call per tap.", out code, out message);
                     if (k > 0 && key.AtMs <= finger.Path[k - 1].AtMs)
                         return Fail("invalid_arguments", where + ".at_ms must be greater than the previous keyframe's.", out code, out message);
 

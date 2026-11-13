@@ -52,7 +52,9 @@ test("wait schema: condition vocabulary, bounds and description promises", () =>
   for (const key of ["all", "any"]) {
     assert.equal(p.condition.properties[key].type, "array");
     assert.equal(p.condition.properties[key].maxItems, 16);
-    assert.equal(p.condition.properties[key].items.properties.all, undefined, "one level deep");
+    const nested = p.condition.properties[key].items;
+    assert.equal(nested.properties.all.type, "array", "a child may be all / any");
+    assert.equal(nested.properties.any.items.properties.all, undefined, "one nested level only");
   }
   assert.deepEqual(p.condition.properties.object.properties.state.enum, [...OBJECT_STATES]);
   assert.deepEqual(p.condition.properties.project_command.required, ["id"]);

@@ -3,7 +3,9 @@ import { makeTool } from "./schema-fragments.js";
 
 export const readConsole = makeTool(
   "unity_senses_read_console",
-  "Read the Unity Editor console log entries. Filter by type (error/warning/log/all), " +
+  "Read the Unity Editor console log entries. Filter by type (error/warning/log/all) or several `types`, " +
+    "by message text (`contains` substring or `pattern` regex), and by position (`since_index` — pass the " +
+    "previous response's `nextSinceIndex` to read only newer entries), " +
     "optionally clear the console, and get structured entries with stack traces. " +
     "Unity-internal stack frames are stripped by default for readability. " +
     "Useful after execute_csharp or mutations to check for compile errors, " +
@@ -18,6 +20,33 @@ export const readConsole = makeTool(
             default: "all",
             description: "Filter entries by log type.",
           },
+          types: {
+            type: "array",
+            items: { type: "string", enum: ["error", "exception", "assert", "warning", "log"] },
+            minItems: 1,
+            description: "Several log types at once (exception/assert count as error); overrides type.",
+          },
+          contains: {
+            type: "string",
+            minLength: 1,
+            description: "Keep entries whose message contains this text (case-insensitive).",
+          },
+          pattern: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Keep entries whose message matches this .NET regex (same syntax as playtest_wait log.pattern: " +
+              "case-sensitive, prefix (?i) to ignore case). Combines with contains (both must match).",
+          },
+          since_index: {
+            type: "integer",
+            minimum: 0,
+            description:
+              "Keep entries at console row index >= this. Each response reports `nextSinceIndex` (the row count " +
+              "at read time); pass it back to read only what was logged since. Clearing the console resets rows to 0.",
+          },
+          limit: { type: "integer", minimum: 1, maximum: 1000, deprecated: true, "x-alias-for": "max_entries", description: "Deprecated alias; use max_entries." },
+          filter: { type: "string", minLength: 1, deprecated: true, "x-alias-for": "contains", description: "Deprecated alias; use contains." },
           clear: {
             type: "boolean",
             default: false,

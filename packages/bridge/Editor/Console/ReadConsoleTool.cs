@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
 
@@ -30,7 +31,8 @@ namespace UnityOpenMcpBridge.Console
         [BridgeTool("unity_senses_read_console", Title = "Read Console",
             IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.None)]
         [System.ComponentModel.Description(
-            "Read the Unity console log entries. Filter by type (error/warning/log/all), " +
+            "Read the Unity console log entries. Filter by type (error/warning/log/all) or several types, " +
+            "by message text (contains / pattern) and by row (since_index), " +
             "optionally clear the console, and get structured entries with stack traces " +
             "(Unity-internal frames stripped by default).")]
         public string ReadConsole(
@@ -39,14 +41,28 @@ namespace UnityOpenMcpBridge.Console
             int max_entries = 100,
             int max_stack_frames = 20,
             bool include_unity_frames = false,
-            string detail = "normal")
+            string detail = "normal",
+            string[] types = null,
+            string contains = null,
+            string pattern = null,
+            int since_index = 0)
         {
             try
             {
                 var detailLevel = ParseDetail(detail);
 
+                Regex rx = null;
+                if (!string.IsNullOrEmpty(pattern))
+                {
+                    // Same construction as playtest_wait log.pattern: case-sensitive
+                    // .NET regex, bounded match time.
+                    try { rx = new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50)); }
+                    catch (ArgumentException e) { return ErrorJson("invalid_arguments", "pattern is not a valid regex: " + e.Message); }
+                }
+
                 var entries = LogEntriesReader.GetEntries();
-                var filtered = FilterByType(entries, (type ?? "all").ToLowerInvariant());
+                var filtered = FilterByType(entries, (type ?? "all").ToLowerInvariant(), types);
+                filtered = FilterByText(filtered, contains, rx, since_index);
 
                 // M13 T4.6 — truncation accounting. The console is chronological;
                 // we keep the most recent `max_entries` after type-filtering and
@@ -76,8 +92,9 @@ namespace UnityOpenMcpBridge.Console
                 if (clear)
                     cleared = LogEntriesReader.Clear();
 
+                var filters = new TextFilters { Types = types, Contains = contains, Pattern = pattern, SinceIndex = since_index };
                 return BuildJson(capped, entries.Count, filtered.Count, truncated, cleared,
-                    type ?? "all", max_entries, max_stack_frames, include_unity_frames, detailLevel);
+                    type ?? "all", max_entries, max_stack_frames, include_unity_frames, detailLevel, filters);
             }
             catch (System.Exception e)
             {
@@ -101,8 +118,32 @@ namespace UnityOpenMcpBridge.Console
 
         // ---- entry filtering ----
 
-        private static List<LogEntryInfo> FilterByType(List<LogEntryInfo> entries, string type)
+        struct TextFilters
         {
+            public string[] Types;
+            public string Contains;
+            public string Pattern;
+            public int SinceIndex;
+        }
+
+        // `types` (several severities) overrides `type`; exception and assert are
+        // error-class console rows.
+        internal static List<LogEntryInfo> FilterByType(List<LogEntryInfo> entries, string type, string[] types = null)
+        {
+            if (types != null && types.Length > 0)
+            {
+                var wanted = new HashSet<string>();
+                foreach (var t in types)
+                {
+                    var lower = (t ?? "").Trim().ToLowerInvariant();
+                    wanted.Add(lower == "exception" || lower == "assert" ? "error" : lower);
+                }
+                if (wanted.Contains("all")) return entries;
+                var picked = new List<LogEntryInfo>();
+                foreach (var e in entries)
+                    if (wanted.Contains(Classify(e.Mode))) picked.Add(e);
+                return picked;
+            }
             if (type == "all") return entries;
 
             var result = new List<LogEntryInfo>();
@@ -115,6 +156,30 @@ namespace UnityOpenMcpBridge.Console
                     result.Add(e);
                 else if (type == "log" && classified == "log")
                     result.Add(e);
+            }
+            return result;
+        }
+
+        // Message filters and the row cursor. `contains` is a case-insensitive
+        // substring; `rx` a case-sensitive regex (a match timeout counts as no
+        // match). Rows below `sinceIndex` were already read by the caller.
+        internal static List<LogEntryInfo> FilterByText(List<LogEntryInfo> entries, string contains, Regex rx, int sinceIndex)
+        {
+            if (string.IsNullOrEmpty(contains) && rx == null && sinceIndex <= 0) return entries;
+            var result = new List<LogEntryInfo>();
+            foreach (var e in entries)
+            {
+                if (e.Index < sinceIndex) continue;
+                var message = e.Message ?? "";
+                if (!string.IsNullOrEmpty(contains) && message.IndexOf(contains, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (rx != null)
+                {
+                    bool matched;
+                    try { matched = rx.IsMatch(message); }
+                    catch (RegexMatchTimeoutException) { matched = false; }
+                    if (!matched) continue;
+                }
+                result.Add(e);
             }
             return result;
         }
@@ -179,7 +244,7 @@ namespace UnityOpenMcpBridge.Console
 
         private static string BuildJson(List<LogEntryInfo> entries, int totalBeforeFilter, int totalAfterFilter,
             int truncated, bool cleared, string type, int maxEntries, int maxFrames, bool includeUnity,
-            DetailLevel detailLevel)
+            DetailLevel detailLevel, TextFilters filters)
         {
             int errorCount = 0, warningCount = 0, logCount = 0;
             foreach (var e in entries)
@@ -208,7 +273,19 @@ namespace UnityOpenMcpBridge.Console
             sb.Append("\"log\":").Append(logCount);
             sb.Append("},");
             sb.Append("\"cleared\":").Append(cleared ? "true" : "false").Append(',');
+            // Row cursor for the next read: entries logged after this call get
+            // indices >= this value (0 after clear: true).
+            sb.Append("\"nextSinceIndex\":").Append(cleared ? 0 : totalBeforeFilter).Append(',');
             sb.Append("\"filter\":").Append(Esc(type)).Append(',');
+            if (filters.Types != null && filters.Types.Length > 0)
+            {
+                sb.Append("\"types\":[");
+                for (int i = 0; i < filters.Types.Length; i++) { if (i > 0) sb.Append(','); sb.Append(Esc(filters.Types[i])); }
+                sb.Append("],");
+            }
+            if (!string.IsNullOrEmpty(filters.Contains)) sb.Append("\"contains\":").Append(Esc(filters.Contains)).Append(',');
+            if (!string.IsNullOrEmpty(filters.Pattern)) sb.Append("\"pattern\":").Append(Esc(filters.Pattern)).Append(',');
+            if (filters.SinceIndex > 0) sb.Append("\"sinceIndex\":").Append(filters.SinceIndex).Append(',');
             sb.Append("\"detail\":").Append(Esc(detailWire)).Append(',');
             sb.Append("\"settings\":{");
             sb.Append("\"maxEntries\":").Append(maxEntries).Append(',');
@@ -222,6 +299,7 @@ namespace UnityOpenMcpBridge.Console
                 if (i > 0) sb.Append(',');
                 var e = entries[i];
                 sb.Append('{');
+                sb.Append("\"index\":").Append(e.Index).Append(',');
                 sb.Append("\"type\":").Append(Esc(Classify(e.Mode))).Append(',');
                 sb.Append("\"message\":").Append(Esc(e.Message));
                 if (!string.IsNullOrEmpty(e.Stack))
@@ -273,6 +351,8 @@ namespace UnityOpenMcpBridge.Console
     // GateDispatchResult.Logs (a public field on a public class).
     public struct LogEntryInfo
     {
+        /// <summary>Console row index (0 = oldest row; reset by a console clear).</summary>
+        public int Index;
         public int Mode;
         public string Message;
         public string StackRaw;
@@ -442,6 +522,7 @@ namespace UnityOpenMcpBridge.Console
 
                 result.Add(new LogEntryInfo
                 {
+                    Index = i,
                     Mode = _modeField != null ? Convert.ToInt32(_modeField.GetValue(entry)) : 0,
                     Message = _messageField != null ? (string)_messageField.GetValue(entry) : "",
                     StackRaw = _stackField != null ? (string)_stackField.GetValue(entry) : "",
@@ -496,6 +577,7 @@ namespace UnityOpenMcpBridge.Console
 
                     result.Add(new LogEntryInfo
                     {
+                        Index = i,
                         Mode = _modeField != null ? Convert.ToInt32(_modeField.GetValue(entryInstance)) : 0,
                         Message = _messageField != null ? (string)_messageField.GetValue(entryInstance) : "",
                         StackRaw = _stackField != null ? (string)_stackField.GetValue(entryInstance) : "",

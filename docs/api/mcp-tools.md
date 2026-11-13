@@ -297,7 +297,13 @@ nested `children` payloads. Each row carries its hierarchy `path`
 
 Mutating responses include compact per-call Unity console entries in `logs[]`.
 Use `unity_senses_read_console` only when the global console buffer and stack
-traces are needed.
+traces are needed. Besides `type`, it filters by several severities (`types`,
+where `exception` / `assert` count as `error`), by message text (`contains`, a
+case-insensitive substring; `pattern`, a case-sensitive .NET regex as in
+`playtest_wait` `log.pattern`) and by console row (`since_index`). Each entry
+carries its row `index`, and every response reports `nextSinceIndex` — pass it
+back as `since_index` to read only what was logged since (a clear resets rows
+to 0). An invalid `pattern` is `invalid_arguments`.
 
 ## Selected tool contracts
 
@@ -901,7 +907,12 @@ tool. For example, `component_modify` accepts:
 
 Unambiguous historical aliases remain declared with `deprecated: true` and
 `x-alias-for`; MCP responses emit deprecation notes (direct HTTP exposes
-`X-Unity-Open-MCP-Deprecations`). Canonical keys map to existing handler keys
+`X-Unity-Open-MCP-Deprecations`). An alias may also translate its value through
+`x-alias-values` — `run_tests` `mode: "EditMode"` / `"PlayMode"` becomes
+`play_mode: false` / `true`. Aliases for names agents commonly guess:
+`run_tests` `mode` → `play_mode`, `filter` → `test_class`; `read_console`
+`limit` → `max_entries`, `filter` → `contains`; `ui_snapshot` `text` / `query` →
+`text_contains`. Canonical keys map to existing handler keys
 through schema-owned `x-wire-key` metadata. Mixing aliases for one selector is
 rejected, as are multiple host selectors or a component ID alongside a type
 selector that would otherwise be ignored. Host selectors are `instance_id`,

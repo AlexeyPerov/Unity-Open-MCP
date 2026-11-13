@@ -4,7 +4,7 @@ import { ALL_TOOLS } from "./tools/index.js";
 import { validateSchema, wireArguments } from "./tool-contract.js";
 import { exampleFor, discoverTools } from "./capabilities/discovery.js";
 import { ToolSessionState } from "./tool-session-state.js";
-const tool = (suffix: string) => ALL_TOOLS.find(t => t.name === `unity_open_mcp_${suffix}`)!;
+const tool = (suffix: string) => ALL_TOOLS.find(t => t.name === `unity_open_mcp_${suffix}` || t.name === `unity_senses_${suffix}`)!;
 test("canonical component locators and patch paths map without touching values", () => {
   const args = { game_object_path: "Main Camera", component_type: "UnityEngine.Transform", fields: [{ property_path: "m_LocalPosition", value: { path: "opaque" } }], paths_hint: ["Assets/Scenes/Main.unity"] };
   assert.deepEqual(validateSchema(args, tool("component_modify").inputSchema), []);
@@ -61,6 +61,21 @@ test("a multi-word discovery query ORs its terms and ranks exact names first", (
   const empty = discoverTools(ALL_TOOLS, new Set(), session, undefined, { query: "zzzz-not-a-word", group: "typed-editor" });
   assert.equal(empty.tools.length, 0);
   assert.match(String((empty as any).emptyReason), /"zzzz-not-a-word".*group="typed-editor"/);
+});
+
+test("value aliases translate their value; plain aliases keep it", () => {
+  const runTests = tool("run_tests").inputSchema;
+  const notes: string[] = [];
+  assert.deepEqual(validateSchema({ mode: "EditMode", filter: "ObeliskAnalyticsToEventsTests" }, runTests), []);
+  assert.deepEqual(wireArguments({ mode: "EditMode", filter: "ObeliskAnalyticsToEventsTests" }, runTests, notes), { play_mode: false, test_class: "ObeliskAnalyticsToEventsTests" });
+  assert.deepEqual(wireArguments({ mode: "PlayMode" }, runTests), { play_mode: true });
+  assert.ok(notes.includes('mode: "EditMode" is deprecated; use play_mode: false.'));
+  assert.match(validateSchema({ mode: "Sideways" }, runTests).join(), /args\.mode must be one of/);
+  assert.match(validateSchema({ mode: "EditMode", play_mode: true }, runTests).join(), /conflicts/);
+  const console = tool("read_console").inputSchema;
+  assert.deepEqual(wireArguments({ limit: 8, filter: "ObeliskAttempts", types: ["error", "exception"] }, console),
+    { max_entries: 8, contains: "ObeliskAttempts", types: ["error", "exception"] });
+  assert.deepEqual(wireArguments({ text: "Victory" }, tool("ui_snapshot").inputSchema), { text_contains: "Victory" });
 });
 
 test("null property values remain valid; shadowed selectors are rejected", () => {

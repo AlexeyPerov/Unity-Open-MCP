@@ -73,6 +73,25 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void ValueAliasTranslatesItsValueToTheCanonicalKey()
+        {
+            // Mirrors tool-contract.ts wireArguments: run_tests `mode` is an alias of
+            // play_mode whose values map EditMode → false and PlayMode → true.
+            var schema = BridgeBatchSchemas.ByTool["unity_senses_run_tests"];
+            var errors = new List<string>();
+            BatchSchemaValidator.ValidateRequest("{\"mode\":\"PlayMode\",\"filter\":\"Demo.Tests\"}", schema, errors);
+            Assert.IsEmpty(errors, string.Join("; ", errors));
+            Assert.AreEqual("{\"play_mode\":true,\"test_class\":\"Demo.Tests\"}",
+                BatchSchemaValidator.WireArguments("{\"mode\":\"PlayMode\",\"filter\":\"Demo.Tests\"}", schema));
+            Assert.AreEqual("{\"play_mode\":false}", BatchSchemaValidator.WireArguments("{\"mode\":\"EditMode\"}", schema));
+            StringAssert.Contains("mode: \"EditMode\" is deprecated; use play_mode: false",
+                string.Join(";", BatchSchemaValidator.Deprecations("{\"mode\":\"EditMode\"}", schema)));
+            errors.Clear();
+            BatchSchemaValidator.ValidateRequest("{\"mode\":\"Sideways\"}", schema, errors);
+            Assert.IsNotEmpty(errors);
+        }
+
+        [Test]
         public void ExplicitNullForOptionalTypedArgumentReadsAsOmitted()
         {
             // Mirrors tool-contract.ts: clients serialize absent optionals as

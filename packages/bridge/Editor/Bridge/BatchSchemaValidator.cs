@@ -191,8 +191,11 @@ namespace UnityOpenMcpBridge
             {
                 var property = Raw(properties, key) ?? "{}";
                 var canonical = Str(property, "x-alias-for");
-                if (canonical != null) notes.Add(key + " is deprecated; use " + canonical);
                 var value = Raw(body, key);
+                var mapped = canonical == null ? null : AliasValue(value, Raw(property, "x-alias-values"));
+                if (canonical != null)
+                    notes.Add(mapped == null ? key + " is deprecated; use " + canonical
+                        : key + ": " + value.Trim() + " is deprecated; use " + canonical + ": " + mapped.Trim());
                 var items = Raw(property, "items");
                 if (items != null && value != null && value.TrimStart().StartsWith("["))
                     foreach (var item in JsonBody.GetArrayRawValues(value)) notes.AddRange(Deprecations(item, items));
@@ -206,6 +209,8 @@ namespace UnityOpenMcpBridge
         }
 
         // Schema-owned aliases are normalized structurally: patch values are never rewritten.
+        // An alias with `x-alias-values` also translates its value (mode "EditMode" → play_mode false);
+        // mirrors wireArguments in mcp-server/src/tool-contract.ts.
         internal static string WireArguments(string value, string schema)
         {
             var properties = Raw(schema, "properties");
@@ -222,9 +227,20 @@ namespace UnityOpenMcpBridge
                 var property = Raw(properties, key) ?? "{}";
                 var canonical = Str(property, "x-alias-for");
                 var target = Str(property, "x-wire-key") ?? (canonical == null ? key : Str(Raw(properties, canonical) ?? "{}", "x-wire-key") ?? canonical);
-                fields.Add(BridgeJson.EscapeString(target) + ":" + WireArguments(Raw(value, key), property));
+                var raw = Raw(value, key);
+                var mapped = canonical == null ? null : AliasValue(raw, Raw(property, "x-alias-values"));
+                fields.Add(BridgeJson.EscapeString(target) + ":" + (mapped ?? WireArguments(raw, property)));
             }
             return "{" + string.Join(",", fields) + "}";
+        }
+
+        // The canonical raw JSON value an alias string maps to, or null when the
+        // alias has no value map or the value is not one of its keys.
+        private static string AliasValue(string raw, string valueMap)
+        {
+            if (valueMap == null || raw == null || !raw.TrimStart().StartsWith("\"")) return null;
+            var text = Str("{\"v\":" + raw + "}", "v");
+            return text == null ? null : Raw(valueMap, text);
         }
 
         private static void Bound(double value, string schema, string min, string max, string path, List<string> errors)

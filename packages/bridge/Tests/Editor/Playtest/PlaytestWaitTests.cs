@@ -75,6 +75,8 @@ namespace UnityOpenMcpBridge.Tests.Playtest
         [TestCase("{\"ms\":250.5}", "ms")]
         [TestCase("{\"any\":[{\"ms\":5},{\"frames\":2}]}", "any")]
         [TestCase("{\"all\":[{\"ms\":5},{\"log\":{\"pattern\":\"x\",\"level\":\"error\"}}]}", "all")]
+        [TestCase("{\"any\":[{\"all\":[{\"frames\":2},{\"ms\":800}]},{\"ms\":1500}]}", "any")]
+        [TestCase("{\"all\":[{\"ms\":800},{\"any\":[{\"object\":{\"path\":\"A\"}},{\"object\":{\"path\":\"B\"}}]}]}", "all")]
         public void Parse_AcceptsEveryShape(string condition, string type)
         {
             if (type == "ui" && PlaytestProbes.Ui == null) Assert.Ignore("uGUI is not compiled in.");
@@ -86,7 +88,7 @@ namespace UnityOpenMcpBridge.Tests.Playtest
         [TestCase("{}", "exactly one key")]
         [TestCase("{\"ms\":1,\"frames\":2}", "exactly one key")]
         [TestCase("{\"sleep\":1}", "unknown condition")]
-        [TestCase("{\"any\":[{\"all\":[{\"ms\":1}]}]}", "nest one level")]
+        [TestCase("{\"any\":[{\"all\":[{\"any\":[{\"ms\":1}]}]}]}", "nest one level")]
         [TestCase("{\"any\":[]}", "1..16")]
         [TestCase("{\"log\":{\"pattern\":\"(\"}}", "not a valid regex")]
         [TestCase("{\"log\":{\"pattern\":\"x\",\"level\":\"fatal\"}}", "level must be")]
@@ -282,6 +284,34 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             Tick(4);
             var status = Status();
             StringAssert.Contains("\"fired\":{\"path\":\"condition.all\",\"type\":\"all\",\"frame\":4", status);
+        }
+
+        [Test]
+        public void NestedComposites_NameTheInnerSetOrLeafThatFired()
+        {
+            // "window open AND 2 frames passed" OR a 50-frame fallback: the inner all fires.
+            Wait("{\"any\":[{\"all\":[{\"frames\":1},{\"frames\":2}]},{\"frames\":50}]}");
+            Tick(1); Tick(2);
+            StringAssert.Contains("\"state\":\"running\"", Status());
+            Tick(3);
+            StringAssert.Contains("\"fired\":{\"path\":\"condition.any[0].all\",\"type\":\"all\"", Status());
+
+            // An any nested in an all: the outer all fires when both its children hold.
+            PlayModeScheduler.ResetForTests();
+            Wait("{\"all\":[{\"frames\":3},{\"any\":[{\"frames\":50},{\"frames\":1}]}]}");
+            Tick(1); Tick(2); Tick(3);
+            StringAssert.Contains("\"state\":\"running\"", Status());
+            Tick(4);
+            StringAssert.Contains("\"fired\":{\"path\":\"condition.all\",\"type\":\"all\"", Status());
+        }
+
+        [Test]
+        public void NestedComposites_AreBoundedByTheLeafCap()
+        {
+            var inner = "{\"all\":[" + string.Join(",", System.Linq.Enumerable.Repeat("{\"frames\":1}", 16)) + "]}";
+            var tooMany = "{\"any\":[" + inner + "," + inner + ",{\"frames\":1}]}";
+            Assert.IsNull(WaitConditionParser.Parse(tooMany, "condition", out var error));
+            StringAssert.Contains("at most 32", error);
         }
 
         [Test]

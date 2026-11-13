@@ -62,6 +62,8 @@ export const uiSnapshot = makeTool(
           "Keep nodes whose text contains this (case-insensitive, after trimming, whitespace collapse " +
           "and rich-text tag removal).",
       },
+      text: { type: "string", deprecated: true, "x-alias-for": "text_contains", description: "Deprecated alias; use text_contains." },
+      query: { type: "string", deprecated: true, "x-alias-for": "text_contains", description: "Deprecated alias; use text_contains." },
       role: {
         type: "string",
         description: `Keep only these roles (comma-separated): ${UI_SNAPSHOT_ROLES.join(", ")}.`,

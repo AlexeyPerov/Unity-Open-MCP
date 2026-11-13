@@ -55,7 +55,7 @@ test("router validates action-specific arguments and never dispatches a project 
   } } as unknown as LiveClient;
   const batch = { route: () => { throw new Error("must not spawn Unity"); } } as unknown as BatchSpawn;
   const router = new ToolRouter(live, batch, "", {} as BridgeEventStream, new ToolSessionState());
-  for (const args of [{ action: "describe" }, { action: "describe", id: "project.demo.x", limit: 1 }, { action: "list", id: "x" }, { action: "invoke", id: "x" }, { action: "list", limit: 101 }, { action: "list", offset: -1 }])
+  for (const args of [{ action: "describe" }, { action: "describe", id: "project.demo.x", limit: 1 }, { action: "list", id: "x" }, { action: "invoke", id: "x", command_id: "y" }, { action: "list", limit: 101 }, { action: "list", offset: -1 }])
     assert.equal((await router.route(name, args)).isError, true);
   assert.equal(calls.length, 0);
   assert.notEqual((await router.route(name, { action: "describe", id: "project.demo.x" })).isError, true);
@@ -87,6 +87,29 @@ test("invoke validates a fresh schema before POST and pins the contract and life
   available = false;
   assert.equal((await router.route(name, invoke)).isError, true);
   assert.equal(dispatched.length, 1);
+});
+
+test("invoke takes id for command_id (and describe the reverse) with a note; command-arg errors name the command", async () => {
+  const dispatched: Record<string, unknown>[] = [];
+  const described: Record<string, unknown>[] = [];
+  const live = { projectCommands: async (args: Record<string, unknown>) => { described.push(args); return { command: { id: "project.demo.x", available: true, invocationSupported: true,
+      schemaVersion: "v1", lifecycle: "none", inputSchema: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string" } } } } }; },
+    route: async (_tool: string, body: Record<string, unknown>) => { dispatched.push(body); return { content: [{ type: "text", text: "{}" }] }; },
+  } as unknown as LiveClient;
+  const router = new ToolRouter(live, {} as BatchSpawn, "", {} as BridgeEventStream, new ToolSessionState());
+  const result = await router.route(name, { action: "invoke", id: "project.demo.x", args: { id: "tab-1" } });
+  assert.notEqual(result.isError, true);
+  assert.equal(dispatched[0].command_id, "project.demo.x");
+  assert.equal(dispatched[0].id, undefined);
+  assert.ok(result.content.some(c => c.type === "text" && /id is accepted for invoke; use command_id/.test(c.text)));
+  const describe = await router.route(name, { action: "describe", command_id: "project.demo.x" });
+  assert.notEqual(describe.isError, true);
+  assert.deepEqual(described.at(-1), { action: "describe", id: "project.demo.x" });
+  const bad = await router.route(name, { action: "invoke", command_id: "project.demo.x", args: { tab: "x" } });
+  assert.equal(bad.isError, true);
+  const text = bad.content[0].type === "text" ? bad.content[0].text : "";
+  assert.match(text, /Project command 'project\.demo\.x' rejected its own arguments: args\.id is required; args\.tab is unknown/);
+  assert.match(text, /not the transport's id\/command_id/);
 });
 
 test("invoke accepts deprecated parameter aliases, wires them to the parameter and refuses mixing", async () => {

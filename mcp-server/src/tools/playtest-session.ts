@@ -80,8 +80,9 @@ export const playtestSession = makeTool(
       label: {
         type: "string",
         minLength: 1,
-        maxLength: 120,
-        description: "[mark] The step that just finished, as a tester would name it (\"Tap Start Wave\").",
+        description:
+          "[mark] The step that just finished, as a tester would name it (\"Tap Start Wave\"). Keep it short: " +
+          "over 120 characters it is truncated and the full text moves to the start of note.",
       },
       verdict: {
         type: "string",

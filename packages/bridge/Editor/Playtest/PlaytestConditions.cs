@@ -17,8 +17,10 @@
 //   frames          N                      N frames have run
 //   ms              N                      N ms have passed (the operation's
 //                                          time base)
-//   all / any       [leaf, …]              every / one of the leaves holds at
-//                                          the same poll (one level deep)
+//   all / any       [condition, …]         every / one of the conditions holds
+//                                          at the same poll; a child may itself
+//                                          be all / any over leaves (two
+//                                          composite levels, e.g. any:[{all:[…]}])
 //
 // Event-like leaves (log) latch once seen; delays (frames, ms) are monotonic;
 // state-like leaves (ui, object, project_command) are re-read at every poll.
@@ -498,16 +500,32 @@ namespace UnityOpenMcpBridge.Playtest
     internal static class WaitConditionParser
     {
         internal const int MaxChildren = 16;
+        // Composite levels: the root all/any plus one nested all/any whose
+        // children are leaves. MaxLeaves bounds the whole tree's poll cost.
+        internal const int MaxCompositeDepth = 2;
+        internal const int MaxLeaves = 32;
         internal const int MaxFrames = 1_000_000;
         internal const double MaxMs = 3_600_000;
         internal static readonly string[] LeafKeys = { "log", "ui", "object", "project_command", "frames", "ms" };
         private static readonly string[] Levels = { "any", "log", "warning", "error", "exception" };
 
         internal static WaitCondition Parse(string raw, string path, out string error)
-            => Parse(raw, path, true, out error);
-
-        private static WaitCondition Parse(string raw, string path, bool allowComposite, out string error)
         {
+            var root = Parse(raw, path, MaxCompositeDepth, out error);
+            if (root == null) return null;
+            int leaves = 0;
+            foreach (var _ in root.Leaves()) leaves++;
+            if (leaves > MaxLeaves)
+            {
+                error = path + " holds " + leaves + " leaf conditions; at most " + MaxLeaves + " are allowed.";
+                return null;
+            }
+            return root;
+        }
+
+        private static WaitCondition Parse(string raw, string path, int compositeDepth, out string error)
+        {
+            bool allowComposite = compositeDepth > 0;
             error = null;
             if (string.IsNullOrWhiteSpace(raw) || !BridgeJson.IsValidJsonObject(raw))
             {
@@ -527,8 +545,8 @@ namespace UnityOpenMcpBridge.Playtest
             {
                 case "all":
                 case "any":
-                    if (!allowComposite) { error = path + ": all/any nest one level only (a list of leaf conditions)."; return null; }
-                    result = ParseComposite(key == "all", value, path + "." + key, out error);
+                    if (!allowComposite) { error = path + ": all/any nest one level only (an inner all/any holds leaf conditions)."; return null; }
+                    result = ParseComposite(key == "all", value, path + "." + key, compositeDepth - 1, out error);
                     break;
                 case "log": result = ParseLog(value, path + ".log", out error); break;
                 case "ui": result = ParseUi(value, path + ".ui", out error); break;
@@ -553,7 +571,7 @@ namespace UnityOpenMcpBridge.Playtest
             return result;
         }
 
-        private static WaitCondition ParseComposite(bool all, string value, string path, out string error)
+        private static WaitCondition ParseComposite(bool all, string value, string path, int childDepth, out string error)
         {
             error = null;
             if (value == null || !value.StartsWith("["))
@@ -570,7 +588,7 @@ namespace UnityOpenMcpBridge.Playtest
             var composite = new CompositeCondition(all) { Path = path };
             for (int i = 0; i < items.Count; i++)
             {
-                var child = Parse(items[i], path + "[" + i + "]", false, out error);
+                var child = Parse(items[i], path + "[" + i + "]", childDepth, out error);
                 if (child == null) return null;
                 composite.Children.Add(child);
             }

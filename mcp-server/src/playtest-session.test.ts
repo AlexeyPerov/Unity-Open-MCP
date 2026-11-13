@@ -363,6 +363,7 @@ test("recorder: one session per owner, only the owner's recorded calls, redacted
   await r.route("unity_senses_screenshot", { view: "composed" }, ME);
   const m2 = body(await r.route(NAME, { action: "mark", label: "Report a bug", verdict: "bug", note: "Exception on tap; token=abc123secret" }, ME));
   assert.equal(m2.step, 2);
+  assert.equal(m2.labelTruncated, undefined);
   assert.equal(m2.since_last_mark.errors, 2);
   assert.match(m2.note, /treat them as findings/);
 
@@ -473,10 +474,20 @@ test("recorder: a live owner process keeps its session; resume continues numberi
   assert.equal(resumed.status, "ok", JSON.stringify(resumed));
   assert.equal(resumed.session.calls, 1);
   await later.route("unity_open_mcp_inputsim_pointer", { action: "click", target_text: "B" }, ME);
+  // A sentence-long label is kept: cut to 120 characters, the full text leads the note.
+  const longLabel = "Opened the shop, bought the second upgrade, closed the shop and confirmed the coin counter dropped by exactly the listed price";
+  const mark = body(await later.route(NAME, { action: "mark", label: longLabel, note: "Counter animated." }, ME));
+  assert.equal(mark.status, "ok", JSON.stringify(mark));
+  assert.equal(mark.label.length, 120);
+  assert.ok(mark.label.endsWith("…"));
+  assert.equal(mark.labelTruncated.maxLength, 120);
   const ended = body(await later.route(NAME, { action: "end" }, ME));
   assert.equal(ended.summary.calls, 2);
   const log = readFileSync(join(ended.folder, "log.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l));
   assert.deepEqual(log.filter(e => e.k === "call").map(e => e.seq), [1, 2]);
+  const marked = log.find(e => e.k === "mark");
+  assert.equal(marked.label, mark.label);
+  assert.equal(marked.note, `${longLabel}\n\nCounter animated.`);
 });
 
 test("recorder: limits are declared and bounded", () => {

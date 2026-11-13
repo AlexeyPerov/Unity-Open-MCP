@@ -18,7 +18,9 @@ Explicitly async commands execute through [jobs](jobs.md).
   returns full `inputSchema`, safety/lifecycle metadata, deprecated aliases,
   async/cancellation declarations, `schemaVersion`, declaring assembly/type,
   declared `pathsHint`, and `invocationSupported: true`.
-  Filters and paging are list-only; `id` is describe-only; invocation uses `command_id`. Aliases are informational
+  Filters and paging are list-only; `id` is describe-only; invocation uses `command_id`. The other locator is
+  accepted when it is the only one sent (`invoke` with `id`, `describe` with `command_id`) and answered with a
+  `deprecations` note; two different values are `invalid_arguments`. Aliases are informational
   and are not resolved as exact ids.
 
 Each entry reports `available` for declaration validity/enabled state. This does

@@ -63,6 +63,20 @@ export const runTests = makeTool(
               "Not a bridge parameter — the bridge run is async and writes a results file " +
               "the server polls. Raise for PlayMode (domain reload) or large suites.",
           },
+          mode: {
+            type: "string",
+            enum: ["EditMode", "PlayMode", "editmode", "playmode"],
+            deprecated: true,
+            "x-alias-for": "play_mode",
+            "x-alias-values": { EditMode: false, editmode: false, PlayMode: true, playmode: true },
+            description: "Deprecated alias; use play_mode (EditMode → false, PlayMode → true).",
+          },
+          filter: {
+            type: "string",
+            deprecated: true,
+            "x-alias-for": "test_class",
+            description: "Deprecated alias; use test_class.",
+          },
           run_id: {
             type: "string",
             description:

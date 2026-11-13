@@ -26,7 +26,8 @@ export const playtestWait = makeTool(
     "ui {text_contains, path, visible, matches} = a ui_snapshot query matches (matches:false = stops " +
     "matching, e.g. a popup closed); object {path | object_id, state: exists | active | inactive | " +
     "destroyed}; project_command {id, args, field} = the project's own read-only predicate returns true " +
-    "(no arbitrary C#); frames N; ms N; all / any [leaves] (one level). The bridge evaluates it inside " +
+    "(no arbitrary C#); frames N; ms N; all / any [conditions] — a child may itself be all / any over leaves " +
+    "(e.g. {\"any\":[{\"all\":[{\"object\":{…}},{\"ms\":800}]},{\"ms\":5000}]}). The bridge evaluates it inside " +
     "the player loop every poll_every_frames frames and the call returns the terminal result: `fired` " +
     "(which condition — e.g. condition.any[1] — at which frame, observed_frame, play_time, elapsed_ms), " +
     "every leaf's last observed state, frames, and console errors logged meanwhile. timeout_ms is " +

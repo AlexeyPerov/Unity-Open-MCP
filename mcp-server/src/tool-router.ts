@@ -2261,12 +2261,29 @@ export class ToolRouter implements Router {
   }
 
   private async routeProjectCommands(args: Record<string, unknown>, live: LiveClient): Promise<CallToolResult> {
+    // `id` (describe) and `command_id` (invoke) name the same thing; agents
+    // routinely send the other one. Accept it when it is the only one given,
+    // with a note, and refuse two different values.
+    const locatorNotes: string[] = [];
+    const primary = args.action === "invoke" ? "command_id" : "id";
+    const other = primary === "id" ? "command_id" : "id";
+    if (args.action === "invoke" || args.action === "describe") {
+      if (args[other] !== undefined && args[primary] !== undefined && args[other] !== args[primary])
+        return sourceResult({ error: { code: "invalid_arguments", message: `${args.action} takes ${primary}; ${other} names a different command (${JSON.stringify(args[other])} vs ${JSON.stringify(args[primary])}). Send ${primary} only.` } }, "local", true);
+      if (args[other] !== undefined) {
+        if (args[primary] === undefined) locatorNotes.push(`${other} is accepted for ${args.action}; use ${primary}.`);
+        args = { ...args, [primary]: args[primary] ?? args[other] };
+        delete args[other];
+      }
+    }
     if (args.action === "invoke") {
       const allowed = ["action", "command_id", "args", "schema_version", "paths_hint", "gate", "ignore_scene_dirty", "confirm_bypass", "timeout_ms"];
       let identity: Record<string, unknown> = { id: args.command_id };
       const fail = (code: string, message: string) => injectRouteMeta(sourceResult({ projectCommand: identity, error: { code, message } }, "local", true), { route: "local" });
-      if (!args.command_id || Object.keys(args).some(k => !allowed.includes(k)))
-        return fail("invalid_arguments", "invoke requires command_id and accepts command args plus transport safety options only.");
+      const unknown = Object.keys(args).filter(k => !allowed.includes(k));
+      if (!args.command_id || unknown.length)
+        return fail("invalid_arguments", "invoke requires command_id and accepts command args plus transport safety options only" +
+          (unknown.length ? ` (unknown: ${unknown.join(", ")}; put command parameters inside args)` : "") + ".");
       const catalog = await live.projectCommands({ action: "describe", id: args.command_id });
       if (catalog.error) return injectRouteMeta(sourceResult(catalog, "live", true), { route: "live" });
       const command = catalog.command as Record<string, any> | undefined;
@@ -2277,7 +2294,9 @@ export class ToolRouter implements Router {
       if (args.schema_version !== undefined && args.schema_version !== command.schemaVersion)
         return fail("command_schema_changed", "Describe the command again before invoking its changed contract.");
       const errors = validateSchema(args.args ?? {}, command.inputSchema);
-      if (errors.length) return fail("invalid_arguments", errors.join("; "));
+      if (errors.length) return fail("invalid_arguments",
+        `Project command '${String(command.id)}' rejected its own arguments: ${errors.join("; ")}. ` +
+        "These keys are the command's parameters from describe (inputSchema), passed inside args — not the transport's id/command_id.");
       // Deprecated parameter aliases are published like built-in aliases.
       const notes: string[] = [];
       const wire = wireArguments(args.args ?? {}, command.inputSchema, notes);
@@ -2292,6 +2311,7 @@ export class ToolRouter implements Router {
         } catch { /* Preserve non-JSON transport diagnostics. */ }
         return item;
       });
+      notes.push(...locatorNotes);
       if (notes.length) result.content.push({ type: "text", text: JSON.stringify({ deprecations: [...new Set(notes)] }) });
       return injectRouteMeta(result, { route: "live" });
     }
@@ -2299,7 +2319,9 @@ export class ToolRouter implements Router {
     if (Object.keys(args).some(k => !allowed.includes(k)) || (args.action === "describe" && !args.id))
       return sourceResult({ error: { code: "invalid_arguments", message: "describe requires an exact id only; list accepts filters and paging only." } }, "local", true);
     const body = await live.projectCommands(args);
-    return injectRouteMeta(sourceResult(body, "live", !!body.error), { route: "live" });
+    const result = injectRouteMeta(sourceResult(body, "live", !!body.error), { route: "live" });
+    if (locatorNotes.length) result.content.push({ type: "text", text: JSON.stringify({ deprecations: locatorNotes }) });
+    return result;
   }
 
   private async manageToolsListGroups(live: LiveClient): Promise<CallToolResult> {

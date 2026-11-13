@@ -254,7 +254,7 @@ A condition is an object with exactly one key:
 | `project_command` `{id, args, field}` | A synchronous, read-only [project command](project-commands.md) returns JSON `true` — or, with `field`, an object whose top-level `field` is `true` | The project's own predicate ("is the wave over"), called at every poll. Arguments are validated once, at start. Mutating or async commands answer `command_not_allowed`; an unknown id `command_unavailable`. There is no arbitrary C# predicate |
 | `frames` N | N frames have run since the start | |
 | `ms` N | N ms have passed in the call's `time` base | `time: gameplay` (default) is the game's clock (`Time.time`, so `time_scale` speeds it up); `realtime` is the wall clock (a hitch counts in full) |
-| `all` / `any` `[leaves]` | Every / one of the leaves holds at the same poll | One level deep (leaves only), 1–16 leaves |
+| `all` / `any` `[conditions]` | Every / one of the children holds at the same poll | 1–16 children each. A child may itself be `all` / `any` over leaves — one nested level, e.g. `{"any":[{"all":[{"object":{…}},{"ms":800}]},{"ms":5000}]}` ("the window is open and 800 ms passed, or give up after 5 s"); at most 32 leaves in the whole tree |
 
 Frames are reported precisely. A poll at the start of frame F+1 sees the state the
 game left after frame F, so a state condition (`ui`, `object`, `project_command`)
@@ -303,7 +303,8 @@ sent — it is not the request's transport budget.
 ```
 
 `fired` names the condition that fired (an `any` names its leaf, e.g.
-`condition.any[1]`). `condition` repeats the tree with every leaf's `met`, `fired`
+`condition.any[1]`; a nested set that fired is named as the set, e.g.
+`condition.any[0].all`). `condition` repeats the tree with every leaf's `met`, `fired`
 and `last` observed state — on a timeout this is what the game showed. `errors`
 lists console errors and exceptions logged meanwhile (at most 20, first stack line;
 `errors_dropped` counts the rest). With `fail_on`, `exception` carries the type,
@@ -599,7 +600,7 @@ tool's result and never fails one.
 | `action` | Arguments | Does |
 |---|---|---|
 | `start` | `name`, `device`, `snapshot` or `use_snapshot` | Opens a session for the calling agent and starts recording. `device` is a free-text summary for the report; the current Game view / Simulator state (`game_view get`) is recorded as well. `snapshot: true` takes a [`player_state`](#unity_open_mcp_player_state) snapshot (`playtest-<session>`) now — the start fails `snapshot_failed` rather than run unisolated; `use_snapshot` names an existing one. Either is diffed against the state at `end` |
-| `mark` | `label`, `verdict` (`ok` default, `bug`, `suspicious`), `note` | Closes a step: the recorded calls since the previous mark belong to it. Answers `since_last_mark` (`calls`, `errors`, `captures`, `failed`) — errors there are findings |
+| `mark` | `label`, `verdict` (`ok` default, `bug`, `suspicious`), `note` | Closes a step: the recorded calls since the previous mark belong to it. Answers `since_last_mark` (`calls`, `errors`, `captures`, `failed`) — errors there are findings. A `label` over 120 characters is not refused: it is cut to 120 (ending in `…`), the full text starts the `note`, and the answer carries `labelTruncated` |
 | `status` | — | Your open session (counts so far), plus `orphaned` sessions of this project whose MCP server process is gone |
 | `end` | `note`, `diff` (default true), `session` | Writes the report and closes the session; returns the report path and a compact `summary` |
 | `resume` | `session` | Re-attaches an orphaned session after an MCP server restart; recording continues, numbering continues |
