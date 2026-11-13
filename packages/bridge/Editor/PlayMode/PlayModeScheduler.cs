@@ -403,8 +403,12 @@ namespace UnityOpenMcpBridge
             sb.Append(",\"state\":").Append(BridgeJson.EscapeString(entry.State));
             sb.Append(",\"phase\":").Append(BridgeJson.EscapeString(entry.Terminal ? entry.State : entry.Op.Phase));
             sb.Append(",\"reason\":").Append(entry.Reason == null ? "null" : BridgeJson.EscapeString(entry.Reason));
-            sb.Append(",\"time\":").Append(BridgeJson.EscapeString(entry.Op.TimeBase == PlayModeTimeBase.Gameplay ? "gameplay" : "realtime"));
-            sb.Append(",\"progress\":{\"elapsedMs\":").Append(Num(entry.ElapsedMs));
+            // The scheduler clock belongs to progress.elapsedMs, so it is named
+            // there (progress.clock). A top-level `time` here clashed with the
+            // tool result's own `time` — playtest_wait reported "realtime" (its
+            // wall-clock timeout) and "gameplay" (its ms conditions) side by side.
+            sb.Append(",\"progress\":{\"clock\":").Append(BridgeJson.EscapeString(entry.Op.TimeBase == PlayModeTimeBase.Gameplay ? "gameplay" : "realtime"));
+            sb.Append(",\"elapsedMs\":").Append(Num(entry.ElapsedMs));
             sb.Append(",\"expectedMs\":").Append(Num(entry.Op.ExpectedDurationMs));
             sb.Append(",\"ticks\":").Append(entry.Ticks);
             sb.Append(",\"startFrame\":").Append(entry.StartFrame);

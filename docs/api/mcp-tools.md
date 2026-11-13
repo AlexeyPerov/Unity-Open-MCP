@@ -663,7 +663,14 @@ writing to the rotated file), it falls back to `Editor-prev.log` and reports
 in a failed-compile state, `AssetDatabase.Refresh` no-ops and the response
 carries `staleLogSuspected` — force a recompile
 (`unity_open_mcp_recompile_scripts`; `compile_check` with the Editor closed)
-before trusting the errors. `compile_check` itself
+before trusting the errors. A headless `compile_check` reports `status`
+(`compile_passed` / `compile_failed` / `compile_timeout`), `errors[]`, and
+`assembliesChecked` with its `assembliesSource`: `compilation` when it observed
+the compile itself; `startup_compile` when the batch Editor had already
+compiled at startup, before the check subscribed — the count is then the
+project assemblies whose `Library/ScriptAssemblies` DLL that run wrote; or
+`up_to_date` (count 0) when no DLL needed rebuilding. `projectAssemblies` is the
+total. `compile_check` itself
 short-circuits with `editor_instance_locked` **before** spawning when a live
 editor holds the project, avoiding the spawn that would rotate the log in the
 first place.

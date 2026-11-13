@@ -198,7 +198,13 @@ namespace UnityOpenMcpBridge.Batch
             EditorApplication.update -= Update;
             CompilationPipeline.assemblyCompilationFinished -= OnAssemblyCompiled;
 
-            var resultJson = BuildResultJson(pending, timedOut);
+            StartupCompileInfo startup = null;
+            if ((pending.assembliesSeen?.Count ?? 0) == 0)
+            {
+                try { startup = ProbeStartupCompile(); }
+                catch (Exception e) { Debug.LogWarning($"[CompileCheck] Startup compile probe failed: {e.Message}"); }
+            }
+            var resultJson = BuildResultJson(pending, timedOut, startup);
 
             try { File.Delete(pendingPath); }
             catch { /* best-effort cleanup */ }
@@ -229,17 +235,34 @@ namespace UnityOpenMcpBridge.Batch
         /// <c>timedOut</c> flag stays emitted for callers that read it directly.
         /// </para>
         /// </summary>
-        internal static string BuildResultJson(PendingState pending, bool timedOut)
+        /// <para><b>assembliesChecked</b> counts the assemblies whose compile this
+        /// check observed. The batch Editor compiles at startup, before
+        /// <c>-executeMethod</c> subscribes, and a RequestScriptCompilation with
+        /// nothing left to do fires no callback — so with no callback the count
+        /// falls back to <paramref name="startup"/>: the project assemblies whose
+        /// <c>Library/ScriptAssemblies</c> DLL this process wrote. <c>assembliesSource</c>
+        /// says which: <c>compilation</c> (callbacks), <c>startup_compile</c>, or
+        /// <c>up_to_date</c> (no DLL rebuilt this run — the existing assemblies already
+        /// matched the sources).</para>
+        internal static string BuildResultJson(PendingState pending, bool timedOut, StartupCompileInfo startup = null)
         {
             string status = timedOut
                 ? "compile_timeout"
                 : (pending.errors.Count > 0 ? "compile_failed" : "compile_passed");
 
+            int observed = pending.assembliesSeen?.Count ?? 0;
+            string source = observed > 0 || startup == null ? "compilation"
+                : startup.RebuiltThisRun > 0 ? "startup_compile" : "up_to_date";
+            int checkedCount = observed > 0 || startup == null ? observed : startup.RebuiltThisRun;
+
             var sb = new StringBuilder(512);
             sb.Append('{');
             sb.Append("\"status\":").Append(JsonString(status)).Append(',');
             sb.Append("\"errorCount\":").Append(pending.errors.Count.ToString(CultureInfo.InvariantCulture)).Append(',');
-            sb.Append("\"assembliesChecked\":").Append((pending.assembliesSeen?.Count ?? 0).ToString(CultureInfo.InvariantCulture)).Append(',');
+            sb.Append("\"assembliesChecked\":").Append(checkedCount.ToString(CultureInfo.InvariantCulture)).Append(',');
+            sb.Append("\"assembliesSource\":").Append(JsonString(source)).Append(',');
+            if (startup != null)
+                sb.Append("\"projectAssemblies\":").Append(startup.ProjectAssemblies.ToString(CultureInfo.InvariantCulture)).Append(',');
             if (timedOut)
                 sb.Append("\"timedOut\":true,");
 
@@ -258,6 +281,42 @@ namespace UnityOpenMcpBridge.Batch
             }
             sb.Append("]}");
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Project assemblies (CompilationPipeline) and how many of their
+        /// Library/ScriptAssemblies DLLs this Unity process wrote — the startup
+        /// compile that ran before the check subscribed.
+        /// </summary>
+        internal static StartupCompileInfo ProbeStartupCompile()
+        {
+            var processStartUtc = System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime();
+            var outputs = new List<string>();
+            foreach (var assembly in CompilationPipeline.GetAssemblies())
+                if (!string.IsNullOrEmpty(assembly.outputPath)) outputs.Add(assembly.outputPath);
+            return CountRebuilt(outputs, ProjectPath, processStartUtc);
+        }
+
+        // Pure over the file system: an output DLL counts as rebuilt when it
+        // exists and was written at or after the process start (2 s slack for
+        // coarse file-system timestamps).
+        internal static StartupCompileInfo CountRebuilt(IEnumerable<string> outputPaths, string projectPath, DateTime processStartUtc)
+        {
+            var info = new StartupCompileInfo();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var output in outputPaths)
+            {
+                if (!seen.Add(output)) continue;
+                info.ProjectAssemblies++;
+                var full = Path.IsPathRooted(output) ? output : Path.Combine(projectPath, output);
+                try
+                {
+                    if (File.Exists(full) && File.GetLastWriteTimeUtc(full) >= processStartUtc.AddSeconds(-2))
+                        info.RebuiltThisRun++;
+                }
+                catch { /* unreadable: not counted */ }
+            }
+            return info;
         }
 
         // Unity compiler messages look like "error CS0246: The type or namespace
@@ -390,6 +449,12 @@ namespace UnityOpenMcpBridge.Batch
         }
 
         #endregion
+    }
+
+    internal sealed class StartupCompileInfo
+    {
+        public int ProjectAssemblies;
+        public int RebuiltThisRun;
     }
 
     internal class PendingState

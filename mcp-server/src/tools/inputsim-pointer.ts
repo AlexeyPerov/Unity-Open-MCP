@@ -36,8 +36,9 @@ export const inputsimPointer = makeTool(
     "during play mode, via the EventSystem + ExecuteEvents. Resolution precedence: " +
     "object_id (a handle from scene_get_data / inputsim_probe) > target (name or " +
     "slash-path, with duplicate detection + partial-path match) > screen_x/screen_y " +
-    "(raycasts through EventSystem.current). The response reports `interactable`, " +
-    "`blockedBy`, and (for drag) `dropTarget`/`dropLanded` so a click on a disabled " +
+    "(raycasts through EventSystem.current). The response reports `interactable` and " +
+    "`blockedBy` at press time (`interactableAfter` when the click changed it, e.g. hid its own panel), " +
+    "and (for drag) `dropTarget`/`dropLanded` so a click on a disabled " +
     "button or behind a modal is never a silent ok. Play-mode only — refuses with " +
     "`play_mode_required` otherwise; pair with editor_set_state to enter play mode " +
     "and inputsim_step to advance frames before a screenshot. ROUTING: `dispatch` " +

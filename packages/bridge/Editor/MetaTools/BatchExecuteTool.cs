@@ -468,6 +468,24 @@ namespace UnityOpenMcpBridge.MetaTools
             return Execute(body, plan);
         }
 
+        // A nested step inherits the batch's paths_hint when it declares the key
+        // but did not send it. Preflight already waives a step's own paths_hint
+        // (the batch owns one scope and one gate cycle), and most typed steps
+        // never read it — but tools that check it themselves (the uGUI authoring
+        // tools) refused such a step with paths_hint_required although the batch
+        // had scoped it.
+        internal static string WithBatchScope(string tool, string paramsBody, string batchScopeRaw)
+        {
+            var body = string.IsNullOrWhiteSpace(paramsBody) ? "{}" : paramsBody.Trim();
+            if (batchScopeRaw == null || !batchScopeRaw.TrimStart().StartsWith("[")) return paramsBody;
+            if (!body.StartsWith("{") || JsonBody.GetTopLevelRawValue(body, "paths_hint") != null) return paramsBody;
+            if (!BridgeBatchSchemas.ByTool.TryGetValue(tool, out var schema)) return paramsBody;
+            var properties = JsonBody.GetTopLevelRawValue(schema, "properties");
+            if (properties == null || JsonBody.GetTopLevelRawValue(properties, "paths_hint") == null) return paramsBody;
+            var inner = body.Substring(1, body.Length - 2).Trim();
+            return "{" + (inner.Length > 0 ? inner + "," : "") + "\"paths_hint\":" + batchScopeRaw.Trim() + "}";
+        }
+
         // Dispatch loop for an already-preflighted request. Callers that hold a
         // plan from Preflight (the HTTP handler via BatchExecuteGateRunner) use
         // this entry so the body is not parsed and validated a second time.
@@ -475,6 +493,7 @@ namespace UnityOpenMcpBridge.MetaTools
         {
             var sw = Stopwatch.StartNew();
             bool failFast = JsonBody.GetBool(JsonBody.TopLevelField(body, "fail_fast"), "fail_fast", true);
+            var batchScope = JsonBody.GetTopLevelRawValue(body, "paths_hint");
             var steps = plan.Steps;
             // --- BridgeBatchRunHistory live progress -------------------------
             // One BeginRun / CompleteRun pair around the whole loop so the
@@ -525,7 +544,7 @@ namespace UnityOpenMcpBridge.MetaTools
                         // paths_hint/gate are NOT re-enforced per step (the
                         // batch owns one gate cycle for the whole sequence —
                         // see BatchExecuteGateRunner).
-                        stepResult = BridgeHttpServer.DispatchTool(step.Tool, step.ParamsBody);
+                        stepResult = BridgeHttpServer.DispatchTool(step.Tool, WithBatchScope(step.Tool, step.ParamsBody, batchScope));
                     }
                     catch (System.Exception e)
                     {

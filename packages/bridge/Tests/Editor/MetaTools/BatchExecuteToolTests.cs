@@ -73,6 +73,24 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void NestedStepInheritsTheBatchScopeWhenItDeclaresPathsHint()
+        {
+            const string scope = "[\"Assets/Scenes/Main.unity\"]";
+            var inherited = BatchExecuteTool.WithBatchScope("unity_open_mcp_ui_element_add",
+                "{\"parent_path\":\"Canvas\",\"element_type\":\"Image\"}", scope);
+            StringAssert.Contains("\"paths_hint\":[\"Assets/Scenes/Main.unity\"]", inherited);
+            StringAssert.Contains("\"element_type\":\"Image\"", inherited);
+            Assert.IsTrue(BridgeJson.IsValidJsonObject(inherited), inherited);
+
+            // A step's own scope wins; a tool without paths_hint and a batch without scope are untouched.
+            const string own = "{\"element_type\":\"Image\",\"paths_hint\":[\"Assets/Other.unity\"]}";
+            Assert.AreEqual(own, BatchExecuteTool.WithBatchScope("unity_open_mcp_ui_element_add", own, scope));
+            Assert.AreEqual("{\"game_object_path\":\"A\"}", BatchExecuteTool.WithBatchScope("unity_open_mcp_component_get", "{\"game_object_path\":\"A\"}", scope));
+            Assert.AreEqual("{}", BatchExecuteTool.WithBatchScope("unity_open_mcp_ui_element_add", "{}", null));
+            StringAssert.Contains("\"paths_hint\":", BatchExecuteTool.WithBatchScope("unity_open_mcp_ui_element_add", "{}", scope));
+        }
+
+        [Test]
         public void ValueAliasTranslatesItsValueToTheCanonicalKey()
         {
             // Mirrors tool-contract.ts wireArguments: run_tests `mode` is an alias of

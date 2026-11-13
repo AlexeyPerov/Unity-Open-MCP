@@ -110,7 +110,11 @@ passed to that direct call becomes the job's `idempotency_key`.
 The adapter starts the operation through the tool (the bridge validates, routes
 input and refuses as usual — a refusal is a `failed` job carrying the bridge's
 code and `error.detected` configuration), then polls `POST /playmode-operations`.
-Progress reports the scheduler phase and `elapsedMs / expectedMs` as a fraction.
+Progress reports the scheduler phase and `elapsedMs / expectedMs` as a fraction;
+the operation snapshot names the clock of `progress.elapsedMs` as
+`progress.clock` (`realtime` for a wait, whose `timeout_ms` is wall-clock). The
+tool result's own `time` is the clock of its `ms` conditions / keyframes and of
+its `elapsed_ms`; `realtime_ms` is always wall time.
 Operations are cancellable: `cancel` is forwarded once and the job becomes
 `cancelled` after the bridge acknowledges it, having released held input and
 restored a wait's time scale. Terminal results keep the operation snapshot under

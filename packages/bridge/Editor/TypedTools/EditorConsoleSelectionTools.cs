@@ -151,6 +151,15 @@ namespace UnityOpenMcpBridge.TypedTools
             switch (state)
             {
                 case EditorStateTarget.Play:
+                    // `play` on a paused session means "let it run": resume
+                    // instead of answering play_noop (which left it paused and
+                    // pointed at a re-enter). force: true still re-enters.
+                    if (!force && EditorApplication.isPlaying && EditorApplication.isPaused)
+                    {
+                        EditorApplication.isPaused = false;
+                        return ToolDispatchResult.Ok(BuildStateEnvelope("resume",
+                            "Play mode was paused; it is running again. Pass force: true to re-enter play mode instead."));
+                    }
                     if (!force && EditorApplication.isPlaying)
                         return ToolDispatchResult.Ok(BuildStateEnvelope("play_noop",
                             "Already in play mode. Pass force: true to re-enter."));

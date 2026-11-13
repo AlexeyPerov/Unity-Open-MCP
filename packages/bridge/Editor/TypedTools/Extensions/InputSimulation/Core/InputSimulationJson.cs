@@ -84,6 +84,9 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             sb.Append(",\"screenPoint\":[").Append(Num(o.ScreenPoint.x)).Append(',').Append(Num(o.ScreenPoint.y)).Append(']');
             sb.Append(",\"hasHandler\":").Append(o.HasHandler ? "true" : "false");
             sb.Append(",\"interactable\":").Append(o.Interactable ? "true" : "false");
+            // Only when the dispatch changed it (the click hid / disabled its own target).
+            if (o.InteractableAfter.HasValue && o.InteractableAfter.Value != o.Interactable)
+                sb.Append(",\"interactableAfter\":").Append(o.InteractableAfter.Value ? "true" : "false");
             sb.Append(",\"eventSystem\":").Append(o.EventSystem ? "true" : "false");
             sb.Append(",\"blockedBy\":");
             sb.Append(o.BlockedBy == null ? "null" : Esc(o.BlockedBy));
@@ -111,7 +114,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         public string TargetPath;
         public Vector2 ScreenPoint;
         public bool HasHandler;
-        public bool Interactable = true;   // P2: false when disabled / CanvasGroup-blocked
+        public bool Interactable = true;   // P2: at press time; false when disabled / CanvasGroup-blocked
+        public bool? InteractableAfter;    // after dispatch; emitted only when it differs
         public bool EventSystem = true;    // false only on the no_event_system path (returned earlier)
         public string BlockedBy;           // P2: top raycast hit when it occludes the target, else null
         public bool IsDrag;

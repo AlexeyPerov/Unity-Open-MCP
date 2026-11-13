@@ -87,6 +87,50 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(json.Contains("\"timedOut\""));
         }
 
+        // The batch Editor compiles before -executeMethod subscribes; a check
+        // that saw no compilation callback reports the assemblies the startup
+        // compile wrote instead of a bare 0.
+        [Test]
+        public static void BuildResultJson_FallsBackToTheStartupCompile()
+        {
+            var pending = new PendingState();
+            var startup = new StartupCompileInfo { ProjectAssemblies = 95, RebuiltThisRun = 95 };
+            var json = CompileCheckState.BuildResultJson(pending, false, startup);
+            StringAssert.Contains("\"assembliesChecked\":95", json);
+            StringAssert.Contains("\"assembliesSource\":\"startup_compile\"", json);
+            StringAssert.Contains("\"projectAssemblies\":95", json);
+
+            var upToDate = CompileCheckState.BuildResultJson(pending, false, new StartupCompileInfo { ProjectAssemblies = 95 });
+            StringAssert.Contains("\"assembliesChecked\":0", upToDate);
+            StringAssert.Contains("\"assembliesSource\":\"up_to_date\"", upToDate);
+
+            var observed = CompileCheckState.BuildResultJson(new PendingState { assembliesSeen = new List<string> { "A.dll" } }, false);
+            StringAssert.Contains("\"assembliesSource\":\"compilation\"", observed);
+        }
+
+        [Test]
+        public static void CountRebuilt_CountsDllsWrittenSinceProcessStart()
+        {
+            var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "cc-startup-" + System.Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(System.IO.Path.Combine(dir, "Library", "ScriptAssemblies"));
+            try
+            {
+                var fresh = System.IO.Path.Combine(dir, "Library", "ScriptAssemblies", "Fresh.dll");
+                var old = System.IO.Path.Combine(dir, "Library", "ScriptAssemblies", "Old.dll");
+                System.IO.File.WriteAllText(fresh, "x");
+                System.IO.File.WriteAllText(old, "x");
+                System.IO.File.SetLastWriteTimeUtc(old, System.DateTime.UtcNow.AddHours(-1));
+                var info = CompileCheckState.CountRebuilt(new[]
+                {
+                    "Library/ScriptAssemblies/Fresh.dll", "Library/ScriptAssemblies/Old.dll",
+                    "Library/ScriptAssemblies/Missing.dll", "Library/ScriptAssemblies/Fresh.dll",
+                }, dir, System.DateTime.UtcNow.AddMinutes(-5));
+                Assert.AreEqual(3, info.ProjectAssemblies);
+                Assert.AreEqual(1, info.RebuiltThisRun);
+            }
+            finally { System.IO.Directory.Delete(dir, true); }
+        }
+
         [Test]
         public static void BuildResultJson_ReportsFailedWithErrors()
         {

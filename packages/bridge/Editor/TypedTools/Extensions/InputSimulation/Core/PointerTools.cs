@@ -168,6 +168,10 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 raycast = default;
             var outcome = NewOutcome(resolved, point);
             outcome.TextTarget = textTarget;
+            // Press-time state: a button that hides its own panel is not
+            // interactable AFTER the click, which used to read as a disabled
+            // target although the tap worked.
+            ComputeHonestyFields(outcome, resolved, point);
 
             switch (action)
             {
@@ -216,7 +220,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                         "press, release, hover, hover_exit, submit, drag.");
             }
 
-            ComputeHonestyFields(outcome, resolved, point);
+            outcome.InteractableAfter = PointerTargets.ComputeInteractable(resolved);
             return InputSimulationJson.BuildPointerOk(outcome);
         }
 
@@ -273,6 +277,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             var outcome = NewOutcome(pressTarget, fromPoint);
             outcome.IsDrag = true;
             outcome.TextTarget = textTarget;
+            ComputeHonestyFields(outcome, pressTarget, fromPoint);
             var pressRaycast = RaycastAt(fromPoint);
 
             var ped = NewEventData(fromPoint, inputButton, pressRaycast, pressTarget);
@@ -337,7 +342,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             Dispatch(pressTarget, ped, ExecuteEvents.endDragHandler, "endDrag", outcome);
             ped.dragging = false;
 
-            ComputeHonestyFields(outcome, pressTarget, fromPoint);
+            outcome.InteractableAfter = PointerTargets.ComputeInteractable(pressTarget);
             outcome.ScreenPoint = toPoint;
             return InputSimulationJson.BuildPointerOk(outcome);
         }
@@ -584,9 +589,10 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             };
         }
 
-        // P2: compute interactable + blockedBy after dispatch. blockedBy is the top
-        // raycast hit at the press point when it is neither the target nor a
-        // descendant — i.e. something is in front of the target.
+        // P2: interactable + blockedBy at PRESS time (before dispatch). blockedBy is
+        // the top raycast hit at the press point when it is neither the target nor
+        // a descendant — i.e. something is in front of the target. The state after
+        // dispatch is reported separately (interactableAfter) when it differs.
         private static void ComputeHonestyFields(PointerOutcome outcome, GameObject resolved, Vector2 point)
         {
             outcome.Interactable = PointerTargets.ComputeInteractable(resolved);

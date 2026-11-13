@@ -131,6 +131,24 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             CollectionAssert.AreEqual(new[] { "enter", "exit" }, PointerRecorder.Events);
         }
 
+        // A button that hides its own panel on click: interactable describes the
+        // target at press time; the post-click state rides in interactableAfter.
+        [Test]
+        public void Click_ThatHidesItsTarget_ReportsPressTimeInteractable()
+        {
+            source.AddComponent<HideOnClick>();
+            var json = Single("click");
+            StringAssert.Contains("\"interactable\":true", json);
+            StringAssert.Contains("\"interactableAfter\":false", json);
+            Assert.IsFalse(source.activeSelf, "the handler ran");
+
+            source.SetActive(true);
+            Object.DestroyImmediate(source.GetComponent<HideOnClick>());
+            var plain = Single("click");
+            StringAssert.Contains("\"interactable\":true", plain);
+            StringAssert.DoesNotContain("interactableAfter", plain, "emitted only when the click changed it");
+        }
+
         [Test]
         public void Interactable_DisabledComponentAndNonSelectableGroupAreFalse()
         {
@@ -143,6 +161,11 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             source.AddComponent<CanvasGroup>().ignoreParentGroups = true;
             Assert.IsTrue(PointerTargets.ComputeInteractable(source));
         }
+    }
+
+    public class HideOnClick : MonoBehaviour, IPointerClickHandler
+    {
+        public void OnPointerClick(PointerEventData e) => gameObject.SetActive(false);
     }
 
     public class PointerRecorder : MonoBehaviour, IPointerDownHandler, IPointerUpHandler,

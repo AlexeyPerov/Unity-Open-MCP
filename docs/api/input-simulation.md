@@ -212,7 +212,10 @@ Named-target dispatch can bypass occlusion. Inspect `interactable`, `blockedBy`,
 and `hasHandler`: a successful dispatch does not establish that a human could click
 the target. Inactive objects, disabled Selectables, and non-interactable or
 non-raycastable CanvasGroup chains report non-interactable; `ignoreParentGroups`
-is respected. `hover` sends enter only; `hover_exit` explicitly ends it.
+is respected. `interactable` and `blockedBy` describe the target at press time;
+when the dispatch itself changes that (a button that hides its own panel), the
+result adds `interactableAfter` with the post-click state, so a working tap is
+not read as a disabled button. `hover` sends enter only; `hover_exit` explicitly ends it.
 
 Pointer selection precedence is `object_id`, then target, then screen coordinates;
 `target_text` is exclusive with all three ([target by label](#target-by-label)).

@@ -34,8 +34,9 @@ export const editorSetState = makeTool(
             type: "string",
             enum: ["play", "pause", "stop"],
             description:
-              "Target state. 'play' → enter play mode (refuses if already playing " +
-              "unless force: true); 'pause' → pause the current play session " +
+              "Target state. 'play' → enter play mode; on a paused session it resumes " +
+              "(action 'resume'); refuses if already running unless force: true " +
+              "(re-enter); 'pause' → pause the current play session " +
               "(idempotent — refuses with pause_noop when already paused unless " +
               "force: true, which toggles pause so an explicit unpause is " +
               "reachable; no-op when not playing); 'stop' → exit play mode " +

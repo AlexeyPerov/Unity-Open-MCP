@@ -286,6 +286,20 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             StringAssert.Contains("\"fired\":{\"path\":\"condition.all\",\"type\":\"all\",\"frame\":4", status);
         }
 
+        // One `time` per response: the operation snapshot names its own clock
+        // as progress.clock (a wait's timeout is wall-clock), the result's
+        // `time` is the ms-condition clock.
+        [Test]
+        public void Snapshot_NamesTheSchedulerClockUnderProgress()
+        {
+            Wait("{\"frames\":2}");
+            Tick(1); Tick(2); Tick(3);
+            var status = Status();
+            StringAssert.Contains("\"progress\":{\"clock\":\"realtime\"", status);
+            Assert.AreEqual(1, System.Text.RegularExpressions.Regex.Matches(status, "\"time\":").Count, status);
+            StringAssert.Contains("\"time\":\"gameplay\"", status);
+        }
+
         [Test]
         public void NestedComposites_NameTheInnerSetOrLeafThatFired()
         {
