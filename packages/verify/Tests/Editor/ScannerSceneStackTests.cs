@@ -119,7 +119,58 @@ namespace UnityOpenMcpVerify.Tests
                 "scanner must close a scene it opened itself (no leak)");
         }
 
+        [Test]
+        public void Scanner_SkipsAListedUnloadedScene_AndLeavesItUnloaded()
+        {
+            // What scene_unload leaves for the gate's validate scan: the scene
+            // is still in the hierarchy but not loaded. The scanner used to
+            // treat it as open and throw "The scene is not loaded"; it now
+            // skips it without touching its state.
+            var scenePath = FixtureRoot + "/UnloadedScan.unity";
+            WriteEmptySceneFile(scenePath);
+            AssetDatabase.ImportAsset(scenePath, ImportAssetOptions.ForceUpdate);
+
+            Scene opened;
+            try
+            {
+                opened = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
+            }
+            catch (System.Exception e)
+            {
+                Assert.Inconclusive($"Could not open fixture scene additively: {e.Message}");
+                return;
+            }
+            Assume.That(EditorSceneManager.CloseScene(opened, false), Is.True, "unload, keep listed");
+            Assume.That(IsSceneListedUnloaded(scenePath), Is.True);
+
+            try
+            {
+                var scenes = new List<SceneData>();
+                Assert.DoesNotThrow(() =>
+                    Scanner.ScanPaths(new[] { scenePath }, ScanSettings.Default(), scenes, new List<PrefabData>()));
+                Assert.AreEqual(0, scenes.Count, "a listed-but-unloaded scene is not scanned");
+                Assert.IsTrue(IsSceneListedUnloaded(scenePath),
+                    "the scanner must leave a listed-but-unloaded scene in that state");
+            }
+            finally
+            {
+                var listed = SceneManager.GetSceneByPath(scenePath);
+                if (listed.IsValid()) EditorSceneManager.CloseScene(listed, true);
+            }
+        }
+
         // ----------------------- helpers ----------------------------------
+
+        private static bool IsSceneListedUnloaded(string path)
+        {
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var s = SceneManager.GetSceneAt(i);
+                if (s.path == path) return !s.isLoaded;
+            }
+            return false;
+        }
+
 
         private static bool IsSceneLoaded(string path)
         {

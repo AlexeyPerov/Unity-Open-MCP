@@ -66,10 +66,21 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
             // "drop" the scene. The wasOpen pattern (same one RemoveMissing-
             // ScriptFix.FixScene uses) only closes what the scanner itself
             // opened, leaving intentional scene-stack side effects intact.
+            //
+            // A scene can also be LISTED but not loaded — what scene_unload
+            // leaves behind while its unload completes (the gate validates
+            // right after it). Reading its roots threw "The scene is not
+            // loaded" and failed the whole gate scan. Such a scene is skipped
+            // (not scanned): loading it back mid-unload, or reading it, would
+            // fight the operation that just ran.
             bool wasOpen = false;
             for (var i = 0; i < SceneManager.sceneCount; i++)
             {
-                if (SceneManager.GetSceneAt(i).path == scenePath) { wasOpen = true; break; }
+                var listed = SceneManager.GetSceneAt(i);
+                if (listed.path != scenePath) continue;
+                if (!listed.isLoaded) return null;
+                wasOpen = true;
+                break;
             }
 
             Scene scene;
@@ -83,6 +94,7 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
             {
                 return null;
             }
+            if (!scene.IsValid() || !scene.isLoaded) return null;
 
             try
             {

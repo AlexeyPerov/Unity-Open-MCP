@@ -868,7 +868,10 @@ supported.
 `scene_set_active`, `scene_unload`, `scene_save`, and `scene_get_data` resolve
 opened scenes by asset `path` first and display `name` second. Prefer paths.
 For `scene_save`, a path that does not identify an open scene is a save-as
-destination.
+destination. `scene_unload` writes no asset; its gate validates the unloaded
+scene's path, and the `scene_prefab_health` scan skips a scene that is still
+listed in the hierarchy but no longer loaded (an unload in progress) instead
+of failing the scan, so a successful unload is a clean success.
 
 ### `unity_open_mcp_component_get`
 
