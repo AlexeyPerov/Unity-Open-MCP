@@ -1067,7 +1067,8 @@ namespace UnityOpenMcpBridge
                             }
                             BridgeAuditRecorder.RecordGateRun(toolName, effectiveGateMode,
                                 GatePolicy.Skipped(ToolDispatchResult.Fail("paths_hint_required", "Explicit mutation scope is required."), "request_rejected"), pathsHint);
-                            BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildPathsHintErrorEnvelope(toolName, effectiveGateMode, BridgeToolClassification.ExposesReadOnlyParam(toolName)));
+                            BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildPathsHintErrorEnvelope(toolName, effectiveGateMode, BridgeToolClassification.ExposesReadOnlyParam(toolName),
+                                EffectiveToolContract.ReadOnlyOverrideReason(toolName, body), EffectiveToolContract.SuggestedScope(body)));
                             return;
                         }
                     }

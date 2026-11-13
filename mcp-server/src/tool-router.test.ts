@@ -5069,6 +5069,15 @@ test("route: invoke refuses inactive targets and recursion; activation carries s
   assert.deepEqual(again.tools, []);
 });
 
+test("route: execute_csharp results carry typedToolHints for snippets a typed tool covers", async () => {
+  const live = makeFakeLive({ available: true });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+  const hinted = parseBody(await router.route("unity_open_mcp_execute_csharp", { code: "return UnityEngine.PlayerPrefs.GetInt(\"coins\");", read_only: true }));
+  assert.ok((hinted.typedToolHints as string[]).some(h => h.includes("playerprefs_get")));
+  const plain = parseBody(await router.route("unity_open_mcp_execute_csharp", { code: "return 1;", read_only: true }));
+  assert.equal(plain.typedToolHints, undefined);
+});
+
 test("route: human Search builds query without touching the Editor by default", async () => {
   const live = makeFakeLive({ available: true });
   const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());

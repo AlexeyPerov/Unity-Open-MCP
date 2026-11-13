@@ -36,6 +36,7 @@ import {
   groupFor,
 } from "./capabilities/tool-groups.js";
 import { closeToolNames } from "./tool-name-suggest.js";
+import { typedToolHints } from "./typed-tool-hints.js";
 import {
   recommendGroups,
   type Recommendation,
@@ -1251,6 +1252,7 @@ export class ToolRouter implements Router {
   private async routeValidated(live: LiveClient, toolName: string, args: Record<string, unknown>, notes: string[], identity: RequestIdentity): Promise<CallToolResult> {
     const result = await this.routeUnchecked(live, toolName, args, identity);
     if (notes.length) result.content.push({ type: "text", text: JSON.stringify({ deprecations: [...new Set(notes)] }) });
+    if (toolName === "unity_open_mcp_execute_csharp") attachTypedToolHints(result, typedToolHints(args.code));
     return result;
   }
 
@@ -4061,3 +4063,23 @@ function flattenSceneBody(body: Record<string, unknown>): Record<string, unknown
 // starts. applyPaging enforces the per-page size; this only lifts the
 // source-side ceiling.
 const SCENE_PAGING_MAX_NODES = 100_000;
+
+/**
+ * Add `typedToolHints` to the result's JSON body (the first text block), or as
+ * its own block when the body is not a JSON object. Advisory only: isError and
+ * every other field are left as they were.
+ */
+function attachTypedToolHints(result: CallToolResult, hints: string[]): void {
+  if (!hints.length) return;
+  const first = result.content[0];
+  if (first?.type === "text") {
+    try {
+      const body = JSON.parse(first.text);
+      if (body && typeof body === "object" && !Array.isArray(body)) {
+        result.content[0] = { ...first, text: JSON.stringify({ ...body, typedToolHints: hints }) };
+        return;
+      }
+    } catch { /* not JSON: fall through */ }
+  }
+  result.content.push({ type: "text", text: JSON.stringify({ typedToolHints: hints }) });
+}

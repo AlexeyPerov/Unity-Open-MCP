@@ -29,6 +29,9 @@ namespace UnityOpenMcpBridge.MetaTools
         public int MaxListItems = 100;
         public bool IncludeFields = true;
         public bool IncludeProperties = true;
+        /// <summary>Also walk non-public instance fields of project types (declared on the type and its
+        /// project base types; Unity / System types keep their public surface only).</summary>
+        public bool IncludeNonPublic = false;
     }
 
     static class OutputSerializer
@@ -300,9 +303,10 @@ namespace UnityOpenMcpBridge.MetaTools
                     catch (Exception ex) { valJson = ErrorMarker(ex); }
                     members.Add("\"" + EscapeJsonString(f.Name) + "\":" + valJson);
                 }
+                if (opts.IncludeNonPublic) AppendNonPublicFields(value, type, depth, opts, visited, members);
             }
 
-            if (opts.IncludeProperties)
+            if (opts.IncludeProperties && !FieldsOnlyTypes.Contains(type))
             {
                 var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
                 foreach (var p in props)
@@ -336,6 +340,51 @@ namespace UnityOpenMcpBridge.MetaTools
             }
 
             return "{" + string.Join(",", members) + "}";
+        }
+
+        // Value types whose public fields ARE the data and whose computed
+        // properties are unsafe to read reflectively. Matrix4x4.rotation /
+        // lossyScale / decomposeProjection assert ValidTRS() on a non-TRS matrix
+        // (e.g. a transform matrix's `transpose`), logging an engine assertion
+        // from a read-only dump; m00..m33 carry the whole value.
+        private static readonly HashSet<Type> FieldsOnlyTypes = new HashSet<Type> { typeof(Matrix4x4) };
+
+        // Non-public instance fields of project types: the private state of a
+        // live MonoBehaviour or service that agents otherwise read through
+        // execute_csharp reflection. Walks the declared fields of the type and
+        // its base types until the first framework type (UnityEngine / System /
+        // Mono), so engine internals stay out. Compiler-generated backing fields
+        // (<Name>k__BackingField) are skipped — their property is the public read.
+        private static void AppendNonPublicFields(object value, Type type, int depth, SerializeOptions opts,
+            HashSet<object> visited, List<string> members)
+        {
+            var seen = new HashSet<string>();
+            foreach (var member in members)
+            {
+                var end = member.IndexOf("\":", StringComparison.Ordinal);
+                if (end > 1) seen.Add(member.Substring(1, end - 1));
+            }
+            for (var t = type; t != null && !IsFrameworkType(t); t = t.BaseType)
+            {
+                foreach (var f in t.GetFields(BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+                {
+                    if (f.Name.StartsWith("<", StringComparison.Ordinal) || !seen.Add(f.Name)) continue;
+                    if (Attribute.IsDefined(f, typeof(ObsoleteAttribute))) continue;
+                    string valJson;
+                    try { valJson = SerializeInternal(f.GetValue(value), depth + 1, opts, visited); }
+                    catch (Exception ex) { valJson = ErrorMarker(ex); }
+                    members.Add("\"" + EscapeJsonString(f.Name) + "\":" + valJson);
+                }
+            }
+        }
+
+        private static bool IsFrameworkType(Type type)
+        {
+            var ns = type.Namespace ?? "";
+            return ns.StartsWith("UnityEngine", StringComparison.Ordinal) || ns.StartsWith("UnityEditor", StringComparison.Ordinal)
+                || ns.StartsWith("System", StringComparison.Ordinal) || ns.StartsWith("Mono", StringComparison.Ordinal)
+                || ns == "Unity" || ns.StartsWith("Unity.", StringComparison.Ordinal)
+                || type == typeof(object);
         }
 
         // B-N6 — properties whose getter CLONES the shared asset into a

@@ -2,7 +2,7 @@
 // (tool-router `routePlaymodeOperation`): the inline budget, what a stalled or
 // failed operation is called, and which start fields are kept in the result.
 import { INPUTSIM_GESTURE_INLINE_LIMIT_MS } from "./tools/inputsim-gesture.js";
-import { PLAYTEST_WAIT_INLINE_LIMIT_MS } from "./tools/playtest-wait.js";
+import { PLAYTEST_WAIT_INLINE_LIMIT_MS, PLAYTEST_WAIT_MAX_TIMEOUT_MS } from "./tools/playtest-wait.js";
 import { CAPTURE_SERIES_INLINE_LIMIT_MS } from "./tools/capture-series.js";
 
 export interface PlaymodeRouteSpec {
@@ -44,7 +44,9 @@ export const PLAYMODE_ROUTES: Record<string, PlaymodeRouteSpec> = {
     resultHint: "which condition fired (or the last observed state)",
     startMeta: () => ({}),
     failureNextSteps: code => code === "timed_out"
-      ? ["The condition did not hold in time: read condition.last (per leaf) for what the game showed; raise timeout_ms, use time_scale, or fix the condition — do not re-poll in a loop."]
+      ? ["The condition did not hold in time: read condition.last (per leaf) for what the game showed; raise timeout_ms, use time_scale, or fix the condition — do not re-poll in a loop.",
+        `One longer wait beats repeating this one: timeout_ms goes up to ${PLAYTEST_WAIT_MAX_TIMEOUT_MS} (over ${PLAYTEST_WAIT_INLINE_LIMIT_MS} ms the call runs as a job and returns a job_id), ` +
+        "and time_scale (e.g. 4) runs the game faster for the wait only."]
       : code === "exception_thrown"
         ? ["The game threw while waiting: read exception.message / exception.stack (and errors[]) before continuing the playtest."]
         : undefined,

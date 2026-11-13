@@ -12,7 +12,8 @@ export const objectGetData = makeTool(
   "unity_open_mcp_object_get_data",
   "Read token-bounded structured data for any live UnityEngine.Object (scene GameObject, " +
     "Component, ScriptableObject, Material, or any asset). Read-only and gate-free. Uses a " +
-    "depth-limited reflective walk over public fields and (optionally) properties — the same " +
+    "depth-limited reflective walk over public fields and (optionally) properties — plus private fields of " +
+    "project types with include_non_public — the same " +
     "engine invoke_method uses to serialize return values, so the shape is consistent. " +
     "Address the object by instance_id (live scene/asset instance) or asset_path (asset on " +
     "disk); instance_id wins when both are set. Prefer component_get for one Component's " +
@@ -44,6 +45,14 @@ export const objectGetData = makeTool(
             description:
               "Walk public properties. On by default to match invoke_method's return shape; " +
               "set false to suppress properties (some have side effects on read).",
+          },
+          include_non_public: {
+            type: "boolean",
+            default: false,
+            description:
+              "Also walk non-public instance fields of project types (the type and its project base types; " +
+              "UnityEngine / System types keep their public surface). Reads a live MonoBehaviour's or service's " +
+              "private state without an execute_csharp reflection snippet. Compiler-generated backing fields are skipped.",
           },
           max_depth: {
             type: "integer",

@@ -545,6 +545,27 @@ namespace UnityOpenMcpBridge.Tests
                 "The second agentNextSteps entry must name the read-only probe exit.");
         }
 
+        // read_only: true on a snippet the bridge treats as mutating (OpenScene,
+        // ExecuteMenuItem, …) used to get "pass read_only: true to waive" — the
+        // flag the caller had already sent. The envelope now says it was ignored
+        // and why, and offers the scene path from the snippet as the scope.
+        [Test]
+        public static void BuildPathsHintErrorEnvelope_SaysWhenReadOnlyWasOverridden()
+        {
+            const string body = "{\"read_only\":true,\"code\":\"UnityEditor.SceneManagement.EditorSceneManager.OpenScene(\\\"Assets/Scenes/X.unity\\\", UnityEditor.SceneManagement.OpenSceneMode.AdditiveWithoutLoading); return 1;\"}";
+            var reason = EffectiveToolContract.ReadOnlyOverrideReason("unity_open_mcp_execute_csharp", body);
+            Assert.AreEqual("the snippet calls OpenScene (scene switch)", reason);
+            Assert.AreEqual("Assets/Scenes/X.unity", EffectiveToolContract.SuggestedScope(body));
+            var json = BridgeJson.BuildPathsHintErrorEnvelope("unity_open_mcp_execute_csharp", "enforce", true,
+                reason, EffectiveToolContract.SuggestedScope(body));
+            Assert.IsTrue(BridgeJson.IsValidJsonObject(json), json);
+            StringAssert.Contains("read_only: true was ignored: the snippet calls OpenScene (scene switch)", json);
+            StringAssert.Contains("Assets/Scenes/X.unity", json);
+            StringAssert.DoesNotContain("pass read_only: true to waive", json);
+            Assert.IsNull(EffectiveToolContract.ReadOnlyOverrideReason("unity_open_mcp_execute_csharp", "{\"read_only\":true,\"code\":\"return 1;\"}"));
+            Assert.IsNull(EffectiveToolContract.ReadOnlyOverrideReason("unity_open_mcp_execute_csharp", "{\"code\":\"OpenScene(x);\"}"));
+        }
+
         // specs/feedback.md 2026-08-14 — with gate: "off" the envelope used to
         // read as a contradiction: the gate was reported SKIPPED and the reason
         // given was the missing argument the gate would have consumed. The

@@ -153,7 +153,7 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_navigation_set_bake_settings", 416 },
             { "unity_open_mcp_navigation_surface_add", 475 },
             { "unity_open_mcp_navigation_surface_bake", 344 },
-            { "unity_open_mcp_object_get_data", 442 },
+            { "unity_open_mcp_object_get_data", 550 },
             { "unity_open_mcp_object_modify", 551 },
             { "unity_open_mcp_package_add", 476 },
             { "unity_open_mcp_package_check", 222 },

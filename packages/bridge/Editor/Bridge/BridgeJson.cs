@@ -868,7 +868,11 @@ namespace UnityOpenMcpBridge
         // the only consumer. And the skip reason becomes `request_rejected`: the
         // gate did not skip *because* paths_hint was missing, it never ran at all
         // because the request was refused before dispatch.
-        internal static string BuildPathsHintErrorEnvelope(string toolName, string gateMode, bool toolExposesReadOnly = false)
+        // `readOnlyOverride`: the caller asserted read_only: true and the bridge
+        // overrode it (EffectiveToolContract.ReadOnlyOverrideReason); the message
+        // then says so and names the matched call instead of advising read_only.
+        internal static string BuildPathsHintErrorEnvelope(string toolName, string gateMode, bool toolExposesReadOnly = false,
+            string readOnlyOverride = null, string suggestedScope = null)
         {
             var sb = new StringBuilder(768);
             sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"paths_hint_required\",\"message\":\"");
@@ -880,7 +884,12 @@ namespace UnityOpenMcpBridge
             sb.Append("audit trail, not only the gate's validation scope, so turning the gate off does not waive it. ");
             sb.Append("There is no whole-project fallback — explicit paths are mandatory. ");
             sb.Append("The request was refused before dispatch: nothing ran, and no gate was evaluated.");
-            if (toolExposesReadOnly)
+            if (readOnlyOverride != null)
+                sb.Append(" read_only: true was ignored: ").Append(EscapeStringContent(readOnlyOverride))
+                  .Append(", which the bridge always treats as mutating — pass paths_hint")
+                  .Append(suggestedScope != null ? " (e.g. [\\\"" + EscapeStringContent(suggestedScope) + "\\\"])" : " for what it touches")
+                  .Append('.');
+            else if (toolExposesReadOnly)
                 sb.Append(" If the snippet performs no asset writes, pass read_only: true to waive this requirement.");
             sb.Append("\"}},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
             // feedback minor — carry skippedReason + outcome so this gate envelope
@@ -890,7 +899,11 @@ namespace UnityOpenMcpBridge
             sb.Append("\",\"skipped\":true,\"skippedReason\":\"request_rejected\",\"outcome\":\"skipped\",\"validation\":null,\"delta\":null}");
             sb.Append(",\"logs\":[]");
             sb.Append(",\"agentNextSteps\":[\"Add 'paths_hint' with at least one asset path and retry — it is required for every mutating call, including gate: \\\"off\\\".\"");
-            if (toolExposesReadOnly)
+            if (readOnlyOverride != null)
+                sb.Append(",\"read_only cannot waive this snippet: ").Append(EscapeStringContent(readOnlyOverride))
+                  .Append(". Send paths_hint").Append(suggestedScope != null ? " [\\\"" + EscapeStringContent(suggestedScope) + "\\\"]" : "")
+                  .Append(" (read_only may stay).\"");
+            else if (toolExposesReadOnly)
                 sb.Append(",\"For read-only probes (no asset writes), pass read_only: true instead of paths_hint.\"");
             sb.Append("]}");
             return sb.ToString();

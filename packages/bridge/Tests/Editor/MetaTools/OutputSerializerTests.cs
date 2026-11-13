@@ -60,8 +60,40 @@ namespace UnityOpenMcpBridge.Tests
         public int DeadProp => throw new System.InvalidOperationException("boom");
     }
 
+    public class ProjectBaseWithPrivate
+    {
+        private int baseSecret = 3;
+        public int Touch() => baseSecret;
+    }
+
+    public class ProjectServiceWithPrivate : ProjectBaseWithPrivate
+    {
+        public int Visible = 1;
+        private string hidden = "h";
+        private System.Collections.Generic.List<int> items = new System.Collections.Generic.List<int> { 4, 5 };
+        public int Auto { get; private set; } = 9;
+        public string Read() => hidden + items.Count;
+    }
+
     public static class OutputSerializerTests
     {
+        [Test]
+        public static void IncludeNonPublic_AddsPrivateFieldsOfProjectTypesOnly()
+        {
+            var value = new ProjectServiceWithPrivate();
+            var plain = OutputSerializer.Serialize(value, new SerializeOptions());
+            StringAssert.DoesNotContain("\"hidden\"", plain, "private fields stay out by default");
+
+            var withPrivate = OutputSerializer.Serialize(value, new SerializeOptions { IncludeNonPublic = true });
+            StringAssert.Contains("\"Visible\":1", withPrivate);
+            StringAssert.Contains("\"hidden\":\"h\"", withPrivate);
+            StringAssert.Contains("\"items\":[4,5]", withPrivate);
+            StringAssert.Contains("\"baseSecret\":3", withPrivate, "project base types are walked");
+            StringAssert.DoesNotContain("k__BackingField", withPrivate, "backing fields are skipped");
+            StringAssert.Contains("\"Auto\":9", withPrivate, "the property still reports the value");
+            Assert.IsTrue(BridgeJson.IsValidJsonObject(withPrivate), withPrivate);
+        }
+
         [Test]
         public static void Serialize_Null_ReturnsJsonNullLiteral()
         {
@@ -93,9 +125,12 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("\"Absent\":null", result);
             StringAssert.Contains("\"Present\":\"x\"", result);
             // The whole object must be valid JSON (no stray `:` before `}`).
+            // Assert on the emitted contract, not on a JsonUtility round-trip:
+            // JsonUtility reads a JSON null into a string field as "" (it has
+            // no null strings), so `parsed.Absent` can never be null there.
+            Assert.IsTrue(BridgeJson.IsValidJsonObject(result), result);
             var parsed = JsonUtility.FromJson<WithNullField>(result);
             Assert.AreEqual("x", parsed.Present);
-            Assert.IsNull(parsed.Absent);
         }
 
         [Test]
@@ -437,7 +472,9 @@ namespace UnityOpenMcpBridge.Tests
                 // components must appear somewhere in the payload.
                 StringAssert.Contains("\"position\"", result);
                 StringAssert.Contains("\"rotation\"", result);
-                StringAssert.Contains("\"scale\"", result);
+                // Transform has no `scale` property: the scale members are
+                // localScale / lossyScale.
+                StringAssert.Contains("\"localScale\"", result);
                 StringAssert.Contains("\"parent\"", result);
             }
             finally

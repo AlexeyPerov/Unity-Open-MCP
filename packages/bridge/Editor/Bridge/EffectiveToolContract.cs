@@ -60,6 +60,55 @@ namespace UnityOpenMcpBridge
             @"\b(RequestScriptCompilation|Refresh|ImportAsset|OpenScene|NewScene|CloseScene|LoadScene|LoadSceneAsync|UnloadSceneAsync|EnterPlaymode|ExitPlaymode|ExecuteMenuItem|BuildPlayer|SwitchActiveBuildTarget|SetScriptingDefineSymbols|RequestReload|ReloadAssembly|LockReloadAssemblies|UnlockReloadAssemblies)\b|\bisPlaying\s*=(?!=)",
             RegexOptions.CultureInvariant);
 
+        /// <summary>
+        /// Why a snippet's <c>read_only: true</c> was overridden, or null when it was
+        /// honoured (or not asserted): the disruptive token the code calls (and what
+        /// it does), or setup_roslyn. Shapes the paths_hint_required wording only.
+        /// </summary>
+        internal static string ReadOnlyOverrideReason(string tool, string body)
+        {
+            if (tool != "unity_open_mcp_execute_csharp" || body == null) return null;
+            if (!JsonBody.GetBool(JsonBody.TopLevelField(body, "read_only"), "read_only")) return null;
+            if (JsonBody.GetBool(JsonBody.TopLevelField(body, "setup_roslyn"), "setup_roslyn"))
+                return "setup_roslyn installs the Roslyn fallback (a write)";
+            var match = DisruptiveSnippet.Match(JsonBody.GetString(JsonBody.TopLevelField(body, "code"), "code") ?? "");
+            if (!match.Success) return null;
+            var token = match.Groups[1].Success ? match.Groups[1].Value : "isPlaying =";
+            return "the snippet calls " + token + " (" + DisruptiveKind(token) + ")";
+        }
+
+        private static string DisruptiveKind(string token)
+        {
+            switch (token)
+            {
+                case "OpenScene": case "NewScene": case "CloseScene": case "LoadScene":
+                case "LoadSceneAsync": case "UnloadSceneAsync":
+                    return "scene switch";
+                case "RequestScriptCompilation": case "RequestReload": case "ReloadAssembly":
+                case "LockReloadAssemblies": case "UnlockReloadAssemblies":
+                    return "recompile / domain reload";
+                case "Refresh": case "ImportAsset":
+                    return "asset import";
+                case "EnterPlaymode": case "ExitPlaymode": case "isPlaying =":
+                    return "play mode change";
+                case "ExecuteMenuItem":
+                    return "menu execution";
+                default:
+                    return "build / platform change";
+            }
+        }
+
+        // The first asset path literal in a snippet ("Assets/…" / "Packages/…"),
+        // offered as the paths_hint to send when read_only was overridden.
+        private static readonly Regex AssetPathLiteral = new Regex(
+            "\"((?:Assets|Packages)/[^\"\\\\]+)\"", RegexOptions.CultureInvariant);
+
+        internal static string SuggestedScope(string body)
+        {
+            var match = AssetPathLiteral.Match(JsonBody.GetString(JsonBody.TopLevelField(body ?? "{}", "code"), "code") ?? "");
+            return match.Success ? match.Groups[1].Value : null;
+        }
+
         internal static bool IsReadOnlySnippet(string body) =>
             JsonBody.GetBool(JsonBody.TopLevelField(body, "read_only"), "read_only")
             && !JsonBody.GetBool(JsonBody.TopLevelField(body, "setup_roslyn"), "setup_roslyn")

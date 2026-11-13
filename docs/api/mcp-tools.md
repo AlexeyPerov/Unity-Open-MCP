@@ -224,6 +224,10 @@ scene-switch, and play-transition calls retain lifecycle and mutation-scope
 protection. This is a caller assertion, not a sandbox or proof of purity:
 indirect calls cannot be proven safe. The deny heuristic still applies; use
 `read_only` only for inspection without writes or disruptive transitions.
+When one of those calls overrides `read_only: true`, the `paths_hint_required`
+refusal says so and names it ("read_only: true was ignored: the snippet calls
+OpenScene (scene switch)"), offering the first `Assets/` / `Packages/` path
+literal in the snippet as the scope to send.
 While an asynchronous project command runs, every snippet, `read_only` or not,
 is refused with `job_busy`.
 
@@ -782,6 +786,22 @@ once, prefer making it public or exercising it from a test assembly with
 `InternalsVisibleTo` via `unity_senses_run_tests` — reflection loses
 compile-time checking.
 
+Guessed names get a lookup instead of a bare diagnostic. For `CS0234` / `CS0246`
+the message appends a "DID YOU MEAN" section listing loaded types whose simple
+name matches, with their full names and assemblies (a qualified guess the
+compiler reports by its first segment, such as `Game.Wrong.PlayerView`, is
+resolved by its last segment); for `CS1061` / `CS0117` it lists the closest
+member names on the type (project types include non-public members, marked).
+The same data is structured as `error.didYouMean` (`types[]`: `name`,
+`candidates`; `members[]`: `type`, `member`, `closest`), and `agentNextSteps`
+points at `find_members` for anything not found.
+
+A snippet that re-implements a typed tool (reads or writes `PlayerPrefs`, sets
+`Time.timeScale`, saves a scene, calls a method or reads a private field by
+reflection, `GameObject.Find`, `AssetDatabase.FindAssets`) gets an advisory
+top-level `typedToolHints` array naming that tool (at most three). It never
+changes the result.
+
 When the assembly is stale (a source is newer than the newest built DLL), the
 response carries a top-level `staleAssembly: true` + `warning` alongside the
 `_staleDomain` evidence — the snippet ran against the **pre-edit** code. When
@@ -883,6 +903,18 @@ paging. Containers and arrays that the SerializedProperty leaf reader does not
 expand render as `{"note":"container_or_array","hint":"use 'property_path' to
 drill in, or 'object_get_data' to expand"}`; drill in via `property_path`, or
 use `object_get_data` to expand the same array reflectively.
+
+### `unity_open_mcp_object_get_data`
+
+A depth-limited reflective dump of any `UnityEngine.Object` (by `instance_id`
+or `asset_path`): public fields and, by default, public properties.
+`include_non_public: true` also walks the non-public instance fields of project
+types — the type and its project base types, stopping at the first
+`UnityEngine` / `UnityEditor` / `System` / `Unity.*` type — which reads a live
+MonoBehaviour's or service's private state without a reflection snippet.
+Compiler-generated backing fields are skipped (their property carries the
+value). `Matrix4x4` values are dumped by their `m00`…`m33` fields only: its
+computed properties assert on a non-TRS matrix.
 
 ### `gameobject_modify`
 

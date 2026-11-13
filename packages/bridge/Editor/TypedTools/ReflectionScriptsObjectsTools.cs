@@ -492,6 +492,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 MaxListItems = ClampPositive(JsonBody.GetInt(body, "max_items", 100)),
                 IncludeFields = JsonBody.GetBool(body, "include_fields", true),
                 IncludeProperties = JsonBody.GetBool(body, "include_properties", true),
+                IncludeNonPublic = JsonBody.GetBool(body, "include_non_public", false),
             };
 
             var sb = new StringBuilder(256);
@@ -518,6 +519,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(",\"maxListItems\":").Append(options.MaxListItems);
             sb.Append(",\"includeFields\":").Append(options.IncludeFields ? "true" : "false");
             sb.Append(",\"includeProperties\":").Append(options.IncludeProperties ? "true" : "false");
+            sb.Append(",\"includeNonPublic\":").Append(options.IncludeNonPublic ? "true" : "false");
             sb.Append("}}");
             return ToolDispatchResult.Ok(sb.ToString());
         }

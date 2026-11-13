@@ -163,8 +163,7 @@ namespace UnityOpenMcpBridge.MetaTools
                 string errors;
                 (pe, errors) = RoslynHost.Compile(source);
                 if (pe == null)
-                    return ToolDispatchResult.Fail("compilation_error",
-                        AppendAccessibilityHint(errors ?? "Unknown compilation error"));
+                    return CompilationFailure(errors ?? "Unknown compilation error", code);
             }
 
             try
@@ -371,6 +370,25 @@ namespace UnityOpenMcpBridge.MetaTools
         // worse than this diagnostic.)
         private static readonly string[] AccessibilityDiagnosticCodes =
             { "CS0117", "CS0122", "CS1061" };
+
+        // A compile failure carries the assembly-boundary note and, for guessed
+        // names, the loaded types / members they most likely meant (also as the
+        // structured error.didYouMean).
+        internal static ToolDispatchResult CompilationFailure(string errors, string code = null)
+        {
+            SnippetDiagnosticHints.Hints hints;
+            try { hints = SnippetDiagnosticHints.Build(errors, code: code); }
+            catch { hints = null; }
+            var message = AppendAccessibilityHint(SnippetDiagnosticHints.AppendTo(errors, hints));
+            var detail = SnippetDiagnosticHints.DetailJson(hints);
+            return detail == null
+                ? ToolDispatchResult.Fail("compilation_error", message)
+                : ToolDispatchResult.FailWithDetail("compilation_error", message, detail, new[]
+                {
+                    "Use the full type names from error.didYouMean (snippets see no project usings), or the closest member name listed there.",
+                    "To browse a type's real members first: unity_open_mcp_find_members {\"query\":\"<TypeName>\"}.",
+                });
+        }
 
         internal static string AppendAccessibilityHint(string errors)
         {

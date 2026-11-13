@@ -326,6 +326,49 @@ namespace UnityOpenMcpBridge.Tests
             }
         }
 
+        // Guessed namespaces and member names: the compile error names the
+        // loaded types / members the caller most likely meant.
+        [Test]
+        public static void CompilationFailure_NamesTheRealTypeForAGuessedNamespace()
+        {
+            var result = ExecuteCSharpTool.CompilationFailure(
+                "snippet(1,8): error CS0234: The type or namespace name 'SnippetDiagnosticHints' does not exist in the namespace 'Game.Wrong' (are you missing an assembly reference?)");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("compilation_error", result.ErrorCode);
+            StringAssert.Contains("DID YOU MEAN", result.ErrorMessage);
+            StringAssert.Contains("UnityOpenMcpBridge.SnippetDiagnosticHints", result.ErrorMessage);
+            StringAssert.Contains("\"didYouMean\"", result.ErrorDetailJson);
+            Assert.IsNotNull(result.NextSteps);
+        }
+
+        [Test]
+        public static void CompilationFailure_NamesClosestMembersAndUnknownTypes()
+        {
+            var result = ExecuteCSharpTool.CompilationFailure(
+                "snippet(2,3): error CS1061: 'UnityEngine.GameObject' does not contain a definition for 'SetActiv' and no accessible extension method 'SetActiv' accepting a first argument of type 'UnityEngine.GameObject' could be found\n" +
+                "snippet(3,3): error CS0246: The type or namespace name 'NoSuchTypeAnywhere42' could not be found (are you missing a using directive or an assembly reference?)");
+            StringAssert.Contains("UnityEngine.GameObject.SetActiv: closest members SetActive", result.ErrorMessage);
+            StringAssert.DoesNotContain("_Injected", result.ErrorMessage, "engine internals are not offered");
+            StringAssert.Contains("unity_open_mcp_find_members", result.ErrorMessage);
+        }
+
+        [Test]
+        public static void CompilationFailure_ResolvesAQualifiedGuessReportedByItsFirstSegment()
+        {
+            var result = ExecuteCSharpTool.CompilationFailure(
+                "snippet(1,16): error CS0246: The type or namespace name 'Game' could not be found (are you missing a using directive or an assembly reference?)",
+                "var t = typeof(Game.Wrong.SnippetDiagnosticHints); return t;");
+            StringAssert.Contains("'Game.Wrong.SnippetDiagnosticHints': UnityOpenMcpBridge.SnippetDiagnosticHints", result.ErrorMessage);
+        }
+
+        [Test]
+        public static void CompilationFailure_WithoutGuessedNamesKeepsThePlainError()
+        {
+            var result = ExecuteCSharpTool.CompilationFailure("snippet(3,1): error CS1002: ; expected");
+            Assert.AreEqual("snippet(3,1): error CS1002: ; expected", result.ErrorMessage);
+            Assert.IsNull(result.ErrorDetailJson);
+        }
+
         [Test]
         public static void AppendAccessibilityHint_LeavesUnrelatedDiagnosticsAlone()
         {

@@ -268,7 +268,7 @@ the change happened within the N frames before `observed_frame`.
 | Argument | Default | Meaning |
 |---|---|---|
 | `condition` | required | See above |
-| `timeout_ms` | 30000 (max 600000) | Wall-clock limit. On expiry the call fails with `timed_out` and every leaf's last observed state |
+| `timeout_ms` | 30000 (max 600000) | Wall-clock limit. On expiry the call fails with `timed_out` and every leaf's last observed state; its `agentNextSteps` say to send one longer wait (over 40 000 ms it runs as a job) or a `time_scale` instead of repeating the same one |
 | `poll_every_frames` | 1 (max 600) | Evaluate the condition every N frames; logs and exceptions are captured every frame regardless |
 | `time_scale` | — | `Time.timeScale` for the wait only (> 0, ≤ 100). Applied on the first frame, restored on every exit path: success, timeout, cancel, exiting play mode, a domain reload, Editor quit. If game code changed the time scale meanwhile (a pause menu), the game's value is kept and `time_scale.note` says so. One time-scaled wait at a time (`playmode_operation_busy`) |
 | `time` | `gameplay` | Clock for `ms` conditions and `elapsed_ms` |
