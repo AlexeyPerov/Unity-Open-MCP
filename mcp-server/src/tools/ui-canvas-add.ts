@@ -60,9 +60,10 @@ export const uiCanvasAdd = makeTool(
           scene_path: {
             type: "string",
             description:
-              "Optional target scene asset path (e.g. 'Assets/Scenes/Bootstrap.unity') for the new Canvas " +
-              "root + EventSystem when no host is addressed. The scene must already be loaded " +
-              "(use unity_open_mcp_scene_open Additive first). Omit to create in the active scene.",
+              "Optional container: a loaded scene's asset path (e.g. 'Assets/Scenes/Bootstrap.unity'; load it " +
+              "with unity_open_mcp_scene_open Additive first) or the open prefab stage's prefab asset path. " +
+              "The new Canvas root + EventSystem go there when no host is addressed (a prefab gets no " +
+              "EventSystem), and a host path is looked up only there.",
           },
           scene_name: {
             type: "string",

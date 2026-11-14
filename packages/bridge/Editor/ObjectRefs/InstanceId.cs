@@ -14,9 +14,11 @@
 //
 // Gate on UNITY_6000_5_OR_NEWER (not UNITY_6000_0_OR_NEWER): EntityId.ToULong /
 // FromULong and the hard InstanceID removal land with 6000.5. Earlier Unity 6
-// minors (6000.0–6000.4) still compile against GetInstanceID() /
-// InstanceIDToObject(int). In both cases the wire value is a long (the legacy
-// int widens cleanly), and is serialized as a JSON string.
+// minors (6000.0–6000.4) still compile against GetInstanceID(); resolving
+// uses InstanceIDToObject(int) up to 6000.2 and EntityIdToObject from 6000.3,
+// which marks InstanceIDToObject(int) obsolete (CS0618) while EntityId is
+// still 4 bytes and converts from int. In every case the wire value is a long
+// (the legacy int widens cleanly), and is serialized as a JSON string.
 using System.Globalization;
 using UnityEditor;
 using UnityEngine;
@@ -68,6 +70,10 @@ namespace UnityOpenMcpBridge.ObjectRefs
             if (id == 0) return null;
 #if UNITY_6000_5_OR_NEWER
             return EditorUtility.EntityIdToObject(ToEntityId(id));
+#elif UNITY_6000_3_OR_NEWER
+            // 6000.3 marks InstanceIDToObject(int) obsolete (CS0618). EntityId
+            // is still the 4-byte id there and converts from int implicitly.
+            return EditorUtility.EntityIdToObject((UnityEngine.EntityId)(int)id);
 #else
             return EditorUtility.InstanceIDToObject((int)id);
 #endif

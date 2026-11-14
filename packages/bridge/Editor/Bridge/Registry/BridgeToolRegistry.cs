@@ -246,7 +246,12 @@ namespace UnityOpenMcpBridge
         // C# parameter list. Everything else still has to match a declared
         // parameter.
         private static readonly string[] TransportEnvelopeKeys =
-            { "gate", "timeout_ms", "ignore_scene_dirty", "confirm_bypass" };
+            { "gate", "timeout_ms", "ignore_scene_dirty", "confirm_bypass",
+              // The GameObject container selector: the dispatcher's target
+              // scope reads it off the body for the shared resolver
+              // (TypedTargets), so an embedded-domain tool accepts it without
+              // declaring a parameter.
+              "scene_path", "scene_name" };
 
         private static List<string> FindUnknownKeys(BridgeToolEntry entry, string body)
         {

@@ -75,7 +75,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
 
             var host = NavigationTargets.Resolve(instance_id, path, name);
             if (host == null)
-                return NavigationJson.Error("target_not_found",
+                return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? NavigationJson.Error("target_not_found",
                     "No GameObject resolved. Address by instance_id > path > name.");
 
             Undo.RecordObject(host, "Add NavMeshSurface");
@@ -560,7 +560,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
         {
             var host = NavigationTargets.Resolve(instance_id, path, name);
             if (host == null)
-                return NavigationJson.Error("target_not_found",
+                return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? NavigationJson.Error("target_not_found",
                     "No GameObject resolved. Address by instance_id > path > name.");
 
             var sb = new StringBuilder(512);
@@ -568,6 +568,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             sb.Append("\"name\":").Append(NavigationJson.Esc(host.name)).Append(',');
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
             sb.Append("\"path\":").Append(NavigationJson.Esc(BuildPath(host))).Append(',');
+            sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(host)).Append(',');
             sb.Append("\"components\":[");
 
             bool first = true;
@@ -1010,18 +1011,9 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
         private static string Num(float v)
             => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
 
+        // Canonical: relative to the prefab root for a prefab-stage object.
         private static string BuildPath(GameObject go)
-        {
-            var sb = new StringBuilder();
-            var t = go.transform;
-            while (t != null)
-            {
-                if (sb.Length > 0) sb.Insert(0, '/');
-                sb.Insert(0, t.name);
-                t = t.parent;
-            }
-            return sb.ToString();
-        }
+            => UnityOpenMcpBridge.TypedTools.TypedTargets.HierarchyPath(go);
 
         private static void AppendComponentList<T>(StringBuilder sb, string key, bool first,
             System.Func<T, string> extra) where T : Component
@@ -1039,6 +1031,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
                 sb.Append("\"name\":").Append(NavigationJson.Esc(c.gameObject.name)).Append(',');
                 sb.Append("\"instanceId\":").Append(InstanceId.ToJson(c)).Append(',');
                 sb.Append("\"path\":").Append(NavigationJson.Esc(BuildPath(c.gameObject)));
+                sb.Append(",\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(c.gameObject));
                 if (extra != null)
                 {
                     sb.Append(',');
@@ -1057,7 +1050,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
 
         // Target-not-found helper — kept short so call sites read cleanly.
         private static string TargetNotFound()
-            => NavigationJson.Error("target_not_found",
+            => UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? NavigationJson.Error("target_not_found",
                 "No GameObject resolved. Address by instance_id > path > name.");
     }
 }

@@ -310,7 +310,7 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
 
             var host = TimelineTargets.Resolve(instance_id, path, name);
             if (host == null)
-                return TimelineJson.Error("target_not_found",
+                return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? TimelineJson.Error("target_not_found",
                     "No GameObject resolved for the PlayableDirector host. " +
                     "Address by instance_id > path > name.");
 
@@ -336,6 +336,7 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
             sb.Append("\"director\":{");
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson(director)).Append(',');
             sb.Append("\"gameObjectPath\":").Append(TimelineJson.Esc(TimelineTargets.BuildPath(host))).Append(',');
+            sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(host)).Append(',');
             sb.Append("\"assetPath\":").Append(TimelineJson.Esc(AssetDatabase.GetAssetPath(asset))).Append(',');
             sb.Append("\"playOnAwake\":").Append(autoplay ? "true" : "false");
             sb.Append('}');

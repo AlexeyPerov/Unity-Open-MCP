@@ -448,10 +448,9 @@ namespace UnityOpenMcpBridge.TypedTools
             var instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
             var path = JsonBody.GetString(body, "path");
             var name = JsonBody.GetString(body, "name");
-            var target = TypedTargets.ResolveGameObject(instanceId, path, name);
-            if (target == null)
-                return ToolDispatchResult.Fail("gameobject_not_found",
-                    $"GameObject not found (instance_id={instanceId}, path='{path}', name='{name}').");
+            var resolved = TypedTargets.Resolve(instanceId, path, name, body);
+            if (!resolved.Ok) return resolved.Failure.ToResult();
+            var target = resolved.GameObject;
 
             var sceneView = SceneView.lastActiveSceneView;
             if (sceneView == null)

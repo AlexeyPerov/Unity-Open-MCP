@@ -865,7 +865,7 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
         }
 
         private static string TargetNotFound()
-            => LightingJson.Error("target_not_found",
+            => UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? LightingJson.Error("target_not_found",
                 "No GameObject resolved. Address by instance_id > path > name.");
     }
 }

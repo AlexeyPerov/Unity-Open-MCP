@@ -12,9 +12,11 @@ namespace UnityOpenMcpBridge.TypedTools
     // Mutation tools run through the gate envelope with paths_hint. Status and
     // overrides are gate-free reads.
     //
-    // Resolve target scene instances by instance_id (canonical) > path > name
-    // via TypedTargets — same addressing model as spatial-query.ts so agents
-    // can pass the same handle across typed tools.
+    // Resolve target instances by instance_id (canonical) > path > name via
+    // TypedTargets — same addressing model as spatial-query.ts so agents can
+    // pass the same handle across typed tools. Targets live in a loaded scene
+    // or in the open prefab stage; prefab_open returns the stage root's path
+    // and id.
     public static class PrefabTools
     {
         public static ToolDispatchResult Instantiate(string body)
@@ -34,28 +36,40 @@ namespace UnityOpenMcpBridge.TypedTools
             var rotation = ParseVector(JsonBody.GetString(body, "rotation"), Vector3.zero);
             var scale = ParseVector(JsonBody.GetString(body, "scale"), Vector3.one);
 
+            // The parent resolves through the shared resolver (loaded scenes and
+            // the open prefab stage; scene_path / paths_hint narrow a path that
+            // matches in several — never "the first loaded scene"). Without a
+            // parent the instance root goes to the creation container: the
+            // named one (scene_path / scene_name), the open prefab stage (under
+            // its root), or the active scene.
+            var request = TargetRequest.For(body);
             GameObject parentGo = null;
+            TargetContainer rootContainer = null;
             if (!string.IsNullOrEmpty(parentPath))
             {
-                parentGo = TypedTargets.FindByPath(parentPath);
-                if (parentGo == null)
-                    return ToolDispatchResult.Fail("parent_not_found",
-                        $"Parent GameObject not found at path '{parentPath}'.");
+                var parent = TypedTargets.Resolve(0, parentPath, null, request, TargetRole.Parent);
+                if (!parent.Ok) return parent.Failure.ToResult();
+                parentGo = parent.GameObject;
             }
-
-            // feedback-01-08-glm §6 — optional explicit target scene for the
-            // instance root. InstantiatePrefab lands in the active scene; route
-            // it into the requested scene when supplied (a parent_path in
-            // another scene already routes via SetParent, so this only matters
-            // for root instances).
-            var targetScene = SceneTargeting.ResolveTargetScene(body, out var sceneError);
-            if (sceneError != null)
-                return ToolDispatchResult.Fail("scene_not_found", sceneError);
+            else
+            {
+                rootContainer = TypedTargets.CreationContainer(request, out var containerFailure);
+                if (containerFailure != null) return containerFailure.ToResult();
+            }
 
             GameObject instance;
             try
             {
-                instance = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+                // Instantiate straight into the destination so the instance
+                // never passes through (and dirties) another scene.
+                if (parentGo != null)
+                    instance = PrefabUtility.InstantiatePrefab(prefab, parentGo.transform) as GameObject;
+                else if (rootContainer != null && rootContainer.Kind == TargetContainerKind.PrefabStage)
+                    instance = PrefabUtility.InstantiatePrefab(prefab, rootContainer.PrefabRoot.transform) as GameObject;
+                else if (rootContainer != null)
+                    instance = PrefabUtility.InstantiatePrefab(prefab, rootContainer.Scene) as GameObject;
+                else
+                    instance = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
                 if (instance == null)
                     return ToolDispatchResult.Fail("instantiate_failed",
                         $"PrefabUtility.InstantiatePrefab returned null for '{prefabAssetPath}'.");
@@ -66,23 +80,23 @@ namespace UnityOpenMcpBridge.TypedTools
             }
 
             if (!string.IsNullOrEmpty(name)) instance.name = name;
-            if (parentGo != null)
-                instance.transform.SetParent(parentGo.transform, false);
-            else
-                SceneTargeting.MoveToSceneIfDifferent(instance, targetScene);
+            if (parentGo == null) TypedTargets.PlaceInContainer(instance, rootContainer);
 
             var t = instance.transform;
             t.SetPositionAndRotation(position, Quaternion.Euler(rotation));
             t.localScale = scale;
 
+            Undo.RegisterCreatedObjectUndo(instance, "MCP Instantiate Prefab");
             EditorUtility.SetDirty(instance);
+            MarkSceneDirty(instance);
 
-            var sb = new StringBuilder(192);
+            var sb = new StringBuilder(256);
             sb.Append("{\"status\":\"ok\",\"prefabAssetPath\":\"").Append(TypedTargets.Esc(prefabAssetPath));
             sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(instance));
             sb.Append(",\"name\":\"").Append(TypedTargets.Esc(instance.name));
-            sb.Append("\",\"path\":\"").Append(TypedTargets.Esc(TypedTargets.HierarchyPath(instance)));
-            sb.Append("\"}");
+            sb.Append("\",\"path\":\"").Append(TypedTargets.Esc(TypedTargets.HierarchyPath(instance))).Append('"');
+            TypedTargets.AppendContainerMember(sb, instance);
+            sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
@@ -102,10 +116,10 @@ namespace UnityOpenMcpBridge.TypedTools
             var name = JsonBody.GetString(body, "name");
             var connect = JsonBody.GetBool(body, "connect", true);
 
-            var sourceGo = TypedTargets.ResolveGameObject(instanceId, path, name);
-            if (sourceGo == null)
-                return ToolDispatchResult.Fail("gameobject_not_found",
-                    $"Source GameObject not found (instance_id={instanceId}, path='{path}', name='{name}').");
+            var source = TypedTargets.Resolve(instanceId, path, name, body);
+            if (!source.Ok) return source.Failure.ToResult();
+            var sourceGo = source.GameObject;
+            var sourcePath = TypedTargets.HierarchyPath(sourceGo);
 
             // Ensure intermediate folders.
             var lastSlash = normalized.LastIndexOf('/');
@@ -132,6 +146,12 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append("\",\"name\":\"").Append(TypedTargets.Esc(prefab.name));
             sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(prefab));
             sb.Append(",\"sourceInstanceId\":").Append(InstanceId.ToJson(sourceGo));
+            sb.Append(",\"sourcePath\":\"").Append(TypedTargets.Esc(sourcePath)).Append('"');
+            if (source.Container != null)
+            {
+                sb.Append(",\"sourceContainer\":");
+                source.Container.AppendJson(sb);
+            }
             sb.Append(",\"isPrefabInstance\":").Append(PrefabUtility.IsPartOfPrefabInstance(sourceGo) ? "true" : "false");
             sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
@@ -156,9 +176,22 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("open_failed",
                     $"PrefabStageUtility.OpenPrefab returned null for '{prefabAssetPath}'.");
 
-            var sb = new StringBuilder(128);
+            // The root's canonical path and instance id let the agent address
+            // the stage with typed tools right away; autoSave says whether
+            // Unity writes stage edits to the asset by itself.
+            var sb = new StringBuilder(256);
             sb.Append("{\"status\":\"ok\",\"prefabAssetPath\":\"").Append(TypedTargets.Esc(prefabAssetPath));
-            sb.Append("\",\"stageOpen\":true}");
+            sb.Append("\",\"stageOpen\":true");
+            if (stage.prefabContentsRoot != null)
+            {
+                sb.Append(',');
+                TargetContainers.AppendRoot(sb, stage);
+                sb.Append(",\"container\":");
+                TargetContainer.ForStage(stage).AppendJson(sb);
+            }
+            var autoSave = TargetContainers.StageAutoSave(stage);
+            sb.Append(",\"autoSave\":").Append(autoSave.HasValue ? (autoSave.Value ? "true" : "false") : "null");
+            sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
@@ -171,6 +204,9 @@ namespace UnityOpenMcpBridge.TypedTools
 
             var prefabContentsRoot = stage.prefabContentsRoot;
             var assetPath = stage.assetPath;
+            // Whether the stage held edits not yet written to the asset (with
+            // Prefab Mode auto-save on, Unity usually wrote them already).
+            var pending = stage.scene.isDirty;
 
             try
             {
@@ -187,8 +223,9 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("close_failed", e.Message);
             }
 
-            var sb = new StringBuilder(96);
+            var sb = new StringBuilder(128);
             sb.Append("{\"status\":\"ok\",\"saved\":").Append(save ? "true" : "false");
+            sb.Append(",\"pendingChanges\":").Append(pending ? "true" : "false");
             sb.Append(",\"prefabAssetPath\":\"").Append(TypedTargets.Esc(assetPath));
             sb.Append("\",\"stageOpen\":false}");
             return ToolDispatchResult.Ok(sb.ToString());
@@ -206,6 +243,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("save_failed",
                     "Open prefab stage is missing prefabContentsRoot or assetPath.");
 
+            var pending = stage.scene.isDirty;
             try
             {
                 // SaveAsPrefabAsset + ClearDirtiness; PrefabStage.Save() is
@@ -215,9 +253,9 @@ namespace UnityOpenMcpBridge.TypedTools
             }
             catch (System.Exception e) { return ToolDispatchResult.Fail("save_failed", e.Message); }
 
-            var sb = new StringBuilder(96);
+            var sb = new StringBuilder(128);
             sb.Append("{\"status\":\"ok\",\"prefabAssetPath\":\"").Append(TypedTargets.Esc(assetPath));
-            sb.Append("\",\"saved\":true}");
+            sb.Append("\",\"saved\":true,\"pendingChanges\":").Append(pending ? "true" : "false").Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
@@ -234,7 +272,9 @@ namespace UnityOpenMcpBridge.TypedTools
             MarkSceneDirty(go);
             var sb = new StringBuilder(128);
             sb.Append("{\"status\":\"ok\",\"assetPath\":\"").Append(TypedTargets.Esc(assetPath));
-            sb.Append("\",\"name\":\"").Append(TypedTargets.Esc(go.name)).Append("\"}");
+            sb.Append("\",\"name\":\"").Append(TypedTargets.Esc(go.name)).Append('"');
+            AppendLocator(sb, go);
+            sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
@@ -248,8 +288,10 @@ namespace UnityOpenMcpBridge.TypedTools
             catch (System.Exception e) { return ToolDispatchResult.Fail("revert_failed", e.Message); }
 
             MarkSceneDirty(go);
-            var sb = new StringBuilder(96);
-            sb.Append("{\"status\":\"ok\",\"name\":\"").Append(TypedTargets.Esc(go.name)).Append("\"}");
+            var sb = new StringBuilder(160);
+            sb.Append("{\"status\":\"ok\",\"name\":\"").Append(TypedTargets.Esc(go.name)).Append('"');
+            AppendLocator(sb, go);
+            sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
@@ -268,7 +310,9 @@ namespace UnityOpenMcpBridge.TypedTools
             MarkSceneDirty(go);
             var sb = new StringBuilder(96);
             sb.Append("{\"status\":\"ok\",\"name\":\"").Append(TypedTargets.Esc(go.name));
-            sb.Append("\",\"mode\":\"").Append(mode.ToString()).Append("\"}");
+            sb.Append("\",\"mode\":\"").Append(mode.ToString()).Append('"');
+            AppendLocator(sb, go);
+            sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
@@ -280,6 +324,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
             var sb = new StringBuilder(512);
             sb.Append("{\"name\":\"").Append(TypedTargets.Esc(go.name)).Append("\"");
+            AppendLocator(sb, go);
 
             var modifications = PrefabUtility.GetPropertyModifications(go);
             sb.Append(",\"propertyModifications\":[");
@@ -362,14 +407,10 @@ namespace UnityOpenMcpBridge.TypedTools
             var path = JsonBody.GetString(body, "path");
             var name = JsonBody.GetString(body, "name");
 
-            var go = TypedTargets.ResolveGameObject(instanceId, path, name);
-            if (go == null)
-                return new InstanceResolve
-                {
-                    Ok = false,
-                    Result = ToolDispatchResult.Fail("gameobject_not_found",
-                        $"GameObject not found (instance_id={instanceId}, path='{path}', name='{name}').")
-                };
+            var target = TypedTargets.Resolve(instanceId, path, name, body);
+            if (!target.Ok)
+                return new InstanceResolve { Ok = false, Result = target.Failure.ToResult() };
+            var go = target.GameObject;
 
             if (!PrefabUtility.IsPartOfAnyPrefab(go))
                 return new InstanceResolve
@@ -408,7 +449,9 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(",\"hasOverrides\":").Append(hasOverrides ? "true" : "false");
             sb.Append(",\"instanceId\":").Append(InstanceId.ToJson(go));
             sb.Append(",\"sourcePath\":\"").Append(TypedTargets.Esc(sourcePath));
-            sb.Append("\",\"sourceName\":\"").Append(TypedTargets.Esc(sourceName)).Append("\"}");
+            sb.Append("\",\"sourceName\":\"").Append(TypedTargets.Esc(sourceName)).Append('"');
+            AppendLocator(sb, go);
+            sb.Append('}');
             return sb.ToString();
         }
 
@@ -424,10 +467,20 @@ namespace UnityOpenMcpBridge.TypedTools
             return sb.ToString();
         }
 
+        // The owning scene, or the open prefab stage's preview scene — marking
+        // that one dirty is how Prefab Mode learns of a scripted edit.
         private static void MarkSceneDirty(GameObject go)
         {
             var scene = go.scene;
             if (scene.IsValid()) EditorSceneManager.MarkSceneDirty(scene);
+        }
+
+        // ,"path":"…","container":{…} — the instance's canonical path and the
+        // scene or prefab stage it lives in.
+        private static void AppendLocator(StringBuilder sb, GameObject go)
+        {
+            sb.Append(",\"path\":\"").Append(TypedTargets.Esc(TypedTargets.HierarchyPath(go))).Append('"');
+            TypedTargets.AppendContainerMember(sb, go);
         }
 
         // Parse "x,y,z" → Vector3. Returns `fallback` on parse failure.

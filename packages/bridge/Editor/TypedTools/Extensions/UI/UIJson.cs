@@ -71,70 +71,17 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
     // addressing they learned for gameobject_* / component_*.
     static class UITargets
     {
+        // The shared resolver (TypedTargets): loaded scenes and the open
+        // prefab stage, scene_path / paths_hint narrowing, refused instance ids
+        // (ambiguous_path and friends: see TypedTargets.RefusalJson); a
+        // one-segment path also matches a nested GameObject of that name.
         public static GameObject Resolve(int instanceId, string path, string name)
-        {
-            // instance_id wins.
-            if (instanceId != 0)
-            {
-                var obj = InstanceId.ToObject(instanceId);
-                if (obj is GameObject go) return go;
-            }
-
-            // path (slash-separated hierarchy from a root).
-            if (!string.IsNullOrEmpty(path))
-            {
-                var go = FindByPath(path);
-                if (go != null) return go;
-            }
-
-            // name-only fallback (first active match).
-            if (!string.IsNullOrEmpty(name))
-            {
-                var roots = SceneQuery.FindActiveTransforms();
-                foreach (var root in roots)
-                {
-                    if (root.gameObject.name == name) return root.gameObject;
-                }
-            }
-
-            return null;
-        }
+            => UnityOpenMcpBridge.TypedTools.TypedTargets.ResolveLenient(instanceId, path, name);
 
         public static GameObject FindByPath(string path)
-        {
-            var parts = path.Split('/');
-            var roots = SceneQuery.FindActiveTransforms();
-            foreach (var root in roots)
-            {
-                // Anchor multi-segment paths to scene roots (FindActiveTransforms returns every active transform), so "A/B" cannot resolve against a nested "A"; single-segment lookups keep matching anywhere.
-                if (parts.Length > 1 && root.parent != null) continue;
-                if (root.gameObject.name == parts[0])
-                {
-                    var current = root.gameObject;
-                    bool match = true;
-                    for (int i = 1; i < parts.Length; i++)
-                    {
-                        var child = current.transform.Find(parts[i]);
-                        if (child == null) { match = false; break; }
-                        current = child.gameObject;
-                    }
-                    if (match) return current;
-                }
-            }
-            return null;
-        }
+            => UnityOpenMcpBridge.TypedTools.TypedTargets.ResolveLenient(0, path, null);
 
-        public static string BuildPath(GameObject go)
-        {
-            var sb = new StringBuilder();
-            var t = go.transform;
-            while (t != null)
-            {
-                if (sb.Length > 0) sb.Insert(0, '/');
-                sb.Insert(0, t.name);
-                t = t.parent;
-            }
-            return sb.ToString();
-        }
+        // Canonical: relative to the prefab root for a prefab-stage object.
+        public static string BuildPath(GameObject go) => UnityOpenMcpBridge.TypedTools.TypedTargets.HierarchyPath(go);
     }
 }

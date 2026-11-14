@@ -638,20 +638,13 @@ namespace UnityOpenMcpBridge.TypedTools
             if (instanceId != 0)
                 return InstanceId.ToObject(instanceId);
 
+            // Paths and names resolve through the shared resolver (loaded
+            // scenes and the open prefab stage). An id selects any Object,
+            // assets included — selecting an asset is a legitimate use here.
             var path = JsonBody.GetString(body, "path");
-            if (!string.IsNullOrEmpty(path))
-            {
-                var go = TypedTargets.FindByPath(path);
-                if (go != null) return go;
-            }
-
             var name = JsonBody.GetString(body, "name");
-            if (!string.IsNullOrEmpty(name))
-            {
-                var go = TypedTargets.FindByName(name);
-                if (go != null) return go;
-            }
-            return null;
+            if (string.IsNullOrEmpty(path) && string.IsNullOrEmpty(name)) return null;
+            return TypedTargets.Resolve(0, path, name, body).GameObject;
         }
 
         private static string BuildSelectionResult(int count, int total, string action)
@@ -677,9 +670,13 @@ namespace UnityOpenMcpBridge.TypedTools
             bool isAsset = !string.IsNullOrEmpty(path) && path != "Library/unity editor resources";
             sb.Append(",\"isAsset\":").Append(isAsset ? "true" : "false");
             if (isAsset) sb.Append(",\"assetPath\":\"").Append(Esc(path)).Append("\"");
-            // Scene GameObjects get a hierarchy path for downstream typed tools.
+            // Scene / prefab-stage GameObjects get a hierarchy path and their
+            // container for downstream typed tools.
             if (obj is GameObject go)
+            {
                 sb.Append(",\"path\":\"").Append(Esc(TypedTargets.HierarchyPath(go))).Append("\"");
+                TypedTargets.AppendContainerMember(sb, go);
+            }
             sb.Append('}');
             return sb.ToString();
         }

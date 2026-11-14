@@ -81,10 +81,22 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
                 if (parentGo == null)
                 {
                     Object.DestroyImmediate(go);
-                    return SplinesJson.Error("parent_not_found",
+                    return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? SplinesJson.Error("parent_not_found",
                         $"No GameObject at parent_path '{parent_path}'.");
                 }
                 parent = parentGo.transform;
+            }
+            else
+            {
+                // No parent: the creation container — the named one (scene_path), the open
+                // prefab stage (under its root), or the active scene, as gameobject_create.
+                var rootContainer = UnityOpenMcpBridge.TypedTools.TypedTargets.CreationContainer(UnityOpenMcpBridge.TypedTools.TargetRequest.Ambient, out var containerFailure);
+                if (containerFailure != null)
+                {
+                    Object.DestroyImmediate(go);
+                    return containerFailure.ToRefusalJson();
+                }
+                UnityOpenMcpBridge.TypedTools.TypedTargets.PlaceInContainer(go, rootContainer);
             }
 
             Undo.RegisterCreatedObjectUndo(go, "Create SplineContainer");
@@ -120,6 +132,7 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
             sb.Append("\"container\":{");
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
             sb.Append("\"path\":").Append(SplinesJson.Esc(SplinesTargets.BuildPath(go))).Append(',');
+            sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(go)).Append(',');
             sb.Append("\"splineCount\":").Append(container.Splines.Count).Append(',');
             sb.Append("\"closed\":").Append(closed ? "true" : "false");
             sb.Append('}');
@@ -816,7 +829,7 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
         }
 
         private static string TargetNotFound()
-            => SplinesJson.Error("target_not_found",
+            => UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? SplinesJson.Error("target_not_found",
                 "No GameObject resolved. Address by instance_id > path > name.");
     }
 }

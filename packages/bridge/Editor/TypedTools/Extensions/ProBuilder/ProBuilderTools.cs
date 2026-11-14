@@ -91,10 +91,25 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
             {
                 var parentGo = ProBuilderTargets.FindByPath(parent_path);
                 if (parentGo == null)
-                    return ProBuilderJson.Error("parent_not_found",
+                {
+                    Object.DestroyImmediate(go);
+                    return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? ProBuilderJson.Error("parent_not_found",
                         $"No GameObject at parent_path '{parent_path}'.");
+                }
                 parent = parentGo.transform;
                 go.transform.SetParent(parent, false);
+            }
+            else
+            {
+                // No parent: the creation container — the named one (scene_path), the open
+                // prefab stage (under its root), or the active scene, as gameobject_create.
+                var rootContainer = UnityOpenMcpBridge.TypedTools.TypedTargets.CreationContainer(UnityOpenMcpBridge.TypedTools.TargetRequest.Ambient, out var containerFailure);
+                if (containerFailure != null)
+                {
+                    Object.DestroyImmediate(go);
+                    return containerFailure.ToRefusalJson();
+                }
+                UnityOpenMcpBridge.TypedTools.TypedTargets.PlaceInContainer(go, rootContainer);
             }
 
             // Apply transform. position/rotation are world space unless a parent
@@ -125,6 +140,7 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
             sb.Append("\"shapeType\":").Append(ProBuilderJson.Esc(shape.ToString())).Append(',');
             sb.Append("\"path\":").Append(ProBuilderJson.Esc(ProBuilderTargets.BuildPath(go))).Append(',');
+            sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(go)).Append(',');
             sb.Append("\"faceCount\":").Append(mesh.faceCount).Append(',');
             sb.Append("\"vertexCount\":").Append(mesh.vertexCount).Append(',');
             sb.Append("\"edgeCount\":").Append(mesh.edgeCount);
@@ -158,7 +174,7 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
         {
             var host = ProBuilderTargets.Resolve(instance_id, path, name);
             if (host == null)
-                return ProBuilderJson.Error("target_not_found",
+                return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? ProBuilderJson.Error("target_not_found",
                     "No GameObject resolved. Address by instance_id > path > name.");
 
             var mesh = host.GetComponent<ProBuilderMesh>();
@@ -171,6 +187,7 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
             sb.Append("\"name\":").Append(ProBuilderJson.Esc(host.name)).Append(',');
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
             sb.Append("\"path\":").Append(ProBuilderJson.Esc(ProBuilderTargets.BuildPath(host))).Append(',');
+            sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(host)).Append(',');
             sb.Append("\"faceCount\":").Append(mesh.faceCount).Append(',');
             sb.Append("\"vertexCount\":").Append(mesh.vertexCount).Append(',');
             sb.Append("\"edgeCount\":").Append(mesh.edgeCount).Append(',');
@@ -456,7 +473,7 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
                 $"{tool} is mutating; pass a non-empty paths_hint scoped to the host scene path.");
 
         private static string TargetNotFound()
-            => ProBuilderJson.Error("target_not_found",
+            => UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? ProBuilderJson.Error("target_not_found",
                 "No GameObject resolved. Address by instance_id > path > name.");
 
         private static bool TryParseShapeType(string s, out ShapeType shape, out string error)

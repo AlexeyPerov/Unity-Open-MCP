@@ -90,6 +90,11 @@ const NAME_SELECTOR_OVERRIDES: Record<string, string> = {
   unity_open_mcp_gameobject_modify: "name_target",
 };
 
+const SCENE_PATH_DESCRIPTION =
+  "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab " +
+  "asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; " +
+  "paths_hint, the open prefab stage, then the active scene narrow first).";
+
 /** Selector keys the one-selector rule applies to; null when the schema has no GameObject host. */
 function gameObjectSelectors(schema: Schema): string[] | null {
   if (Array.isArray(schema["x-gameobject-selectors"])) return schema["x-gameobject-selectors"];
@@ -134,8 +139,15 @@ export function canonicalSchema(name: string, input: Schema): Tool["inputSchema"
     const nameSelector = NAME_SELECTOR_OVERRIDES[name] ?? "name";
     if (nameSelector !== "name")
       schema["x-gameobject-selectors"] = DEFAULT_GAMEOBJECT_SELECTORS.map(k => k === "name" ? nameSelector : k).filter(k => props[k]);
-    props.game_object_path.description = `GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or ${nameSelector}.`;
+    const stagePaths = name.startsWith("unity_senses_") ? "" : " (in the open prefab stage: from the prefab root)";
+    props.game_object_path.description = `GameObject hierarchy path, e.g. Root/Child${stagePaths}. Supply only one host selector: instance_id, game_object_path, or ${nameSelector}.`;
   }
+  // One container selector for every typed tool that looks a GameObject up by
+  // path (the bridge's shared resolver reads it; see TypedTargets.cs). Tools
+  // that already declare scene_path keep their own wording.
+  if ((props.game_object_path || props.parent_path) && !props.scene_path && !schema["x-project-command"] &&
+      !name.startsWith("unity_senses_"))
+    props.scene_path = { type: "string", description: SCENE_PATH_DESCRIPTION };
   if (props.component_type) props.component_type.description = "Component type (full name preferred); alternative to component_instance_id.";
   widenInstanceIds(schema);
   return schema as Tool["inputSchema"];

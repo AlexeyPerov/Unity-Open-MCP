@@ -5,10 +5,13 @@ import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 // Scene side-effect — scope paths_hint to the destination scene path.
 export const prefabInstantiate = makeTool(
   "unity_open_mcp_prefab_instantiate",
-  "Instantiate a prefab into the currently active scene at an optional position/rotation/scale, " +
-    "optionally parented under an existing scene GameObject path. Mutating: runs the full gate path. " +
-    "`paths_hint` should be the destination scene path (the instance is a scene side-effect) plus the " +
-    "prefab asset path. Returns the new instance's instanceId, name, and path so the agent can " +
+  "Instantiate a prefab at an optional position/rotation/scale, optionally parented under an existing " +
+    "GameObject path. Without parent_path the instance root goes to the container scene_path/scene_name " +
+    "names; else, while a prefab stage is open, under the prefab root (unless paths_hint names a loaded scene " +
+    "and not the prefab); else the active scene. A parent_path found in several loaded scenes resolves in the " +
+    "one scene_path / paths_hint names, then the active scene, else refuses with ambiguous_path. Mutating: " +
+    "runs the full gate path. `paths_hint` should be the destination scene path plus the prefab asset path. " +
+    "Returns the new instance's instanceId, name, path and container (scene or prefab stage) so the agent can " +
     "re-acquire it. Use unity_open_mcp_search_assets with t:Prefab to locate the prefab asset first.",
   {
     required: ["prefab_asset_path", "paths_hint"],
@@ -24,15 +27,15 @@ export const prefabInstantiate = makeTool(
           parent_path: {
             type: "string",
             description:
-              "Optional destination scene path \"Root/Parent\" — the parent must already exist. " +
-              "Omit to instantiate at scene root.",
+              "Optional parent hierarchy path \"Root/Parent\" (in the open prefab stage: from the prefab root) " +
+              "— the parent must already exist. Omit to instantiate a root.",
           },
           scene_path: {
             type: "string",
             description:
-              "Optional target scene asset path (e.g. 'Assets/Scenes/Bootstrap.unity') for the instance root. " +
-              "The scene must already be loaded (use unity_open_mcp_scene_open Additive first). Omit to " +
-              "instantiate in the active scene. Ignored when parent_path is supplied (the parent's scene wins).",
+              "Optional container: a loaded scene's asset path (e.g. 'Assets/Scenes/Bootstrap.unity'; load it " +
+              "with unity_open_mcp_scene_open Additive first) or the open prefab stage's prefab asset path. The " +
+              "instance root goes there, and parent_path is looked up only there.",
           },
           scene_name: {
             type: "string",

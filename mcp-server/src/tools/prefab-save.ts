@@ -6,8 +6,9 @@ import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 export const prefabSave = makeTool(
   "unity_open_mcp_prefab_save",
   "Save the currently open prefab edit stage back to its asset path. No-op (with a note) when " +
-    "no prefab stage is open. Mutating: runs the full gate path; `paths_hint` is the prefab asset " +
-    "path being saved (best-effort when omitted).",
+    "no prefab stage is open. `pendingChanges` says whether the stage held edits not yet written. " +
+    "Mutating: runs the full gate path; `paths_hint` is the prefab asset path being saved (best-effort " +
+    "when omitted).",
   {
     properties: {
           paths_hint: { ...PATHS_HINT_TYPE, description: "Prefab asset path being saved (the gate's validation scope). Best-effort when omitted." },

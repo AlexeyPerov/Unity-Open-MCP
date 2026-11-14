@@ -412,6 +412,9 @@ Negative instance IDs (e.g. `-4617212`) returned by creator tools
 them back verbatim to `gameobject_modify` / `component_modify` / `invoke_method`.
 If a tool ever reports `GameObject not found (instance_id=0…)`, the id changed
 across a domain reload; re-acquire it via `gameobject_find` (by name) and retry.
+Paths and ids resolve in the loaded scenes and the open prefab stage; see
+[GameObject containers](#gameobject-containers-loaded-scenes-and-the-prefab-stage)
+for which one a path picks, `ambiguous_path`, and the ids typed tools refuse.
 
 #### `invoke_method` positional arguments
 
@@ -927,17 +930,69 @@ and every subsequent call. No tool can dismiss a modal; `bridge_status` reports
 the state as `wedged` / `main_thread_wedged` so it is not mistaken for a compile
 failure. Prefer the non-interactive API.
 
-### Creator tools and scene targeting
+### GameObject containers: loaded scenes and the prefab stage
 
-`gameobject_create`, `ui_canvas_add`, and `prefab_instantiate` accept an optional
-`scene_path` / `scene_name` to control which **loaded** scene receives the new
-root GameObject / Canvas / instance. Without it, the new object lands in the
-active scene — invisible and mutable, so with multiple scenes loaded the result
-was inconsistent. Pass the target scene asset path (e.g.
-`Assets/Scenes/Bootstrap.unity`) or name; the scene must already be loaded
-(`scene_open` Additive first). `ui_canvas_add`'s EventSystem ensure is scoped to
-that scene, so a stray EventSystem is neither created in nor stolen from a
-different loaded scene.
+Every typed tool that takes `game_object_path`, `parent_path`, `instance_id` or
+a by-name selector (`gameobject_*`, `component_*`, `prefab_*`, `selection_set`,
+`scene_focus`, object-reference values in `component_modify` / `object_modify`,
+and the embedded domains such as `ui_*`, `light_*`, `navigation_*`) resolves
+it through one resolver. A GameObject lives in a **container**: a loaded scene,
+or the open **prefab stage** (`prefab_open`), whose contents Unity keeps in a
+preview scene.
+
+- **Paths in the prefab stage** start at the prefab root (`Panel/Child`). The
+  wrapper Unity adds around a UI prefab is accepted too
+  (`Canvas (Environment)/Panel/Child`); objects of that environment are not
+  part of the prefab and are never edited. `prefab_open` returns `rootPath`,
+  `rootInstanceId`, `container` and `autoSave`.
+- **Which container a path resolves in.** A path (or name) that matches in one
+  container resolves there. When it matches in several, the candidates narrow
+  in this order: the container the call names with `scene_path` (a loaded
+  scene's path, or the open stage's prefab asset path; `scene_name` names a
+  scene) — binding, a path missing there is `gameobject_not_found` /
+  `parent_not_found` even if it exists elsewhere; containers whose path (or a
+  folder holding it) is in `paths_hint`; the open prefab stage; the active
+  scene. If more than one is left the call is refused with `ambiguous_path`:
+  `error.candidates` lists each match's `container`, `path` and `instanceId`,
+  and `agentNextSteps` names the `scene_path` to retry with. A path is never
+  resolved in "the first loaded scene" by load order. Within one container the
+  first match in hierarchy order wins, as before. `scene_path` is accepted by
+  every typed tool that takes `game_object_path` or `parent_path`.
+- **Instance ids** resolve through the Unity API to a GameObject of a loaded
+  scene or of the open stage's prefab contents. Other ids are refused, never
+  edited: `persistent_object` (an object inside an asset on disk, e.g. a prefab
+  asset's child — open the prefab with `prefab_open` and address the stage
+  object), `preview_scene_object` (another preview scene, or the stage's
+  environment), `not_a_gameobject` (a Component — the error names its
+  GameObject's `instanceId` — or any other object type). An id that no longer
+  exists falls back to the path / name, as before.
+- **Results** carry `container` (`{"kind":"scene","path":"Assets/…unity"}`, an
+  untitled scene adds its `name`, or `{"kind":"prefab_stage","path":"Assets/…prefab"}`)
+  next to the unchanged `path`, which is canonical: relative to the prefab root
+  for a stage object. Component results name the host as `gameObjectPath`.
+- **New roots.** `gameobject_create`, `prefab_instantiate`, `ui_canvas_add` and
+  the domain creators (`probuilder_create_shape`, `cinemachine_create_camera`,
+  `splines_container_create`, `tilemap_create`) put a GameObject created without
+  a parent into the container `scene_path` / `scene_name` names (the scene must
+  already be loaded: `scene_open` Additive first); otherwise, while a prefab
+  stage is open, under the prefab root — as Unity's own Create menu does in
+  Prefab Mode — unless `paths_hint` names a loaded scene and not the prefab;
+  otherwise the active scene. `ui_canvas_add`'s EventSystem ensure is scoped to
+  the canvas's scene, and a prefab gets no EventSystem.
+- **Inside the stage** the prefab root cannot be destroyed, duplicated or
+  reparented (`stage_root_protected`), nothing is detached to the stage root,
+  and GameObjects do not move between the stage and a scene. Edits record Undo
+  and mark the stage dirty.
+- **Saving and the gate.** Prefab Mode auto-save (on by default; `autoSave` in
+  the `prefab_open` result) writes a stage edit to the prefab file on a later
+  Editor update — after the call returned. With it off, the edit stays in the
+  stage until `prefab_save` or `prefab_close {"save":true}`; `prefab_close
+  {"save":false}` discards it. Their results say whether the stage held
+  `pendingChanges`. The gate validates saved files, so a call whose targets were
+  all in the stage reports `gate.skippedReason: "prefab_stage_edit"` instead of
+  a delta, and `agentNextSteps` says how the edit gets saved; run
+  `validate_edit` on the prefab once it is. A call that also edited a scene
+  validates `paths_hint` as usual and carries the same advice.
 
 ### `unity_open_mcp_editor_status`
 

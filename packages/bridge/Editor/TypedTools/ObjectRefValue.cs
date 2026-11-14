@@ -65,10 +65,13 @@ namespace UnityOpenMcpBridge.TypedTools
                 var obj = AssetDatabase.LoadAssetAtPath<Object>(path);
                 if (obj == null)
                 {
-                    // Not an asset — try the live scene hierarchy.
+                    // Not an asset — try the live hierarchy (loaded scenes and
+                    // the open prefab stage, narrowed like every typed path).
                     var go = TypedTargets.FindByPath(path);
                     if (go != null)
                         obj = CoerceToTarget(go, targetType, path, out error);
+                    else if (TypedTargets.LastFailure != null && !TypedTargets.LastFailure.IsNotFound)
+                        error = $"object_reference path '{path}': {TypedTargets.LastFailure.Message}";
                     else
                         error = $"object_reference path '{path}' resolved to neither an asset nor a live scene GameObject.";
                 }

@@ -16,7 +16,12 @@ be used on 6000.5+ at all (no pragma suppresses CS0619):
 
 Gate the EntityId path on `UNITY_6000_5_OR_NEWER`, not
 `UNITY_6000_0_OR_NEWER` — 6000.0–6000.4 still compile against the int APIs,
-and `EntityId.ToULong` / `FromULong` are the 6000.5-era round-trip.
+and `EntityId.ToULong` / `FromULong` are the 6000.5-era round-trip. One step
+earlier, 6000.3 marks `InstanceIDToObject(int)` obsolete (CS0618) while
+`EntityId` is still 4 bytes with an implicit `int` conversion, so the helper
+resolves through `EntityIdToObject((EntityId)(int)id)` from
+`UNITY_6000_3_OR_NEWER` and compiles without the warning; `GetInstanceID()` is
+not obsolete before 6000.5.
 
 The bridge keeps the agent-facing instance-ID contract but routes every read
 and resolve through one central, version-gated helper so the `#if` lives in one
@@ -45,8 +50,14 @@ the next, and a `tool-contract` test fails on any schema that narrows it again.
 Under the hood, on `UNITY_6000_5_OR_NEWER` the helper calls
 `EntityId.ToULong(obj.GetEntityId())` (returns `ulong`, cast to `long`) and
 `EditorUtility.EntityIdToObject(FromULong((ulong)id))`; on older Unity it
-falls back to `GetInstanceID()` (int, widened to long) /
-`InstanceIDToObject((int)id)`.
+falls back to `GetInstanceID()` (int, widened to long) and
+`EntityIdToObject` (6000.3–6000.4) / `InstanceIDToObject((int)id)` (earlier).
+
+Typed GameObject tools never resolve a host id with the helper alone: they go
+through `TypedTargets` (`packages/bridge/Editor/TypedTools/TypedTargets.cs`),
+which accepts only a GameObject of a loaded scene or of the open prefab stage
+and refuses an object inside an asset on disk, of another preview scene, or of a
+non-GameObject type.
 
 ### How this shows up in the source
 

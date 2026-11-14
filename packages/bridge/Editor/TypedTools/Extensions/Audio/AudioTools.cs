@@ -332,6 +332,7 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
                 sb.Append("\"instanceId\":").Append(InstanceId.ToJson(l)).Append(',');
                 sb.Append("\"name\":").Append(AudioJson.Esc(l.gameObject.name)).Append(',');
                 sb.Append("\"path\":").Append(AudioJson.Esc(AudioTargets.BuildPath(l.gameObject))).Append(',');
+                sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(l.gameObject)).Append(',');
                 sb.Append("\"enabled\":").Append(l.enabled ? "true" : "false");
                 sb.Append('}');
             }
@@ -479,7 +480,7 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
             => f.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
 
         private static string TargetNotFound()
-            => AudioJson.Error("target_not_found",
+            => UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? AudioJson.Error("target_not_found",
                 "No GameObject resolved. Address by instance_id > path > name.");
     }
 }

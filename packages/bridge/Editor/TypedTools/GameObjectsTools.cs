@@ -13,15 +13,16 @@ namespace UnityOpenMcpBridge.TypedTools
     // duplicate / find / modify / set_parent. Mutation tools run through the
     // gate envelope with paths_hint. `find` is gate-free.
     //
-    // Resolve target scene instances by instance_id (canonical) > path > name
-    // via TypedTargets — same addressing model as spatial-query.ts so agents
-    // can pass the same handle across typed tools. Mutations register Undo and
-    // mark the active scene dirty so Unity knows to save.
+    // Resolve targets by instance_id (canonical) > path > name via
+    // TypedTargets — same addressing model as spatial-query.ts so agents can
+    // pass the same handle across typed tools. Targets live in a loaded scene
+    // or in the open prefab stage (see TypedTargets for which container a path
+    // resolves in). Mutations register Undo and mark the owning scene (or the
+    // stage) dirty so Unity knows to save.
     //
-    // paths_hint is the active scene path (the GameObject is a scene side-effect)
-    // for every mutating tool here — GameObjects are not asset-backed, so there
-    // is no .prefab/.mat path to scope. Pass the scene that contains (or will
-    // contain) the GameObject.
+    // paths_hint is the path of the container that holds (or will hold) the
+    // GameObject: the scene path, or the prefab asset path while editing in
+    // its stage. It also narrows a path that matches in several containers.
     public static class GameObjectsTools
     {
         public static ToolDispatchResult Create(string body)
@@ -46,25 +47,25 @@ namespace UnityOpenMcpBridge.TypedTools
                     $"Unknown primitive_type '{primitiveStr}'. Expected one of: " +
                     "Cube, Sphere, Capsule, Cylinder, Plane, Quad.");
 
+            // The parent resolves through the shared resolver (loaded scenes and
+            // the open prefab stage; scene_path / paths_hint narrow a path that
+            // matches in several). Without a parent, the new root goes to the
+            // creation container: the named one (scene_path / scene_name), the
+            // open prefab stage (under its root), or the active scene.
+            var request = TargetRequest.For(body);
             GameObject parentGo = null;
+            TargetContainer rootContainer = null;
             if (!string.IsNullOrEmpty(parentPath))
             {
-                parentGo = TypedTargets.FindByPath(parentPath);
-                if (parentGo == null)
-                    return ToolDispatchResult.Fail("parent_not_found",
-                        $"Parent GameObject not found at path '{parentPath}'.");
+                var parent = TypedTargets.Resolve(0, parentPath, null, request, TargetRole.Parent);
+                if (!parent.Ok) return parent.Failure.ToResult();
+                parentGo = parent.GameObject;
             }
-
-            // feedback-01-08-glm §6 — optional explicit target scene. Without
-            // this, a new root GameObject lands in whatever the active scene is
-            // at call time (invisible + mutable), so with multiple scenes loaded
-            // the result was inconsistent. When supplied, the new GameObject is
-            // moved into the target scene via MoveGameObjectToScene after
-            // creation. A parent_path in another scene already routes the GO
-            // there via SetParent, so scene targeting only applies to roots.
-            var targetScene = SceneTargeting.ResolveTargetScene(body, out var sceneError);
-            if (sceneError != null)
-                return ToolDispatchResult.Fail("scene_not_found", sceneError);
+            else
+            {
+                rootContainer = TypedTargets.CreationContainer(request, out var containerFailure);
+                if (containerFailure != null) return containerFailure.ToResult();
+            }
 
             GameObject go;
             try
@@ -83,7 +84,7 @@ namespace UnityOpenMcpBridge.TypedTools
             if (parentGo != null)
                 go.transform.SetParent(parentGo.transform, false);
             else
-                SceneTargeting.MoveToSceneIfDifferent(go, targetScene);
+                TypedTargets.PlaceInContainer(go, rootContainer);
 
             ApplyTransform(go.transform, position, rotation, scale, localSpace);
 
@@ -99,12 +100,16 @@ namespace UnityOpenMcpBridge.TypedTools
             var resolved = ResolveInstance(body);
             if (!resolved.Ok) return resolved.Result;
             var go = resolved.GameObject;
+            if (TypedTargets.IsStageRoot(go)) return StageRootRefusal(go, "destroyed");
 
             // B23 — capture the owning scene BEFORE the destroy: reading
             // go.scene after Undo.DestroyObjectImmediate is unreliable, so the
             // scene the object lived in (not necessarily the active scene) must
-            // be resolved up front and marked dirty after the removal.
+            // be resolved up front and marked dirty after the removal. The path
+            // and container are read up front for the same reason.
             var owningScene = go != null ? go.scene : default;
+            var path = TypedTargets.HierarchyPath(go);
+            var container = TypedTargets.ContainerOf(go);
 
             try
             {
@@ -120,9 +125,16 @@ namespace UnityOpenMcpBridge.TypedTools
             else
                 MarkActiveSceneDirty();
 
-            var sb = new StringBuilder(64);
+            var sb = new StringBuilder(128);
             sb.Append("{\"status\":\"ok\",\"destroyed\":true,\"name\":\"")
-              .Append(TypedTargets.Esc(resolved.Name)).Append("\"}");
+              .Append(TypedTargets.Esc(resolved.Name)).Append("\",\"path\":\"")
+              .Append(TypedTargets.Esc(path)).Append('"');
+            if (container != null)
+            {
+                sb.Append(",\"container\":");
+                container.AppendJson(sb);
+            }
+            sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
@@ -131,6 +143,7 @@ namespace UnityOpenMcpBridge.TypedTools
             var resolved = ResolveInstance(body);
             if (!resolved.Ok) return resolved.Result;
             var go = resolved.GameObject;
+            if (TypedTargets.IsStageRoot(go)) return StageRootRefusal(go, "duplicated");
 
             GameObject clone;
             // Track whether the clone retained its prefab connection, so the
@@ -178,6 +191,11 @@ namespace UnityOpenMcpBridge.TypedTools
                 clone.transform.localRotation = srcT.localRotation;
                 clone.transform.localScale = srcT.localScale;
 
+                // A root clone lands in the active scene; keep it in the
+                // source's scene, as the Editor's own duplicate does.
+                if (clone.transform.parent == null && go.scene.IsValid() && clone.scene != go.scene)
+                    SceneManager.MoveGameObjectToScene(clone, go.scene);
+
                 // Editor duplicate places the clone immediately after the source
                 // rather than at the parent end.
                 clone.transform.SetSiblingIndex(srcT.GetSiblingIndex() + 1);
@@ -210,9 +228,15 @@ namespace UnityOpenMcpBridge.TypedTools
             var instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
             var path = JsonBody.GetString(body, "path");
             var name = JsonBody.GetString(body, "name");
+            var request = TargetRequest.For(body);
             if (instanceId != 0 || !string.IsNullOrEmpty(path) || !string.IsNullOrEmpty(name))
             {
-                var go = TypedTargets.ResolveGameObject(instanceId, path, name);
+                var target = TypedTargets.Resolve(instanceId, path, name, request);
+                var go = target.GameObject;
+                // An address that matches in several containers, or an id the
+                // typed tools refuse, is an answer the caller must act on — not
+                // an empty result.
+                if (!target.Ok && !target.Failure.IsNotFound) return target.Failure.ToResult();
                 if (go == null)
                 {
                     // NOTE: named sbNotFound (not sb) — a `var sb` here would
@@ -230,20 +254,27 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Ok(sbOne.ToString());
             }
 
-            // List mode — enumerate candidates from loaded scenes and apply
-            // filters. Use a query-driven walk so a project with many roots
-            // stays bounded by max_results.
+            // List mode — enumerate candidates from the open prefab stage (its
+            // prefab contents) and the loaded scenes, or only from the container
+            // scene_path / scene_name names, and apply filters. Use a
+            // query-driven walk so a project with many roots stays bounded by
+            // max_results.
             var tagFilter = JsonBody.GetString(body, "tag");
             var componentFilter = JsonBody.GetString(body, "component");
             var nameContains = JsonBody.GetString(body, "name_contains");
             var rootOnly = JsonBody.GetBool(body, "root_only", false);
 
+            var named = TargetContainers.Named(request, out var namedFailure);
+            if (namedFailure != null) return namedFailure.ToResult();
+            var containers = named != null ? new List<TargetContainer> { named } : TargetContainers.All();
+
             var matches = new List<GameObject>();
-            for (var i = 0; i < SceneManager.sceneCount; i++)
+            foreach (var container in containers)
             {
-                var scene = SceneManager.GetSceneAt(i);
-                if (!scene.isLoaded) continue;
-                foreach (var root in scene.GetRootGameObjects())
+                var roots = container.Kind == TargetContainerKind.PrefabStage
+                    ? new[] { container.PrefabRoot }
+                    : container.Scene.GetRootGameObjects();
+                foreach (var root in roots)
                 {
                     if (rootOnly)
                     {
@@ -315,10 +346,15 @@ namespace UnityOpenMcpBridge.TypedTools
             var resolveName = hasNameTarget
                 ? nameTarget
                 : JsonBody.GetString(body, "name");
-            var go = TypedTargets.ResolveGameObject(instanceId, path, resolveName);
-            if (go == null)
+            var target = TypedTargets.Resolve(instanceId, path, resolveName, body);
+            if (!target.Ok)
+            {
+                if (!target.Failure.IsNotFound) return target.Failure.ToResult();
                 return ToolDispatchResult.Fail("gameobject_not_found",
-                    $"GameObject not found (instance_id={instanceId}, path='{path}', name_target='{nameTarget}').");
+                    $"GameObject not found (instance_id={instanceId}, path='{path}', name_target='{nameTarget}')." +
+                    NotFoundContext(target.Failure.Message));
+            }
+            var go = target.GameObject;
 
             // ---- surface detection (T22.1.4) ----
             // B-R4 — every GetRawValue read here routes through NullAsAbsent:
@@ -727,17 +763,15 @@ namespace UnityOpenMcpBridge.TypedTools
             bool detachToRoot = false;
             if (parentInstanceId != 0)
             {
-                parentGo = TypedTargets.FindByInstanceId(parentInstanceId);
-                if (parentGo == null)
-                    return ToolDispatchResult.Fail("parent_not_found",
-                        $"Parent GameObject not found (parent_instance_id={parentInstanceId}).");
+                var parent = TypedTargets.Resolve(parentInstanceId, null, null, body, TargetRole.Parent);
+                if (!parent.Ok) return parent.Failure.ToResult();
+                parentGo = parent.GameObject;
             }
             else if (!string.IsNullOrEmpty(parentPath))
             {
-                parentGo = TypedTargets.FindByPath(parentPath);
-                if (parentGo == null)
-                    return ToolDispatchResult.Fail("parent_not_found",
-                        $"Parent GameObject not found (parent_path='{parentPath}').");
+                var parent = TypedTargets.Resolve(0, parentPath, null, body, TargetRole.Parent);
+                if (!parent.Ok) return parent.Failure.ToResult();
+                parentGo = parent.GameObject;
             }
             else if (parentPathKeyPresent)
             {
@@ -751,6 +785,27 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("missing_parameter",
                     "Provide 'parent_path' or 'parent_instance_id' to identify the new parent. " +
                     "Pass an empty parent_path with parent_instance_id=0 to detach to scene root.");
+            }
+
+            // A prefab stage holds one prefab: its root stays the root, and
+            // nothing moves between the stage and a scene (a detached object
+            // or one moved out would never be saved with the prefab).
+            if (TypedTargets.IsStageRoot(go)) return StageRootRefusal(go, "reparented");
+            var goContainer = TypedTargets.ContainerOf(go);
+            bool goInStage = goContainer != null && goContainer.Kind == TargetContainerKind.PrefabStage;
+            if (goInStage && detachToRoot)
+                return ToolDispatchResult.Fail("invalid_parameter",
+                    $"'{go.name}' is in the prefab stage of '{goContainer.AssetPath}'; detaching it to the stage " +
+                    "root would take it out of the prefab. Parent it under the prefab root instead.");
+            if (parentGo != null)
+            {
+                var parentContainer = TypedTargets.ContainerOf(parentGo);
+                bool parentInStage = parentContainer != null && parentContainer.Kind == TargetContainerKind.PrefabStage;
+                if (goInStage != parentInStage)
+                    return ToolDispatchResult.Fail("invalid_parameter",
+                        $"'{go.name}' is in {goContainer?.Describe() ?? "no editable container"} and the new parent " +
+                        $"'{parentGo.name}' in {parentContainer?.Describe() ?? "no editable container"}; GameObjects do " +
+                        "not move between a prefab stage and a scene.");
             }
 
             if (parentGo != null)
@@ -804,6 +859,7 @@ namespace UnityOpenMcpBridge.TypedTools
             public GameObject GameObject;
             public string Name;
             public ToolDispatchResult Result;
+            public TargetContainer Container;
         }
 
         public static InstanceResolve ResolveInstance(string body)
@@ -819,16 +875,34 @@ namespace UnityOpenMcpBridge.TypedTools
             var path = JsonBody.GetString(selectors, "path");
             var name = JsonBody.GetString(selectors, "name");
 
-            var go = TypedTargets.ResolveGameObject(instanceId, path, name);
-            if (go == null)
-                return new InstanceResolve
-                {
-                    Ok = false,
-                    Result = ToolDispatchResult.Fail("gameobject_not_found",
-                        $"GameObject not found (instance_id={instanceId}, path='{path}', name='{name}').")
-                };
+            var target = TypedTargets.Resolve(instanceId, path, name, body);
+            if (!target.Ok)
+                return new InstanceResolve { Ok = false, Result = target.Failure.ToResult() };
 
-            return new InstanceResolve { Ok = true, GameObject = go, Name = go.name };
+            var go = target.GameObject;
+            return new InstanceResolve { Ok = true, GameObject = go, Name = go.name, Container = target.Container };
+        }
+
+        // The refusal for an edit that would leave a prefab stage without its
+        // single root.
+        internal static ToolDispatchResult StageRootRefusal(GameObject go, string verb)
+        {
+            var container = TypedTargets.ContainerOf(go);
+            return ToolDispatchResult.Fail("stage_root_protected",
+                $"'{go.name}' is the root of the prefab open in {container?.Describe() ?? "the prefab stage"}. " +
+                $"A prefab has exactly one root, so it cannot be {verb} inside its stage; edit its children, or " +
+                "close the stage (unity_open_mcp_prefab_close) and work on the prefab asset.");
+        }
+
+        // The resolver's context sentence (searched containers, the prefab
+        // root to start stage paths at) for a tool that words its own
+        // not-found message.
+        private static string NotFoundContext(string resolverMessage)
+        {
+            if (string.IsNullOrEmpty(resolverMessage)) return "";
+            var cut = resolverMessage.IndexOf(" Searched ", System.StringComparison.Ordinal);
+            if (cut < 0) cut = resolverMessage.IndexOf(" Looked in ", System.StringComparison.Ordinal);
+            return cut < 0 ? "" : resolverMessage.Substring(cut);
         }
 
         private static PrimitiveType? ParsePrimitive(string raw)
@@ -927,8 +1001,9 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append("\",\"active\":").Append(go.activeInHierarchy ? "true" : "false");
             sb.Append(",\"tag\":\"").Append(TypedTargets.Esc(go.tag));
             sb.Append("\",\"layer\":").Append(go.layer);
-            sb.Append(",\"scene\":\"").Append(TypedTargets.Esc(go.scene.path));
-            sb.Append("\",\"transform\":");
+            sb.Append(",\"scene\":\"").Append(TypedTargets.Esc(go.scene.path)).Append('"');
+            TypedTargets.AppendContainerMember(sb, go);
+            sb.Append(",\"transform\":");
             AppendTransform(sb, t);
             sb.Append(",\"components\":[");
             var comps = go.GetComponents<Component>();
@@ -1002,13 +1077,14 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // B23 — mark the scene that actually OWNS the object dirty, not the
-        // active scene. Targets are resolved across every loaded scene, so
-        // flagging the active scene for an edit on an additively-loaded scene
+        // active scene. Targets are resolved across every loaded scene and the
+        // open prefab stage, so flagging the active scene for an edit elsewhere
         // trips SceneDirtyGuard and Unity's save prompt on a scene with no
-        // changes. Falls back to the active scene when the object is not in a
-        // valid loaded scene (e.g. a freshly-created GameObject whose scene
-        // assignment is pending, or a prefab-stage object) so we never silently
-        // skip the dirty flag.
+        // changes. A prefab-stage object's scene is the stage's preview scene;
+        // marking it dirty is how Prefab Mode learns of a scripted edit. Falls
+        // back to the active scene when the object has no valid scene (e.g. a
+        // freshly-created GameObject whose scene assignment is pending) so we
+        // never silently skip the dirty flag.
         private static void MarkObjectSceneDirty(GameObject go)
         {
             if (go != null && go.scene.IsValid())

@@ -71,7 +71,6 @@ namespace UnityOpenMcpBridge.Extensions.TilemapExt
                     "scoped to the active scene path.");
 
             var grid = new GameObject(string.IsNullOrEmpty(grid_name) ? "Grid" : grid_name);
-            Undo.RegisterCreatedObjectUndo(grid, "Create Tilemap Grid");
 
             Transform parent = null;
             if (!string.IsNullOrEmpty(parent_path))
@@ -80,12 +79,27 @@ namespace UnityOpenMcpBridge.Extensions.TilemapExt
                 if (parentGo == null)
                 {
                     Object.DestroyImmediate(grid);
-                    return TilemapJson.Error("parent_not_found",
+                    return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? TilemapJson.Error("parent_not_found",
                         $"No GameObject at parent_path '{parent_path}'.");
                 }
                 parent = parentGo.transform;
                 grid.transform.SetParent(parent, false);
             }
+            else
+            {
+                // No parent: the creation container — the named one (scene_path), the open
+                // prefab stage (under its root), or the active scene, as gameobject_create.
+                var rootContainer = UnityOpenMcpBridge.TypedTools.TypedTargets.CreationContainer(UnityOpenMcpBridge.TypedTools.TargetRequest.Ambient, out var containerFailure);
+                if (containerFailure != null)
+                {
+                    Object.DestroyImmediate(grid);
+                    return containerFailure.ToRefusalJson();
+                }
+                UnityOpenMcpBridge.TypedTools.TypedTargets.PlaceInContainer(grid, rootContainer);
+            }
+            // Registered once placed: a creation is recorded in (and dirties)
+            // the scene the object is in at that moment.
+            Undo.RegisterCreatedObjectUndo(grid, "Create Tilemap Grid");
 
             if (!string.IsNullOrEmpty(position))
             {
@@ -99,8 +113,8 @@ namespace UnityOpenMcpBridge.Extensions.TilemapExt
             // Child Tilemap GameObject — the conventional 2D layout puts the
             // Tilemap as a child of the Grid.
             var tilemapGo = new GameObject(string.IsNullOrEmpty(tilemap_name) ? "Tilemap" : tilemap_name);
-            Undo.RegisterCreatedObjectUndo(tilemapGo, "Create Tilemap");
             tilemapGo.transform.SetParent(grid.transform, false);
+            Undo.RegisterCreatedObjectUndo(tilemapGo, "Create Tilemap");
             Undo.AddComponent<Tilemap>(tilemapGo);
             Undo.AddComponent<TilemapRenderer>(tilemapGo);
 
@@ -113,6 +127,7 @@ namespace UnityOpenMcpBridge.Extensions.TilemapExt
             sb.Append("\"gridPath\":").Append(TilemapJson.Esc(TilemapTargets.BuildPath(grid))).Append(',');
             sb.Append("\"tilemapInstanceId\":").Append(InstanceId.ToJson(tilemapGo)).Append(',');
             sb.Append("\"tilemapPath\":").Append(TilemapJson.Esc(TilemapTargets.BuildPath(tilemapGo))).Append(',');
+            sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(tilemapGo)).Append(',');
             sb.Append("\"cellBounds\":").Append(TilemapJson.Vec3Int(tilemap.cellBounds.size));
             sb.Append('}');
             return TilemapJson.Ok(sb.ToString());
@@ -418,7 +433,7 @@ namespace UnityOpenMcpBridge.Extensions.TilemapExt
         }
 
         private static string TargetNotFound()
-            => TilemapJson.Error("target_not_found",
+            => UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? TilemapJson.Error("target_not_found",
                 "No GameObject resolved. Address by instance_id > path > name.");
     }
 }

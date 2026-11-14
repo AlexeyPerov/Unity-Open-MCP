@@ -76,7 +76,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 MarkActiveSceneDirty(go);
             }
 
-            return ToolDispatchResult.Ok(BuildOpResult(added, errors, "added"));
+            return ToolDispatchResult.Ok(BuildOpResult(added, errors, "added", go));
         }
 
         public static ToolDispatchResult Destroy(string body)
@@ -125,7 +125,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 MarkActiveSceneDirty(go);
             }
 
-            return ToolDispatchResult.Ok(BuildOpResult(removed, errors, "destroyed"));
+            return ToolDispatchResult.Ok(BuildOpResult(removed, errors, "destroyed", go));
         }
 
         // Component get returns the serialized field/property list of one
@@ -240,6 +240,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append("\",\"name\":\"").Append(TypedTargets.Esc(component.GetType().Name));
             sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(component));
             sb.Append(",\"enabled\":").Append(IsEnabled(component) ? "true" : "false");
+            AppendHostLocator(sb, component.gameObject);
             sb.Append(",\"profile\":\"").Append(ProfileToString(options.Profile)).Append('"');
             if (!string.IsNullOrEmpty(propertyPath))
                 sb.Append(",\"property_path\":\"").Append(TypedTargets.Esc(propertyPath)).Append('"');
@@ -359,7 +360,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 }
             }
 
-            return ToolDispatchResult.Ok(BuildOpResult(modified, errors, "modified"));
+            return ToolDispatchResult.Ok(BuildOpResult(modified, errors, "modified", component.gameObject));
         }
 
         // Component list_all returns a token-bounded catalog of component
@@ -1295,8 +1296,24 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        private static string BuildOpResult(List<string> done, List<string> errors, string doneLabel)
-            => AssetsTools.BuildFolderOpResult(done, errors, doneLabel);
+        // The add / destroy / modify result: what was done and the errors,
+        // plus the host's canonical path and container (scene or prefab stage).
+        private static string BuildOpResult(List<string> done, List<string> errors, string doneLabel, GameObject host)
+        {
+            var json = AssetsTools.BuildFolderOpResult(done, errors, doneLabel);
+            var sb = new StringBuilder(json.Length + 128);
+            sb.Append(json, 0, json.Length - 1);
+            AppendHostLocator(sb, host);
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        // ,"gameObjectPath":"…","container":{…} for the component's host.
+        private static void AppendHostLocator(StringBuilder sb, GameObject host)
+        {
+            sb.Append(",\"gameObjectPath\":\"").Append(TypedTargets.Esc(TypedTargets.HierarchyPath(host))).Append('"');
+            TypedTargets.AppendContainerMember(sb, host);
+        }
 
         private static void MarkActiveSceneDirty(GameObject go)
         {

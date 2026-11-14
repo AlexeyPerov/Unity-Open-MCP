@@ -189,6 +189,7 @@ namespace UnityOpenMcpBridge.Extensions.TerrainExt
             sb.Append("\"name\":").Append(TerrainJson.Esc(go.name)).Append(',');
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
             sb.Append("\"path\":").Append(TerrainJson.Esc(TerrainTargets.BuildPath(go))).Append(',');
+            sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(go)).Append(',');
             sb.Append("\"terrainDataInstanceId\":").Append(InstanceId.ToJson(td)).Append(',');
             sb.Append("\"size\":").Append(Vec3(td.size)).Append(',');
             sb.Append("\"heightmapResolution\":").Append(td.heightmapResolution).Append(',');
@@ -664,7 +665,7 @@ namespace UnityOpenMcpBridge.Extensions.TerrainExt
 
             var go = TerrainTargets.Resolve(instanceId, sidePath, null);
             if (go == null)
-                return TerrainJson.Error("neighbor_not_found",
+                return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? TerrainJson.Error("neighbor_not_found",
                     $"Neighbor '{side}' not resolved. Address by instance_id > path.");
             if (go == host.gameObject)
                 return TerrainJson.Error("neighbor_is_self",

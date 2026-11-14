@@ -5,14 +5,14 @@ import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 // Scene side-effect — scope paths_hint to the destination scene path.
 export const gameobjectCreate = makeTool(
   "unity_open_mcp_gameobject_create",
-  "Create a new GameObject in the active scene (or an explicit target scene via scene_path/scene_name), " +
-    "optionally parented under an existing scene GameObject and pre-positioned. Pass `primitive_type` to " +
-    "spawn a Unity primitive (Cube/Sphere/Capsule/Cylinder/Plane/Quad) with its default renderer+collider. " +
-    "Mutating: runs the full gate path; `paths_hint` should be the destination scene path (the GameObject " +
-    "is a scene side-effect). When multiple scenes are loaded, pass scene_path/scene_name to control which " +
-    "scene receives the new root GameObject — otherwise it lands in the active scene. Returns the new " +
-    "instance's instanceId, name, path, transform, and component list so the agent can immediately chain " +
-    "component_add / modify / set_parent without an extra lookup.",
+  "Create a new GameObject, optionally parented under an existing GameObject and pre-positioned. Pass " +
+    "`primitive_type` to spawn a Unity primitive (Cube/Sphere/Capsule/Cylinder/Plane/Quad) with its default " +
+    "renderer+collider. Without parent_path the new root goes to the container scene_path/scene_name names; " +
+    "else, while a prefab stage is open, under the prefab root (unless paths_hint names a loaded scene and not " +
+    "the prefab); else the active scene. Mutating: runs the full gate path; `paths_hint` is the destination " +
+    "scene path (or the prefab asset path in its stage). Returns the new instance's instanceId, name, path, " +
+    "container, transform, and component list so the agent can immediately chain component_add / modify / " +
+    "set_parent without an extra lookup.",
   {
     required: ["name", "paths_hint"],
         properties: {
@@ -30,15 +30,15 @@ export const gameobjectCreate = makeTool(
           parent_path: {
             type: "string",
             description:
-              "Optional destination scene path \"Root/Parent\" — the parent must already exist. " +
-              "Omit to create at scene root.",
+              "Optional parent hierarchy path \"Root/Parent\" (in the open prefab stage: from the prefab root) " +
+              "— the parent must already exist. Omit to create a root GameObject.",
           },
           scene_path: {
             type: "string",
             description:
-              "Optional target scene asset path (e.g. 'Assets/Scenes/Bootstrap.unity') for the new root " +
-              "GameObject. The scene must already be loaded (use unity_open_mcp_scene_open Additive first). " +
-              "Omit to create in the active scene. Ignored when parent_path is supplied (the parent's scene wins).",
+              "Optional container: a loaded scene's asset path (e.g. 'Assets/Scenes/Bootstrap.unity'; load it " +
+              "with unity_open_mcp_scene_open Additive first) or the open prefab stage's prefab asset path. The " +
+              "new root GameObject goes there, and parent_path is looked up only there.",
           },
           scene_name: {
             type: "string",

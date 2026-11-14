@@ -287,20 +287,13 @@ namespace UnityOpenMcpBridge.Extensions.ParticlesExt
         private static ParticleSystem ResolvePs(int instanceId, string path, string name, out string errorEnvelope)
         {
             errorEnvelope = null;
-            GameObject host = null;
-            if (instanceId != 0)
-            {
-                var obj = InstanceId.ToObject(instanceId);
-                if (obj is GameObject goById) host = goById;
-            }
-            if (host == null && !string.IsNullOrEmpty(path))
-                host = FindByPath(path);
-            if (host == null && !string.IsNullOrEmpty(name))
-                host = FindByName(name);
-
+            // The shared resolver: loaded scenes and the open prefab stage,
+            // scene_path / paths_hint narrowing, refused instance ids; a
+            // one-segment path also matches a nested GameObject of that name.
+            var host = UnityOpenMcpBridge.TypedTools.TypedTargets.ResolveLenient(instanceId, path, name);
             if (host == null)
             {
-                errorEnvelope = ParticleSystemJson.Error("target_not_found",
+                errorEnvelope = UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? ParticleSystemJson.Error("target_not_found",
                     "No GameObject resolved. Address by instance_id > path > name.");
                 return null;
             }
@@ -320,38 +313,6 @@ namespace UnityOpenMcpBridge.Extensions.ParticlesExt
             => ParticleSystemJson.Error("paths_hint_required",
                 "particle_system_modify is mutating; pass a non-empty paths_hint " +
                 "scoped to the host scene path.");
-
-        private static GameObject FindByPath(string path)
-        {
-            var parts = path.Split('/');
-            var roots = SceneQuery.FindActiveTransforms();
-            foreach (var root in roots)
-            {
-                // Anchor multi-segment paths to scene roots (FindActiveTransforms returns every active transform), so "A/B" cannot resolve against a nested "A"; single-segment lookups keep matching anywhere.
-                if (parts.Length > 1 && root.parent != null) continue;
-                if (root.gameObject.name == parts[0])
-                {
-                    var current = root.gameObject;
-                    bool match = true;
-                    for (int i = 1; i < parts.Length; i++)
-                    {
-                        var child = current.transform.Find(parts[i]);
-                        if (child == null) { match = false; break; }
-                        current = child.gameObject;
-                    }
-                    if (match) return current;
-                }
-            }
-            return null;
-        }
-
-        private static GameObject FindByName(string name)
-        {
-            var roots = SceneQuery.FindActiveTransforms();
-            foreach (var root in roots)
-                if (root.gameObject.name == name) return root.gameObject;
-            return null;
-        }
 
         // =====================================================================
         // Module serializers (read side)

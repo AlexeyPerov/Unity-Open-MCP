@@ -1310,12 +1310,47 @@ namespace UnityOpenMcpBridge
             return result;
         }
 
+        // `dirtyScenes` of a call that ran (the scenes / prefab stage it left
+        // with unsaved changes; a scene_dirty refusal already carries the
+        // blocking scenes), and the prefab-stage advisory when the call edited
+        // the open stage and the gate did not already say so.
+        private static void ReportFootprint(GateDispatchResult result, HashSet<TargetContainer> dirtyBefore,
+            TargetScope scope)
+        {
+            var mutation = result.Mutation;
+            if (mutation == null || !(mutation.Success || mutation.PartialCommit) || result.EffectiveReadOnly) return;
+            if (result.DirtyScenePaths == null)
+                result.DirtyScenePaths = MutationFootprint.Dirtied(dirtyBefore, scope.Touched);
+            if (result.SkippedReason == MutationFootprint.StageEditSkipReason) return;
+            var stage = MutationFootprint.EditedStage(out _);
+            if (stage != null)
+                result.AgentNextSteps = AppendStep(result.AgentNextSteps,
+                    MutationFootprint.StageAdvisory(stage, validationSkipped: !result.GateRan));
+        }
+
         // Kept as the single 4-argument entry point (tests resolve it by name
         // through reflection); the HTTP path uses the planned variant below.
         private static GateDispatchResult DispatchWithGateCore(string toolName, string body, string gateMode, string[] pathsHint)
             => DispatchWithGatePlanned(toolName, body, gateMode, pathsHint, null);
 
+        // The target scope spans the whole gated dispatch (a batch's steps nest
+        // inside it), so after the call it knows every scene / prefab stage a
+        // typed tool resolved a target in. With the dirty state taken before
+        // the call, that yields the call's `dirtyScenes` and the prefab-stage
+        // advisory; GatePolicy reads it to skip validating a stage-only edit.
         private static GateDispatchResult DispatchWithGatePlanned(string toolName, string body, string gateMode, string[] pathsHint,
+            ToolRequestContract contract)
+        {
+            using (var scope = TargetScope.Enter(body))
+            {
+                var dirtyBefore = MutationFootprint.DirtyNow();
+                var result = DispatchGated(toolName, body, gateMode, pathsHint, contract);
+                ReportFootprint(result, dirtyBefore, scope);
+                return result;
+            }
+        }
+
+        private static GateDispatchResult DispatchGated(string toolName, string body, string gateMode, string[] pathsHint,
             ToolRequestContract contract)
         {
             // Direct and test callers arrive without the HTTP handler's contract.
@@ -1379,6 +1414,16 @@ namespace UnityOpenMcpBridge
                 return ToolDispatchResult.Fail("duplicate_tool_id", "All conflicting registrations were rejected: " + toolName);
             if (BridgeBatchSchemas.ByTool.TryGetValue(toolName, out var wireSchema))
                 body = BatchSchemaValidator.WireArguments(body, wireSchema);
+            // The call's container request (scene_path / scene_name /
+            // paths_hint; a batch step inherits what it leaves out) for the
+            // typed tools that receive parameters instead of the body, and the
+            // record of the containers this call resolved targets in.
+            using (TargetScope.Enter(body))
+                return DispatchToolCore(toolName, body);
+        }
+
+        private static ToolDispatchResult DispatchToolCore(string toolName, string body)
+        {
             return toolName switch
             {
                 ProjectCommandInvocation.ToolName => ProjectCommandInvocation.Execute(body),

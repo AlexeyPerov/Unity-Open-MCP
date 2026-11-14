@@ -293,6 +293,29 @@ namespace UnityOpenMcpBridge
                 };
             }
 
+            // A typed edit that landed only in the open prefab stage changed no
+            // file during this call: the checkpoint and the validate scan both
+            // read the saved prefab, so a delta would claim "no new issues" for
+            // content the gate never looked at. Report the skip and what saves
+            // the edit instead.
+            var editedStage = MutationFootprint.EditedStage(out var onlyStage);
+            if (editedStage != null && onlyStage)
+            {
+                gateSw.Stop();
+                return new GateDispatchResult
+                {
+                    Mutation = mutationResult,
+                    GateRan = false,
+                    Outcome = GateOutcome.Skipped,
+                    SkippedReason = MutationFootprint.StageEditSkipReason,
+                    CheckpointId = checkpoint.CheckpointId,
+                    CheckpointDurationMs = checkpointMs,
+                    TotalGateDurationMs = gateSw.ElapsedMilliseconds,
+                    GateFailed = false,
+                    AgentNextSteps = new[] { MutationFootprint.StageAdvisory(editedStage, validationSkipped: true) }
+                };
+            }
+
             VerifyResult validation;
             try
             {

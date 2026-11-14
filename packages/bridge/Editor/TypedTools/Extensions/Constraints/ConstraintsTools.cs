@@ -118,7 +118,7 @@ namespace UnityOpenMcpBridge.Extensions.ConstraintsExt
                 var sourceGo = ConstraintsTargets.Resolve(
                     source_instance_id, source_path, source_name);
                 if (sourceGo == null)
-                    return ConstraintsJson.Error("source_not_found",
+                    return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? ConstraintsJson.Error("source_not_found",
                         "Source GameObject not resolved. Address by " +
                         "source_instance_id > source_path > source_name.");
                 sourceTransform = sourceGo.transform;
@@ -176,6 +176,7 @@ namespace UnityOpenMcpBridge.Extensions.ConstraintsExt
             sb.Append("\"type\":").Append(ConstraintsJson.Esc(type.Name)).Append(',');
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson((constraint as Component))).Append(',');
             sb.Append("\"path\":").Append(ConstraintsJson.Esc(ConstraintsTargets.BuildPath(host))).Append(',');
+            sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(host)).Append(',');
             sb.Append("\"constraintActive\":").Append(constraint.constraintActive ? "true" : "false").Append(',');
             sb.Append("\"sourceCount\":").Append(constraint.sourceCount).Append(',');
             sb.Append("\"sourceAdded\":").Append(sourceAdded ? "true" : "false");
@@ -305,6 +306,7 @@ namespace UnityOpenMcpBridge.Extensions.ConstraintsExt
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson(group)).Append(',');
             sb.Append("\"path\":").Append(ConstraintsJson.Esc(ConstraintsTargets.BuildPath(host))).Append(',');
+            sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(host)).Append(',');
             sb.Append("\"fadeMode\":").Append(ConstraintsJson.Esc(group.fadeMode.ToString())).Append(',');
             sb.Append("\"animateCrossFading\":").Append(group.animateCrossFading ? "true" : "false").Append(',');
             sb.Append("\"lodCount\":").Append(group.lodCount).Append(',');
@@ -452,11 +454,7 @@ namespace UnityOpenMcpBridge.Extensions.ConstraintsExt
             // "iid:<n>" form — explicit instance id.
             if (hint.StartsWith("iid:") &&
                 int.TryParse(hint.Substring(4), out var iid) && iid != 0)
-            {
-                var obj = InstanceId.ToObject(iid);
-                if (obj is GameObject go) return go;
-                return null;
-            }
+                return ConstraintsTargets.Resolve(iid, null, null);
 
             // Otherwise treat as a hierarchy path (slash-separated from a root).
             return ConstraintsTargets.FindByPath(hint);
@@ -467,7 +465,7 @@ namespace UnityOpenMcpBridge.Extensions.ConstraintsExt
         // =====================================================================
 
         private static string TargetNotFound()
-            => ConstraintsJson.Error("target_not_found",
+            => UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? ConstraintsJson.Error("target_not_found",
                 "No GameObject resolved. Address by instance_id > path > name.");
     }
 }

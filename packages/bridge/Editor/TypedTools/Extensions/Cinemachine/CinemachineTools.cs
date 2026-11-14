@@ -83,10 +83,22 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
                 if (parentGo == null)
                 {
                     Object.DestroyImmediate(go);
-                    return CinemachineJson.Error("parent_not_found",
+                    return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? CinemachineJson.Error("parent_not_found",
                         $"No GameObject at parent_path '{parent_path}'.");
                 }
                 parent = parentGo.transform;
+            }
+            else
+            {
+                // No parent: the creation container — the named one (scene_path), the open
+                // prefab stage (under its root), or the active scene, as gameobject_create.
+                var rootContainer = UnityOpenMcpBridge.TypedTools.TypedTargets.CreationContainer(UnityOpenMcpBridge.TypedTools.TargetRequest.Ambient, out var containerFailure);
+                if (containerFailure != null)
+                {
+                    Object.DestroyImmediate(go);
+                    return containerFailure.ToRefusalJson();
+                }
+                UnityOpenMcpBridge.TypedTools.TypedTargets.PlaceInContainer(go, rootContainer);
             }
 
             Undo.RegisterCreatedObjectUndo(go, "Create CinemachineCamera");
@@ -132,6 +144,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             sb.Append("\"camera\":{");
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
             sb.Append("\"path\":").Append(CinemachineJson.Esc(CinemachineTargets.BuildPath(go))).Append(',');
+            sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(go)).Append(',');
             sb.Append("\"priority\":").Append(priority);
             sb.Append('}');
             return CinemachineJson.Ok(sb.ToString());
@@ -188,7 +201,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             {
                 var follow = ResolveTarget(follow_instance_id, follow_path);
                 if (follow == null)
-                    return CinemachineJson.Error("target_not_found",
+                    return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? CinemachineJson.Error("target_not_found",
                         "No GameObject resolved for the Follow target.");
                 Undo.RecordObject(camera, "Set Cinemachine Follow");
                 SetObjectFieldOrProperty(camera, "Follow", follow.transform);
@@ -199,7 +212,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             {
                 var lookAt = ResolveTarget(look_at_instance_id, look_at_path);
                 if (lookAt == null)
-                    return CinemachineJson.Error("target_not_found",
+                    return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? CinemachineJson.Error("target_not_found",
                         "No GameObject resolved for the Look At target.");
                 Undo.RecordObject(camera, "Set Cinemachine LookAt");
                 SetObjectFieldOrProperty(camera, "LookAt", lookAt.transform);
@@ -475,7 +488,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
                 if (cam != null) host = cam.gameObject;
             }
             if (host == null)
-                return CinemachineJson.Error("target_not_found",
+                return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? CinemachineJson.Error("target_not_found",
                     "No Camera GameObject resolved. Pass instance_id / path / name, " +
                     "or ensure a Camera tagged MainCamera exists in the scene.");
 
@@ -545,6 +558,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
                 sb.Append('{');
                 sb.Append("\"instanceId\":").Append(InstanceId.ToJson(mb)).Append(',');
                 sb.Append("\"path\":").Append(CinemachineJson.Esc(CinemachineTargets.BuildPath(mb.gameObject))).Append(',');
+                sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(mb.gameObject)).Append(',');
                 sb.Append("\"priority\":").Append(GetPriorityValue(mb)).Append(',');
                 sb.Append("\"follow\":").Append(CinemachineJson.Esc(GetTransformPath(GetObjectFieldOrProperty(mb, "Follow") as Transform))).Append(',');
                 sb.Append("\"lookAt\":").Append(CinemachineJson.Esc(GetTransformPath(GetObjectFieldOrProperty(mb, "LookAt") as Transform))).Append(',');
@@ -563,13 +577,8 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
 
         private static GameObject ResolveTarget(long instanceId, string path)
         {
-            if (instanceId != 0)
-            {
-                var obj = CinemachineTargets.ObjectForId(instanceId);
-                if (obj is GameObject go) return go;
-            }
-            if (!string.IsNullOrEmpty(path)) return CinemachineTargets.FindByPath(path);
-            return null;
+            if (instanceId == 0 && string.IsNullOrEmpty(path)) return null;
+            return CinemachineTargets.Resolve(instanceId, path, null);
         }
 
         // Set the priority value on a CinemachineCamera. 3.x exposes Priority as
@@ -689,7 +698,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
         }
 
         private static string TargetNotFound()
-            => CinemachineJson.Error("target_not_found",
+            => UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? CinemachineJson.Error("target_not_found",
                 "No GameObject resolved. Address by instance_id > path > name.");
     }
 }

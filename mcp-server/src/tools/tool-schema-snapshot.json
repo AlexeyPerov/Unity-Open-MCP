@@ -2494,7 +2494,7 @@
     }
   },
   "unity_open_mcp_prefab_instantiate": {
-    "description": "Instantiate a prefab into the currently active scene at an optional position/rotation/scale, optionally parented under an existing scene GameObject path. Mutating: runs the full gate path. `paths_hint` should be the destination scene path (the instance is a scene side-effect) plus the prefab asset path. Returns the new instance's instanceId, name, and path so the agent can re-acquire it. Use unity_open_mcp_search_assets with t:Prefab to locate the prefab asset first.",
+    "description": "Instantiate a prefab at an optional position/rotation/scale, optionally parented under an existing GameObject path. Without parent_path the instance root goes to the container scene_path/scene_name names; else, while a prefab stage is open, under the prefab root (unless paths_hint names a loaded scene and not the prefab); else the active scene. A parent_path found in several loaded scenes resolves in the one scene_path / paths_hint names, then the active scene, else refuses with ambiguous_path. Mutating: runs the full gate path. `paths_hint` should be the destination scene path plus the prefab asset path. Returns the new instance's instanceId, name, path and container (scene or prefab stage) so the agent can re-acquire it. Use unity_open_mcp_search_assets with t:Prefab to locate the prefab asset first.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -2511,7 +2511,7 @@
           "type": "string"
         },
         "parent_path": {
-          "description": "Optional destination scene path \"Root/Parent\" — the parent must already exist. Omit to instantiate at scene root.",
+          "description": "Optional parent hierarchy path \"Root/Parent\" (in the open prefab stage: from the prefab root) — the parent must already exist. Omit to instantiate a root.",
           "type": "string"
         },
         "paths_hint": {
@@ -2544,7 +2544,7 @@
           "type": "string"
         },
         "scene_path": {
-          "description": "Optional target scene asset path (e.g. 'Assets/Scenes/Bootstrap.unity') for the instance root. The scene must already be loaded (use unity_open_mcp_scene_open Additive first). Omit to instantiate in the active scene. Ignored when parent_path is supplied (the parent's scene wins).",
+          "description": "Optional container: a loaded scene's asset path (e.g. 'Assets/Scenes/Bootstrap.unity'; load it with unity_open_mcp_scene_open Additive first) or the open prefab stage's prefab asset path. The instance root goes there, and parent_path is looked up only there.",
           "type": "string"
         },
         "asset_path": {
@@ -2637,7 +2637,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "asset_path": {
@@ -2656,6 +2656,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -2686,7 +2690,7 @@
     }
   },
   "unity_open_mcp_prefab_open": {
-    "description": "Open the prefab edit stage for a prefab asset path. Modifications inside the stage propagate to all instances. Pair with unity_open_mcp_prefab_close to exit the stage when done. Mutating: runs the full gate path; `paths_hint` is the prefab asset path.",
+    "description": "Open the prefab edit stage for a prefab asset path. Typed GameObject tools then reach the stage: address objects by path from the prefab root (\"Root/Child\"; a UI prefab's \"Canvas (Environment)/\" wrapper is accepted too) or by instance id. Returns rootPath + rootInstanceId, the container, and autoSave (when on, Unity writes stage edits to the asset on a later Editor update; otherwise they stay in the stage until prefab_save / prefab_close). Modifications inside the stage propagate to all instances. Pair with unity_open_mcp_prefab_close to exit the stage when done. Mutating: runs the full gate path; `paths_hint` is the prefab asset path.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -2751,7 +2755,7 @@
     }
   },
   "unity_open_mcp_prefab_close": {
-    "description": "Close the currently open prefab edit stage, optionally saving changes. No-op (with a note) when no prefab stage is open. Mutating: runs the full gate path; `paths_hint` is the prefab asset path being edited (best-effort — when omitted, the gate runs without a scope).",
+    "description": "Close the currently open prefab edit stage, optionally saving changes. No-op (with a note) when no prefab stage is open. `pendingChanges` says whether the stage held edits not yet written (auto-save may already have written them). Mutating: runs the full gate path; `paths_hint` is the prefab asset path being edited (best-effort — when omitted, the gate runs without a scope).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -2780,7 +2784,7 @@
     }
   },
   "unity_open_mcp_prefab_save": {
-    "description": "Save the currently open prefab edit stage back to its asset path. No-op (with a note) when no prefab stage is open. Mutating: runs the full gate path; `paths_hint` is the prefab asset path being saved (best-effort when omitted).",
+    "description": "Save the currently open prefab edit stage back to its asset path. No-op (with a note) when no prefab stage is open. `pendingChanges` says whether the stage held edits not yet written. Mutating: runs the full gate path; `paths_hint` is the prefab asset path being saved (best-effort when omitted).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -2843,7 +2847,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -2851,6 +2855,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -2899,7 +2907,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -2907,6 +2915,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -2960,7 +2972,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -2968,6 +2980,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -3001,7 +3017,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3009,6 +3025,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "type": "object"
@@ -3039,7 +3059,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3047,13 +3067,17 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "type": "object"
     }
   },
   "unity_open_mcp_gameobject_create": {
-    "description": "Create a new GameObject in the active scene (or an explicit target scene via scene_path/scene_name), optionally parented under an existing scene GameObject and pre-positioned. Pass `primitive_type` to spawn a Unity primitive (Cube/Sphere/Capsule/Cylinder/Plane/Quad) with its default renderer+collider. Mutating: runs the full gate path; `paths_hint` should be the destination scene path (the GameObject is a scene side-effect). When multiple scenes are loaded, pass scene_path/scene_name to control which scene receives the new root GameObject — otherwise it lands in the active scene. Returns the new instance's instanceId, name, path, transform, and component list so the agent can immediately chain component_add / modify / set_parent without an extra lookup.",
+    "description": "Create a new GameObject, optionally parented under an existing GameObject and pre-positioned. Pass `primitive_type` to spawn a Unity primitive (Cube/Sphere/Capsule/Cylinder/Plane/Quad) with its default renderer+collider. Without parent_path the new root goes to the container scene_path/scene_name names; else, while a prefab stage is open, under the prefab root (unless paths_hint names a loaded scene and not the prefab); else the active scene. Mutating: runs the full gate path; `paths_hint` is the destination scene path (or the prefab asset path in its stage). Returns the new instance's instanceId, name, path, container, transform, and component list so the agent can immediately chain component_add / modify / set_parent without an extra lookup.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -3075,7 +3099,7 @@
           "type": "string"
         },
         "parent_path": {
-          "description": "Optional destination scene path \"Root/Parent\" — the parent must already exist. Omit to create at scene root.",
+          "description": "Optional parent hierarchy path \"Root/Parent\" (in the open prefab stage: from the prefab root) — the parent must already exist. Omit to create a root GameObject.",
           "type": "string"
         },
         "paths_hint": {
@@ -3114,7 +3138,7 @@
           "type": "string"
         },
         "scene_path": {
-          "description": "Optional target scene asset path (e.g. 'Assets/Scenes/Bootstrap.unity') for the new root GameObject. The scene must already be loaded (use unity_open_mcp_scene_open Additive first). Omit to create in the active scene. Ignored when parent_path is supplied (the parent's scene wins).",
+          "description": "Optional container: a loaded scene's asset path (e.g. 'Assets/Scenes/Bootstrap.unity'; load it with unity_open_mcp_scene_open Additive first) or the open prefab stage's prefab asset path. The new root GameObject goes there, and parent_path is looked up only there.",
           "type": "string"
         }
       },
@@ -3165,7 +3189,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3173,6 +3197,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -3221,7 +3249,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3229,6 +3257,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -3285,7 +3317,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3293,6 +3325,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "type": "object"
@@ -3342,7 +3378,7 @@
           "type": "object"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name_target.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name_target.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -3461,6 +3497,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -3533,7 +3573,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3541,6 +3581,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -3596,7 +3640,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3604,6 +3648,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -3660,7 +3708,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3668,6 +3716,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -3770,7 +3822,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3783,6 +3835,10 @@
           "type": "string",
           "description": "Component type (full name preferred); alternative to component_instance_id.",
           "x-wire-key": "type_name"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "type": "object"
@@ -3893,7 +3949,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3906,6 +3962,10 @@
           "type": "string",
           "description": "Component type (full name preferred); alternative to component_instance_id.",
           "x-wire-key": "type_name"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -4352,7 +4412,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -4360,6 +4420,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -4889,7 +4953,7 @@
           "type": "boolean"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -4942,6 +5006,10 @@
             "type": "object"
           },
           "type": "array"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "type": "object"
@@ -6467,7 +6535,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -6475,6 +6543,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -6505,7 +6577,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -6547,6 +6619,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -6561,7 +6637,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -6603,6 +6679,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -6622,7 +6702,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -6674,6 +6754,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -6698,7 +6782,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -6745,6 +6829,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -6779,7 +6867,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -6831,6 +6919,10 @@
           "default": 0,
           "description": "Link width (0 = point-to-point).",
           "type": "number"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -6855,7 +6947,7 @@
           "type": "number"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -6917,6 +7009,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -6935,7 +7031,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -6977,6 +7073,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -7000,7 +7100,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -7027,6 +7127,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "type": "object"
@@ -7053,7 +7157,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -7095,6 +7199,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -7480,6 +7588,10 @@
           "default": "Cube",
           "description": "ShapeType primitive. Valid: Cube, Cylinder, Sphere, Plane, Prism, Cone, Stair, Door, Pipe, Arch, Sprite, Torus.",
           "type": "string"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -7494,7 +7606,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -7521,6 +7633,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "type": "object"
@@ -7600,7 +7716,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -7608,6 +7724,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -7675,7 +7795,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -7683,6 +7803,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -7754,7 +7878,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -7762,6 +7886,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -7851,7 +7979,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -7859,6 +7987,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "type": "object"
@@ -7924,7 +8056,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -7932,6 +8064,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -8219,6 +8355,10 @@
         "rotation": {
           "description": "Optional Euler rotation (degrees) as 'x,y,z'.",
           "type": "string"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -8233,7 +8373,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8300,6 +8440,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -8314,7 +8458,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8381,6 +8525,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -8396,7 +8544,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8452,6 +8600,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -8467,7 +8619,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8504,6 +8656,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "type": "object"
@@ -8515,7 +8671,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8547,6 +8703,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "type": "object"
@@ -8562,7 +8722,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8604,6 +8764,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -8684,7 +8848,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -8692,6 +8856,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -8714,7 +8882,7 @@
           "type": "integer"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8800,6 +8968,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -8818,7 +8990,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8860,6 +9032,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -8885,7 +9061,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8925,6 +9101,10 @@
         "target_path": {
           "description": "Assets/-rooted .cubemap path (required for bake_mode='custom'). The cubemap asset is created if absent.",
           "type": "string"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -8939,7 +9119,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8966,6 +9146,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "type": "object"
@@ -9094,7 +9278,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9102,6 +9286,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -9129,7 +9317,7 @@
           "type": "number"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -9211,6 +9399,10 @@
         "volume": {
           "description": "Volume 0-1.",
           "type": "number"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -9352,7 +9544,7 @@
           "type": "string"
         },
         "scene_path": {
-          "description": "Optional target scene asset path (e.g. 'Assets/Scenes/Bootstrap.unity') for the new Canvas root + EventSystem when no host is addressed. The scene must already be loaded (use unity_open_mcp_scene_open Additive first). Omit to create in the active scene.",
+          "description": "Optional container: a loaded scene's asset path (e.g. 'Assets/Scenes/Bootstrap.unity'; load it with unity_open_mcp_scene_open Additive first) or the open prefab stage's prefab asset path. The new Canvas root + EventSystem go there when no host is addressed (a prefab gets no EventSystem), and a host path is looked up only there.",
           "type": "string"
         },
         "sorting_order": {
@@ -9362,7 +9554,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9441,6 +9633,10 @@
         },
         "text": {
           "description": "Initial text (Text / TMP_Text / InputField).",
+          "type": "string"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
         }
       },
@@ -9532,7 +9728,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9540,6 +9736,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -9597,7 +9797,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9605,6 +9805,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -9692,7 +9896,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9700,6 +9904,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -9768,7 +9976,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9776,6 +9984,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -9841,7 +10053,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9849,6 +10061,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -9977,7 +10193,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9985,6 +10201,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -10063,7 +10283,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -10071,6 +10291,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -10163,7 +10387,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -10171,6 +10395,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -10199,7 +10427,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -10276,6 +10504,10 @@
         },
         "top_path": {
           "description": "Top neighbor Terrain GameObject hierarchy path. Pass an empty value or omit to clear the side. The GameObject must carry a Terrain component.",
+          "type": "string"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
         }
       },
@@ -10701,6 +10933,10 @@
         "rotation": {
           "description": "Optional Euler rotation (degrees) as 'x,y,z'.",
           "type": "string"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -10726,7 +10962,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -10778,6 +11014,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -10804,7 +11044,7 @@
           "type": "number"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -10849,6 +11089,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -10867,7 +11111,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -10908,6 +11152,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -10923,7 +11171,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -10968,6 +11216,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -10983,7 +11235,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -11024,6 +11276,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -11228,7 +11484,7 @@
           "type": "boolean"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -11269,6 +11525,10 @@
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -11365,6 +11625,10 @@
         "tilemap_name": {
           "description": "Optional child Tilemap GameObject name.",
           "type": "string"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -11379,7 +11643,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -11439,6 +11703,10 @@
           "default": 0,
           "description": "Cell z coordinate.",
           "type": "integer"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [
@@ -11454,7 +11722,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -11520,6 +11788,10 @@
           "default": 0,
           "description": "Cell z plane.",
           "type": "integer"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
         }
       },
       "required": [

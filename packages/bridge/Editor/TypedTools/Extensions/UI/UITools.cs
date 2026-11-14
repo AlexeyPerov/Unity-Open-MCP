@@ -94,28 +94,38 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
                     "ui_canvas_add is mutating; pass a non-empty paths_hint scoped " +
                     "to the host's (or new root's) scene path.");
 
-            // feedback-01-08-glm §6 — optional explicit target scene for the new
-            // Canvas root + EventSystem. Without this, both landed in whatever
-            // the active scene was at call time, and EnsureEventSystem's global
-            // dedup could place a stray EventSystem in the wrong scene.
-            var targetScene = ResolveCanvasTargetScene(scene_path, scene_name, out var sceneError);
-            if (sceneError != null)
-                return UIJson.Error("scene_not_found", sceneError);
+            // feedback-01-08-glm §6 — optional explicit container for the new
+            // Canvas root + EventSystem: scene_path / scene_name name a loaded
+            // scene, or the open prefab stage by its prefab asset path. Without
+            // it the new root goes where every typed creator puts one (the open
+            // prefab stage under its root, else the active scene), and
+            // EnsureEventSystem's dedup is scoped to the canvas's scene.
+            var request = new UnityOpenMcpBridge.TypedTools.TargetRequest(scene_path, scene_name, paths_hint);
+            UnityOpenMcpBridge.TypedTools.TargetContainers.Named(request, out var namedFailure);
+            if (namedFailure != null) return namedFailure.ToRefusalJson();
 
-            // Resolve the host. When no host is addressed, create a new scene
-            // root GameObject to hold the canvas (agents pass new_root_name to
-            // name it; otherwise it defaults to "Canvas").
-            GameObject host = UITargets.Resolve(instance_id, path, name);
+            // Resolve the host. When no host is addressed, create a new root
+            // GameObject to hold the canvas (agents pass new_root_name to name
+            // it; otherwise it defaults to "Canvas"). An address that matches in
+            // several containers, or a refused instance id, is answered as such.
+            bool addressed = instance_id != 0 || !string.IsNullOrEmpty(path) || !string.IsNullOrEmpty(name);
+            GameObject host = addressed ? UITargets.Resolve(instance_id, path, name) : null;
+            if (host == null && addressed)
+            {
+                var refusal = UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson();
+                if (refusal != null) return refusal;
+            }
             bool createdRoot = false;
             if (host == null)
             {
+                var container = UnityOpenMcpBridge.TypedTools.TypedTargets.CreationContainer(request, out var containerFailure);
+                if (containerFailure != null) return containerFailure.ToRefusalJson();
                 host = new GameObject(string.IsNullOrEmpty(new_root_name) ? "Canvas" : new_root_name);
+                // Place before registering the undo: a creation is recorded in
+                // (and dirties) the scene the object is in at that moment.
+                UnityOpenMcpBridge.TypedTools.TypedTargets.PlaceInContainer(host, container);
                 Undo.RegisterCreatedObjectUndo(host, "Create UI Canvas root");
                 createdRoot = true;
-                // Route the new root into the requested scene (no-op when the
-                // selector was omitted → active scene, the historic default).
-                if (targetScene.IsValid() && targetScene.isLoaded && host.scene != targetScene)
-                    UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(host, targetScene);
             }
 
             Undo.RecordObject(host, "Add Canvas");
@@ -155,7 +165,12 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             // feedback-01-08-glm §6 — scope the dedup to the canvas's scene so a
             // stray EventSystem is not created in (or stolen from) a different
             // loaded scene, and place the new EventSystem in that scene.
-            bool addedEventSystem = EnsureEventSystem(host.scene);
+            // A prefab gets no EventSystem: in its stage one would be a second
+            // root outside the prefab contents, never saved with it.
+            var hostContainer = UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerOf(host);
+            bool inPrefabStage = hostContainer != null &&
+                hostContainer.Kind == UnityOpenMcpBridge.TypedTools.TargetContainerKind.PrefabStage;
+            bool addedEventSystem = !inPrefabStage && EnsureEventSystem(host.scene);
 
             EditorUtility.SetDirty(host);
 
@@ -166,6 +181,7 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson(canvas)).Append(',');
             sb.Append("\"name\":").Append(UIJson.Esc(host.name)).Append(',');
             sb.Append("\"path\":").Append(UIJson.Esc(UITargets.BuildPath(host))).Append(',');
+            sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(host)).Append(',');
             sb.Append("\"renderMode\":").Append(UIJson.Esc(canvas.renderMode.ToString())).Append(',');
             sb.Append("\"sortingOrder\":").Append(canvas.sortingOrder).Append(',');
             sb.Append("\"addedCanvasScaler\":").Append(addedScaler ? "true" : "false").Append(',');
@@ -227,7 +243,7 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
 
             var parent = UITargets.Resolve(parent_instance_id, parent_path, parent_name);
             if (parent == null)
-                return UIJson.Error("parent_not_found",
+                return UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? UIJson.Error("parent_not_found",
                     "Parent GameObject not resolved. Address by parent_instance_id > " +
                     "parent_path > parent_name.");
 
@@ -253,8 +269,10 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             // element_type when element_name is omitted.
             var goName = string.IsNullOrEmpty(element_name) ? element_type : element_name;
             var go = new GameObject(goName, typeof(RectTransform));
-            Undo.RegisterCreatedObjectUndo(go, "Create UI element");
+            // Parent before registering the undo: a creation is recorded in
+            // (and dirties) the scene the object is in at that moment.
             go.transform.SetParent(parent.transform, worldPositionStays: false);
+            Undo.RegisterCreatedObjectUndo(go, "Create UI element");
 
             var addedComponents = new StringBuilder(160);
             addedComponents.Append('[');
@@ -280,6 +298,7 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             sb.Append("\"type\":").Append(UIJson.Esc(element_type)).Append(',');
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
             sb.Append("\"path\":").Append(UIJson.Esc(UITargets.BuildPath(go))).Append(',');
+            sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(go)).Append(',');
             sb.Append("\"parentPath\":").Append(UIJson.Esc(UITargets.BuildPath(parent))).Append(',');
             sb.Append("\"addedComponents\":").Append(addedComponents.ToString());
             sb.Append('}');
@@ -418,7 +437,8 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             if (gridGroup != null) instanceId =InstanceId.Of(gridGroup);
             else if (hvGroup != null) instanceId =InstanceId.Of(hvGroup);
             sb.Append("\"instanceId\":").Append(instanceId).Append(',');
-            sb.Append("\"path\":").Append(UIJson.Esc(UITargets.BuildPath(host)));
+            sb.Append("\"path\":").Append(UIJson.Esc(UITargets.BuildPath(host))).Append(',');
+            sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(host));
             sb.Append('}');
             return UIJson.Ok(sb.ToString());
         }
@@ -520,7 +540,9 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             EditorUtility.SetDirty(comp);
             return UIJson.Ok(
                 "\"applied\":" + applied.ToString() + ',' +
-                "\"errors\":" + errors.ToString());
+                "\"errors\":" + errors.ToString() + ',' +
+                "\"path\":" + UIJson.Esc(UITargets.BuildPath(host)) + ',' +
+                "\"container\":" + UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(host));
         }
 
         // =====================================================================
@@ -759,13 +781,13 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             }
 
             var esGo = new GameObject("EventSystem");
-            Undo.RegisterCreatedObjectUndo(esGo, "Create EventSystem");
-            Undo.AddComponent<EventSystem>(esGo);
-
             // Route the new EventSystem into the target scene (no-op when the
-            // target is invalid/active — the historic active-scene placement).
+            // target is invalid/active — the historic active-scene placement)
+            // before registering the undo, which dirties the scene it is in.
             if (scene.IsValid() && scene.isLoaded && esGo.scene != scene)
                 UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(esGo, scene);
+            Undo.RegisterCreatedObjectUndo(esGo, "Create EventSystem");
+            Undo.AddComponent<EventSystem>(esGo);
 
             // Add StandaloneInputModule (the legacy input module). When the
             // Input System package is installed, the agent can swap this for
@@ -778,36 +800,6 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
         // =====================================================================
         // Helpers — parsing
         // =====================================================================
-
-        // feedback-01-08-glm §6 — resolve the optional scene_path/scene_name
-        // selector to a loaded Scene for the new Canvas root + EventSystem.
-        // Delegates to the shared SceneTargeting helper so canvas creation and
-        // gameobject_create share one scene-resolution path. Returns a default
-        // (invalid) Scene — meaning active-scene default — when both are null.
-        private static UnityEngine.SceneManagement.Scene ResolveCanvasTargetScene(
-            string scenePath, string sceneName, out string error)
-        {
-            if (string.IsNullOrWhiteSpace(scenePath) && string.IsNullOrWhiteSpace(sceneName))
-            {
-                error = null;
-                return new UnityEngine.SceneManagement.Scene();
-            }
-            if (!string.IsNullOrWhiteSpace(scenePath))
-            {
-                var scene = UnityOpenMcpBridge.TypedTools.SceneTargeting.ResolveByPath(scenePath);
-                if (scene.IsValid() && scene.isLoaded) { error = null; return scene; }
-                error = $"Target scene not found / not loaded for scene_path '{scenePath}'. " +
-                    "Use unity_open_mcp_scene_open (OpenSceneMode.Additive) to load it first, or omit " +
-                    "scene_path/scene_name to create in the active scene.";
-                return new UnityEngine.SceneManagement.Scene();
-            }
-            var byName = UnityOpenMcpBridge.TypedTools.SceneTargeting.ResolveByName(sceneName);
-            if (byName.IsValid() && byName.isLoaded) { error = null; return byName; }
-            error = $"Target scene not found / not loaded for scene_name '{sceneName}'. " +
-                "Use unity_open_mcp_scene_open (OpenSceneMode.Additive) to load it first, or omit " +
-                "scene_path/scene_name to create in the active scene.";
-            return new UnityEngine.SceneManagement.Scene();
-        }
 
         private static bool ParseRenderMode(string s, out RenderMode mode)
         {
@@ -1098,7 +1090,7 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
         // =====================================================================
 
         private static string TargetNotFound()
-            => UIJson.Error("target_not_found",
+            => UnityOpenMcpBridge.TypedTools.TypedTargets.RefusalJson() ?? UIJson.Error("target_not_found",
                 "No GameObject resolved. Address by instance_id > path > name.");
     }
 }

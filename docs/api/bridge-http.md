@@ -214,7 +214,19 @@ batch validates committed mutations and reports the actual validation outcome
 independently of `mutation.success`. Existing delta and next-step fields remain.
 `effectiveReadOnly` is additive response metadata; audit records also include it
 and `skippedReason`. `request_rejected`, `gate_off`, `no_scope`, `read_only`, and
-`play_mode` identify other skip causes.
+`play_mode` identify other skip causes. `prefab_stage_edit` means every target of
+the call was in the open prefab stage: the edit is in memory (or written by
+Prefab Mode auto-save after the call), while the checkpoint and the validate scan
+read saved files, so no delta is claimed; `agentNextSteps` says how the edit gets
+saved. A call that also touched a scene validates as usual and carries the same
+advice.
+
+`dirtyScenes` lists scene paths with unsaved changes. On a `scene_dirty` refusal
+they are the scenes that blocked the call. On a call that ran they are the
+scenes it left dirty — dirty after the call and either clean before it or
+holding a GameObject the call resolved or created — with the open prefab stage
+listed by its prefab asset path and an untitled scene as `(unsaved scene)`;
+`null` when there are none (and for read-only calls).
 
 ## Published argument schemas
 
