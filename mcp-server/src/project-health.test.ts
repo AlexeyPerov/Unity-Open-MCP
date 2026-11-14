@@ -142,6 +142,10 @@ test("detectMissingCachedPackages flags a registry package with no PackageCache 
     const fromLog = summarizeProjectHealth("One or more packages could not be added to the local file system:\n  com.unity.burst: TAR_ENTRY_ERROR: ENOSPC: no space left on device\n", root);
     assert.equal(fromLog.issues.filter((i) => i.kind === "package_install_failed").length, 1);
     assert.match(fromLog.issues[0].reason ?? "", /ENOSPC/);
+    // A cache holding no package folder (only a stray file) is "never resolved", not "all failed".
+    rmSync(join(root, "Library", "PackageCache", "com.unity.collections@88d5bf65ce66"), { recursive: true });
+    writeFileSync(join(root, "Library", "PackageCache", ".DS_Store"), "");
+    assert.deepEqual(detectMissingCachedPackages(root), []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

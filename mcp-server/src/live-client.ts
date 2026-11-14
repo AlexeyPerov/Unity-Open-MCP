@@ -664,7 +664,7 @@ export class LiveClient implements Router {
       throw new Error("Test start did not confirm the owned run id.");
     }
     onStarted();
-    return this.pollTestResults(String(args.run_id), args);
+    return this.pollTestResults(String(args.run_id), args, body.startedMarker === true);
   }
 
   private async handleRunTests(
@@ -694,7 +694,7 @@ export class LiveClient implements Router {
       startResult.content[0]?.type === "text"
         ? startResult.content[0].text
         : "";
-    let body: { status?: string; runId?: string; mode?: string };
+    let body: { status?: string; runId?: string; mode?: string; startedMarker?: boolean };
     try {
       body = JSON.parse(text);
     } catch {
@@ -705,7 +705,7 @@ export class LiveClient implements Router {
       return startResult;
     }
 
-    return this.pollTestResults(body.runId, args);
+    return this.pollTestResults(body.runId, args, body.startedMarker === true);
   }
 
   /** How long the run-never-began signature must hold before the poll gives up. */
@@ -718,7 +718,10 @@ export class LiveClient implements Router {
    * main_thread_wedged signature (bridge_status uses the same pair): a stale
    * instance heartbeat while the listener still answers /ping. A stale
    * heartbeat alone is normal once tests execute (they hold the main thread),
-   * which is why the started marker gates this.
+   * which is why the started marker gates this — and why the poll only asks
+   * when the bridge's start answer said it writes that marker
+   * (`startedMarker: true`). A bridge that never writes one would otherwise
+   * have every long-running test read as a start that never happened.
    */
   private async testRunBlockedBeforeStart(startedPath: string): Promise<boolean> {
     if (!this.projectPath || existsSync(startedPath)) return false;
@@ -756,6 +759,7 @@ export class LiveClient implements Router {
   private async pollTestResults(
     runId: string,
     args: Record<string, unknown>,
+    bridgeWritesStartedMarker = false,
   ): Promise<CallToolResult> {
     const timeoutMs =
       typeof args.timeout_ms === "number" ? args.timeout_ms : 60_000;
@@ -778,11 +782,11 @@ export class LiveClient implements Router {
     // poll waited out the whole timeout_ms while every other tool already
     // answered main_thread_blocked. Signature, sustained for
     // testStartBlockedAfterMs: no test-started marker, a stale heartbeat (main
-    // thread not ticking) and a listener that still answers /ping.
+    // thread not ticking) and a listener that still answers /ping. Only asked
+    // of a bridge that writes the marker (bridgeWritesStartedMarker).
     const startedPath = join(statusDir(), `test-started-${runId}.json`);
     let blockedSince: number | null = null;
     let lastBlockedCheck = 0;
-
 
     // M9 (round-2 review) — read the results file atomically. The bridge writes
     // it with a plain `File.WriteAllText` (TestRunnerService.cs:104), which is
@@ -863,7 +867,7 @@ export class LiveClient implements Router {
 
     let intervalMs = minIntervalMs;
     while (Date.now() < deadline) {
-      if (Date.now() - lastBlockedCheck >= this.testStartBlockedCheckMs) {
+      if (bridgeWritesStartedMarker && Date.now() - lastBlockedCheck >= this.testStartBlockedCheckMs) {
         lastBlockedCheck = Date.now();
         if (await this.testRunBlockedBeforeStart(startedPath)) {
           blockedSince ??= lastBlockedCheck;

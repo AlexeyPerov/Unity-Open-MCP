@@ -104,6 +104,11 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("\"assembliesChecked\":0", upToDate);
             StringAssert.Contains("\"assembliesSource\":\"up_to_date\"", upToDate);
 
+            // A timeout that observed nothing is not evidence of up-to-date assemblies.
+            var timedOut = CompileCheckState.BuildResultJson(pending, true, new StartupCompileInfo { ProjectAssemblies = 95 });
+            StringAssert.Contains("\"status\":\"compile_timeout\"", timedOut);
+            StringAssert.DoesNotContain("up_to_date", timedOut);
+
             var observed = CompileCheckState.BuildResultJson(new PendingState { assembliesSeen = new List<string> { "A.dll" } }, false);
             StringAssert.Contains("\"assembliesSource\":\"compilation\"", observed);
         }

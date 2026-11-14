@@ -32,7 +32,8 @@ export const IMAGE_SAVE_TO_PROP = {
   type: "string",
   minLength: 1,
   description:
-    "Also copy the final PNG here: a .png path, or a directory (trailing slash or existing) that keeps the file name. " +
-    "Relative paths resolve against the project root; Assets/ and Packages/ are refused (the image would be imported). " +
+    "Also copy the final PNG here: a .png path, or a directory (trailing slash, existing, or no extension) that keeps " +
+    "the file name. Relative paths resolve against the project root, ~/ against the home directory; a target inside " +
+    "the project's Assets/ or Packages/ is refused however the path is written (the image would be imported). " +
     "The response's savedTo is the full path.",
 } as const;

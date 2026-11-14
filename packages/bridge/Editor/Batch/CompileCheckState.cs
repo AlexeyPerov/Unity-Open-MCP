@@ -251,8 +251,11 @@ namespace UnityOpenMcpBridge.Batch
                 : (pending.errors.Count > 0 ? "compile_failed" : "compile_passed");
 
             int observed = pending.assembliesSeen?.Count ?? 0;
+            // A timed-out check that saw nothing proves nothing about the
+            // assemblies, so it never claims up_to_date.
             string source = observed > 0 || startup == null ? "compilation"
-                : startup.RebuiltThisRun > 0 ? "startup_compile" : "up_to_date";
+                : startup.RebuiltThisRun > 0 ? "startup_compile"
+                : timedOut ? "compilation" : "up_to_date";
             int checkedCount = observed > 0 || startup == null ? observed : startup.RebuiltThisRun;
 
             var sb = new StringBuilder(512);

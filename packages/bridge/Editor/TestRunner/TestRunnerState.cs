@@ -219,10 +219,9 @@ namespace UnityOpenMcpBridge.TestRunner
             {
                 var path = PendingFilePath(runId);
                 if (File.Exists(path)) File.Delete(path);
-                var started = TestRunnerService.StartedFilePath(runId);
-                if (File.Exists(started)) File.Delete(started);
             }
             catch { }
+            TestRunnerService.DeleteStartedFile(runId);
         }
 
         // RunStarted reached for `runId` (see TestRunnerService.StartedFilePath).
@@ -391,6 +390,7 @@ namespace UnityOpenMcpBridge.TestRunner
                     if (IsPendingStale(createdAtMs, nowMs))
                     {
                         try { File.Delete(file); } catch { }
+                        TestRunnerService.DeleteStartedFile(runId);
                         continue;
                     }
 

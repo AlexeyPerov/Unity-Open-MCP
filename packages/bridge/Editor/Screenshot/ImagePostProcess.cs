@@ -64,18 +64,54 @@ namespace UnityOpenMcpBridge.Screenshot
             return null;
         }
 
-        // An image written under Assets/ or Packages/ is imported as an asset —
-        // a project mutation from a read-only tool — so those roots are refused.
-        internal static string CheckSaveTo(string saveTo)
+        internal static string ProjectRoot =>
+            Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
+
+        // An image written under the project's Assets/ or Packages/ is imported
+        // as an asset — a project mutation from a read-only tool — so those
+        // roots are refused however the path spells them (relative, "./", "..",
+        // absolute): the check runs on the resolved target, not on the text.
+        internal static string CheckSaveTo(string saveTo, string projectRoot = null)
         {
-            var normalized = saveTo.Trim().Replace('\\', '/');
-            if (normalized.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase) || normalized.Equals("Assets", StringComparison.OrdinalIgnoreCase)
-                || normalized.StartsWith("Packages/", StringComparison.OrdinalIgnoreCase) || normalized.Equals("Packages", StringComparison.OrdinalIgnoreCase))
-                return "save_to must be outside Assets/ and Packages/ (an image there would be imported as an asset).";
-            var ext = Path.GetExtension(normalized);
-            if (!normalized.EndsWith("/") && !string.IsNullOrEmpty(ext) && !ext.Equals(".png", StringComparison.OrdinalIgnoreCase))
+            projectRoot = projectRoot ?? ProjectRoot;
+            string target;
+            try { target = ResolveTarget(saveTo, projectRoot, "capture.png"); }
+            catch (Exception e) when (e is ArgumentException || e is NotSupportedException || e is PathTooLongException)
+            {
+                return "save_to is not a usable path: " + e.Message;
+            }
+            if (!".png".Equals(Path.GetExtension(target), StringComparison.OrdinalIgnoreCase))
                 return "save_to must be a .png file path or a directory.";
+            if (IsUnder(target, Path.Combine(projectRoot, "Assets")) || IsUnder(target, Path.Combine(projectRoot, "Packages")))
+                return "save_to must be outside Assets/ and Packages/ (an image there would be imported as an asset).";
             return null;
+        }
+
+        // The full path the file lands at. save_to is a directory (the file
+        // keeps `fileName`) when it ends with a slash, exists as a directory or
+        // has no extension; otherwise it is the file itself. Relative paths
+        // resolve against the project root, "~/" against the user's home.
+        internal static string ResolveTarget(string saveTo, string projectRoot, string fileName)
+        {
+            var raw = saveTo.Trim();
+            var target = raw.Replace('\\', '/');
+            if (target == "~" || target.StartsWith("~/", StringComparison.Ordinal))
+                target = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), target.Substring(1).TrimStart('/'));
+            else if (!Path.IsPathRooted(target))
+                target = Path.Combine(projectRoot, target);
+            bool directory = raw.EndsWith("/") || raw.EndsWith("\\") || Directory.Exists(target)
+                || string.IsNullOrEmpty(Path.GetExtension(target));
+            if (directory) target = Path.Combine(target, fileName);
+            return Path.GetFullPath(target);
+        }
+
+        // Case-insensitive: the default macOS and Windows volumes are, and
+        // refusing a differently-cased sibling elsewhere costs nothing.
+        private static bool IsUnder(string fullPath, string root)
+        {
+            var prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            return fullPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>Crop / downscale <paramref name="png"/>; returns it unchanged when no pixel option is set.</summary>
@@ -167,17 +203,13 @@ namespace UnityOpenMcpBridge.Screenshot
         }
 
         /// <summary>
-        /// Copy <paramref name="sourceFile"/> to <see cref="SaveTo"/> (a .png path, or a
-        /// directory — trailing slash or existing — that keeps the file name);
-        /// relative paths resolve against the project root. Returns the full path.
+        /// Copy <paramref name="sourceFile"/> to <see cref="SaveTo"/> (see
+        /// <see cref="ResolveTarget"/>: a .png path, or a directory that keeps the
+        /// file name). Returns the full path.
         /// </summary>
         internal string Save(string sourceFile, string projectRoot)
         {
-            var target = SaveTo.Replace('\\', '/');
-            if (!Path.IsPathRooted(target)) target = Path.Combine(projectRoot, target);
-            bool directory = SaveTo.EndsWith("/") || SaveTo.EndsWith("\\") || Directory.Exists(target);
-            if (directory) target = Path.Combine(target, Path.GetFileName(sourceFile));
-            target = Path.GetFullPath(target);
+            var target = ResolveTarget(SaveTo, projectRoot, Path.GetFileName(sourceFile));
             Directory.CreateDirectory(Path.GetDirectoryName(target));
             File.Copy(sourceFile, target, true);
             return target;

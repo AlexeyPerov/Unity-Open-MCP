@@ -1147,7 +1147,7 @@
           "type": "array"
         },
         "save_to": {
-          "description": "Also copy the final PNG here: a .png path, or a directory (trailing slash or existing) that keeps the file name. Relative paths resolve against the project root; Assets/ and Packages/ are refused (the image would be imported). The response's savedTo is the full path.",
+          "description": "Also copy the final PNG here: a .png path, or a directory (trailing slash, existing, or no extension) that keeps the file name. Relative paths resolve against the project root, ~/ against the home directory; a target inside the project's Assets/ or Packages/ is refused however the path is written (the image would be imported). The response's savedTo is the full path.",
           "minLength": 1,
           "type": "string"
         },

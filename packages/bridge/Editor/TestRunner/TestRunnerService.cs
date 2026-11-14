@@ -219,6 +219,21 @@ namespace UnityOpenMcpBridge.TestRunner
                 if (File.Exists(path)) File.Delete(path);
             }
             catch { }
+            DeleteStartedFile(runId);
+        }
+
+        // The started marker goes with its run: a finished or aborted run must
+        // not leave one behind, and a new run must not inherit one from an
+        // earlier run with the same (caller-supplied) run_id — the results poll
+        // would read "already started" and never report a blocked start.
+        internal static void DeleteStartedFile(string runId)
+        {
+            try
+            {
+                var started = StartedFilePath(runId);
+                if (File.Exists(started)) File.Delete(started);
+            }
+            catch { }
         }
 
         // run_tests refusal when a loaded scene is dirty: same code, dirty list
@@ -255,7 +270,12 @@ namespace UnityOpenMcpBridge.TestRunner
             sb.Append('{');
             sb.Append("\"status\":\"started\",");
             sb.Append("\"runId\":").Append(EscapeString(runId)).Append(',');
-            sb.Append("\"mode\":").Append(EscapeString(mode));
+            sb.Append("\"mode\":").Append(EscapeString(mode)).Append(',');
+            // This bridge writes test-started-<runId>.json on RunStarted. The
+            // results poll only treats a missing marker as "not started yet"
+            // when the bridge says it writes one; an older bridge never does,
+            // and its long-running tests must not read as a blocked start.
+            sb.Append("\"startedMarker\":true");
             sb.Append('}');
             return sb.ToString();
         }

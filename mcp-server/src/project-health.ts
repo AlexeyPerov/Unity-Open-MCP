@@ -321,7 +321,8 @@ const CACHED_PACKAGE_SOURCES = new Set(["registry", "git"]);
  * Cross-check Packages/packages-lock.json against Library/PackageCache: a
  * registry or git package with no `Library/PackageCache/<name>@*` folder was
  * never installed (a failed unpack whose log lines rotated away, a cache
- * cleared by hand). Skipped when the cache folder does not exist or is empty
+ * cleared by hand). Skipped when the cache folder does not exist or holds no
+ * package folder
  * (the project was never opened, or the Library was deleted), and fails open
  * to `[]` on any read or parse error.
  */
@@ -331,7 +332,9 @@ export function detectMissingCachedPackages(projectPath: string | undefined | nu
     const cacheDir = join(projectPath, "Library", "PackageCache");
     const lockPath = join(projectPath, "Packages", "packages-lock.json");
     if (!existsSync(cacheDir) || !existsSync(lockPath)) return [];
-    const cached = readdirSync(cacheDir);
+    // Package folders are `<name>@<version or hash>`; anything else (.DS_Store,
+    // a stray file) says nothing about what is installed.
+    const cached = readdirSync(cacheDir).filter((entry) => entry.includes("@"));
     if (cached.length === 0) return [];
     const cachedNames = new Set(cached.map((entry) => entry.split("@")[0]));
     const lock = JSON.parse(readFileSync(lockPath, "utf-8")) as { dependencies?: Record<string, { source?: unknown }> };
@@ -369,7 +372,9 @@ export function mergePackageCacheIssues(issues: HealthIssue[], cacheIssues: Heal
 /**
  * Build the full ProjectHealth summary from a log tail. Combines the CSxxxx
  * compiler errors with the package/assembly health issues and produces a
- * single aggregate verdict + headline. Pure function.
+ * single aggregate verdict + headline. Pure over the log; with `projectPath`
+ * it also reads Packages/packages-lock.json and lists Library/PackageCache
+ * (detectMissingCachedPackages).
  */
 export function summarizeProjectHealth(log: string, projectPath?: string | null): ProjectHealth {
   const compilerErrors = extractStructuredCompilerErrors(log);
@@ -386,7 +391,7 @@ export function summarizeProjectHealth(log: string, projectPath?: string | null)
       (diskFull ? " — the disk is full" : "") +
       ". Fix the install first" +
       (compilerErrors.length > 0
-        ? `; the ${compilerErrors.length} compiler error(s) in packages that depend on them are a consequence.`
+        ? `; of the ${compilerErrors.length} compiler error(s), those in packages that depend on them are a consequence.`
         : ".");
   } else if (unhealthy) {
     if (compilerErrors.length > 0 && issues.length > 0) {

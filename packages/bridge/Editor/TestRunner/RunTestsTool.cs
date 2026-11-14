@@ -89,6 +89,7 @@ namespace UnityOpenMcpBridge.TestRunner
                 if (File.Exists(f)) File.Delete(f);
             }
             catch { }
+            TestRunnerService.DeleteStartedFile(run_id);
 
             // MarkPending writes the on-disk test-pending-<runId>.json signal for
             // ALL modes (not just PlayMode). For PlayMode it survives the domain

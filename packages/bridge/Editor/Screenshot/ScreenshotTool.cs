@@ -138,8 +138,7 @@ namespace UnityOpenMcpBridge.Screenshot
             if (post.ChangesPixels)
                 System.IO.File.WriteAllBytes(filePath, post.Apply(System.IO.File.ReadAllBytes(filePath)));
             if (string.IsNullOrEmpty(post.SaveTo)) return null;
-            var projectRoot = System.IO.Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
-            return post.Save(filePath, projectRoot);
+            return post.Save(filePath, ImagePostProcess.ProjectRoot);
         }
 
         private static string BuildSuccessJson(string view, int width, int height, string filePath, ImagePostProcess post = null)

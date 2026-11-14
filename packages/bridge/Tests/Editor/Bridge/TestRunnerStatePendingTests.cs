@@ -66,6 +66,19 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(File.Exists(TestRunnerService.PendingFilePath(runId)));
         }
 
+        // An aborted run takes its started marker with it, and the start answer
+        // tells the poll that this bridge writes one at all.
+        [Test]
+        public void AbortedRun_RemovesItsStartedMarker_AndStartAdvertisesIt()
+        {
+            var runId = RunId("started-aborted");
+            TestRunnerState.MarkPending(runId, null, null, "X", null, playMode: false);
+            TestRunnerState.MarkStarted(runId);
+            TestRunnerService.ClearPendingFile(runId);
+            Assert.IsFalse(File.Exists(TestRunnerService.StartedFilePath(runId)));
+            StringAssert.Contains("\"startedMarker\":true", TestRunnerService.BuildStartedJson(runId, "EditMode"));
+        }
+
         [Test]
         public void SceneDirtyRefusal_CarriesCodeDirtyScenesAndSaveStep()
         {

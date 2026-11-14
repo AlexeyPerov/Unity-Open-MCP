@@ -89,6 +89,39 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(50, h);
         }
 
+        // The refusal is about where the file lands, not how the path is spelled:
+        // an absolute or dot-segment path into the project's asset roots would
+        // be imported exactly like "Assets/…".
+        [Test]
+        public void CheckSaveTo_RefusesTheProjectAssetRootsHoweverSpelled()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "ipp-project");
+            var refused = new[]
+            {
+                "Assets/a.png", "./Assets/a.png", "Temp/../Assets/Shots/", "assets/a.png", "Assets", "Packages/pkg/",
+                Path.Combine(root, "Assets", "Shots", "a.png"), Path.Combine(root, "Packages") + "/",
+            };
+            foreach (var path in refused)
+                StringAssert.Contains("outside Assets/", ImagePostProcess.CheckSaveTo(path, root), path);
+
+            var allowed = new[] { "Temp/a.png", "AssetsBackup/a.png", "../shots/", "shots", "~/ipp-shots/", Path.Combine(Path.GetTempPath(), "ipp-out", "a.png") };
+            foreach (var path in allowed)
+                Assert.IsNull(ImagePostProcess.CheckSaveTo(path, root), path);
+        }
+
+        [Test]
+        public void ResolveTarget_ReadsAnExtensionlessPathAsADirectory()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "ipp-project");
+            Assert.AreEqual(Path.GetFullPath(Path.Combine(root, "out", "shots", "shot.png")),
+                ImagePostProcess.ResolveTarget("out/shots", root, "shot.png"));
+            Assert.AreEqual(Path.GetFullPath(Path.Combine(root, "out", "named.png")),
+                ImagePostProcess.ResolveTarget("out/named.png", root, "shot.png"));
+            var home = System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile);
+            Assert.AreEqual(Path.GetFullPath(Path.Combine(home, "ipp-shots", "shot.png")),
+                ImagePostProcess.ResolveTarget("~/ipp-shots/", root, "shot.png"));
+        }
+
         [Test]
         public void Save_CopiesToAFileOrIntoADirectory()
         {

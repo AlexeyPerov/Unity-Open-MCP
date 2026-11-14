@@ -3059,7 +3059,7 @@ function idlePingHandler(req: IncomingMessage, res: ServerResponse): void {
   res.end(req.url?.startsWith("/ping") ? JSON.stringify({ connected: true, compiling: false }) : "{}");
 }
 
-type PollPrivate = { pollTestResults(runId: string, args: Record<string, unknown>): Promise<CallToolResult> };
+type PollPrivate = { pollTestResults(runId: string, args: Record<string, unknown>, bridgeWritesStartedMarker?: boolean): Promise<CallToolResult> };
 
 test("LiveClient: test poll fails fast with main_thread_blocked when the run never starts", async () => {
   const s = makeSandbox();
@@ -3071,13 +3071,36 @@ test("LiveClient: test poll fails fast with main_thread_blocked when the run nev
     client.testStartBlockedAfterMs = 200;
     client.testStartBlockedCheckMs = 50;
     const startedAt = Date.now();
-    const result = await (client as unknown as PollPrivate).pollTestResults("run-blocked", { timeout_ms: 20_000 });
+    const result = await (client as unknown as PollPrivate).pollTestResults("run-blocked", { timeout_ms: 20_000 }, true);
     assert.equal(result.isError, true);
     const body = JSON.parse((result.content[0] as { text: string }).text);
     assert.equal(body.error.code, "main_thread_blocked");
     assert.match(body.error.message, /never started.*Scene\(s\) Have Been Modified/);
     assert.equal(body.runId, "run-blocked");
     assert.ok(Date.now() - startedAt < 10_000, "must not wait out timeout_ms");
+  } finally {
+    await stub.close();
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient: a bridge that writes no started marker is never reported as a blocked start", async () => {
+  const s = makeSandbox();
+  const stub = await startBridgeStub(idlePingHandler);
+  try {
+    // Same wedge signature as above, but the start answer carried no
+    // startedMarker (an older bridge): its tests holding the main thread look
+    // identical, so the poll must wait for the results instead of failing.
+    plantLock(s, BLOCKED_RUN_PROJECT, process.pid, 60_000, "idle", stub.port);
+    const status = join(s.dir, ".unity-open-mcp");
+    const client = new LiveClient(stub.port, new PingCache(), "deadbeef", BLOCKED_RUN_PROJECT);
+    client.testStartBlockedAfterMs = 100;
+    client.testStartBlockedCheckMs = 20;
+    setTimeout(() => writeFileSync(join(status, "test-results-run-old-bridge.json"),
+      JSON.stringify({ status: "completed", runId: "run-old-bridge", summary: { total: 1, passed: 1, failed: 0 } })), 600);
+    const result = await (client as unknown as PollPrivate).pollTestResults("run-old-bridge", { timeout_ms: 10_000 });
+    assert.equal(result.isError, false);
+    assert.equal(JSON.parse((result.content[0] as { text: string }).text).status, "completed");
   } finally {
     await stub.close();
     disposeSandbox(s);
@@ -3096,7 +3119,7 @@ test("LiveClient: a started run (tests holding the main thread) is not mistaken 
     client.testStartBlockedCheckMs = 20;
     setTimeout(() => writeFileSync(join(status, "test-results-run-busy.json"),
       JSON.stringify({ status: "completed", runId: "run-busy", summary: { total: 1, passed: 1, failed: 0 } })), 600);
-    const result = await (client as unknown as PollPrivate).pollTestResults("run-busy", { timeout_ms: 10_000 });
+    const result = await (client as unknown as PollPrivate).pollTestResults("run-busy", { timeout_ms: 10_000 }, true);
     assert.equal(result.isError, false);
     assert.equal(JSON.parse((result.content[0] as { text: string }).text).status, "completed");
     assert.equal(existsSync(join(status, "test-started-run-busy.json")), false, "the poll clears the started marker");

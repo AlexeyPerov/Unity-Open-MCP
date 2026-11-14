@@ -303,7 +303,7 @@ namespace UnityOpenMcpBridge
             { "unity_senses_pull_events", 374 },
             { "unity_senses_read_console", 755 },
             { "unity_senses_run_tests", 1005 },
-            { "unity_senses_screenshot", 1155 },
+            { "unity_senses_screenshot", 1181 },
             { "unity_senses_screenshot_camera", 357 },
             { "unity_senses_screenshot_window", 454 },
             { "unity_senses_spatial_query", 919 },

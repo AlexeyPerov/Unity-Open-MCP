@@ -451,12 +451,16 @@ anything is scheduled: the Test Framework asks "Scene(s) Have Been Modified"
 before EditMode and PlayMode runs, and that native prompt blocks the Editor
 until a human answers. `ignore_scene_dirty: true` starts the run anyway. The
 bridge writes `test-started-<runId>.json` when the Test Framework reports
-`RunStarted`; while that marker is missing, the results poll watches for the
-blocked-main-thread signature (stale instance heartbeat with the listener still
-answering `/ping`). Sustained for 15 s, the call fails with
-`main_thread_blocked` naming the run instead of waiting out `timeout_ms` — a
-stale heartbeat after `RunStarted` is the tests themselves holding the main
-thread and is not treated as blocked.
+`RunStarted` and says so in its start answer (`startedMarker: true`); while that
+marker is missing, the results poll watches for the blocked-main-thread
+signature (stale instance heartbeat with the listener still answering `/ping`).
+Sustained for 15 s, the call fails with `main_thread_blocked` naming the run
+instead of waiting out `timeout_ms` — a stale heartbeat after `RunStarted` is
+the tests themselves holding the main thread and is not treated as blocked. A
+bridge whose start answer carries no `startedMarker` never writes the marker,
+so the poll does not apply this check to it and waits for the results file.
+The marker is removed with the run (finished, aborted or superseded) and when
+a new run reuses the `run_id`.
 
 `run_tests` also cannot be a nested `unity_open_mcp_batch_execute` step; the batch
 route has no results poller and refuses it up-front with
@@ -552,9 +556,11 @@ Space Overlay UI.
   `postProcess` reports `source_size`, the applied `region` and the final `size`,
   while `width` / `height` / `resolution` keep describing the capture.
   `unity_senses_screenshot` also takes `save_to`: a `.png` path or a directory
-  (trailing slash or existing) the final file is copied to, relative to the
-  project root unless absolute; `Assets/` and `Packages/` are refused (the image
-  would be imported). The response's `savedTo` is the full path.
+  (trailing slash, existing, or no extension) the final file is copied to,
+  relative to the project root unless absolute (`~/` is the home directory). A
+  target that resolves inside the project's `Assets/` or `Packages/` is refused
+  however the path is written — relative, `./`, `..` or absolute — because the
+  image would be imported. The response's `savedTo` is the full path.
 
 Set the device or resolution first with
 [`unity_open_mcp_game_view`](playtest.md#unity_open_mcp_game_view), then capture.

@@ -92,7 +92,11 @@ namespace UnityOpenMcpBridge.Console
                 if (clear)
                     cleared = LogEntriesReader.Clear();
 
-                var filters = new TextFilters { Types = types, Contains = contains, Pattern = pattern, SinceIndex = since_index };
+                // The row after the last one read. Not entries.Count: a row that
+                // failed to read is skipped, and counting would then hand back a
+                // cursor below rows already returned.
+                int nextSinceIndex = cleared || entries.Count == 0 ? 0 : entries[entries.Count - 1].Index + 1;
+                var filters = new TextFilters { Types = types, Contains = contains, Pattern = pattern, SinceIndex = since_index, NextSinceIndex = nextSinceIndex };
                 return BuildJson(capped, entries.Count, filtered.Count, truncated, cleared,
                     type ?? "all", max_entries, max_stack_frames, include_unity_frames, detailLevel, filters);
             }
@@ -124,6 +128,7 @@ namespace UnityOpenMcpBridge.Console
             public string Contains;
             public string Pattern;
             public int SinceIndex;
+            public int NextSinceIndex;
         }
 
         // `types` (several severities) overrides `type`; exception and assert are
@@ -275,7 +280,7 @@ namespace UnityOpenMcpBridge.Console
             sb.Append("\"cleared\":").Append(cleared ? "true" : "false").Append(',');
             // Row cursor for the next read: entries logged after this call get
             // indices >= this value (0 after clear: true).
-            sb.Append("\"nextSinceIndex\":").Append(cleared ? 0 : totalBeforeFilter).Append(',');
+            sb.Append("\"nextSinceIndex\":").Append(filters.NextSinceIndex).Append(',');
             sb.Append("\"filter\":").Append(Esc(type)).Append(',');
             if (filters.Types != null && filters.Types.Length > 0)
             {
