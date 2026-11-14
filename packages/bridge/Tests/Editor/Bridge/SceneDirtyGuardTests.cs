@@ -187,6 +187,131 @@ namespace UnityOpenMcpBridge.Tests
             }
         }
 
+        // ----- execute_csharp: the guard follows what the snippet does -----
+
+        private const string Snippet = "unity_open_mcp_execute_csharp";
+
+        private static GateDispatchResult RefuseSnippet(string code, string extra = "")
+        {
+            var body = "{" + extra + "\"paths_hint\":[\"Assets/A.asset\"],\"code\":\"" + BridgeJson.EscapeStringContent(code) + "\"}";
+            return SceneDirtyGuard.Refuse(EffectiveToolContract.Resolve(Snippet, body), body);
+        }
+
+        [Test]
+        public static void Refuse_DirtyUntitledScene_FollowsTheSnippet()
+        {
+            // An untitled dirty scene is the one state the opt-in auto-save
+            // cannot clear, and the one a save snippet must not run into.
+            var active = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            bool reuse = string.IsNullOrEmpty(active.path);
+            bool wasDirty = active.isDirty;
+            var scratch = reuse ? active : EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+            try
+            {
+                EditorSceneManager.MarkSceneDirty(scratch);
+
+                // An asset write cannot raise the save modal: not refused.
+                Assert.IsNull(RefuseSnippet(
+                    "var so = new UnityEditor.SerializedObject(asset); so.ApplyModifiedProperties(); UnityEditor.AssetDatabase.SaveAssets();"));
+
+                // A disruptive snippet is, and the refusal says which call made it so.
+                var recompile = RefuseSnippet("UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation(); return 1;");
+                Assert.IsNotNull(recompile);
+                Assert.AreEqual("scene_dirty", recompile.Mutation.ErrorCode);
+                CollectionAssert.Contains(recompile.DirtyScenePaths, "(unsaved scene)");
+                StringAssert.Contains("the snippet calls RequestScriptCompilation (recompile / domain reload)",
+                    recompile.AgentNextSteps[recompile.AgentNextSteps.Length - 1]);
+                Assert.IsNull(RefuseSnippet("UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation();",
+                    "\"ignore_scene_dirty\":true,"));
+
+                // Saving a scene that has no path opens the native save-file
+                // dialog: the save snippet is refused for the untitled scene only.
+                var save = RefuseSnippet("UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes(); return 1;");
+                Assert.IsNotNull(save);
+                Assert.AreEqual("scene_dirty", save.Mutation.ErrorCode);
+                CollectionAssert.AreEqual(new[] { "(unsaved scene)" }, save.DirtyScenePaths);
+                StringAssert.Contains("save-file dialog", save.Mutation.ErrorMessage);
+                StringAssert.Contains("unity_open_mcp_scene_save", save.AgentNextSteps[0]);
+                StringAssert.Contains("save-as", save.AgentNextSteps[0]);
+                Assert.IsNull(RefuseSnippet("UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes();",
+                    "\"ignore_scene_dirty\":true,"));
+            }
+            finally
+            {
+                if (!reuse) EditorSceneManager.CloseScene(scratch, true);
+                else if (!wasDirty) ClearSceneDirtiness(scratch);
+            }
+        }
+
+        [Test]
+        public static void UntitledOnly_SavedDirtyScenes_AreWhatASaveSnippetWrites()
+        {
+            var saved = SceneDirtyGuard.GuardResult.Refuse(new[] { "Assets/A.unity", "Assets/B.unity" }, "dirty");
+            Assert.IsTrue(SceneDirtyGuard.UntitledOnly(saved).Allowed);
+            Assert.IsTrue(SceneDirtyGuard.UntitledOnly(SceneDirtyGuard.GuardResult.Allow()).Allowed);
+
+            var mixed = SceneDirtyGuard.UntitledOnly(
+                SceneDirtyGuard.GuardResult.Refuse(new[] { "Assets/A.unity", "(unsaved scene)" }, "dirty"));
+            Assert.IsFalse(mixed.Allowed);
+            CollectionAssert.AreEqual(new[] { "(unsaved scene)" }, mixed.DirtyScenePaths);
+        }
+
+        // ----- recovery steps: save, then discard, then opt out -----
+
+        [Test]
+        public static void NextSteps_SavedScene_NameTheTypedSaveFirst()
+        {
+            var steps = BridgeJson.BuildSceneDirtyNextSteps(new[] { "Assets/Scenes/Main.unity" });
+            Assert.AreEqual(3, steps.Length);
+            StringAssert.StartsWith(
+                "Save, then retry: unity_open_mcp_scene_save {\"asset_path\":\"Assets/Scenes/Main.unity\",\"paths_hint\":[\"Assets/Scenes/Main.unity\"]}",
+                steps[0]);
+            StringAssert.Contains(
+                "unity_open_mcp_scene_open {\"asset_path\":\"Assets/Scenes/Main.unity\",\"paths_hint\":[\"Assets/Scenes/Main.unity\"],\"ignore_scene_dirty\":true}",
+                steps[1]);
+            StringAssert.Contains("discard", steps[1]);
+            StringAssert.Contains("ignore_scene_dirty: true", steps[2]);
+            // No raw-snippet save and no API that does not exist.
+            foreach (var step in steps)
+            {
+                StringAssert.DoesNotContain("execute_csharp", step);
+                StringAssert.DoesNotContain("RestoreSavedSceneState", step);
+            }
+        }
+
+        [Test]
+        public static void NextSteps_SeveralScenes_NameEachAndTheUntitledSaveAs()
+        {
+            var steps = BridgeJson.BuildSceneDirtyNextSteps(new[] { "Assets/A.unity", "(unsaved scene)", "Assets/B.unity" });
+            Assert.AreEqual(4, steps.Length);
+            StringAssert.Contains("\"asset_path\":\"Assets/A.unity\"", steps[0]);
+            StringAssert.Contains("also Assets/B.unity", steps[0]);
+            StringAssert.Contains("untitled scene", steps[1]);
+            StringAssert.Contains("Assets/Scenes/<Name>.unity", steps[1]);
+            StringAssert.Contains("unity_open_mcp_scene_open", steps[2]);
+            StringAssert.Contains("ignore_scene_dirty: true", steps[3]);
+
+            var untitled = BridgeJson.BuildSceneDirtyNextSteps(new[] { "(unsaved scene)" });
+            Assert.AreEqual(3, untitled.Length);
+            StringAssert.Contains("unity_open_mcp_scene_save", untitled[0]);
+            StringAssert.Contains("save-as", untitled[0]);
+            StringAssert.Contains("unity_open_mcp_scene_open", untitled[1]);
+        }
+
+        // editor_set_state answers outside the gate envelope; its refusal
+        // carries the same recovery steps.
+        [Test]
+        public static void Fail_DirectResponseRefusal_CarriesTheSameSteps()
+        {
+            var guard = SceneDirtyGuard.GuardResult.Refuse(new[] { "Assets/Scenes/Main.unity" }, "dirty");
+            var result = SceneDirtyGuard.Fail(guard);
+            Assert.AreEqual("scene_dirty", result.ErrorCode);
+            CollectionAssert.AreEqual(BridgeJson.BuildSceneDirtyNextSteps(guard.DirtyScenePaths), result.NextSteps);
+            var json = BridgeJson.BuildDirectToolErrorJson(result);
+            Assert.IsTrue(BridgeJson.IsValidJsonObject(json), json);
+            StringAssert.Contains("\"agentNextSteps\":[\"Save, then retry: unity_open_mcp_scene_save", json);
+        }
+
         // The session's untitled scene is reused when Unity refuses an additive
         // scene beside it; hand it back in the state we found it.
         private static void ClearSceneDirtiness(UnityEngine.SceneManagement.Scene scene)

@@ -942,35 +942,44 @@ namespace UnityOpenMcpBridge
             if (members.Length > 0) sb.Append(',').Append(members);
         }
 
-        // M13 T4.2 — agent-facing next-steps when a mutating op is refused because
-        // the active scene has unsaved changes.
+        // Agent-facing next steps of every scene_dirty refusal (the gate path,
+        // run_tests, editor_set_state), in the order to try them: the typed save
+        // for each dirty scene, the discard, then the opt-out.
         internal static string[] BuildSceneDirtyNextSteps(string[] dirtyPaths)
         {
-            var list = new List<string>(3);
-            if (dirtyPaths == null || dirtyPaths.Length == 0)
-            {
-                list.Add("Save or discard the active scene's unsaved changes, then retry.");
-            }
-            else
-            {
-                list.Add("Save or discard changes to the dirty scene(s) before retrying: "
-                    + string.Join(", ", dirtyPaths) + ".");
-            }
-            // Name a saved scene by its own path; an untitled scene ("(unsaved scene)")
-            // has none, so it gets a save-as placeholder instead.
-            string saved = null;
+            // A saved scene is named by its own path; an untitled one
+            // ("(unsaved scene)") has none and needs a save-as destination.
+            var saved = new List<string>();
+            bool untitled = dirtyPaths == null || dirtyPaths.Length == 0;
             if (dirtyPaths != null)
                 foreach (var path in dirtyPaths)
-                    if (!string.IsNullOrEmpty(path) && path.EndsWith(".unity", System.StringComparison.OrdinalIgnoreCase)) { saved = path; break; }
-            list.Add(saved != null
-                ? "To save: unity_open_mcp_scene_save {\"asset_path\":\"" + saved + "\",\"paths_hint\":[\"" + saved +
-                  "\"]} for each dirty scene."
-                : "To save the untitled scene: unity_open_mcp_scene_save {\"asset_path\":\"Assets/Scenes/<Name>.unity\"," +
-                  "\"paths_hint\":[\"Assets/Scenes/<Name>.unity\"]} (save-as).");
-            list.Add("To discard: EditorSceneManager.RestoreSavedSceneState(), or retry the " +
-                     "original call with ignore_scene_dirty: true to proceed and accept the risk.");
+                {
+                    if (!string.IsNullOrEmpty(path) && path.EndsWith(".unity", System.StringComparison.OrdinalIgnoreCase)) saved.Add(path);
+                    else untitled = true;
+                }
+
+            var list = new List<string>(4);
+            if (saved.Count > 0)
+                list.Add("Save, then retry: " + SceneCall("unity_open_mcp_scene_save", saved[0], null) +
+                         (saved.Count > 1
+                             ? " — one call per dirty scene; also " + string.Join(", ", saved.GetRange(1, saved.Count - 1)) + "."
+                             : "."));
+            if (untitled)
+                list.Add("Save the untitled scene to a path (save-as), then retry: " +
+                         SceneCall("unity_open_mcp_scene_save", "Assets/Scenes/<Name>.unity", null) +
+                         " — a new asset_path is a save-as of the active scene.");
+            list.Add(saved.Count > 0
+                ? "Or discard the unsaved changes: " + SceneCall("unity_open_mcp_scene_open", saved[0], ",\"ignore_scene_dirty\":true") +
+                  " reloads the scene from disk (the default single mode closes every other open scene without saving it)."
+                : "Or discard the untitled scene: " + SceneCall("unity_open_mcp_scene_open", "<a saved scene>.unity", ",\"ignore_scene_dirty\":true") +
+                  " replaces it.");
+            list.Add("Or retry the original call with ignore_scene_dirty: true to proceed with the scene still dirty " +
+                     "and accept the risk of Unity's native save prompt.");
             return list.ToArray();
         }
+
+        private static string SceneCall(string tool, string scenePath, string extraArgs) =>
+            tool + " {\"asset_path\":\"" + scenePath + "\",\"paths_hint\":[\"" + scenePath + "\"]" + (extraArgs ?? "") + "}";
 
         // /ping response body — live bridge status snapshot.
         internal static string BuildPingJson()

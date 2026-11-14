@@ -151,6 +151,12 @@ namespace UnityOpenMcpBridge.MetaTools
         private static bool IsNestedReloadUnsafe(string toolName, string body, out LifecyclePolicy policy)
         {
             policy = EffectiveToolContract.Lifecycle(toolName, body);
+            // A writing snippet keeps the tool's declared class here, whatever its
+            // text says: the snippet classification is a heuristic the caller can
+            // override on a single call, not a licence to run arbitrary code
+            // between the steps a reload would silently abort.
+            if (toolName == "unity_open_mcp_execute_csharp" && policy != LifecyclePolicy.None)
+                policy = ToolLifecycle.Resolve(toolName);
             if (policy != LifecyclePolicy.RestartThenSettle) return false;
             // scene_create's safety depends on its `mode` param; the param-aware
             // IsNestedSceneStackUnsafe check (run before this one at the call

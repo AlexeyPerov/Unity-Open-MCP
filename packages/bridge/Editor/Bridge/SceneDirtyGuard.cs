@@ -13,6 +13,10 @@ namespace UnityOpenMcpBridge
     // refuse if any loaded scene is dirty, surfacing the dirty scene paths so
     // the agent can save or discard first.
     //
+    // An execute_csharp snippet is RestartThenSettle only when its text can
+    // lead there (SnippetClassifier): an asset write is not preflighted, and a
+    // snippet that saves scenes is refused only for an untitled dirty scene.
+    //
     // The guard runs on the main thread (UnityEditor.SceneManagement is
     // main-thread-only) inside DispatchWithGate, before the mutation. The
     // request-level `ignore_scene_dirty: true` flag is the explicit opt-out —
@@ -62,8 +66,11 @@ namespace UnityOpenMcpBridge
             if (IsAdditiveSceneOp(contract.ToolName, body)) return false;
             // Explicit opt-out: the agent takes responsibility for the dirty
             // state (the lightweight --force equivalent — no auto-save).
-            return !JsonBody.GetBool(JsonBody.TopLevelField(body, "ignore_scene_dirty"), "ignore_scene_dirty");
+            return !IgnoresSceneDirty(body);
         }
+
+        private static bool IgnoresSceneDirty(string body) =>
+            JsonBody.GetBool(JsonBody.TopLevelField(body, "ignore_scene_dirty"), "ignore_scene_dirty");
 
         // The whole preflight every entry point that can start a
         // RestartThenSettle op shares (the tool gate path and asynchronous
@@ -73,9 +80,17 @@ namespace UnityOpenMcpBridge
         // be called on the main thread.
         internal static GateDispatchResult Refuse(ToolRequestContract contract, string body)
         {
-            if (!AppliesTo(contract, body)) return null;
-            var guard = CheckWithAutoSave();
+            GuardResult guard;
+            if (AppliesTo(contract, body)) guard = CheckWithAutoSave();
+            // A snippet that saves scenes resolves the dirty state itself, so it
+            // is not held back by it — except by a scene that has no path yet.
+            else if (contract.SavesScenes && !IgnoresSceneDirty(body)) guard = UntitledOnly(Check());
+            else return null;
             if (guard.Allowed) return null;
+            var steps = new List<string>(BridgeJson.BuildSceneDirtyNextSteps(guard.DirtyScenePaths));
+            if (contract.GuardReason != null)
+                steps.Add("The guard applies here because " + contract.GuardReason +
+                          "; a snippet that only writes assets or saves scenes is not refused for a dirty scene.");
             return new GateDispatchResult
             {
                 Mutation = ToolDispatchResult.Fail("scene_dirty", guard.RefusalMessage),
@@ -84,8 +99,31 @@ namespace UnityOpenMcpBridge
                 SkippedReason = "request_rejected",
                 GateFailed = false,
                 DirtyScenePaths = guard.DirtyScenePaths,
-                AgentNextSteps = BridgeJson.BuildSceneDirtyNextSteps(guard.DirtyScenePaths)
+                AgentNextSteps = steps.ToArray()
             };
+        }
+
+        // The scene_dirty refusal of a tool that answers outside the gate
+        // envelope (editor_set_state): same code, message and recovery steps.
+        internal static ToolDispatchResult Fail(GuardResult guard) =>
+            ToolDispatchResult.FailWithDetail("scene_dirty", guard.RefusalMessage, null,
+                BridgeJson.BuildSceneDirtyNextSteps(guard.DirtyScenePaths));
+
+        internal const string UntitledScene = "(unsaved scene)";
+
+        // Narrows a refusal to the scenes that were never saved. SaveScene /
+        // SaveOpenScenes on one opens Unity's native save-file dialog, which
+        // blocks the main thread until a human answers; the saved dirty scenes
+        // are exactly what such a snippet is about to write.
+        internal static GuardResult UntitledOnly(GuardResult guard)
+        {
+            if (guard.Allowed) return guard;
+            if (System.Array.IndexOf(guard.DirtyScenePaths, UntitledScene) < 0) return GuardResult.Allow();
+            return GuardResult.Refuse(new[] { UntitledScene },
+                "An untitled scene has unsaved changes. Saving a scene that has no path opens Unity's native " +
+                "save-file dialog, which blocks the Editor until a human answers it, so the snippet was not run. " +
+                "Give the scene a path first (unity_open_mcp_scene_save with asset_path), or retry with " +
+                "ignore_scene_dirty: true to proceed and accept the dialog.");
         }
 
         // Check() plus the opt-in auto-save retry. Shared by the gate path above
@@ -234,7 +272,7 @@ namespace UnityOpenMcpBridge
                 {
                     var path = entry.path;
                     if (string.IsNullOrEmpty(path))
-                        path = "(unsaved scene)";
+                        path = UntitledScene;
                     dirty.Add(path);
                 }
             }

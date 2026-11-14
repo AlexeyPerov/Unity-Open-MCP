@@ -93,6 +93,26 @@ test("lifecycleForCall: an upgrade preview is none; the apply keeps compile-relo
   assert.equal(lifecycleForCall("unity_open_mcp_apply_fix", { dry_run: true }).class, "scene-dirty");
 });
 
+// The bridge classifies each snippet (read / asset write / scene save /
+// disruptive) and reports it in the response. The server keeps one class for
+// the tool — the one with the reload recovery — instead of a second classifier
+// that could disagree with the bridge's; the note tells the agent where the
+// per-call answer is, and the scene-dirty recovery names the typed save.
+test("execute_csharp keeps the reload recovery class for every call; the note points at the per-call lifecycle", () => {
+  for (const args of [
+    { code: "return 1;", read_only: true },
+    { code: "UnityEditor.AssetDatabase.SaveAssets();", paths_hint: ["Assets/A.asset"] },
+    { code: "UnityEditor.AssetDatabase.Refresh();", paths_hint: ["Assets/A.asset"] },
+  ]) {
+    assert.equal(lifecycleForCall("unity_open_mcp_execute_csharp", args).class, "compile-reload");
+  }
+  const note = lifecycleFor("unity_open_mcp_execute_csharp").note ?? "";
+  assert.match(note, /editor_settle/);
+  assert.match(note, /dirty scene/);
+  const sceneDirty = LIFECYCLE_TAXONOMY.find((entry) => entry.class === "scene-dirty");
+  assert.match(sceneDirty?.recovery ?? "", /scene_save/);
+});
+
 test("lifecycleFor: compile_check note carries the editor_instance_locked constraint", () => {
   const entry = lifecycleFor("unity_open_mcp_compile_check");
   assert.equal(entry.class, "compile-reload");

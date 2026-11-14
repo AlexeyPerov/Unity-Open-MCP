@@ -186,7 +186,7 @@ namespace UnityOpenMcpBridge.TypedTools
             {
                 var guard = SceneDirtyGuard.Check();
                 if (!guard.Allowed)
-                    return ToolDispatchResult.Fail("scene_dirty", guard.RefusalMessage);
+                    return SceneDirtyGuard.Fail(guard);
             }
 
             try

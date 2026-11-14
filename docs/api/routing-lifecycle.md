@@ -216,7 +216,7 @@ pointed at a top-level call it cannot make.
 | `markers_missing` | A non-compile batch operation exited 0 without its report. | Inspect the captured output tail and the operation's post-state before repeating a mutation. |
 | `batch_spawn_failed` | Headless Unity produced no classifiable result (non-zero exit, no markers). | Inspect compile errors, package state, project lock, and path. |
 | `batch_step_requires_server_poll` | A `batch_execute` step's terminal result is produced by the server polling a results file, which the batch route does not do (today: `unity_senses_run_tests`, `unity_open_mcp_inputsim_gesture`, `unity_open_mcp_playtest_wait`, `unity_senses_capture_series`, `unity_open_mcp_game_view` set actions). | Call the tool as a single top-level call. The message also names a reachable `execute_csharp` / `invoke_method` equivalent for clients that cannot see the tool. |
-| `scene_dirty` | A disruptive call was refused because a loaded scene has unsaved work, including unsaved additive scenes. The guard covers every `restart_then_settle` tool (recompile, package and asmdef edits, build target/defines, player settings, snippets, menus, single-mode scene switches, upgrade) plus `editor_set_state` play and `run_tests`; each publishes `ignore_scene_dirty`. | Save first (`scene_save`; the `agentNextSteps` name the call) or discard, or deliberately pass `ignore_scene_dirty: true` and accept Unity's native save prompt. |
+| `scene_dirty` | A disruptive call was refused because a loaded scene has unsaved work, including unsaved additive scenes. The guard covers every `restart_then_settle` call (recompile, package and asmdef edits, build target/defines, player settings, menus, single-mode scene switches, upgrade, and an `execute_csharp` snippet whose text can disrupt the Editor) plus `editor_set_state` play and `run_tests`; each publishes `ignore_scene_dirty`. A snippet that only writes assets is not refused, and one that saves scenes is refused only for an untitled dirty scene — see [`execute_csharp`](mcp-tools.md#unity_open_mcp_execute_csharp). | Follow `agentNextSteps`, in order: save with `scene_save` (the step carries the call and the dirty scene's path; an untitled scene gets a save-as path), or discard by reopening the scene with `scene_open` + `ignore_scene_dirty: true`, or deliberately retry with `ignore_scene_dirty: true` and accept Unity's native save prompt. |
 | `bridge_response_unparsable` | A substantial bridge response could not be parsed. | Do not trust partial output; check bridge health before retrying. |
 
 A failed tool POST is replayed only for proven pre-connection failures
@@ -404,7 +404,12 @@ Catalog lifecycle values are conservative defaults. A pure inspection snippet
 with `read_only: true`, an explicitly declared `[BridgeReadOnlyMenu]` verifier,
 or an all-read `batch_execute` resolves to `none` in its response. Dirty scenes
 are left untouched. Known disruptive snippet calls retain the default protection;
-`read_only` is an assertion, not proof that arbitrary C# is safe. Mixed batches
+`read_only` is an assertion, not proof that arbitrary C# is safe. A writing
+snippet whose text shows only asset writes or a scene save resolves to
+`editor_settle` and skips the dirty-scene preflight; one that can compile,
+reload, import, switch scenes or change play mode — or resolves a member by a
+computed name — keeps `restart_then_settle`
+([classification](mcp-tools.md#unity_open_mcp_execute_csharp)). Mixed batches
 retain `editor_settle`, union scope, and one gate/undo group. Nested reload and
 server-polled operations are rejected during preflight before step zero.
 

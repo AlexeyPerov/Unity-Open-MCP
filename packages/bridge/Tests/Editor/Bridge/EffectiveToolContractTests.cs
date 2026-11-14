@@ -51,7 +51,10 @@ namespace UnityOpenMcpBridge.Tests
                 var before = Undo.GetCurrentGroup();
                 var body = "{\"read_only\":true,\"code\":\"return 42;\"}";
                 Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_execute_csharp", body));
-                Assert.IsTrue(SceneDirtyGuard.AppliesTo("unity_open_mcp_execute_csharp", "{\"code\":\"return 42;\"}"));
+                // Without the assertion the snippet is a write, but one whose text
+                // shows no lifecycle call: gated, not preflighted.
+                Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_execute_csharp", "{\"code\":\"return 42;\"}"));
+                Assert.IsTrue(SceneDirtyGuard.AppliesTo("unity_open_mcp_execute_csharp", "{\"code\":\"AssetDatabase.Refresh(); return 42;\"}"));
                 var result = Dispatch("unity_open_mcp_execute_csharp", body);
                 Assert.IsTrue(result.Mutation.Success, result.Mutation.ErrorMessage);
                 Assert.IsTrue(result.EffectiveReadOnly);
@@ -60,6 +63,41 @@ namespace UnityOpenMcpBridge.Tests
                 Assert.IsTrue(scene.isDirty);
                 Assert.AreEqual(rootCount, scene.rootCount);
                 Assert.AreEqual(before, Undo.GetCurrentGroup());
+            }
+            finally
+            {
+                if (!wasDirty)
+                    typeof(EditorSceneManager).GetMethod("ClearSceneDirtiness", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static)
+                        .Invoke(null, new object[] { scene });
+            }
+        }
+
+        // A reflection probe — GetAssemblies … GetMethod("…").Invoke(…) — asserted
+        // read_only is a read: with a dirty scene it is neither refused with
+        // scene_dirty nor given the restart lifecycle.
+        [Test]
+        public void ReadOnlyReflectionProbe_DirtyScene_RunsAsARead()
+        {
+            const string tool = "unity_open_mcp_execute_csharp";
+            const string body = "{\"read_only\":true,\"usings\":[\"System.Linq\"],\"code\":\"return System.AppDomain.CurrentDomain.GetAssemblies()" +
+                ".Where(a => a.GetName().Name == \\\"UnityEngine.CoreModule\\\").SelectMany(a => a.GetTypes())" +
+                ".First(t => t.FullName == \\\"UnityEngine.Mathf\\\").GetMethod(\\\"Clamp01\\\").Invoke(null, new object[] { 2.5f });\"}";
+            var scene = SceneManager.GetActiveScene();
+            bool wasDirty = scene.isDirty;
+            try
+            {
+                EditorSceneManager.MarkSceneDirty(scene);
+                var contract = EffectiveToolContract.Resolve(tool, body);
+                Assert.IsFalse(contract.IsMutating);
+                Assert.AreEqual(LifecyclePolicy.None, contract.Lifecycle);
+                Assert.IsNull(SceneDirtyGuard.Refuse(contract, body));
+
+                var result = Dispatch(tool, body);
+                Assert.IsTrue(result.Mutation.Success, result.Mutation.ErrorCode + ": " + result.Mutation.ErrorMessage);
+                Assert.AreEqual("read_only", result.SkippedReason);
+                Assert.IsNull(result.DirtyScenePaths);
+                StringAssert.Contains("1", result.Mutation.Output);
+                Assert.IsTrue(scene.isDirty);
             }
             finally
             {

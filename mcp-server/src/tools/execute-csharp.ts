@@ -63,8 +63,8 @@ export const executeCsharp = makeTool(
               "type lookup, SessionState read, console read). When true the " +
               "paths_hint requirement is waived and the gate is skipped (no " +
               "checkpoint/validate), including when paths_hint is supplied. Pure reads bypass the dirty-scene guard " +
-              "and settle wait. Known compile, refresh, scene-switch, or play-transition calls retain mutation " +
-              "scope and lifecycle protection even with this flag. A read probe needs no fake " +
+              "and settle wait. Known compile, refresh, scene-switch, scene-save, or play-transition calls retain " +
+              "mutation scope and lifecycle protection even with this flag. A read probe needs no fake " +
               "scope. This is a SCOPE HINT, not a safety boundary: the deny " +
               "heuristic still applies (a snippet matching " +
               "AssetDatabase.DeleteAsset / EditorApplication.Exit / etc. is " +
@@ -73,7 +73,15 @@ export const executeCsharp = makeTool(
               "For the same reason a snippet is refused with job_busy while an " +
               "asynchronous project command job runs, even with read_only: true.",
           },
-          ignore_scene_dirty: { ...IGNORE_SCENE_DIRTY_BASE, description: "Bypass the active-scene dirty guard. By default a disruptive op " + "(recompile / scene switch) is refused with scene_dirty when any " + "loaded scene has unsaved changes, so Unity's native save modal " + "never interrupts the flow. Set true to proceed and accept the risk " + "of a native save prompt." },
+          ignore_scene_dirty: {
+            ...IGNORE_SCENE_DIRTY_BASE,
+            description:
+              "Bypass the dirty-scene guard. While a loaded scene has unsaved changes a snippet is refused " +
+              "(scene_dirty) only if its text can disrupt the Editor: a compile / reload / asset refresh / " +
+              "scene or stage switch / play-mode / menu / build call, or a member resolved by a computed " +
+              "name. Asset writes are not refused; SaveScene / SaveOpenScenes only for an untitled dirty " +
+              "scene (its save opens a native dialog). Set true to proceed and accept the risk of a native prompt.",
+          },
           confirm_bypass: { ...CONFIRM_BYPASS_BASE, description: "Bypass the deny heuristic for destructive patterns " + "(EditorApplication.Exit, AssetDatabase.DeleteAsset, " + "BuildPipeline.BuildPlayer, etc.). Requires gate: \"off\" as well — " + "both flags must be set. The bypass is audited." },
           gate: { ...GATE_PROP },
           timeout_ms: {

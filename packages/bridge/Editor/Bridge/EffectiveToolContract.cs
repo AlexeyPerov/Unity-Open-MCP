@@ -35,6 +35,12 @@ namespace UnityOpenMcpBridge
         /// <summary>The request (or one of its batch steps) passed <c>read_only: true</c> to a tool
         /// exposing that flag. Only shapes the <c>job_busy</c> refusal wording.</summary>
         internal bool ReadOnlyAsserted;
+        /// <summary>execute_csharp only: the snippet saves scenes, so the dirty-scene guard narrows to
+        /// untitled scenes — saving one opens Unity's native save-file dialog.</summary>
+        internal bool SavesScenes;
+        /// <summary>execute_csharp only: why the snippet keeps the guarded lifecycle
+        /// (<see cref="SnippetVerdict.Reason"/>); null otherwise. Shapes the scene_dirty next steps.</summary>
+        internal string GuardReason;
         /// <summary>Dispatch that reuses this contract's preflight output (bound arguments); null means
         /// the plain <c>DispatchTool(toolName, body)</c> path.</summary>
         internal Func<ToolDispatchResult> Invoke;
@@ -56,46 +62,32 @@ namespace UnityOpenMcpBridge
     // Request-level classification. Catalog flags remain conservative defaults.
     internal static class EffectiveToolContract
     {
-        private static readonly Regex DisruptiveSnippet = new Regex(
-            @"\b(RequestScriptCompilation|Refresh|ImportAsset|OpenScene|NewScene|CloseScene|LoadScene|LoadSceneAsync|UnloadSceneAsync|EnterPlaymode|ExitPlaymode|ExecuteMenuItem|BuildPlayer|SwitchActiveBuildTarget|SetScriptingDefineSymbols|RequestReload|ReloadAssembly|LockReloadAssemblies|UnlockReloadAssemblies)\b|\bisPlaying\s*=(?!=)",
-            RegexOptions.CultureInvariant);
+        private const string ExecuteCSharp = "unity_open_mcp_execute_csharp";
+
+        // The snippet's one classification (SnippetClassifier); everything
+        // below that depends on what a snippet does reads this verdict.
+        private static SnippetVerdict Snippet(string body) =>
+            SnippetClassifier.Classify(JsonBody.GetString(JsonBody.TopLevelField(body ?? "{}", "code"), "code"));
+
+        private static bool Flag(string body, string key) =>
+            body != null && JsonBody.GetBool(JsonBody.TopLevelField(body, key), key);
+
+        // A snippet the classifier knows to write or disrupt: read_only cannot
+        // waive its scope. An opaque one is left to the caller's assertion.
+        private static bool IsKnownWrite(SnippetEffect effect) =>
+            effect == SnippetEffect.Disruptive || effect == SnippetEffect.SavesScenes;
 
         /// <summary>
         /// Why a snippet's <c>read_only: true</c> was overridden, or null when it was
-        /// honoured (or not asserted): the disruptive token the code calls (and what
-        /// it does), or setup_roslyn. Shapes the paths_hint_required wording only.
+        /// honoured (or not asserted): the call the snippet makes (and what it
+        /// does), or setup_roslyn. Shapes the paths_hint_required wording only.
         /// </summary>
         internal static string ReadOnlyOverrideReason(string tool, string body)
         {
-            if (tool != "unity_open_mcp_execute_csharp" || body == null) return null;
-            if (!JsonBody.GetBool(JsonBody.TopLevelField(body, "read_only"), "read_only")) return null;
-            if (JsonBody.GetBool(JsonBody.TopLevelField(body, "setup_roslyn"), "setup_roslyn"))
-                return "setup_roslyn installs the Roslyn fallback (a write)";
-            var match = DisruptiveSnippet.Match(JsonBody.GetString(JsonBody.TopLevelField(body, "code"), "code") ?? "");
-            if (!match.Success) return null;
-            var token = match.Groups[1].Success ? match.Groups[1].Value : "isPlaying =";
-            return "the snippet calls " + token + " (" + DisruptiveKind(token) + ")";
-        }
-
-        private static string DisruptiveKind(string token)
-        {
-            switch (token)
-            {
-                case "OpenScene": case "NewScene": case "CloseScene": case "LoadScene":
-                case "LoadSceneAsync": case "UnloadSceneAsync":
-                    return "scene switch";
-                case "RequestScriptCompilation": case "RequestReload": case "ReloadAssembly":
-                case "LockReloadAssemblies": case "UnlockReloadAssemblies":
-                    return "recompile / domain reload";
-                case "Refresh": case "ImportAsset":
-                    return "asset import";
-                case "EnterPlaymode": case "ExitPlaymode": case "isPlaying =":
-                    return "play mode change";
-                case "ExecuteMenuItem":
-                    return "menu execution";
-                default:
-                    return "build / platform change";
-            }
+            if (tool != ExecuteCSharp || !Flag(body, "read_only")) return null;
+            if (Flag(body, "setup_roslyn")) return "setup_roslyn installs the Roslyn fallback (a write)";
+            var verdict = Snippet(body);
+            return IsKnownWrite(verdict.Effect) ? verdict.Reason : null;
         }
 
         // The first asset path literal in a snippet ("Assets/…" / "Packages/…"),
@@ -110,9 +102,23 @@ namespace UnityOpenMcpBridge
         }
 
         internal static bool IsReadOnlySnippet(string body) =>
-            JsonBody.GetBool(JsonBody.TopLevelField(body, "read_only"), "read_only")
-            && !JsonBody.GetBool(JsonBody.TopLevelField(body, "setup_roslyn"), "setup_roslyn")
-            && !DisruptiveSnippet.IsMatch(JsonBody.GetString(JsonBody.TopLevelField(body, "code"), "code") ?? "");
+            Flag(body, "read_only") && !Flag(body, "setup_roslyn") && !IsKnownWrite(Snippet(body).Effect);
+
+        // The lifecycle of one snippet. A read is None. A write the classifier
+        // can read — an asset edit, a scene save — only settles the asset
+        // database. Everything else keeps the tool's declared class: a call
+        // that can compile, reload, import, switch scenes or change play mode,
+        // a member resolved by a computed name, an empty snippet, and
+        // setup_roslyn.
+        private static LifecyclePolicy SnippetLifecycle(string body)
+        {
+            if (IsReadOnlySnippet(body)) return LifecyclePolicy.None;
+            if (Flag(body, "setup_roslyn")) return ToolLifecycle.Resolve(ExecuteCSharp);
+            var effect = Snippet(body).Effect;
+            return effect == SnippetEffect.Plain || effect == SnippetEffect.SavesScenes
+                ? LifecyclePolicy.EditorSettle
+                : ToolLifecycle.Resolve(ExecuteCSharp);
+        }
 
         // An upgrade preview (dry_run defaults true) only reads the pins it
         // would rewrite; the apply alone writes configs and schedules the UPM
@@ -125,7 +131,7 @@ namespace UnityOpenMcpBridge
         {
             if (tool == ProjectCommandInvocation.ToolName)
                 return !ProjectCommandInvocation.Resolve(body, out var command) || command.Attribute.IsMutating;
-            if (tool == "unity_open_mcp_execute_csharp" && IsReadOnlySnippet(body)) return false;
+            if (tool == ExecuteCSharp && IsReadOnlySnippet(body)) return false;
             if (tool == "unity_open_mcp_execute_menu" && ExecuteMenuTool.IsReadOnlyMenu(
                 JsonBody.GetString(JsonBody.TopLevelField(body, "menu_path"), "menu_path"))) return false;
             if (tool == "unity_open_mcp_apply_fix" && JsonBody.GetBool(JsonBody.TopLevelField(body, "dry_run"), "dry_run", true)) return false;
@@ -173,11 +179,18 @@ namespace UnityOpenMcpBridge
                     ReadOnlyAsserted = plan != null && plan.Steps.Exists(step => AssertsReadOnly(step.Tool, step.ParamsBody)),
                 };
             }
-            return new ToolRequestContract
+            var contract = new ToolRequestContract
             {
                 ToolName = tool, IsMutating = IsMutating(tool, body), Lifecycle = Lifecycle(tool, body),
                 ReadOnlyAsserted = AssertsReadOnly(tool, body),
             };
+            if (tool == ExecuteCSharp && !Flag(body, "setup_roslyn"))
+            {
+                var verdict = Snippet(body);
+                contract.SavesScenes = verdict.Effect == SnippetEffect.SavesScenes;
+                if (contract.Lifecycle == LifecyclePolicy.RestartThenSettle) contract.GuardReason = verdict.Reason;
+            }
+            return contract;
         }
 
         private static bool AssertsReadOnly(string tool, string body) =>
@@ -188,7 +201,7 @@ namespace UnityOpenMcpBridge
         {
             if (tool == ProjectCommandInvocation.ToolName)
                 return ProjectCommandInvocation.Resolve(body, out var command) ? command.Attribute.Lifecycle : LifecyclePolicy.None;
-            if (tool == "unity_open_mcp_execute_csharp" && IsReadOnlySnippet(body)) return LifecyclePolicy.None;
+            if (tool == ExecuteCSharp) return SnippetLifecycle(body);
             if (tool == "unity_open_mcp_execute_menu" && ExecuteMenuTool.IsNonDisruptiveReadOnlyMenu(
                 JsonBody.GetString(JsonBody.TopLevelField(body, "menu_path"), "menu_path"))) return LifecyclePolicy.None;
             if (tool == "unity_open_mcp_batch_execute" && !IsMutating(tool, body)) return LifecyclePolicy.None;

@@ -220,8 +220,8 @@ code. Poll `editor_status.isCompiling` until false, then `read_compile_errors`.
 `SessionState` reads, console reads): it waives the `paths_hint` requirement and
 skips the gate even if a scope is supplied. Such reads run against dirty scenes
 without saving them and return lifecycle `none`. Known compile/refresh,
-scene-switch, and play-transition calls retain lifecycle and mutation-scope
-protection. This is a caller assertion, not a sandbox or proof of purity:
+scene-switch, scene-save, and play-transition calls retain lifecycle and
+mutation-scope protection. This is a caller assertion, not a sandbox or proof of purity:
 indirect calls cannot be proven safe. The deny heuristic still applies; use
 `read_only` only for inspection without writes or disruptive transitions.
 When one of those calls overrides `read_only: true`, the `paths_hint_required`
@@ -826,6 +826,38 @@ whenever one of those diagnostics is present. For a seam you will call more than
 once, prefer making it public or exercising it from a test assembly with
 `InternalsVisibleTo` via `unity_senses_run_tests` — reflection loses
 compile-time checking.
+
+The lifecycle of a call follows the snippet's text, and the response reports it
+in `lifecycle`. One classification decides it, the dirty-scene guard and whether
+`read_only` is honoured:
+
+| Snippet | `lifecycle` | With an unsaved scene open |
+|---|---|---|
+| `read_only: true` probe | `none` | runs |
+| writes assets or objects (`SerializedObject`, `AssetDatabase.CreateAsset` / `SaveAssets`, `EditorPrefs`) | `editor_settle` | runs |
+| saves scenes (`EditorSceneManager.SaveScene` / `SaveOpenScenes`) | `editor_settle` | runs; refused with `scene_dirty` only when a dirty scene is untitled, because saving it opens Unity's native save dialog |
+| can compile, reload, import, switch the scene or prefab stage, change play mode, run a menu item, build, run tests or raise a save prompt | `restart_then_settle` | refused with `scene_dirty` |
+| resolves a member by a computed name (`GetMethod(name)`, `GetMethods()` + `Invoke`, `SendMessage(name)`), or has no code | `restart_then_settle` | refused with `scene_dirty` |
+
+The disruptive row is a deny-list of API names matched anywhere in the text,
+string literals and comments included, without their declaring type:
+`RequestScriptCompilation`, `RequestScriptReload`, `SetScriptingDefineSymbols*`,
+`PlayerSettings` writes, `AssetDatabase.Refresh` / `ImportAsset` /
+`ImportPackage` / `MoveAsset` / `DeleteAsset`, `SaveAndReimport`,
+`OpenScene` / `NewScene` / `CloseScene` / `LoadScene*` /
+`RestoreSceneManagerSetup`, `AssetDatabase.OpenAsset`, `OpenPrefab` /
+`GoToMainStage`, `EnterPlaymode` / `ExitPlaymode` / `isPlaying =`,
+`ExecuteMenuItem`, `BuildPlayer`, `SwitchActiveBuildTarget`,
+`PackageManager.Client.Add` / `Remove`, `TestRunnerApi`,
+`*IfUserWantsTo` / `SaveSceneAs`, `EditorApplication.Exit` / `OpenProject`, and
+a file write that names a `.cs` / `.asmdef` / `.dll` / `manifest.json`. A listed
+name in a reflective lookup (`GetMethod("OpenScene")`) counts too. The list errs
+towards refusing; `ignore_scene_dirty: true` is the override, and the
+`scene_dirty` refusal names the call that put the snippet on the list. It is a
+heuristic over the text, not a sandbox: what a project method does when the
+snippet calls it is not visible. A `read_only: true` snippet is held to the same
+list (and to scene saves), but a computed member name alone does not override
+the assertion. Nested in `batch_execute`, only a `read_only` snippet is accepted.
 
 Guessed names get a lookup instead of a bare diagnostic. For `CS0234` / `CS0246`
 the message appends a "DID YOU MEAN" section listing loaded types whose simple

@@ -68,7 +68,15 @@ export const TOOL_LIFECYCLE: Record<string, ToolLifecycle> = {
   // The bridge blocks up to 60s for the compile to settle and the dirty guard
   // preflights these. `compile_check` is the batch-only observer: it spawns a
   // fresh headless Unity and cannot share the project with a live Editor.
-  "unity_open_mcp_execute_csharp": { class: "compile-reload" },
+  "unity_open_mcp_execute_csharp": {
+    class: "compile-reload",
+    note:
+      "The class of a snippet that can compile, reload, refresh assets, switch the scene or stage, " +
+      "change play mode, run a menu item or build (or resolves a member by a computed name). The " +
+      "bridge classifies each call from the snippet text and reports it in the response's " +
+      "`lifecycle`: a read_only probe is `none`; a snippet that only writes assets or saves scenes " +
+      "is `editor_settle` and is not held back by a dirty scene.",
+  },
   "unity_open_mcp_invoke_method": { class: "compile-reload" },
   "unity_open_mcp_execute_menu": { class: "compile-reload" },
   "unity_open_mcp_asmdef_create": { class: "compile-reload" },
@@ -445,8 +453,9 @@ export const LIFECYCLE_TAXONOMY: LifecycleTaxonomyEntry[] = [
       "Runs the gate (checkpoint → mutate → validate → delta); blocks up to 5s for asset " +
       "refresh. Requires non-empty paths_hint (no whole-project fallback).",
     recovery:
-      "Read gate.delta + agentNextSteps from the response. On scene_dirty refusal, save or " +
-      "discard first, or pass ignore_scene_dirty: true to accept the risk.",
+      "Read gate.delta + agentNextSteps from the response. On scene_dirty refusal, save with " +
+      "scene_save (agentNextSteps names the call) or discard first, or pass ignore_scene_dirty: " +
+      "true to accept the risk.",
   },
   {
     class: "process-stale",

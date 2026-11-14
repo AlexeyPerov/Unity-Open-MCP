@@ -172,7 +172,10 @@ namespace UnityOpenMcpBridge
             // ----- RestartThenSettle: may trigger a domain reload -----
             // execute_csharp / invoke_method can recompile; execute_menu can
             // hit any menu (scene switch, reimport, package op); compile_check
-            // spawns a fresh Unity recompiling from scratch.
+            // spawns a fresh Unity recompiling from scratch. For execute_csharp
+            // this is the declared default: a snippet whose text shows only an
+            // asset write or a scene save resolves to EditorSettle per request
+            // (EffectiveToolContract.Lifecycle over SnippetClassifier).
             { "unity_open_mcp_execute_csharp",   LifecyclePolicy.RestartThenSettle },
             { "unity_open_mcp_invoke_method",    LifecyclePolicy.RestartThenSettle },
             { "unity_open_mcp_execute_menu",     LifecyclePolicy.RestartThenSettle },
