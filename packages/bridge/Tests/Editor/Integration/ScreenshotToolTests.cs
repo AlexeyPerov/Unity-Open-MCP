@@ -329,16 +329,15 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void ScreenshotWindow_RequiresWindowTitleOrType()
         {
-            // The tool returns a JSON error string (does not throw), so dispatch
-            // reports Success=true but the body carries an "error" object. We pin
-            // the validation error code in the output JSON.
+            // The tool returns its refusal as a JSON error body (does not
+            // throw); the registry reports that as a failed dispatch carrying
+            // the tool's code.
             var dispatch = BridgeToolRegistry.TryDispatch(
                 "unity_senses_screenshot_window",
                 "{\"width\":64,\"height\":64}");
             Assert.IsNotNull(dispatch, "screenshot_window should dispatch via the registry");
-            Assert.IsTrue(dispatch.Success, "screenshot_window should return a JSON result (not throw)");
-            Assert.IsNotNull(dispatch.Output, "screenshot_window should return JSON output");
-            Assert.IsTrue(dispatch.Output.Contains("\"missing_parameter\""),
+            Assert.IsFalse(dispatch.Success, "a refusal is a failed dispatch");
+            Assert.AreEqual("missing_parameter", dispatch.ErrorCode,
                 "screenshot_window without window_title/window_type should return a missing_parameter error");
         }
 

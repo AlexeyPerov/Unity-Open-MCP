@@ -247,6 +247,19 @@ the gate may pass while the batch operation fails. Check both fields. Existing
 `gate.delta`, `gate.validation`, and `agentNextSteps` remain readable, and
 `effectiveReadOnly` reports the request classification.
 
+**Tool refusals are failures.** When a tool declines a call — `play_mode_required`,
+`target_not_found`, `ambiguous_target`, `under_not_found`, `device_not_found`,
+`paths_hint_required` raised by the tool itself, and so on — the result is a
+failed mutation for every tool, embedded domains and extension packs included:
+`mutation.success: false`, `mutation.output: null`, `isError: true`, and
+`mutation.error` holding `code`, `message` and whatever detail the tool attached
+(`candidates`, `matches`, `hidden_matches`, `detected`, `skipped`, `available`, …).
+The tool's own recovery steps arrive in the envelope's `agentNextSteps`. A
+refused mutating tool validates nothing (`gate.skippedReason: "mutation_failed"`).
+Gate-free tools answer with the same object as a flat `{ "error": { … } }` body.
+Branch on `isError` / `mutation.success` and read the detail from
+`mutation.error`; there is no error object inside a successful `mutation.output`.
+
 `unity_open_mcp_apply_fix` defaults to `dry_run: true`. Review the preview before
 applying. Unsafe fixes require an explicit replacement target. A top-level
 non-dry-run fix can restore touched files when application fails or introduces
@@ -322,7 +335,11 @@ before scope enforcement or checkpoints. Refusals collect errors across all
 steps, including unknown tools, unknown keys, missing fields, invalid values,
 reload hazards, and server-polled operations. `fail_fast` defaults to
 `true`; `gate` defaults to `enforce`. Successful earlier steps are not
-automatically rolled back when a later step fails. Nested steps that resolve
+automatically rolled back when a later step fails. A step the nested tool
+refused is a failed step like any other: `status: "failed"` with the tool's
+`error` object (code, message and its detail members) and, when the tool gave
+them, its own `agentNextSteps`; it counts in `callFailureCount`, never in
+`callSuccessCount`, and stops the batch under `fail_fast`. Nested steps that resolve
 to the `restart_then_settle` lifecycle (`scene_open`, `scene_create` in Single
 mode, `package_add` / `package_remove`, `asmdef_create` / `asmdef_modify`,
 `build_set_target` / `build_set_defines`, `settings_set_player`,

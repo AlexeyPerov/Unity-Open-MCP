@@ -105,5 +105,21 @@ namespace UnityOpenMcpBridge.Tests
             if (result.Success)
                 StringAssert.Contains("\"failOnSeverity\":\"never\"", result.Output);
         }
+
+        // An unknown rule id is a refusal: a failed result (so a nested batch
+        // step fails) that still carries the tool's own error body, which the
+        // gate-free response returns as written.
+        [Test]
+        public void Execute_UnknownRule_IsFailedResultWithTheToolsBody()
+        {
+            var body = Body + ",\"include_rules\":[\"__no_such_rule__\"]}";
+            foreach (var result in new[] { ScanPathsTool.Execute(body), ValidateEditTool.Execute(body) })
+            {
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("unknown_rule", result.ErrorCode);
+                StringAssert.Contains("\"unknownRules\":[\"__no_such_rule__\"]", result.ErrorDetailJson);
+                StringAssert.StartsWith("{\"error\":{\"code\":\"unknown_rule\"", result.RefusalBody);
+            }
+        }
     }
 }

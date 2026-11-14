@@ -43,6 +43,9 @@ resolve in the simulated screen's pixels.
 
 ### Refusals
 
+A refusal is a failed call (`isError: true`, `mutation.success: false`); the
+`error` object below is `mutation.error`, and `agentNextSteps` is the envelope's.
+
 | Code | When | Response |
 |---|---|---|
 | `input_backend_unavailable` | No backend can reach the project's input (for example `input_system` requested in a legacy-only project, or an Input System–only project without a `Touchscreen`) | `error.detected` holds the configuration (`activeInputHandler`, Input System package version, `touchscreen`, Editor version, Simulator/Game view state, focus requirement); `error.skipped` lists each backend's reason; `agentNextSteps` says what to do |

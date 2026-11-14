@@ -136,7 +136,7 @@ if save failed or a modal blocked the bridge.
   `ft_scene_created`, `ft_scene_active`, `active_scene_at_teardown`,
   `main_dirty_at_finalize`.
 - **Arguments stay schema-valid.** `--check-args` builds every step (placeholder
-  values for ids an earlier step captures) and validates it with the server's own
+  values for ids, names and paths an earlier step captures) and validates it with the server's own
   preflight (`withSchemaDefaults` + `validateSchema`) — no Unity needed; the
   `mcp-server` test suite runs it, so a schema change that breaks a step fails
   `npm test`. Band F reachability probes derive their arguments from each tool's

@@ -97,6 +97,13 @@ When extras is absent, the tool returns `tilemap_extras_required`.
 3. Preserve gate contracts on mutating tools (`paths_hint`, `IsMutating`,
    `Gate`, `Lifecycle`, idempotent/destructive hints) and JSON response schema
    parity with the MCP tool definition.
+   Refuse a call by returning `{"error":{"code":"…","message":"…"}}` (extra
+   members such as `candidates` are allowed inside `error`, and a top-level
+   `agentNextSteps` string array beside it). The registry reports that body as
+   a failed call — `mutation.success: false` with the object in
+   `mutation.error`, `isError: true`, a failed `batch_execute` step — so refuse
+   before changing anything, and never return a top-level `error` object from a
+   call that succeeded. Community packs follow the same contract.
 4. Mirror the layout for EditMode tests under
    `packages/bridge/Tests/Editor/TypedTools/<Domain>/` with their own gated
    test sub-asmdef.

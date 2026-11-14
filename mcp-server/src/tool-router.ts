@@ -2242,13 +2242,11 @@ export class ToolRouter implements Router {
       // GitHub tag check (an embedded or file: bridge install skips UPM, so it
       // must also work offline).
       const preview = await live.route("unity_open_mcp_upgrade", { ...forwarded, dry_run: true });
-      const previewBody = parseResultBody(preview);
-      const mutation = previewBody?.mutation;
-      const output = (mutation && typeof mutation === "object" ? (mutation as Record<string, unknown>).output : previewBody) as Record<string, unknown> | undefined;
-      if (preview.isError || (output && typeof output === "object" && output.error !== undefined)) {
+      const output = toolOutput(preview);
+      if (preview.isError || output.error !== undefined) {
         return injectRouteMeta(preview, { route: "live" });
       }
-      if (output && typeof output === "object" && output.upmEnabled === true) {
+      if (output.upmEnabled === true) {
         const version = String(forwarded.target_version);
         const tag = await releaseLookup.confirmBridgeTag(version);
         if (!tag.confirmed) {

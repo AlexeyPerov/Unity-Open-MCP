@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { setImmediate as tick } from "node:timers/promises";
 import { ProjectJobHttpError, type LiveClient } from "../live-client.js";
 import { JobManager } from "./job-manager.js";
-import { projectCommandOperation, testRunOperation, playmodeOperation, pollPlaymodeOperation, PLAYMODE_OPERATION_TOOLS } from "./adapters.js";
+import { projectCommandOperation, testRunOperation, playmodeOperation, pollPlaymodeOperation, toolOutput, PLAYMODE_OPERATION_TOOLS } from "./adapters.js";
 const owner = { project: "/project", agent: "test" };
 const catalog = { command: { available: true, async: true, cancellable: true, schemaVersion: "v1", inputSchema: { type: "object" } } };
 
@@ -237,7 +237,9 @@ function playmodeLive(states: Array<Record<string, unknown>>, options: { startEr
     route: async (tool: string, args: Record<string, unknown>) => {
       assert.equal(tool, GESTURE);
       calls.starts.push(args);
-      if (options.startError) return { ...text(options.startError), isError: true };
+      // A refused start is a failed gate envelope: the code and the tool's
+      // detail in mutation.error, its next steps on the envelope.
+      if (options.startError) return { ...text({ mutation: { success: false, output: null, error: options.startError.error }, gate: { skipped: true, skippedReason: "mutation_failed" }, agentNextSteps: options.startError.agentNextSteps ?? [] }), isError: true };
       // Registry tools answer inside the gate envelope.
       return text({ mutation: { success: true, output: { status: "ok", operation: { operation_id: args.operation_id, kind: GESTURE, state: "running", phase: "running" }, backend: ["legacy_touch"] }, error: null }, gate: { skipped: true } });
     },
@@ -315,14 +317,32 @@ test("play-mode job ended by exiting play mode fails with that reason", async t 
 
 test("play-mode start refusal keeps the bridge's code and detected configuration", async t => {
   const manager = new JobManager(); t.after(() => manager.close());
-  const refusal = { error: { code: "input_backend_unavailable", message: "none", detected: { activeInputHandler: 1 } } };
+  const refusal = { error: { code: "input_backend_unavailable", message: "none", detected: { activeInputHandler: 1 } }, agentNextSteps: ["Enable an input backend."] };
   const { live, calls } = playmodeLive([], { startError: refusal });
   manager.register(GESTURE, playmodeOperation(GESTURE, PLAYMODE_OPERATION_TOOLS.get(GESTURE)!, () => live, { pollIntervalMs: 1 }));
   const done = await manager.wait(owner, manager.start(owner, GESTURE, gestureArgs).job_id, 2000);
   assert.equal(done.state, "failed");
   assert.equal(done.error?.code, "input_backend_unavailable");
   assert.deepEqual((done.result as Record<string, any>).error.detected, { activeInputHandler: 1 });
+  assert.deepEqual((done.result as Record<string, any>).agentNextSteps, ["Enable an input backend."]);
   assert.equal(calls.status, 0);
+});
+
+test("toolOutput reads a tool's answer and its refusal from either response shape", () => {
+  const ok = text({ mutation: { success: true, output: { status: "ok", count: 2 }, error: null }, agentNextSteps: [] });
+  assert.deepEqual(toolOutput(ok), { status: "ok", count: 2 });
+
+  const error = { code: "ambiguous_target", message: "2 matches", candidates: ["A/Play", "B/Play"] };
+  const refused = text({ mutation: { success: false, output: null, error }, agentNextSteps: ["Pass target_index."] });
+  assert.deepEqual(toolOutput(refused), { error, agentNextSteps: ["Pass target_index."] });
+
+  // A failure that kept its output (a partial batch) carries both.
+  const partial = text({ mutation: { success: false, output: { batch: { callFailureCount: 1 } }, error: { code: "batch_partial_failure", message: "1 failed" } }, agentNextSteps: [] });
+  assert.deepEqual(toolOutput(partial), { batch: { callFailureCount: 1 }, error: { code: "batch_partial_failure", message: "1 failed" } });
+
+  // Direct bodies (gate-free tools, server-side errors) are already flat.
+  const direct = text({ error: { code: "scene_dirty", message: "save first" }, dirtyScenes: ["Assets/A.unity"] });
+  assert.deepEqual(toolOutput(direct), { error: { code: "scene_dirty", message: "save first" }, dirtyScenes: ["Assets/A.unity"] });
 });
 
 test("play-mode poll cancels once at the deadline so held input is released", async () => {

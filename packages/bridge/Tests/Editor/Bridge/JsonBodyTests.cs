@@ -334,5 +334,29 @@ namespace UnityOpenMcpBridge.Tests
             var scope = JsonBody.SelectorScope(body);
             Assert.AreEqual(111L, JsonBody.GetLongFlexible(scope, "instance_id", 0));
         }
+
+        [Test]
+        public static void GetTopLevelMembers_ReturnsDepthOnePairsVerbatim()
+        {
+            var members = JsonBody.GetTopLevelMembers(
+                " { \"a\" : 1 , \"b\":\"x, } y\",\"c\":{\"a\":[1,{\"b\":2}]}, \"d\":[\"]\",null],\"e\":null }");
+            Assert.IsNotNull(members);
+            Assert.AreEqual(5, members.Count);
+            Assert.AreEqual("a", members[0].Key); Assert.AreEqual("1", members[0].Value);
+            Assert.AreEqual("b", members[1].Key); Assert.AreEqual("\"x, } y\"", members[1].Value);
+            Assert.AreEqual("c", members[2].Key); Assert.AreEqual("{\"a\":[1,{\"b\":2}]}", members[2].Value);
+            Assert.AreEqual("d", members[3].Key); Assert.AreEqual("[\"]\",null]", members[3].Value);
+            Assert.AreEqual("e", members[4].Key); Assert.AreEqual("null", members[4].Value);
+        }
+
+        [Test]
+        public static void GetTopLevelMembers_NonObjects_ReturnNullAndEmptyObjectIsEmpty()
+        {
+            Assert.IsNull(JsonBody.GetTopLevelMembers(null));
+            Assert.IsNull(JsonBody.GetTopLevelMembers(""));
+            Assert.IsNull(JsonBody.GetTopLevelMembers("[{\"a\":1}]"));
+            Assert.IsNull(JsonBody.GetTopLevelMembers("\"text\""));
+            Assert.AreEqual(0, JsonBody.GetTopLevelMembers("{}").Count);
+        }
     }
 }

@@ -108,8 +108,10 @@ its schedule plus encoding — and returns that job snapshot; an `operation_id`
 passed to that direct call becomes the job's `idempotency_key`.
 
 The adapter starts the operation through the tool (the bridge validates, routes
-input and refuses as usual — a refusal is a `failed` job carrying the bridge's
-code and `error.detected` configuration), then polls `POST /playmode-operations`.
+input and refuses as usual — a refusal is a `failed` job: `error` carries the
+bridge's code and message, `result.error` the full refusal object with its detail
+such as `detected`, and `result.agentNextSteps` the tool's recovery steps), then
+polls `POST /playmode-operations`.
 Progress reports the scheduler phase and `elapsedMs / expectedMs` as a fraction;
 the operation snapshot names the clock of `progress.elapsedMs` as
 `progress.clock` (`realtime` for a wait, whose `timeout_ms` is wall-clock). The

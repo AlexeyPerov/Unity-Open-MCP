@@ -184,8 +184,15 @@ test("a lost settle watch (reload) and a deadline cancel are both not_settled", 
 });
 
 test("bridge refusals pass through untouched", async () => {
-  const { live } = fakeLive({ start: { error: { code: "unsupported_editor_version", message: "2022.3" } } });
+  const error = { code: "device_not_found", message: "No device matches 'x'.", available: 11 };
+  const refused: CallToolResult = { content: [{ type: "text", text: JSON.stringify({ mutation: { success: false, output: null, error }, logs: [] }) }], isError: true };
+  let polls = 0;
+  const live = { route: async () => refused, playmodeOperation: async () => { polls++; return {}; } } as unknown as LiveClient;
   const r = await routeGameView(live, { action: "set_device", device: "x" });
   assert.equal(r.kind, "passthrough");
-  if (r.kind === "passthrough") assert.equal(body(r.result).mutation.output.error.code, "unsupported_editor_version");
+  if (r.kind === "passthrough") {
+    assert.equal(r.result.isError, true);
+    assert.deepEqual(body(r.result).mutation.error, error);
+  }
+  assert.equal(polls, 0, "a refused set starts no settle poll");
 });

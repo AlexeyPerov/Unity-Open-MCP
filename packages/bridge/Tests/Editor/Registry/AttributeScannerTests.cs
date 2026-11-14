@@ -175,6 +175,35 @@ namespace UnityOpenMcpBridge.Tests
         }
     }
 
+    namespace TestFixtureL
+    {
+        // String-returning tools (every embedded domain and extension pack)
+        // report a refusal as the JSON body {"error":{"code":…,"message":…}}.
+        [BridgeToolType]
+        public class Tool_Refusing
+        {
+            internal const string Plain =
+                "{\"error\":{\"code\":\"play_mode_required\",\"message\":\"Enter play mode first.\"}}";
+            internal const string Detailed =
+                "{\"error\":{\"code\":\"ambiguous_target\",\"message\":\"2 matches\",\"candidates\":[\"A/Play\",\"B/Play\"]}," +
+                "\"agentNextSteps\":[\"Pass target_index.\"]}";
+            internal const string Fine = "{\"status\":\"ok\",\"errors\":[],\"last\":{\"error\":null}}";
+
+            internal static int MutationCalls;
+
+            [BridgeTool("test_refusing_tool")]
+            public string Refuse(string kind = "plain")
+                => kind == "detailed" ? Detailed : kind == "ok" ? Fine : Plain;
+
+            [BridgeTool("test_refusing_mutation_tool", IsMutating = true, Gate = GateMode.Enforce)]
+            public string RefuseMutation(string[] paths_hint = null)
+            {
+                MutationCalls++;
+                return Detailed;
+            }
+        }
+    }
+
     public class AttributeScannerTests
     {
         // The [BridgeTool] / [BridgeResource] fixtures above live in this test
@@ -291,6 +320,84 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(result.Success, "Dispatch must fail when a required parameter is missing");
             Assert.AreEqual("missing_parameter", result.ErrorCode);
         }
+
+        // A refusal body returned by a string tool is a failed dispatch, so the
+        // gate envelope, a batch step, the activity log and the audit record all
+        // see a failure — not an error object inside a success.
+        [Test]
+        public static void TryDispatch_RefusalBody_IsFailedDispatch()
+        {
+            var result = BridgeToolRegistry.TryDispatch("test_refusing_tool", "{}");
+            Assert.IsNotNull(result);
+            Assert.IsFalse(result.Success, "a returned {\"error\":{code,…}} body must not read as success");
+            Assert.AreEqual("play_mode_required", result.ErrorCode);
+            Assert.AreEqual("Enter play mode first.", result.ErrorMessage);
+            Assert.IsNull(result.Output);
+            Assert.IsFalse(result.PartialCommit);
+        }
+
+        [Test]
+        public static void TryDispatch_RefusalBody_KeepsDetailAndNextSteps()
+        {
+            var result = BridgeToolRegistry.TryDispatch("test_refusing_tool", "{\"kind\":\"detailed\"}");
+            Assert.IsNotNull(result);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("ambiguous_target", result.ErrorCode);
+            Assert.AreEqual("{\"candidates\":[\"A/Play\",\"B/Play\"]}", result.ErrorDetailJson);
+            CollectionAssert.AreEqual(new[] { "Pass target_index." }, result.NextSteps);
+            // Gate-free tools answer with the body exactly as the tool wrote it.
+            Assert.AreEqual(TestFixtureL.Tool_Refusing.Detailed, result.RefusalBody);
+        }
+
+        [Test]
+        public static void TryDispatch_OutputMentioningErrors_StaysSuccess()
+        {
+            var result = BridgeToolRegistry.TryDispatch("test_refusing_tool", "{\"kind\":\"ok\"}");
+            Assert.IsNotNull(result);
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual(TestFixtureL.Tool_Refusing.Fine, result.Output);
+        }
+
+        [Test]
+        public static void GateDispatch_RefusedReadOnlyTool_IsFailedMutationWithItsNextSteps()
+        {
+            var result = DispatchWithGate("test_refusing_tool", "{\"kind\":\"detailed\"}", "enforce", null);
+            Assert.IsFalse(result.Mutation.Success);
+            Assert.AreEqual("ambiguous_target", result.Mutation.ErrorCode);
+            Assert.IsFalse(result.GateRan);
+            Assert.AreEqual("mutation_failed", result.SkippedReason);
+            CollectionAssert.AreEqual(new[] { "Pass target_index." }, result.AgentNextSteps);
+
+            var json = BridgeJson.BuildGateEnvelope(result, "enforce", LifecyclePolicy.None);
+            StringAssert.Contains(
+                "\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"ambiguous_target\",\"message\":\"2 matches\",\"candidates\":[\"A/Play\",\"B/Play\"]}}",
+                json);
+            StringAssert.Contains("\"agentNextSteps\":[\"Pass target_index.\"]", json);
+        }
+
+        // A refused mutating tool validates nothing: the gate reports the
+        // mutation failure and the tool's own next steps on every gate path.
+        [TestCase("off", true)]
+        [TestCase("enforce", false)]
+        public static void GateDispatch_RefusedMutatingTool_RunsNoGate(string gateMode, bool scoped)
+        {
+            TestFixtureL.Tool_Refusing.MutationCalls = 0;
+            var result = DispatchWithGate("test_refusing_mutation_tool", "{}", gateMode,
+                scoped ? new[] { "Assets/__mcp_refusal_probe__" } : null);
+            Assert.AreEqual(1, TestFixtureL.Tool_Refusing.MutationCalls);
+            Assert.IsFalse(result.Mutation.Success);
+            Assert.AreEqual("ambiguous_target", result.Mutation.ErrorCode);
+            Assert.IsFalse(result.GateRan);
+            Assert.IsFalse(result.GateFailed);
+            Assert.IsNull(result.Delta);
+            Assert.AreEqual("mutation_failed", result.SkippedReason);
+            CollectionAssert.AreEqual(new[] { "Pass target_index." }, result.AgentNextSteps);
+        }
+
+        private static GateDispatchResult DispatchWithGate(string tool, string body, string gateMode, string[] pathsHint)
+            => (GateDispatchResult)typeof(BridgeHttpServer)
+                .GetMethod("DispatchWithGateCore", BindingFlags.NonPublic | BindingFlags.Static)
+                .Invoke(null, new object[] { tool, body, gateMode, pathsHint });
 
         // feedback (2026-08-17, editor_status uncallable) — the transport
         // envelope keys (gate / timeout_ms / ignore_scene_dirty /

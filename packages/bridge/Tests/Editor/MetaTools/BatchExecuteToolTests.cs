@@ -602,6 +602,52 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         // -------------------------------------------------------------------
+        // A nested registry tool that refuses with its own {"error":{…}} body is
+        // a failed step: counted as a failure, reported with its code, and it
+        // stops the batch under fail_fast.
+        // -------------------------------------------------------------------
+
+        private const string RefusedSpatialStep =
+            "{\"tool\":\"unity_senses_spatial_query\",\"params\":{\"action\":\"bounds\",\"name\":\"__MCPTest_Batch_NoSuchObject\"}}";
+
+        [Test]
+        public void Execute_RefusedRegistryStep_FailFast_StopsTheBatch()
+        {
+            var body = "{\"commands\":[" + RefusedSpatialStep + "," +
+                       "{\"tool\":\"unity_open_mcp_gameobject_create\",\"params\":{\"name\":\"" + CleanupPrefix + "AfterRefusal\"}}" +
+                       "],\"fail_fast\":true}";
+
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success, "a refused nested step must fail the batch");
+            Assert.AreEqual("batch_partial_failure", result.ErrorCode);
+            Assert.IsFalse(result.PartialCommit, "nothing committed before the refusal");
+            StringAssert.Contains("\"success\":false,\"callSuccessCount\":0,\"callFailureCount\":1", result.Output);
+            StringAssert.Contains(
+                "{\"index\":0,\"tool\":\"unity_senses_spatial_query\",\"status\":\"failed\",\"error\":{\"code\":\"target_not_found\"",
+                result.Output);
+            StringAssert.Contains("{\"index\":1,\"tool\":\"unity_open_mcp_gameobject_create\",\"status\":\"skipped\"}", result.Output);
+            Assert.IsNull(GameObject.Find(CleanupPrefix + "AfterRefusal"), "the step after the refusal must not run");
+        }
+
+        [Test]
+        public void Execute_RefusedRegistryStep_FailFastFalse_RunsTheRestAndCountsTheFailure()
+        {
+            var body = "{\"commands\":[" + RefusedSpatialStep + "," +
+                       "{\"tool\":\"unity_open_mcp_gameobject_create\",\"params\":{\"name\":\"" + CleanupPrefix + "AfterRefusal2\"}}" +
+                       "],\"fail_fast\":false}";
+
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success);
+            Assert.IsTrue(result.PartialCommit, "the committed step still needs the gate's health check");
+            StringAssert.Contains("\"success\":false,\"callSuccessCount\":1,\"callFailureCount\":1", result.Output);
+            Assert.AreEqual(1, Regex.Matches(result.Output, "\"status\":\"failed\"").Count);
+            Assert.AreEqual(0, Regex.Matches(result.Output, "\"status\":\"skipped\"").Count);
+            StringAssert.Contains("\"error\":{\"code\":\"target_not_found\"", result.Output);
+            StringAssert.DoesNotContain("\"output\":{\"error\"", result.Output);
+            Assert.IsNotNull(GameObject.Find(CleanupPrefix + "AfterRefusal2"));
+        }
+
+        // -------------------------------------------------------------------
         // fail_fast: false — runs every step, collects per-step errors
         // -------------------------------------------------------------------
 

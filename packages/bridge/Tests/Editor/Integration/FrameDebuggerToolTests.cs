@@ -50,15 +50,14 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void FrameDebugger_RejectsUnknownAction()
         {
-            // The tool returns a JSON error string (does not throw), so dispatch
-            // reports Success=true with an "error" object in the body.
+            // The tool returns its refusal as a JSON error body (does not
+            // throw); the registry reports that as a failed dispatch.
             var dispatch = BridgeToolRegistry.TryDispatch(
                 "unity_senses_frame_debugger",
                 "{\"action\":\"bogus\"}");
             Assert.IsNotNull(dispatch, "frame_debugger should dispatch via the registry");
-            Assert.IsTrue(dispatch.Success, "frame_debugger should return a JSON result (not throw)");
-            Assert.IsNotNull(dispatch.Output, "frame_debugger should return JSON output");
-            Assert.IsTrue(dispatch.Output.Contains("\"validation_error\""),
+            Assert.IsFalse(dispatch.Success, "a refusal is a failed dispatch");
+            Assert.AreEqual("validation_error", dispatch.ErrorCode,
                 "frame_debugger with an unknown action should return a validation_error");
         }
 
@@ -67,23 +66,22 @@ namespace UnityOpenMcpBridge.Tests
         {
             // Dispatch the list action. The Frame Debugger may be unavailable
             // (reflection misses the API on some Unity builds) or have no
-            // captured frame — either way the dispatch must succeed and return
-            // a JSON envelope (error payload or status:ok). We don't pin the
-            // live capture here; CI exercises that path.
+            // captured frame — either way the dispatch must answer with the
+            // tool's own result: status:ok, or a refusal carrying the tool's
+            // code. We don't pin the live capture here; CI exercises that path.
             var dispatch = BridgeToolRegistry.TryDispatch(
                 "unity_senses_frame_debugger",
                 "{\"action\":\"list\",\"max_draw_calls\":8}");
             Assert.IsNotNull(dispatch, "frame_debugger should dispatch via the registry");
-            Assert.IsTrue(dispatch.Success, "frame_debugger should return a JSON result (not throw)");
-            Assert.IsNotNull(dispatch.Output, "frame_debugger should return JSON output");
 
-            // The envelope must be one of: error (api unavailable / no captured
-            // frame) or status:ok (list returned). It must never be empty or
-            // a raw thrown exception.
-            var output = dispatch.Output;
-            Assert.IsTrue(
-                output.Contains("\"error\"") || output.Contains("\"status\":\"ok\""),
-                "frame_debugger list output should be an error or status:ok envelope: " + output);
+            // It must never be empty or a raw thrown exception.
+            if (dispatch.Success)
+                StringAssert.Contains("\"status\":\"ok\"", dispatch.Output);
+            else
+            {
+                Assert.AreNotEqual("execution_error", dispatch.ErrorCode, dispatch.ErrorMessage);
+                Assert.IsNotNull(dispatch.RefusalBody, "a refusal keeps the tool's own error body");
+            }
         }
     }
 }

@@ -30,9 +30,13 @@ namespace UnityOpenMcpBridge.MetaTools
 
             var result = filtered.Result;
 
+            // A failed result, so a nested batch step reads as failed; the
+            // direct response is this body as written.
             if (result.HasUnknownRules)
-                return ToolDispatchResult.Ok(
-                    BuildUnknownRulesError(result.UnknownRuleIds, result.AvailableRuleIds));
+            {
+                var refusal = BuildUnknownRulesError(result.UnknownRuleIds, result.AvailableRuleIds);
+                return ToolDispatchResult.FromRefusalBody(refusal) ?? ToolDispatchResult.Ok(refusal);
+            }
 
             return ToolDispatchResult.Ok(BuildResult(result, filtered.RulesApplied));
         }

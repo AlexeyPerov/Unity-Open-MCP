@@ -21,6 +21,10 @@ namespace UnityOpenMcpExtensions.Template
     //      `string[] pathsHint` parameter (the snake_case `paths_hint` field
     //      is bound by name). Read-only tools set ReadOnlyHint = true,
     //      Gate = GateMode.Off.
+    //   5. To refuse a call, return {"error":{"code":"…","message":"…"}} (see
+    //      ErrorJson below) before changing anything. The bridge reports that
+    //      body as a failed call: mutation.success false, the object in
+    //      mutation.error, isError true, a failed batch_execute step.
     //
     // Copy this class, rename the namespace, change the tool id, and put your
     // domain code inside the method body. See packages/extensions/navigation

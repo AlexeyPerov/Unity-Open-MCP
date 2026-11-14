@@ -208,16 +208,18 @@ namespace UnityOpenMcpBridge
                 var instance = entry.GetInstance();
                 var result = entry.Method.Invoke(instance, args);
 
-                // A tool that returns its own ToolDispatchResult reports a
-                // refusal as a failed mutation (mutation.success:false with a
-                // stable code) instead of an error object inside a success.
+                // A refusal is a failed dispatch (mutation.success:false with a
+                // stable code), never an error object inside a success. A tool
+                // reports one either by returning its own ToolDispatchResult or
+                // by returning the `{"error":{"code":…,"message":…}}` body, which
+                // every string-returning tool (extension packs included) uses.
                 if (result is ToolDispatchResult direct) return direct;
 
                 var output = result?.ToString();
                 if (result != null && output == null)
                     output = JsonBody.GetRawValue(result.ToString(), "");
 
-                return ToolDispatchResult.Ok(output);
+                return ToolDispatchResult.FromRefusalBody(output) ?? ToolDispatchResult.Ok(output);
             }
             catch (TargetInvocationException tie)
             {

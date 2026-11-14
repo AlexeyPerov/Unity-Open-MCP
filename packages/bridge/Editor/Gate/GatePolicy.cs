@@ -193,7 +193,8 @@ namespace UnityOpenMcpBridge
                     GateRan = false,
                     Outcome = GateOutcome.Skipped,
                     SkippedReason = noPathResult.Success ? "no_scope" : "mutation_failed",
-                    GateFailed = false
+                    GateFailed = false,
+                    AgentNextSteps = noPathResult.Success ? null : noPathResult.NextSteps
                 };
             }
 

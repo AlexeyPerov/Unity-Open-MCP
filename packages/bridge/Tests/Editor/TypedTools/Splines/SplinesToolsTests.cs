@@ -102,9 +102,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.SplinesExt
                 "unity_open_mcp_splines_container_create",
                 "{\"name\":\"NoHintContainer\"}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success); // invocation succeeded; refusal is in Output.
-            StringAssert.Contains("\"error\"", result.Output);
-            StringAssert.Contains("paths_hint_required", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
 
         [Test]
@@ -114,8 +113,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.SplinesExt
                 "unity_open_mcp_splines_add_knot",
                 "{\"position\":\"0,0,0\"}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("paths_hint_required", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
 
         // -----------------------------------------------------------------
@@ -134,8 +133,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.SplinesExt
                     "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
-                Assert.IsTrue(result.Success);
-                StringAssert.Contains("missing_parameter", result.Output);
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("missing_parameter", result.ErrorCode);
             }
             finally
             {
@@ -155,8 +154,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.SplinesExt
                     ",\"position\":\"0,0,0\"" +
                     ",\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
-                Assert.IsTrue(result.Success);
-                StringAssert.Contains("component_not_found", result.Output);
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("component_not_found", result.ErrorCode);
             }
             finally
             {
@@ -177,8 +176,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.SplinesExt
                     ",\"tangent_mode\":\"NotAMode\"" +
                     ",\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
-                Assert.IsTrue(result.Success);
-                StringAssert.Contains("invalid_tangent_mode", result.Output);
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("invalid_tangent_mode", result.ErrorCode);
             }
             finally
             {
@@ -253,8 +252,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.SplinesExt
                     "unity_open_mcp_splines_evaluate",
                     "{\"instance_id\":" +InstanceId.Of(go) + ",\"t\":0.5}");
                 Assert.IsNotNull(result);
-                Assert.IsTrue(result.Success);
-                StringAssert.Contains("spline_too_short", result.Output);
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("spline_too_short", result.ErrorCode);
             }
             finally
             {

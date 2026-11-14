@@ -250,18 +250,18 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ShaderGraphExt
                 "\"shader_type\":\"Unlit\"," +
                 "\"paths_hint\":[\"" + tempAssetPath + "\"]}");
             Assert.IsNotNull(create);
-            Assert.IsTrue(create.Success, create.ErrorMessage ?? create.Output);
 
             // The create surface is environment-dependent. When it cannot reach
-            // the package creation API, it returns a structured shadergraph_*
-            // error envelope (not a throw). Assert that either the asset was
+            // the package creation API, it refuses with a structured
+            // shadergraph_* code (not a throw). Assert that either the asset was
             // created OR the refusal is a documented structured error — never a
             // silent crash.
             var created = AssetDatabase.LoadAssetAtPath<Object>(tempAssetPath) != null;
             if (!created)
             {
-                Assert.IsTrue(create.Output.Contains("shadergraph_"),
-                    $"Unexpected non-structured create failure: {create.Output}");
+                Assert.IsFalse(create.Success, create.Output);
+                StringAssert.StartsWith("shadergraph_", create.ErrorCode,
+                    $"Unexpected non-structured create failure: {create.ErrorMessage}");
                 // The create surface is environment-dependent (menu/GraphUtil
                 // creation needs the Editor's Assets/Create menu wired and a
                 // writable Assets folder). When it cannot reach the package
@@ -272,9 +272,10 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ShaderGraphExt
                 // surface regardless of the host environment.
                 Assert.Ignore(
                     "Shader Graph create surface unavailable in this environment " +
-                    $"(structured error in Output) — round-trip halted at create. " +
+                    $"({create.ErrorCode}) — round-trip halted at create. " +
                     "Refusal-path coverage above still pins the model surface.");
             }
+            Assert.IsTrue(create.Success, create.ErrorMessage ?? create.Output);
 
             // open (read-only) — returns a structured summary parsed from the
             // .shadergraph JSON. The asset exists now, so this must succeed.
@@ -298,12 +299,12 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ShaderGraphExt
                 "\"position\":\"100,100\"," +
                 "\"paths_hint\":[\"" + tempAssetPath + "\"]}");
             Assert.IsNotNull(nodeAdd);
-            Assert.IsTrue(nodeAdd.Success, nodeAdd.ErrorMessage ?? nodeAdd.Output);
-            Assert.IsTrue(
-                nodeAdd.Output.Contains("\"status\":\"ok\"") ||
-                nodeAdd.Output.Contains("shadergraph_") ||
-                nodeAdd.Output.Contains("unknown_node_type"),
-                $"Unexpected node_add output: {nodeAdd.Output}");
+            if (nodeAdd.Success)
+                StringAssert.Contains("\"status\":\"ok\"", nodeAdd.Output);
+            else
+                Assert.IsTrue(
+                    nodeAdd.ErrorCode.StartsWith("shadergraph_") || nodeAdd.ErrorCode == "unknown_node_type",
+                    $"Unexpected node_add refusal: {nodeAdd.ErrorCode}: {nodeAdd.ErrorMessage}");
         }
 
         // -----------------------------------------------------------------
@@ -313,11 +314,9 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ShaderGraphExt
         private static void AssertEnvelope(ToolDispatchResult result, string expectedCode)
         {
             Assert.IsNotNull(result);
-            // invocation succeeded; the refusal is carried in Output as a JSON
-            // error envelope.
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("\"error\"", result.Output);
-            StringAssert.Contains(expectedCode, result.Output);
+            // The tool's JSON error body is reported as a failed dispatch.
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual(expectedCode, result.ErrorCode);
         }
     }
 }

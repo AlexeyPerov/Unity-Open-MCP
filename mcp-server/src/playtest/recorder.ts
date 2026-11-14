@@ -246,7 +246,7 @@ export class PlaytestRecorder {
     const end = this.now();
     const body = result ? toolResultBody(result) : {};
     const output = result ? toolOutput(result) : {};
-    const error = (output.error ?? body.error) as { code?: string; message?: string } | undefined;
+    const error = output.error as { code?: string; message?: string } | undefined;
     const jobId = typeof body.job_id === "string" ? body.job_id : undefined;
     const status = thrown ? "error" : result?.isError || error ? "error" : jobId && !TERMINAL_JOB_STATES.has(String(body.state)) ? "job_started" : "ok";
     const { errors, total, responseOnly } = this.collectErrors(session, handle.start, end, output, body);
@@ -375,7 +375,7 @@ export class PlaytestRecorder {
       const result = await call("unity_open_mcp_player_state", { action: "snapshot", name: snapshotName });
       const out = toolOutput(result);
       if (result.isError || out.error) {
-        const failure = (out.error ?? toolResultBody(result).error ?? {}) as { code?: string; message?: string };
+        const failure = (out.error ?? {}) as { code?: string; message?: string };
         throw new PlaytestError("snapshot_failed",
           `The player-state snapshot failed (${failure.code ?? "error"}): ${failure.message ?? "no detail"}. No session was started.`,
           { snapshot_error: failure });
@@ -485,7 +485,7 @@ export class PlaytestRecorder {
         const result = await call("unity_open_mcp_player_state", { action: "diff", name: session.meta.snapshot.name, limit: 200 });
         const out = toolOutput(result);
         stateDiff = result.isError || out.error
-          ? { ok: false, error: out.error ?? toolResultBody(result).error ?? { code: "diff_failed" } }
+          ? { ok: false, error: out.error ?? { code: "diff_failed" } }
           : { ok: true, output: out };
       } catch (error) {
         stateDiff = { ok: false, error: { code: "diff_failed", message: error instanceof Error ? error.message : String(error) } };

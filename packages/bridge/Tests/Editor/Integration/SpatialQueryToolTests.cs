@@ -42,12 +42,10 @@ namespace UnityOpenMcpBridge.Tests
             var result = BridgeToolRegistry.TryDispatch("unity_senses_spatial_query", "{\"action\":\"bogus\"}");
 
             Assert.IsNotNull(result, "Dispatch should return a result");
-            Assert.IsTrue(result.Success, "Dispatch should succeed (error is in-payload)");
-            Assert.IsNotNull(result.Output, "Output should not be null");
-            StringAssert.Contains("\"error\"", result.Output,
-                "Output should be an error payload");
-            StringAssert.Contains("unknown_action", result.Output,
-                "Error code should be unknown_action");
+            Assert.IsFalse(result.Success, "A refusal is a failed dispatch");
+            Assert.AreEqual("unknown_action", result.ErrorCode);
+            StringAssert.Contains("\"error\"", result.RefusalBody,
+                "The gate-free response is the tool's own error payload");
         }
 
         [Test]
@@ -56,9 +54,8 @@ namespace UnityOpenMcpBridge.Tests
             var result = BridgeToolRegistry.TryDispatch("unity_senses_spatial_query", "{}");
 
             Assert.IsNotNull(result, "Dispatch should return a result");
-            Assert.IsTrue(result.Success, "Dispatch should succeed (error is in-payload)");
-            Assert.IsNotNull(result.Output, "Output should not be null");
-            StringAssert.Contains("unknown_action", result.Output,
+            Assert.IsFalse(result.Success, "A refusal is a failed dispatch");
+            Assert.AreEqual("unknown_action", result.ErrorCode,
                 "Missing action should surface unknown_action");
         }
 
@@ -70,8 +67,8 @@ namespace UnityOpenMcpBridge.Tests
                 "{\"action\":\"raycast\",\"direction\":\"0,-1,0\"}");
 
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("missing_parameter", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("missing_parameter", result.ErrorCode);
         }
 
         [Test]
@@ -85,11 +82,10 @@ namespace UnityOpenMcpBridge.Tests
                 "{\"action\":\"bounds\",\"instance_id\":\"568105589213726936\"}");
 
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success, "Dispatch should succeed (error is in-payload)");
-            Assert.IsNotNull(result.Output);
-            StringAssert.DoesNotContain("cannot be converted to type 'System.Int64'", result.Output);
+            StringAssert.DoesNotContain("cannot be converted to type 'System.Int64'", result.ErrorMessage ?? "");
             // No such GO in an empty test host — target_not_found is the happy path.
-            StringAssert.Contains("target_not_found", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("target_not_found", result.ErrorCode);
         }
     }
 }

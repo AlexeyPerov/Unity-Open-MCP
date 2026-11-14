@@ -461,6 +461,35 @@ namespace UnityOpenMcpBridge
             return keys.Count == 0 ? null : keys;
         }
 
+        // The depth-1 members of a JSON object as (unescaped key, raw value)
+        // pairs in encounter order; null when `json` is not an object. Nested
+        // values are skipped, not parsed, so a large payload costs one scan.
+        internal static List<KeyValuePair<string, string>> GetTopLevelMembers(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return null;
+            int i = 0;
+            while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
+            if (i >= json.Length || json[i] != '{') return null;
+            i++;
+            var members = new List<KeyValuePair<string, string>>();
+            while (i < json.Length)
+            {
+                while (i < json.Length && (char.IsWhiteSpace(json[i]) || json[i] == ',')) i++;
+                if (i >= json.Length || json[i] != '"') break;
+                i++;
+                var name = ReadQuotedString(json, ref i);
+                while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
+                if (i >= json.Length || json[i] != ':') return null;
+                i++;
+                while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
+                int start = i;
+                i = ScanValueEnd(json, i);
+                if (i <= start) return null;
+                members.Add(new KeyValuePair<string, string>(name, json.Substring(start, i - start).TrimEnd()));
+            }
+            return members;
+        }
+
         public static List<object> ParseArgsArray(string json, string key)
         {
             var raw = GetRawValue(json, key);

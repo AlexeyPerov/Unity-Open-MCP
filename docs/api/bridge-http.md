@@ -197,8 +197,18 @@ scope; see [Restore](playtest.md#restore).
 A failed mutation before validation has `gate.outcome: "skipped"`,
 `skippedReason: "mutation_failed"`, `skipped: true`, and null `validation` and
 `delta`. A completed checkpoint ID remains available. A refusal that names what
-to do instead carries it in `agentNextSteps` (read-only and gate-off calls
-included). Gate failure counters do
+to do instead carries it in `agentNextSteps` (read-only, gate-off and
+no-scope calls included). A registry tool reports a refusal either by returning
+a failed dispatch result or by returning the JSON body
+`{"error":{"code":"…","message":"…",…}}`; the dispatcher reads that body as the
+same failed mutation — `mutation.success: false`, `mutation.output: null`, the
+`error` object's members in `mutation.error` (any other top-level member of the
+body is added to it; an `error` member of the same name wins), and a top-level
+`agentNextSteps` string array as the envelope's `agentNextSteps`. Only a
+top-level `error` object with a string `code` counts; a nested one, or an
+`error` string or number, is ordinary output. Direct-response tools answer with
+the body as the tool wrote it. A refused `batch_execute` step is reported the
+same way (`status: "failed"`, `error`, `agentNextSteps`). Gate failure counters do
 not count such failures; activity still records the failed operation. A partial
 batch validates committed mutations and reports the actual validation outcome
 independently of `mutation.success`. Existing delta and next-step fields remain.

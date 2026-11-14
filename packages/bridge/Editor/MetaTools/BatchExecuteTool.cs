@@ -582,6 +582,8 @@ namespace UnityOpenMcpBridge.MetaTools
                             Status = "failed",
                             ErrorCode = stepResult.ErrorCode,
                             ErrorMessage = stepResult.ErrorMessage,
+                            ErrorDetailJson = stepResult.ErrorDetailJson,
+                            NextSteps = stepResult.NextSteps,
                         });
                         if (failFast)
                         {
@@ -743,6 +745,10 @@ namespace UnityOpenMcpBridge.MetaTools
             public string Output; // raw JSON object (success only)
             public string ErrorCode;
             public string ErrorMessage;
+            // A refused step's structured detail (members of its `error`) and
+            // its own next steps, as on a top-level call.
+            public string ErrorDetailJson;
+            public string[] NextSteps;
 
             public void WriteJson(StringBuilder sb)
             {
@@ -780,7 +786,19 @@ namespace UnityOpenMcpBridge.MetaTools
                     BridgeJson.EscapeStringContentTo(sb, ErrorCode);
                     sb.Append("\",\"message\":\"");
                     BridgeJson.EscapeStringContentTo(sb, ErrorMessage ?? "");
-                    sb.Append("\"}");
+                    sb.Append('"');
+                    BridgeJson.AppendErrorDetail(sb, ErrorDetailJson);
+                    sb.Append('}');
+                    if (NextSteps != null && NextSteps.Length > 0)
+                    {
+                        sb.Append(",\"agentNextSteps\":[");
+                        for (int i = 0; i < NextSteps.Length; i++)
+                        {
+                            if (i > 0) sb.Append(',');
+                            sb.Append(BridgeJson.EscapeString(NextSteps[i]));
+                        }
+                        sb.Append(']');
+                    }
                 }
                 sb.Append('}');
             }

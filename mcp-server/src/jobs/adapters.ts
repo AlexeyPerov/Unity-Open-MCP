@@ -206,17 +206,23 @@ export function toolResultBody(result: CallToolResult): Record<string, any> {
 }
 
 /**
- * The tool's own output: registry tools answer inside the gate envelope
- * (`mutation.output` / `mutation.error`); other shapes are returned as-is.
+ * The tool's own answer, whichever shape carried it. A gate envelope yields
+ * `mutation.output`; when the call was refused it also yields the refusal as
+ * `error` (`mutation.error`: code, message and the tool's detail members) plus
+ * the envelope's `agentNextSteps`. A direct body is returned as-is, so its
+ * top-level `error` reads the same way. Every route that needs to know what a
+ * tool answered or why it refused goes through here.
  */
 export function toolOutput(result: CallToolResult): Record<string, any> {
   const body = toolResultBody(result);
   const mutation = body.mutation;
-  if (mutation && typeof mutation === "object") {
-    if (mutation.output && typeof mutation.output === "object") return mutation.output as Record<string, any>;
-    if (mutation.error) return { error: mutation.error };
+  if (!mutation || typeof mutation !== "object") return body;
+  const output = mutation.output && typeof mutation.output === "object" ? mutation.output as Record<string, any> : null;
+  if (mutation.error) {
+    const steps = Array.isArray(body.agentNextSteps) && body.agentNextSteps.length ? { agentNextSteps: body.agentNextSteps } : {};
+    return { ...(output && !Array.isArray(output) ? output : {}), error: mutation.error, ...steps };
   }
-  return body;
+  return output ?? body;
 }
 
 export type PlaymodePollOutcome =

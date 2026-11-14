@@ -106,9 +106,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.CinemachineExt
                 "unity_open_mcp_cinemachine_create_camera",
                 "{\"name\":\"NoHintCamera\"}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success); // invocation succeeded; refusal is in Output.
-            StringAssert.Contains("\"error\"", result.Output);
-            StringAssert.Contains("paths_hint_required", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
 
         [Test]
@@ -118,8 +117,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.CinemachineExt
                 "unity_open_mcp_cinemachine_set_targets",
                 "{\"follow_path\":\"Player\"}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("paths_hint_required", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
 
         [Test]
@@ -129,8 +128,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.CinemachineExt
                 "unity_open_mcp_cinemachine_set_lens",
                 "{\"field_of_view\":60}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("paths_hint_required", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
 
         [Test]
@@ -140,8 +139,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.CinemachineExt
                 "unity_open_mcp_cinemachine_brain_ensure",
                 "{}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("paths_hint_required", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
 
         // -----------------------------------------------------------------
@@ -162,15 +161,13 @@ namespace UnityOpenMcpBridge.Tests.Extensions.CinemachineExt
                     "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
-                Assert.IsTrue(result.Success);
+                Assert.IsFalse(result.Success);
                 // Either Cinemachine is missing (cinemachine_package_required /
                 // cinemachine_3x_required) or it is present and the tool refuses
                 // for missing_parameter.
-                Assert.IsTrue(
-                    result.Output.Contains("cinemachine_package_required") ||
-                    result.Output.Contains("cinemachine_3x_required") ||
-                    result.Output.Contains("missing_parameter"),
-                    $"Unexpected output: {result.Output}");
+                CollectionAssert.Contains(
+                    new[] { "cinemachine_package_required", "cinemachine_3x_required", "missing_parameter" },
+                    result.ErrorCode, $"Unexpected refusal: {result.ErrorMessage}");
             }
             finally
             {
@@ -189,12 +186,10 @@ namespace UnityOpenMcpBridge.Tests.Extensions.CinemachineExt
                     "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
-                Assert.IsTrue(result.Success);
-                Assert.IsTrue(
-                    result.Output.Contains("cinemachine_package_required") ||
-                    result.Output.Contains("cinemachine_3x_required") ||
-                    result.Output.Contains("missing_parameter"),
-                    $"Unexpected output: {result.Output}");
+                Assert.IsFalse(result.Success);
+                CollectionAssert.Contains(
+                    new[] { "cinemachine_package_required", "cinemachine_3x_required", "missing_parameter" },
+                    result.ErrorCode, $"Unexpected refusal: {result.ErrorMessage}");
             }
             finally
             {

@@ -235,11 +235,9 @@ namespace UnityOpenMcpBridge.Tests.Extensions.VFXExt
         private static void AssertEnvelope(ToolDispatchResult result, string expectedCode)
         {
             Assert.IsNotNull(result);
-            // invocation succeeded; the refusal is carried in Output as a JSON
-            // error envelope.
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("\"error\"", result.Output);
-            StringAssert.Contains(expectedCode, result.Output);
+            // The tool's JSON error body is reported as a failed dispatch.
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual(expectedCode, result.ErrorCode);
         }
     }
 }

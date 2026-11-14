@@ -752,6 +752,12 @@ is full are dropped, and the report says how many.
 
 ## Errors
 
+Each of these is a failed call: `isError: true`, `mutation.success: false`, and
+the code, message and any detail named below in `mutation.error` (see
+[tool refusals](mcp-tools.md#mutation-and-gate-contract)). Errors the MCP server
+raises itself (`not_settled`, a stalled wait, session errors) are a flat
+top-level `error`.
+
 | Code | When |
 |---|---|
 | `invalid_arguments` | `ui_snapshot`: unknown `profile` / `role`, invalid `placeholder_pattern`, `min_touch_size` ≤ 0. `game_view`: unknown action, width/height out of range or without the other, width/height together with `size_label`, an orientation the device does not support, `settle_timeout_ms` out of range |

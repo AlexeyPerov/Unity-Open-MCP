@@ -1681,7 +1681,9 @@ namespace UnityOpenMcpBridge
                 if (result.Success && result.Output != null)
                     BridgeHttpResponse.SendJson(context, 200, BridgeJson.SpliceLogsField(result.Output, capturedLogs));
                 else if (!result.Success)
-                    BridgeHttpResponse.SendJson(context, 200, SpliceLogsIntoFlatError(BridgeJson.BuildDirectToolErrorJson(result), capturedLogs));
+                    // A refusal the tool wrote itself is already the flat error
+                    // body; answer with it as written.
+                    BridgeHttpResponse.SendJson(context, 200, SpliceLogsIntoFlatError(result.RefusalBody ?? BridgeJson.BuildDirectToolErrorJson(result), capturedLogs));
                 else
                     BridgeHttpResponse.SendJson(context, 200, SpliceLogsIntoFlatError("{\"error\":{\"code\":\"empty_output\",\"message\":\"Tool returned empty output\"}}", capturedLogs));
             }

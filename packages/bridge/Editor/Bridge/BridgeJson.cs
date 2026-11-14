@@ -934,7 +934,7 @@ namespace UnityOpenMcpBridge
         // Splices the members of a structured refusal's detail object into the
         // `error` object being written (after code/message). Null, empty or
         // non-object detail writes nothing, so the error keeps its plain shape.
-        private static void AppendErrorDetail(StringBuilder sb, string detailJson)
+        internal static void AppendErrorDetail(StringBuilder sb, string detailJson)
         {
             if (string.IsNullOrEmpty(detailJson) || !IsValidJsonObject(detailJson)) return;
             var members = detailJson.Trim();

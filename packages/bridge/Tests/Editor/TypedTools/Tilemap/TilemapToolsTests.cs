@@ -102,8 +102,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TilemapExt
                 "unity_open_mcp_tilemap_create",
                 "{\"grid_name\":\"NoHintGrid\"}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("paths_hint_required", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
 
         [Test]
@@ -113,8 +113,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TilemapExt
                 "unity_open_mcp_tilemap_set_tile",
                 "{\"tile_asset_path\":\"Assets/Foo.asset\"}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("paths_hint_required", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
 
         [Test]
@@ -124,8 +124,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TilemapExt
                 "unity_open_mcp_tilemap_box_fill",
                 "{\"tile_asset_path\":\"Assets/Foo.asset\"}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("paths_hint_required", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
 
         [Test]
@@ -135,8 +135,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TilemapExt
                 "unity_open_mcp_tilemap_create_tile_asset",
                 "{\"asset_path\":\"Assets/Foo.asset\"}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("paths_hint_required", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
 
         [Test]
@@ -146,8 +146,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TilemapExt
                 "unity_open_mcp_tilemap_create_rule_tile",
                 "{\"asset_path\":\"Assets/Foo.asset\"}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("paths_hint_required", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
 
         // -----------------------------------------------------------------
@@ -166,8 +166,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TilemapExt
                     "{\"instance_id\":" +InstanceId.Of(go) + "," +
                     "\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
-                Assert.IsTrue(result.Success);
-                StringAssert.Contains("missing_parameter", result.Output);
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("missing_parameter", result.ErrorCode);
             }
             finally
             {
@@ -187,8 +187,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TilemapExt
                     "\"tile_asset_path\":\"Assets/Foo.asset\"," +
                     "\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
-                Assert.IsTrue(result.Success);
-                StringAssert.Contains("component_not_found", result.Output);
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("component_not_found", result.ErrorCode);
             }
             finally
             {
@@ -204,8 +204,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TilemapExt
                 "{\"asset_path\":\"Assets/Foo.prefab\"," +
                 "\"paths_hint\":[\"Assets/Foo.prefab\"]}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("invalid_parameter", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("invalid_parameter", result.ErrorCode);
         }
 
         // -----------------------------------------------------------------
@@ -279,12 +279,13 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TilemapExt
                     "{\"asset_path\":\"" + ruleTilePath + "\"," +
                     "\"paths_hint\":[\"" + ruleTilePath + "\"]}");
                 Assert.IsNotNull(result);
-                Assert.IsTrue(result.Success);
 #if UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS
+                Assert.IsTrue(result.Success, result.ErrorMessage);
                 StringAssert.Contains("\"status\":\"ok\"", result.Output);
                 Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<Object>(ruleTilePath));
 #else
-                StringAssert.Contains("tilemap_extras_required", result.Output);
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("tilemap_extras_required", result.ErrorCode);
                 Assert.IsNull(AssetDatabase.LoadAssetAtPath<Object>(ruleTilePath));
 #endif
             }

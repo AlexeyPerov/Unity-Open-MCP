@@ -525,13 +525,11 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
                 return SpriteAtlasJson.Error("paths_hint_required",
                     "spriteatlas_delete is mutating; pass a non-empty paths_hint.");
 
-            var normalized = NormalizeAtlasPath(asset_path);
+            // Resolve the atlas the way every other tool here does: a
+            // .spriteatlas that has not been packed yet has no SpriteAtlas
+            // main object to load, only its SpriteAtlasAsset.
+            var normalized = LoadAtlasAsset(asset_path);
             if (normalized.Error != null) return normalized.Error;
-
-            var loaded = AssetDatabase.LoadAssetAtPath<UnityEngine.U2D.SpriteAtlas>(normalized.Path);
-            if (loaded == null)
-                return SpriteAtlasJson.Error("asset_not_found",
-                    $"SpriteAtlas not found at '{normalized.Path}'.");
 
             if (!AssetDatabase.DeleteAsset(normalized.Path))
                 return SpriteAtlasJson.Error("delete_failed",

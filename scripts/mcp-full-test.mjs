@@ -738,12 +738,14 @@ function buildSuite() {
   }, { gate: true, expect: "gate" });
   s("skybox_get", "C", "unity_open_mcp_skybox_get");
   s("skybox_set", "C", "unity_open_mcp_skybox_set", { material_path: FT_MAT, paths_hint: SCENE_HINT }, { gate: true, expect: "gate" });
+  // The sphere carries no ReflectionProbe (a real bake would write lighting
+  // data next to the demo scene): the lookup is reached and answers component_not_found.
   s("reflection_probe_get", "C", "unity_open_mcp_reflection_probe_get", {
     resolveArgs: (ctx) => ({ instance_id: ctx.sphereId }),
-  });
+  }, { expect: "tolerate", tolerate: ["component_not_found"] });
   s("reflection_probe_bake", "C", "unity_open_mcp_reflection_probe_bake", {
     resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, paths_hint: SCENE_HINT }),
-  }, { gate: true, expect: "gate", timeoutMs: 180_000 });
+  }, { gate: true, expect: "tolerate", tolerate: ["component_not_found"], timeoutMs: 180_000 });
 
   // --- audio ---
   s("audio_source_add", "C", "unity_open_mcp_audio_source_add", {
@@ -759,15 +761,15 @@ function buildSuite() {
   // --- ui ---
   s("ui_canvas_add", "C", "unity_open_mcp_ui_canvas_add", {
     paths_hint: SCENE_HINT,
-  }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.canvasId = pluck(r, "mutation.output.instanceId"); } });
+  }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.canvasPath = pluck(r, "mutation.output.canvas.path"); } });
   s("ui_element_add", "C", "unity_open_mcp_ui_element_add", {
-    resolveArgs: (ctx) => ({ parent_instance_id: ctx.canvasId, element_type: "Text", paths_hint: SCENE_HINT }),
-  }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.uiElemId = pluck(r, "mutation.output.instanceId"); } });
+    resolveArgs: (ctx) => ({ parent_path: ctx.canvasPath, element_type: "Text", paths_hint: SCENE_HINT }),
+  }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.uiElemId = pluck(r, "mutation.output.element.instanceId"); } });
   s("ui_layout_group_add", "C", "unity_open_mcp_ui_layout_group_add", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.canvasId, layout_type: "VerticalLayoutGroup", paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ path: ctx.canvasPath, layout_type: "VerticalLayoutGroup", paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("ui_element_modify", "C", "unity_open_mcp_ui_element_modify", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.uiElemId, component_type: "UnityEngine.UI.Text", fields_json: JSON.stringify([{ field: "text", value: "FT" }]), paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.uiElemId, component_type: "Text", fields_json: JSON.stringify([{ field: "text", value: "FT" }]), paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
 
   // --- constraints / LOD ---
@@ -784,7 +786,7 @@ function buildSuite() {
   // --- terrain ---
   s("terrain_create", "C", "unity_open_mcp_terrain_create", {
     width: 100, length: 100, height: 50, paths_hint: [FT_TERRAIN_DATA_HINT, ...SCENE_HINT],
-  }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.terrainId = pluck(r, "mutation.output.instanceId"); }, timeoutMs: 180_000 });
+  }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.terrainId = pluck(r, "mutation.output.terrain.instanceId"); }, timeoutMs: 180_000 });
   s("terrain_set_heights", "C", "unity_open_mcp_terrain_set_heights", {
     resolveArgs: (ctx) => ({ instance_id: ctx.terrainId, heights: [[0.1, 0.1], [0.1, 0.1]], paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate", timeoutMs: 180_000 });
@@ -799,24 +801,26 @@ function buildSuite() {
     resolveArgs: (ctx) => ({ instance_id: ctx.terrainId, tree_prototype_index: 0, prototype_prefab_path: FT_PREFAB, instances: [{ position: "0.5,0.5" }], paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate", timeoutMs: 180_000 });
 
-  // --- cinemachine (reflection-gated; package may be absent → tolerate tool_not_found via expect) ---
-  s("cinemachine_brain_ensure", "C", "unity_open_mcp_cinemachine_brain_ensure", { paths_hint: SCENE_HINT }, { gate: true, expect: "gate" });
+  // --- cinemachine (reflection-gated: the tools are always registered; without the
+  // package every call refuses with cinemachine_package_required, which proves the route) ---
+  const NO_CINEMACHINE = { expect: "tolerate", tolerate: ["cinemachine_package_required"] };
+  s("cinemachine_brain_ensure", "C", "unity_open_mcp_cinemachine_brain_ensure", { paths_hint: SCENE_HINT }, { gate: true, ...NO_CINEMACHINE });
   s("cinemachine_create_camera", "C", "unity_open_mcp_cinemachine_create_camera", { paths_hint: SCENE_HINT }, {
-    gate: true, expect: "gate", after: (r, ctx) => { ctx.vcamId = pluck(r, "mutation.output.instanceId"); },
+    gate: true, ...NO_CINEMACHINE, after: (r, ctx) => { ctx.vcamId = pluck(r, "mutation.output.instanceId"); },
   });
   s("cinemachine_set_targets", "C", "unity_open_mcp_cinemachine_set_targets", {
     resolveArgs: (ctx) => ({ instance_id: ctx.vcamId, paths_hint: SCENE_HINT }),
-  }, { gate: true, expect: "gate" });
+  }, { gate: true, ...NO_CINEMACHINE });
   s("cinemachine_set_lens", "C", "unity_open_mcp_cinemachine_set_lens", {
     resolveArgs: (ctx) => ({ instance_id: ctx.vcamId, field_of_view: 60, paths_hint: SCENE_HINT }),
-  }, { gate: true, expect: "gate" });
+  }, { gate: true, ...NO_CINEMACHINE });
   s("cinemachine_set_body", "C", "unity_open_mcp_cinemachine_set_body", {
     resolveArgs: (ctx) => ({ instance_id: ctx.vcamId, body_name: "CinemachineFollow", paths_hint: SCENE_HINT }),
-  }, { gate: true, expect: "gate" });
+  }, { gate: true, ...NO_CINEMACHINE });
   s("cinemachine_set_noise", "C", "unity_open_mcp_cinemachine_set_noise", {
     resolveArgs: (ctx) => ({ instance_id: ctx.vcamId, noise_name: "CinemachineBasicMultiChannelPerlin", paths_hint: SCENE_HINT }),
-  }, { gate: true, expect: "gate" });
-  s("cinemachine_camera_list", "C", "unity_open_mcp_cinemachine_camera_list");
+  }, { gate: true, ...NO_CINEMACHINE });
+  s("cinemachine_camera_list", "C", "unity_open_mcp_cinemachine_camera_list", {}, NO_CINEMACHINE);
 
   // --- sprite2d / texture ---
   s("spriteatlas_create", "C", "unity_open_mcp_spriteatlas_create", {
@@ -1089,7 +1093,7 @@ const SAVE_DIRTY_AFTER = new Set(["gameobject_find_query"]);
 // only ever measures the script, not the tool — the drift this guards against
 // (renamed keys, enum changes, string-vs-array) used to show up as
 // "invalid_arguments (tolerated)" in live runs. Steps built by resolveArgs get
-// placeholder ctx values: 1 for ids and numbers, a name for *Name keys.
+// placeholder ctx values: 1 for ids and numbers, a string for *Name / *Path keys.
 // ---------------------------------------------------------------------------
 
 export async function checkStepArgs(steps) {
@@ -1099,7 +1103,7 @@ export async function checkStepArgs(steps) {
   const { validateSchema } = await load("tool-contract.js");
   const { withSchemaDefaults } = await load("schema-defaults.js");
   const placeholder = new Proxy({}, {
-    get: (_target, key) => (typeof key !== "string" ? undefined : /name$/i.test(key) ? "FT_Placeholder" : 1),
+    get: (_target, key) => (typeof key !== "string" ? undefined : /(name|path)$/i.test(key) ? "FT_Placeholder" : 1),
   });
   const problems = [];
   for (const step of steps) {

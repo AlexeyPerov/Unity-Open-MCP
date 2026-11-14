@@ -131,7 +131,8 @@ function fakeLive(states: Array<Record<string, unknown>>, startError?: Record<st
   const live = {
     route: async (name: string, args: Record<string, unknown>) => {
       calls.starts.push({ tool: name, args });
-      if (startError) return { ...text(startError), isError: true };
+      // A refused start is a failed gate envelope with the code in mutation.error.
+      if (startError) return { ...text({ mutation: { success: false, output: null, error: startError.error }, agentNextSteps: [] }), isError: true };
       return text({ mutation: { success: true, output: { status: "ok", operation: { operation_id: args.operation_id, kind: name, state: "running" } }, error: null } });
     },
     playmodeOperation: async (args: { action: string; operation_id: string }) => {
@@ -192,7 +193,8 @@ test("inline wait: a bridge refusal passes through unchanged", async t => {
   const { live, calls } = fakeLive([], { error: { code: "play_mode_required", message: "play" } });
   const r = router(live); t.after(() => r.jobs.close());
   const out = body(await r.route(WAIT, { condition: { frames: 1 } }));
-  assert.equal(out.error.code, "play_mode_required");
+  assert.equal(out.mutation.success, false);
+  assert.equal(out.mutation.error.code, "play_mode_required");
   assert.equal(calls.status, 0);
 });
 

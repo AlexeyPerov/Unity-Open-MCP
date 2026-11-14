@@ -102,8 +102,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TimelineExt
                 "unity_open_mcp_timeline_create",
                 "{\"asset_path\":\"Assets/NoHint.playable\"}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("paths_hint_required", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
 
         [Test]
@@ -113,8 +113,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TimelineExt
                 "unity_open_mcp_timeline_track_add",
                 "{\"track_type\":\"Animation\"}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("paths_hint_required", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
 
         // -----------------------------------------------------------------
@@ -128,8 +128,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TimelineExt
                 "unity_open_mcp_timeline_create",
                 "{\"paths_hint\":[\"Assets/NoScene.unity\"]}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("missing_parameter", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("missing_parameter", result.ErrorCode);
         }
 
         [Test]
@@ -140,8 +140,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TimelineExt
                 "{\"asset_path\":\"Assets/NotPlayable.asset\"," +
                 "\"paths_hint\":[\"Assets/NoScene.unity\"]}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("invalid_parameter", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("invalid_parameter", result.ErrorCode);
         }
 
         [Test]
@@ -155,8 +155,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TimelineExt
                 "\"track_type\":\"NotATrack\"," +
                 "\"paths_hint\":[\"" + tempAssetPath + "\"]}");
             Assert.IsNotNull(result);
-            Assert.IsTrue(result.Success);
-            StringAssert.Contains("invalid_track_type", result.Output);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("invalid_track_type", result.ErrorCode);
         }
 
         // -----------------------------------------------------------------

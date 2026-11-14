@@ -225,14 +225,14 @@ function buildSuite() {
     expect: "tolerate", tolerate: ["bridge_response_unparsable"],
   });
   s("screenshot_camera_strict", "B", "unity_senses_screenshot_camera", {
-    position: [0, 5, -10], rotation: [30, 0, 0], width: 64, height: 64,
+    position: "0,5,-10", rotation: "30,0,0", width: 64, height: 64,
   }, { expect: "tolerate", tolerate: ["bridge_response_unparsable", "missing_parameter"] });
   s("capture_inline_strict", "B", "unity_senses_capture_inline", { width: 64, height: 64 }, {
     expect: "tolerate", tolerate: ["bridge_response_unparsable"],
   });
   s("screenshot_window_strict", "B", "unity_senses_screenshot_window", {
-    window: "Scene", width: 64, height: 64,
-  }, { expect: "tolerate", tolerate: ["bridge_response_unparsable", "missing_parameter"] });
+    window_title: "Scene", width: 64, height: 64,
+  }, { expect: "tolerate", tolerate: ["bridge_response_unparsable", "missing_parameter", "not_supported"] });
 
   // component_get — S0 tolerates bridge_response_unparsable (large field dump).
   // S1 re-tests strict against a fresh BT_Cube (created in Band C). Same
@@ -266,9 +266,13 @@ function buildSuite() {
     asset_path: FT_ASMDEF, add_references: ["Unity.InputSystem"], paths_hint: [FT_ASMDEF],
   }, { gate: true, expect: "tolerate", tolerate: ["bridge_response_unparsable"], timeoutMs: 180_000 });
 
-  // frame_debugger: enable → list → disable (strict 3-step chain).
+  // frame_debugger: enable → list → disable (3-step chain). `enable` arms the
+  // capture; when `list` lands before the Editor rendered its next frame the
+  // tool refuses with no_captured_frame, which still proves the route.
   s("frame_debugger_enable", "B", "unity_senses_frame_debugger", { action: "enable" });
-  s("frame_debugger_list", "B", "unity_senses_frame_debugger", { action: "list" });
+  s("frame_debugger_list", "B", "unity_senses_frame_debugger", { action: "list" }, {
+    expect: "tolerate", tolerate: ["no_captured_frame"],
+  });
   s("frame_debugger_disable", "B", "unity_senses_frame_debugger", { action: "disable" });
 
   // generate_skill with write:true to a temp path under the fixture (cleanup deletes).

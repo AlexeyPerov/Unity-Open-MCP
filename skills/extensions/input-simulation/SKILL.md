@@ -55,9 +55,10 @@ legacy `Input` and the Input System in the same frame.
 - Never open the Device Simulator or rewrite input settings to make a call work.
   When a check needs the Simulator (a device screen, safe area, a `Touchscreen`),
   open it explicitly with `game_view set_device` (`playtest` group) first.
-  Read the refusal instead: `input_backend_unavailable` (with `error.detected`
-  configuration and `agentNextSteps`), `legacy_multitouch_unsupported`,
-  `unsupported_editor_version`.
+  Read the refusal instead (a failed call: `isError: true`, the code and detail
+  in `mutation.error`): `input_backend_unavailable` (with
+  `mutation.error.detected` configuration and `agentNextSteps`),
+  `legacy_multitouch_unsupported`, `unsupported_editor_version`.
 
 ## Which tool reaches which code
 
@@ -270,7 +271,7 @@ review image). Needs a rendering Game view / Simulator; Unity 6.
 | `no_target_or_screen_point` | Neither object_id, target, nor screen point given | Provide one |
 | `no_camera` | `Camera.main` is null (pointer3d) | Tag a MainCamera in the scene |
 | `no_device` | `Keyboard.current` is null, or `backend: "input_system"` without a `Touchscreen` | Use `backend: "auto"` (legacy touches when the Input Manager is on); for uGUI prefer `inputsim_pointer` |
-| `input_backend_unavailable` | No backend reaches this project's input | Read `error.detected` + `agentNextSteps`; drive the behaviour via `invoke_method` / a project command |
+| `input_backend_unavailable` | No backend reaches this project's input | Read `mutation.error.detected` + `agentNextSteps`; drive the behaviour via `invoke_method` / a project command |
 | `legacy_multitouch_unsupported` | Finger ≠ 0 or several fingers on `legacy_touch` | One finger (id 0), or `backend: "input_system"` with a `Touchscreen` |
 | `unsupported_editor_version` | Legacy injection not enabled for this Editor version | Use `routing: "dispatch"` / `invoke_method` |
 | `playmode_operation_busy` | A gesture is still driving input | Wait for it or cancel its job |
