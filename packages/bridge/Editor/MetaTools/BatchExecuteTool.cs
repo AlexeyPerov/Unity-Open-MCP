@@ -108,8 +108,8 @@ namespace UnityOpenMcpBridge.MetaTools
                            "whose tools/list_changed it ignored), the equivalent is one " +
                            "execute_csharp call with read_only:true — " +
                            "`UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation(); " +
-                           "return \"requested\";` — then poll editor_status until isCompiling is " +
-                           "false. That is what this tool does; it only adds the before/after " +
+                           "return \"requested\";` — then wait with unity_open_mcp_editor_status " +
+                           "{\"wait_until\":\"idle\"}. That is what this tool does; it only adds the before/after " +
                            "Library/ScriptAssemblies mtimes that make a no-op recompile detectable.";
                 case "unity_senses_run_tests":
                     return "If your client cannot see the top-level tool (a manage_tools activation " +
@@ -276,6 +276,18 @@ namespace UnityOpenMcpBridge.MetaTools
                         "a single top-level call instead — that route polls to a terminal result.",
                         tool));
             }
+
+            // editor_status with wait_until is the MCP server's wait: it polls the
+            // instance lock and /ping from outside the Editor across the very
+            // compile / reload it waits for. Inside a batch nothing polls, and
+            // the main thread the wait needs is held by the batch.
+            if (tool == "unity_open_mcp_editor_status" && JsonBody.GetString(paramsBody, "wait_until") != null)
+                return ToolDispatchResult.Fail(
+                    "batch_step_requires_server_poll",
+                    $"commands[{index}] tool '{tool}' with wait_until is not invokable inside a batch: the wait is " +
+                    "run by the MCP server outside the Editor, and no compile, reload or play-mode change can " +
+                    "finish while a batch holds the main thread. Call it as a single top-level call after the " +
+                    "batch (a plain editor_status, without wait_until, works inside a batch).");
 
             // game_view set_resolution / set_device in play mode return once the
             // game reports the new size, which the MCP server polls on the

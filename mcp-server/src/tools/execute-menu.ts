@@ -10,7 +10,9 @@ export const executeMenu = makeTool(
     `bump reimports the whole content tree) — raised up to the ${BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS} ms ` +
     "transport cap, which is the hard ceiling this schema declares, NOT an " +
     "arbitrary value: a menu that needs longer cannot be waited out in one " +
-    "call (poll unity_open_mcp_editor_status instead). A `timeout` response does NOT " +
+    "call (wait with unity_open_mcp_editor_status {\"wait_until\":\"idle\"} instead). " +
+    "`Assets/Refresh` is the menu form of assets_refresh: a gated mutation (scope defaults " +
+    "to Assets) whose result carries the same `compile` block. A `timeout` response does NOT " +
     "mean the menu failed — it usually completed after the wait elapsed; " +
     "confirm with unity_open_mcp_editor_status or an asset probe rather than " +
     "retrying, because a blind retry of an authoring menu can double-write " +
@@ -44,8 +46,8 @@ export const executeMenu = makeTool(
               "the clamp. Raise it for a genuinely slow menu " +
               "(`Assets/Refresh` after an importer version bump reimports " +
               "the whole content tree). If the menu needs longer than the " +
-              "cap, do NOT retry on timeout — the menu is still running; poll " +
-              "unity_open_mcp_editor_status until it settles. Default 30000.",
+              "cap, do NOT retry on timeout — the menu is still running; wait with " +
+              "unity_open_mcp_editor_status {\"wait_until\":\"idle\"} until it settles. Default 30000.",
           },
         },
   },

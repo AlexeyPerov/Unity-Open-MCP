@@ -32,9 +32,12 @@ namespace UnityOpenMcpBridge.MetaTools
             "File/Quit"
         };
 
+        // Assets/Refresh is NOT read-only: it imports changed files, runs
+        // their postprocessors and can start a compile + domain reload. It is
+        // a mutation with assets_refresh's lifecycle and default scope (see
+        // IsRefreshMenu).
         private static readonly HashSet<string> ReadOnlyMenuAllowlist = new(StringComparer.OrdinalIgnoreCase)
         {
-            "Assets/Refresh",
             "Assets/Reveal in Finder",
             "Assets/Show in Explorer",
             "Edit/Selection",
@@ -84,6 +87,14 @@ namespace UnityOpenMcpBridge.MetaTools
                     if (!menu.validate) menus.Add(menu.menuItem);
             return menus;
         }
+
+        /// <summary>
+        /// The menu equivalent of assets_refresh: gated over the same default
+        /// scope (Assets) with the same settle lifecycle, and its envelope
+        /// carries the compile handshake like assets_refresh's.
+        /// </summary>
+        public static bool IsRefreshMenu(string menuPath) =>
+            string.Equals(menuPath?.Trim(), "Assets/Refresh", StringComparison.OrdinalIgnoreCase);
 
         public static bool IsNonDisruptiveReadOnlyMenu(string menuPath) =>
             menuPath != null && (VerifierMenus.Contains(menuPath)

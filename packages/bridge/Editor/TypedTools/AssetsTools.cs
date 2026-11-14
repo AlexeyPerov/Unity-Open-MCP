@@ -221,11 +221,19 @@ namespace UnityOpenMcpBridge.TypedTools
         public static ToolDispatchResult Refresh(string body)
         {
             var wholeProject = JsonBody.GetBool(body, "whole_project", true);
+            var generationAtStart = BridgeCompileState.Generation;
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+            // A refresh that imported scripts leaves the compile requested, not
+            // started: it runs on a later update, and isCompiling can read false
+            // again before it does. Record it so a wait holds until it ran.
+            BridgeCompileState.NoteDispatchEnd();
+            var compileDue = BridgeCompileState.Pending || EditorApplication.isCompiling;
 
             var sb = new StringBuilder(128);
             sb.Append("{\"refreshed\":true,\"wholeProject\":").Append(wholeProject ? "true" : "false");
             sb.Append(",\"isCompiling\":").Append(EditorApplication.isCompiling ? "true" : "false");
+            sb.Append(",\"compileDue\":").Append(compileDue ? "true" : "false");
+            sb.Append(",\"compileGenerationAtStart\":").Append(generationAtStart);
             sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }

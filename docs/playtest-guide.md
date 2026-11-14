@@ -100,7 +100,7 @@ A thrown exception reaches the agent as `execution_error` with the message, so
 
 ### 2. Boot
 
-Enter play mode (`editor_set_state play`, then `editor_status` until playing),
+Enter play mode (`editor_set_state play`, then `editor_status {"wait_until":"playing"}`),
 then boot through the project's command (`playtest.boot`). Do not reflect into
 launchers, singletons or save systems with `execute_csharp` — that tests the
 reflection, not the game, and a recorded playtest should only contain what a
@@ -193,7 +193,7 @@ The demo walkthrough, as an agent issues it (open
 playtest_session   {"action":"start","name":"Demo smoke","device":"Game view, Free Aspect","snapshot":true}
 project_commands   {"action":"invoke","command_id":"project.demo.playtest.begin","args":{}}
 playtest_session   {"action":"mark","label":"Isolate the save","verdict":"ok"}
-editor_set_state   {"state":"play"}                       → editor_status until playing
+editor_set_state   {"state":"play"}                       → editor_status {"wait_until":"playing"}
 project_commands   {"action":"invoke","command_id":"project.demo.playtest.boot","args":{}}
 ui_snapshot        {}
 playtest_session   {"action":"mark","label":"Boot to the main menu","verdict":"ok"}

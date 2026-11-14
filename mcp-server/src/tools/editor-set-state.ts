@@ -11,8 +11,8 @@ import { IGNORE_SCENE_DIRTY_BASE, makeTool } from "./schema-fragments.js";
 // The call does NOT go through the gate envelope: editor state transitions
 // write no assets (the gate validates asset-reference fallout, which does not
 // apply). It is a gate-free direct-response tool that still runs on the main
-// thread. Document settle/poll expectations: entering play mode is
-// near-instant in the editor; the response reflects the post-transition state.
+// thread. play / stop only request the transition (Unity performs it on a later
+// update, usually with a domain reload); the editor_status wait outlives it.
 export const editorSetState = makeTool(
   "unity_open_mcp_editor_set_state",
   "Set the Unity Editor play / pause / stop state. Complements " +
@@ -23,7 +23,11 @@ export const editorSetState = makeTool(
     "scene has unsaved changes, Unity's native save modal can interrupt the " +
     "flow, so the bridge preflights and refuses with code `scene_dirty`; pass " +
     "ignore_scene_dirty: true to accept the risk. Writes no assets, so the call " +
-    "is gate-free and returns the post-transition state directly. Prefer this " +
+    "is gate-free. play / stop only REQUEST the change: Unity switches on a later " +
+    "update (with a domain reload unless Enter Play Mode Options skip it), so the " +
+    "response reports `transition` and the next step is unity_open_mcp_editor_status " +
+    "{\"wait_until\":\"playing\"} (or \"edit\" after stop), which returns once the mode " +
+    "is reached — do not poll. Prefer this " +
     "over raw execute_csharp EditorApplication.isPlaying = true — schema-" +
     "validated, undo-safe, and the dirty-scene refusal is surfaced as a " +
     "structured error instead of a hanging save dialog.",

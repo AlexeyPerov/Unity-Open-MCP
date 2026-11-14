@@ -62,7 +62,19 @@ namespace UnityOpenMcpBridge
         // unload, instead of leaking across the reload boundary. A dictionary
         // (not a bag) is used so each completed request can retire its own
         // entry in the finally — only genuinely in-flight contexts remain.
-        private static readonly ConcurrentDictionary<HttpListenerContext, byte> _inFlightContexts = new();
+        private static readonly ConcurrentDictionary<HttpListenerContext, InFlightRequest> _inFlightContexts = new();
+
+        // Per-request state the reload teardown reads: whether the request is
+        // a tool call (and so gets a well-formed reload answer instead of a
+        // bare abort) and whether its work reached the main thread.
+        private sealed class InFlightRequest
+        {
+            internal volatile string ToolName;
+            internal volatile bool Dispatched;
+            // The compile generation the dispatch started at (-1: unknown),
+            // so a dispatched-then-cut-off answer can still name the wait.
+            internal volatile int GenerationAtStart = -1;
+        }
 
         // M26 Plan 4 — bounded in-process recovery when bind fails with
         // "address already in use" (zombie listener / OS release lag).
@@ -150,8 +162,16 @@ namespace UnityOpenMcpBridge
         // to detect a dead bridge and fail fast instead of hanging on /ping.
         // On a normal reload, Start() runs again after the reload and Acquire()
         // overwrites this lock with fresh state.
-        private static void OnBeforeAssemblyReload() =>
+        private static void OnBeforeAssemblyReload()
+        {
+            _reloading = true;
             ForceStopListener(releaseLock: false, logStopped: false);
+        }
+
+        // Set by beforeAssemblyReload, so the teardown answers every tool call
+        // still in flight with a well-formed editor_reloading body (a static
+        // field: the new domain starts with it false).
+        private static volatile bool _reloading;
 
         // Graceful editor quit: full release — delete the lock so a stale entry
         // doesn't linger for a closed editor.
@@ -385,14 +405,40 @@ namespace UnityOpenMcpBridge
         // contexts may already be half-closed by their own finally, and a
         // failure to close one must not skip the rest. Clears the set so a
         // fresh post-reload listener starts with an empty tracker.
+        //
+        // On a domain reload a tool call whose response was not written yet is
+        // first answered with BuildEditorReloadingJson: HTTP 503 when its work
+        // never reached the main thread (nothing ran; the client waits for the
+        // reload and sends it again), HTTP 200 + dispatched:true when it ran
+        // (the effect may have committed; the client must not replay it). A
+        // bare abort used to reach the client as HTTP 200 with an empty body,
+        // which read as a corrupt response (bridge_response_unparsable).
+        // TrySendJsonNow never blocks this main-thread teardown on a worker
+        // that is writing its own response at the same moment.
         private static void AbortInFlightContexts()
         {
             if (_inFlightContexts.IsEmpty) return;
-            var keys = _inFlightContexts.Keys;
+            var entries = _inFlightContexts.ToArray();
             _inFlightContexts.Clear();
-            foreach (var ctx in keys)
+            foreach (var entry in entries)
             {
+                var ctx = entry.Key;
                 if (ctx == null) continue;
+                var request = entry.Value;
+                if (_reloading && request?.ToolName != null)
+                {
+                    var willPlay = EditorApplication.isPlayingOrWillChangePlaymode;
+                    var transition = willPlay && !EditorApplication.isPlaying ? "entering_playmode"
+                        : !willPlay && EditorApplication.isPlaying ? "exiting_playmode"
+                        : "reloading";
+                    try
+                    {
+                        BridgeHttpResponse.TrySendJsonNow(ctx, request.Dispatched ? 200 : 503,
+                            BridgeJson.BuildEditorReloadingJson(request.ToolName, request.Dispatched, transition,
+                                request.GenerationAtStart >= 0 ? request.GenerationAtStart : (int?)null));
+                    }
+                    catch { }
+                }
                 try { ctx.Response.Abort(); } catch { }
                 try { ctx.Response.Close(); } catch { }
             }
@@ -448,7 +494,7 @@ namespace UnityOpenMcpBridge
             // leaking the FD across the AppDomain boundary. Tracked for the
             // whole request lifetime (including the long-lived SSE streams) and
             // retired in the finally below so the set holds only live contexts.
-            _inFlightContexts.TryAdd(context, 0);
+            _inFlightContexts.TryAdd(context, new InFlightRequest());
             var activity = BridgeActivityRecorder.BeginActivity(context);
             BridgeActivityRecorder.CurrentActivity = activity;
             try
@@ -854,6 +900,33 @@ namespace UnityOpenMcpBridge
             if (mintedSubscriber) BridgeEventSource.Unsubscribe(subscriber);
         }
 
+        // Tools whose call can leave a compile due even under a lighter
+        // lifecycle (they import scripts): their envelope always carries the
+        // `compile` block, so the caller has the generation to wait past.
+        private static bool IsCompileRelevant(string toolName, string body) =>
+            CompileRelevantTools.Contains(toolName)
+            || (toolName == "unity_open_mcp_execute_menu"
+                && ExecuteMenuTool.IsRefreshMenu(JsonBody.GetString(JsonBody.TopLevelField(body, "menu_path"), "menu_path")));
+
+        private static readonly HashSet<string> CompileRelevantTools = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "unity_open_mcp_assets_refresh",
+            "unity_open_mcp_script_write",
+            "unity_open_mcp_script_delete",
+        };
+
+        // Main thread. The transition that must not receive a mutation, or
+        // null: a compile running or due (it ends in a domain reload), or a
+        // play-mode change Unity has been asked for and not finished.
+        internal static string DispatchBlockingTransition()
+        {
+            if (EditorApplication.isCompiling) return "compiling";
+            var willPlay = EditorApplication.isPlayingOrWillChangePlaymode;
+            if (willPlay && !EditorApplication.isPlaying) return "entering_playmode";
+            if (!willPlay && EditorApplication.isPlaying) return "exiting_playmode";
+            return null;
+        }
+
         private static void HandleToolDispatch(HttpListenerContext context, string toolName)
         {
             string body;
@@ -917,10 +990,12 @@ namespace UnityOpenMcpBridge
             // dispatch applies the same project-job guard as the gate path.
             var contract = EffectiveToolContract.Resolve(toolName, body,
                 envelopeValidated: BridgeBatchSchemas.ByTool.ContainsKey(toolName));
+            _inFlightContexts.TryGetValue(context, out var inFlight);
+            if (inFlight != null) inFlight.ToolName = toolName;
 
             if (DirectResponseTools.Contains(toolName))
             {
-                HandleDirectResponseTool(context, toolName, BridgeBatchSchemas.ByTool.TryGetValue(toolName, out var directSchema) ? BatchSchemaValidator.WireArguments(body, directSchema) : body, timeoutMs, contract);
+                HandleDirectResponseTool(context, toolName, BridgeBatchSchemas.ByTool.TryGetValue(toolName, out var directSchema) ? BatchSchemaValidator.WireArguments(body, directSchema) : body, timeoutMs, contract, inFlight);
                 return;
             }
 
@@ -1030,6 +1105,13 @@ namespace UnityOpenMcpBridge
                             pathsHint = new[] { "Assets" };
                         }
                     }
+                    else if (toolName == "unity_open_mcp_execute_menu"
+                        && ExecuteMenuTool.IsRefreshMenu(JsonBody.GetString(JsonBody.TopLevelField(body, "menu_path"), "menu_path")))
+                    {
+                        // The menu form of assets_refresh: same whole-project
+                        // default scope.
+                        pathsHint = new[] { "Assets" };
+                    }
                     else if (toolName == "unity_open_mcp_reimport_package")
                     {
                         // reimport_package's scope IS the named local package;
@@ -1110,6 +1192,11 @@ namespace UnityOpenMcpBridge
                 var timedOut = new System.Runtime.CompilerServices.StrongBox<bool>(false);
                 var wantsCompileState = context.Request.Headers[BridgeCompileState.Header] == "1";
                 string compileState = null;
+                // Set on the main thread when the Editor was mid-transition at
+                // dispatch time: the call is answered 503 editor_reloading and
+                // never runs.
+                string refusedTransition = null;
+                bool compileDue = false;
 
                 var queueTask = BridgeRequestQueue.Enqueue(agentId, toolName, isMutating, () =>
                 {
@@ -1117,6 +1204,18 @@ namespace UnityOpenMcpBridge
                     // dispatch entirely — running the mutation now would double-
                     // apply it on the caller's inevitable retry.
                     if (System.Threading.Volatile.Read(ref timedOut.Value)) return;
+                    // A mutation never runs into a compile, a pending domain
+                    // reload or a play-mode change: its response would be cut
+                    // off by the reload, and its effect would land in a domain
+                    // that is about to be replaced. The client waits for the
+                    // Editor to settle and sends it again.
+                    if (isMutating && (refusedTransition = DispatchBlockingTransition()) != null) return;
+                    var generationAtStart = BridgeCompileState.Generation;
+                    if (inFlight != null)
+                    {
+                        inFlight.GenerationAtStart = generationAtStart;
+                        inFlight.Dispatched = true;
+                    }
                     try
                     {
                         result = DispatchWithGate(toolName, body, effectiveGateMode, pathsHint, contract);
@@ -1125,6 +1224,15 @@ namespace UnityOpenMcpBridge
                     {
                         dispatchError = e;
                         throw;
+                    }
+                    BridgeCompileState.NoteDispatchEnd();
+                    compileDue = BridgeCompileState.Pending || EditorApplication.isCompiling;
+                    if (compileDue || contract.Lifecycle == LifecyclePolicy.RestartThenSettle || IsCompileRelevant(toolName, body))
+                        result.CompileJson = BridgeCompileState.EnvelopeJson(generationAtStart);
+                    if (compileDue)
+                    {
+                        result.CompileGenerationAtStart = generationAtStart;
+                        BridgeHeartbeat.WriteNowIfRunning();
                     }
                     if (wantsCompileState) compileState = BridgeCompileState.BuildHeader();
                 });
@@ -1148,6 +1256,14 @@ namespace UnityOpenMcpBridge
                 if (dispatchError != null) throw dispatchError;
 
                 sw.Stop();
+
+                if (refusedTransition != null)
+                {
+                    BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "editor_reloading",
+                        $"Editor {refusedTransition}; {toolName} was not run.", sw.ElapsedMilliseconds);
+                    BridgeHttpResponse.SendJson(context, 503, BridgeJson.BuildEditorReloadingJson(toolName, false, refusedTransition));
+                    return;
+                }
 
                 // M13 T4.1 — compile-settle wait. Done on THIS worker thread,
                 // not the main thread that DispatchWithGate ran on, because the
@@ -1200,8 +1316,23 @@ namespace UnityOpenMcpBridge
                     if (BridgeSession.IsCompiling)
                     {
                         result.CompilePending = true;
-                        result.AgentNextSteps = AppendCompilePendingStep(result.AgentNextSteps);
+                        result.AgentNextSteps = AppendStep(result.AgentNextSteps,
+                            BridgeJson.CompilePendingStepFor(compileDue ? result.CompileGenerationAtStart : (int?)null));
                     }
+                }
+
+                // The call left a compile due (requested but not started, or
+                // running): name the wait that returns once it has finished,
+                // keyed to the generation the call started at so it cannot
+                // return in the gap before the compile starts.
+                if (compileDue && !result.CompilePending && result.Mutation != null
+                    && (result.Mutation.Success || result.Mutation.PartialCommit))
+                {
+                    result.AgentNextSteps = AppendStep(result.AgentNextSteps,
+                        "This call left a script compile due. Wait for it with "
+                        + BridgeJson.WaitCall("idle", result.CompileGenerationAtStart)
+                        + " — it returns once that compile and its domain reload are done, with the compile status "
+                        + "and error count — before calling tools that depend on the new code.");
                 }
 
                 // A compile the settle wait saw moved the state past the
@@ -1259,14 +1390,6 @@ namespace UnityOpenMcpBridge
                 BridgeHttpResponse.SendJson(context, 200, FailureEnvelope(BridgeJson.BuildFaultEnvelope(e, effectiveGateMode), "execution_error", e.Message));
             }
         }
-
-        // feedback-fable-04-08 §9 — append the compilePending advisory to the
-        // gate envelope's agentNextSteps. The advisory text is owned by
-        // BridgeJson (whose envelope writer also guarantees it for
-        // compilePending:true results built without the dispatcher); appending
-        // it here too puts it on result.AgentNextSteps for the audit trail.
-        private static string[] AppendCompilePendingStep(string[] existing)
-            => AppendStep(existing, BridgeJson.CompilePendingStep);
 
         // Append one advisory line to an agentNextSteps array. Returns a new
         // array (preserving the existing steps) so the gate's own next-steps
@@ -1701,7 +1824,7 @@ namespace UnityOpenMcpBridge
             => ProjectCommandJobs.Refuse(contract) ?? DispatchTool(toolName, body);
 
         private static void HandleDirectResponseTool(HttpListenerContext context, string toolName, string body, int timeoutMs,
-            ToolRequestContract contract)
+            ToolRequestContract contract, InFlightRequest inFlight)
         {
             // M22 T22.1.3 — direct-response tools bypass the gate envelope, so
             // capture happens inside the main-thread callback (alongside
@@ -1712,16 +1835,27 @@ namespace UnityOpenMcpBridge
             List<LogEntryInfo> capturedLogs = null;
             try
             {
+                string refusedTransition = null;
                 var task = MainThreadDispatcher.EnqueueAsync(() =>
                 {
+                    // Same rule as the gate path: a state change never runs
+                    // into a compile, a pending reload or a play-mode change.
+                    if (contract.IsMutating && (refusedTransition = DispatchBlockingTransition()) != null) return null;
+                    if (inFlight != null) inFlight.Dispatched = true;
                     int captureStart = LogEntriesReader.StartCapture();
                     ToolDispatchResult r;
                     try { r = DispatchDirectResponse(toolName, body, contract); }
                     finally { capturedLogs = LogEntriesReader.StopCapture(captureStart); }
+                    BridgeCompileState.NoteDispatchEnd();
                     return r;
                 }, timeoutMs);
 
                 var result = task.Result;
+                if (refusedTransition != null)
+                {
+                    BridgeHttpResponse.SendJson(context, 503, BridgeJson.BuildEditorReloadingJson(toolName, false, refusedTransition));
+                    return;
+                }
 
                 if (result.Success && result.Output != null)
                     BridgeHttpResponse.SendJson(context, 200, BridgeJson.SpliceLogsField(result.Output, capturedLogs));

@@ -42,6 +42,8 @@ export interface PingSnapshot {
   mode: string;
   compiling: boolean;
   isPlaying: boolean;
+  /** Play-mode / compile transition the bridge reports (wire contract 8); absent on older bridges. */
+  transition?: string | null;
   asOf: string;
 }
 
@@ -78,6 +80,7 @@ export class PingCache {
     const snap = this.snapshot;
     if (snap === null) return null;
     if (snap.compiling) return null;
+    if (snap.transition) return null;
     if (!snap.connected) return null;
     const recordedAt = Date.parse(snap.asOf);
     if (!Number.isFinite(recordedAt)) return null;

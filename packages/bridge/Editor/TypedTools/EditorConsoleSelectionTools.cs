@@ -213,6 +213,11 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("state_change_failed", e.Message);
             }
 
+            // isPlaying = true / false only REQUESTS the change; Unity makes it
+            // on a later update (with a domain reload unless Enter Play Mode
+            // Options skip it). Publish the request now so /ping reports the
+            // transition before that update runs.
+            BridgeSession.RefreshVolatileState();
             var action = state == EditorStateTarget.Play ? "play"
                 : state == EditorStateTarget.Pause ? "pause"
                 : "stop";
@@ -576,7 +581,7 @@ namespace UnityOpenMcpBridge.TypedTools
             };
         }
 
-        private static string BuildStateEnvelope(string action, string note)
+        internal static string BuildStateEnvelope(string action, string note)
         {
             var sb = new StringBuilder(128);
             sb.Append("{\"status\":\"ok\",\"action\":\"").Append(Esc(action)).Append("\"");
@@ -584,7 +589,21 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(",\"isPaused\":").Append(EditorApplication.isPaused ? "true" : "false");
             if (!string.IsNullOrEmpty(note))
                 sb.Append(",\"note\":\"").Append(Esc(note)).Append("\"");
-            sb.Append(",\"agentNextSteps\":[\"Poll unity_open_mcp_editor_status to confirm the transition settled.\"]}");
+            // play / stop start a transition the response cannot wait for (the
+            // play-mode domain reload tears this listener down); the server-side
+            // wait outlives it. pause / resume / no-ops take effect at once.
+            var until = action == "play" ? "playing" : action == "stop" ? "edit" : null;
+            if (until != null)
+            {
+                sb.Append(",\"transition\":\"").Append(until == "playing" ? "entering_playmode" : "exiting_playmode").Append('"');
+                sb.Append(",\"agentNextSteps\":[").Append(BridgeJson.EscapeString(
+                    "The change is requested, not done: Unity switches play mode on a later update. Wait for it with "
+                    + BridgeJson.WaitCall(until, null) + " before the next call.")).Append("]}");
+            }
+            else
+            {
+                sb.Append(",\"agentNextSteps\":[]}");
+            }
             return sb.ToString();
         }
 

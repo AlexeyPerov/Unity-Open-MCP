@@ -517,22 +517,13 @@ export function runToolOnce(step, ctx, project, defaultTimeout, runEnv) {
   return { ok: pass, ms, detail, result: parsed.result ?? {}, raw: parsed };
 }
 
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-/** Poll editor_status until the Editor answers and is not compiling (true), or
- *  the budget runs out (false). editor_status itself answers editor_reloading
- *  while a domain reload is in progress. */
+/** Wait until the Editor is settled — no compile, domain reload or play-mode
+ *  change in progress and no compile due — with the editor_status wait
+ *  (true), or the budget runs out (false). */
 export function waitForEditorSettled(project, runEnv, timeoutMs = 120_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const status = invokeTool(project, "unity_open_mcp_editor_status", {}, 15_000, runEnv);
-    const output = status?.result?.mutation?.output ?? status?.result;
-    if (status && status.isError !== true && output?.isCompiling === false) return true;
-    sleepSync(2_000);
-  }
-  return false;
+  const status = invokeTool(project, "unity_open_mcp_editor_status",
+    { wait_until: "idle", timeout_ms: timeoutMs }, timeoutMs + 30_000, runEnv);
+  return !!status && status.isError !== true && status.result?.reached === true;
 }
 
 /** Step runner with scene_dirty / main_thread_blocked save+retry,

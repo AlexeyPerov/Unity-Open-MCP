@@ -495,6 +495,10 @@ namespace UnityOpenMcpBridge
             // the bridge blocked waiting for the editor to finish compiling.
             sb.Append(",\"lifecycle\":\"").Append(lifecycle.ToWireString()).Append("\"");
             sb.Append(",\"settleMs\":").Append(result.SettleMs);
+            // The compile handshake: emitted for calls that can leave a compile
+            // due, so the caller can wait past `generationAtStart`.
+            if (result.CompileJson != null)
+                sb.Append(",\"compile\":").Append(result.CompileJson);
 
             // feedback-fable-04-08 §9 — emitted ONLY when the editor was still
             // compiling after the post-mutation settle wait. The gate's delta
@@ -591,16 +595,53 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
+        // The one way to wait for the Editor: the MCP server's editor_status
+        // wait, which polls the instance lock, /ping and /compile-state from
+        // outside the Editor and so outlives the domain reload it waits for.
+        // `afterGeneration`: the compile generation a call started at — the
+        // wait then also requires a compile after it to have finished (or the
+        // Editor to report that none is due).
+        internal static string WaitCall(string until, int? afterGeneration)
+            => "unity_open_mcp_editor_status {\"wait_until\":\"" + until + "\""
+                + (afterGeneration.HasValue ? ",\"after_generation\":" + afterGeneration.Value : "") + "}";
+
+        // Body of a tool request the bridge did not run because the Editor is
+        // compiling, reloading or changing play mode (HTTP 503), or whose
+        // response a domain reload cut off after it ran (HTTP 200,
+        // dispatched:true). Well-formed either way, so a reload race never
+        // reads as a corrupt response.
+        internal static string BuildEditorReloadingJson(string toolName, bool dispatched, string transition,
+            int? generationAtStart = null)
+        {
+            var message = dispatched
+                ? "'" + toolName + "' ran, but a domain reload started before its response was written. "
+                    + "Its effect may have committed: verify it before repeating the call."
+                : "The Editor is " + (transition ?? "reloading") + "; '" + toolName + "' was not run. "
+                    + "It can be retried once the Editor settles.";
+            return "{\"error\":{\"code\":\"editor_reloading\",\"message\":" + EscapeString(message) + "}"
+                + ",\"dispatched\":" + (dispatched ? "true" : "false")
+                + ",\"transition\":" + EscapeString(transition ?? "reloading")
+                + ",\"retryAfterMs\":1000"
+                + (generationAtStart.HasValue ? ",\"compile\":{\"generationAtStart\":" + generationAtStart.Value + "}" : "")
+                + ",\"agentNextSteps\":[" + EscapeString("Wait for the Editor to settle: " + WaitCall("idle", dispatched ? generationAtStart : null)
+                    + (dispatched ? ", then verify the call's effect before repeating it." : ", then retry the call.")) + "]}";
+        }
+
         // feedback-fable-04-08 §9 — the compilePending advisory. Owned here so
         // the envelope writer above can guarantee compilePending:true is always
         // accompanied by the prose; the dispatcher appends the same constant to
         // result.AgentNextSteps up front so the audit trail carries it too.
-        internal const string CompilePendingStep =
+        internal static readonly string CompilePendingStep = CompilePendingStepFor(null);
+
+        // The advisory keyed to the generation the call started at, so the
+        // wait it names cannot return before the call's compile has run.
+        internal static string CompilePendingStepFor(int? generationAtStart) =>
             "A script compilation was still in progress when the gate validated " +
             "— the gate's passed/newErrors:0 reflects the PRE-compile state, not " +
-            "the new code. Poll unity_open_mcp_editor_status.isCompiling until " +
-            "false, then unity_open_mcp_read_compile_errors to confirm the new " +
-            "code is healthy before trusting this result.";
+            "the new code. Wait for the compile with " + WaitCall("idle", generationAtStart) +
+            " (it outlives the domain reload; its result carries the compile status and " +
+            "error count), then unity_open_mcp_read_compile_errors for the diagnostics " +
+            "before trusting this result.";
 
         // feedback-04-08-opus §3 — the gate delta inlines every issue key into
         // the response. A large prefab rebuild produced ~1 450 keys (~222 KB),
@@ -997,7 +1038,11 @@ namespace UnityOpenMcpBridge
             sb.Append("\"wireContract\":").Append(BridgeSession.WireContract).Append(',');
             sb.Append("\"mode\":").Append(EscapeString(BridgeSession.Mode)).Append(',');
             sb.Append("\"compiling\":").Append(BridgeSession.IsCompiling ? "true" : "false").Append(',');
-            sb.Append("\"isPlaying\":").Append(BridgeSession.IsPlaying ? "true" : "false");
+            sb.Append("\"isPlaying\":").Append(BridgeSession.IsPlaying ? "true" : "false").Append(',');
+            // The transition in progress (compiling / entering_playmode /
+            // exiting_playmode) or null: a client must not treat a reachable,
+            // non-compiling bridge as settled while play mode is changing.
+            sb.Append("\"transition\":").Append(EscapeString(BridgeSession.Transition));
             sb.Append('}');
             return sb.ToString();
         }

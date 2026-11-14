@@ -81,9 +81,38 @@ namespace UnityOpenMcpBridge
         //       without a flush); a registry tool may return a failed result
         //       (mutation.success:false) and a failed mutation's own next steps
         //       reach agentNextSteps.
-        public const int WireContract = 7;
+        //   8 — Reload/transition handshake: /ping `transition`; the instance
+        //       lock's `compile` block (generation, running, failed,
+        //       errorCount, pending, requestedAt); /compile-state `pending`;
+        //       a mutation that meets a compile or play-mode change answers
+        //       HTTP 503 editor_reloading (dispatched:false) instead of
+        //       running; a tool call cut off by a domain reload answers a
+        //       well-formed editor_reloading body (503 not run / 200
+        //       dispatched:true) instead of an empty 200; the gate envelope's
+        //       `compile` block; execute_menu Assets/Refresh is a gated
+        //       mutation with assets_refresh's lifecycle and default scope.
+        public const int WireContract = 8;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
+
+        // The Editor transition in progress, as /ping reports it: "compiling"
+        // (a compile is running or due, or the domain is about to reload),
+        // "entering_playmode" (play requested, play mode not reached yet),
+        // "exiting_playmode", or null when settled. Thread-safe: built from the
+        // volatile flags the main thread refreshes every update and on every
+        // play-mode change.
+        public static string Transition
+        {
+            get
+            {
+                if (_isCompiling) return "compiling";
+                var willPlay = _willChangePlaymode;
+                var playing = _isPlaying;
+                if (willPlay && !playing) return "entering_playmode";
+                if (!willPlay && playing) return "exiting_playmode";
+                return null;
+            }
+        }
         public static string Mode => "live";
         public static bool Connected => _connected;
 
@@ -91,6 +120,7 @@ namespace UnityOpenMcpBridge
         private static string _unityVersion;
         private static volatile bool _isCompiling;
         private static volatile bool _isPlaying;
+        private static volatile bool _willChangePlaymode;
         private static volatile bool _connected;
         private static volatile bool _initialized;
 
@@ -105,7 +135,12 @@ namespace UnityOpenMcpBridge
 
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
             AssemblyReloadEvents.afterAssemblyReload += OnAfterAssemblyReload;
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
         }
+
+        // A play-mode change is visible to /ping at once, not one update later.
+        private static void OnPlayModeStateChanged(PlayModeStateChange change) => RefreshVolatileState();
 
         private static void CacheStaticState()
         {
@@ -113,10 +148,13 @@ namespace UnityOpenMcpBridge
             _unityVersion = Application.unityVersion;
         }
 
-        private static void RefreshVolatileState()
+        // Main thread. Also called by a tool that just changed play mode, so
+        // the transition shows before the next update tick.
+        internal static void RefreshVolatileState()
         {
             _isCompiling = EditorApplication.isCompiling;
             _isPlaying = EditorApplication.isPlaying;
+            _willChangePlaymode = EditorApplication.isPlayingOrWillChangePlaymode;
         }
 
         private static void OnBeforeAssemblyReload()
@@ -153,6 +191,12 @@ namespace UnityOpenMcpBridge
         internal static void SetPlayingForTest(bool value)
         {
             _isPlaying = value;
+        }
+
+        // Same pattern: pin the "play mode requested" flag for a transition test.
+        internal static void SetWillChangePlaymodeForTest(bool value)
+        {
+            _willChangePlaymode = value;
         }
 
         public static bool IsInitialized => _initialized;

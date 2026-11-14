@@ -178,7 +178,7 @@
     }
   },
   "unity_open_mcp_execute_menu": {
-    "description": "Execute a Unity Editor menu item. Runs on Unity's main thread and blocks until the menu returns, so a legitimately slow menu needs an explicit `timeout_ms` (e.g. `Assets/Refresh` after an AssetPostprocessor version bump reimports the whole content tree) — raised up to the 55000 ms transport cap, which is the hard ceiling this schema declares, NOT an arbitrary value: a menu that needs longer cannot be waited out in one call (poll unity_open_mcp_editor_status instead). A `timeout` response does NOT mean the menu failed — it usually completed after the wait elapsed; confirm with unity_open_mcp_editor_status or an asset probe rather than retrying, because a blind retry of an authoring menu can double-write assets. Prefer non-interactive APIs over menus that open a MODAL dialog (material/scene converters, importer settings prompts): a modal blocks the main thread for as long as it is open, wedging this and every subsequent call, and no tool can dismiss it — an operator must close it in the Unity UI.",
+    "description": "Execute a Unity Editor menu item. Runs on Unity's main thread and blocks until the menu returns, so a legitimately slow menu needs an explicit `timeout_ms` (e.g. `Assets/Refresh` after an AssetPostprocessor version bump reimports the whole content tree) — raised up to the 55000 ms transport cap, which is the hard ceiling this schema declares, NOT an arbitrary value: a menu that needs longer cannot be waited out in one call (wait with unity_open_mcp_editor_status {\"wait_until\":\"idle\"} instead). `Assets/Refresh` is the menu form of assets_refresh: a gated mutation (scope defaults to Assets) whose result carries the same `compile` block. A `timeout` response does NOT mean the menu failed — it usually completed after the wait elapsed; confirm with unity_open_mcp_editor_status or an asset probe rather than retrying, because a blind retry of an authoring menu can double-write assets. Prefer non-interactive APIs over menus that open a MODAL dialog (material/scene converters, importer settings prompts): a modal blocks the main thread for as long as it is open, wedging this and every subsequent call, and no tool can dismiss it — an operator must close it in the Unity UI.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -213,7 +213,7 @@
         },
         "timeout_ms": {
           "default": 30000,
-          "description": "How long to wait for the menu to return. Same semantics and hard cap (55000 ms) as execute_csharp: values above a typical MCP host request timeout (~60s) are unreachable because the host aborts the tools/call first, so the route clamps server-side and reports the clamp. Raise it for a genuinely slow menu (`Assets/Refresh` after an importer version bump reimports the whole content tree). If the menu needs longer than the cap, do NOT retry on timeout — the menu is still running; poll unity_open_mcp_editor_status until it settles. Default 30000.",
+          "description": "How long to wait for the menu to return. Same semantics and hard cap (55000 ms) as execute_csharp: values above a typical MCP host request timeout (~60s) are unreachable because the host aborts the tools/call first, so the route clamps server-side and reports the clamp. Raise it for a genuinely slow menu (`Assets/Refresh` after an importer version bump reimports the whole content tree). If the menu needs longer than the cap, do NOT retry on timeout — the menu is still running; wait with unity_open_mcp_editor_status {\"wait_until\":\"idle\"} until it settles. Default 30000.",
           "maximum": 55000,
           "minimum": 1000,
           "type": "integer"
@@ -286,15 +286,29 @@
     }
   },
   "unity_open_mcp_editor_status": {
-    "description": "Returns the current Unity Editor state: play mode, compile state, current scene path, Unity version, editor type, and the in-memory dirty-scene summary. The dirtySceneCount + dirtyScenes:[{name,path}] fields list every loaded scene with unsaved in-memory changes — the memory-vs-disk signal that tells you a unity_open_mcp_scene_save is pending before you reason against on-disk YAML (e.g. after a structural op like gameobject_set_parent that marks a scene dirty without writing it).",
+    "description": "The Editor's state, and the one way to wait for it. Always answers: play / pause / compile state, the active scene and the in-memory dirty-scene summary (dirtySceneCount + dirtyScenes:[{name,path}] — the memory-vs-disk signal that a unity_open_mcp_scene_save is pending), plus `state`, `transition` (compiling / reloading / entering_playmode / exiting_playmode, or null), `reloading`, `compileGeneration` and `compilePending`. While the Editor compiles, reloads or changes play mode the answer is read from the instance lock and /ping (`source: \"lock\"`, with `retryAfterMs`) instead of failing. With `wait_until` it BLOCKS until the Editor is settled — no compile, domain reload or play-mode change in progress, no requested compile still to start — and in the requested mode, then returns the final state with the compile generation, status and error count (the same count read_compile_errors reports). Use it after editor_set_state, assets_refresh, recompile_scripts, script_write, asmdef or package edits, instead of polling. Pass `after_generation` (the `compile.generationAtStart` a call returned) to require that the compile the call caused has run. The wait survives the domain reload it waits for; past ~40 s it continues as a unity_open_mcp_jobs job and returns its job_id.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "after_generation": {
+          "description": "With wait_until: also require a compile that started after this compile generation (the `compile.generationAtStart` of the call that changed scripts) to have finished. If the Editor reports no compile due, the wait returns after a short grace with compile.ranAfterGeneration: false.",
+          "minimum": 0,
+          "type": "integer"
+        },
         "timeout_ms": {
-          "default": 30000,
-          "maximum": 55000,
+          "description": "With wait_until: the wait's budget (default 120000); up to 40000 ms is waited inline, the rest as a jobs wait. Without wait_until: how long the bridge may take to answer (capped at 5000; the lock answers otherwise).",
+          "maximum": 600000,
           "minimum": 1000,
           "type": "integer"
+        },
+        "wait_until": {
+          "description": "Block until the Editor is settled: \"idle\" (either mode), \"playing\" (in play mode) or \"edit\" (in edit mode). A requested mode that does not come (e.g. play mode refused because scripts do not compile) returns wait_not_reached once the Editor has settled in the other mode for a few seconds.",
+          "enum": [
+            "idle",
+            "playing",
+            "edit"
+          ],
+          "type": "string"
         }
       },
       "type": "object"
@@ -2185,7 +2199,7 @@
     }
   },
   "unity_open_mcp_assets_refresh": {
-    "description": "Refresh the AssetDatabase to pick up files added/removed/changed on disk outside Unity. Use after direct filesystem edits (e.g. creating folders, dropping textures). May trigger asset import and, for .cs files, a recompile — that is reflected in the gate delta. Light mutation: runs the gate path. Pass `whole_project: true` (default) when you changed files in arbitrary places; pass it `false` with a scoped `paths_hint` for a known small change set.",
+    "description": "Refresh the AssetDatabase to pick up files added/removed/changed on disk outside Unity. Use after direct filesystem edits (e.g. creating folders, dropping textures). May trigger asset import and, for .cs files, a recompile + domain reload that runs AFTER the call returns: the result's `compile` block (`generationAtStart`, `pending`) and agentNextSteps then name unity_open_mcp_editor_status {\"wait_until\":\"idle\",\"after_generation\":N}, which returns once that compile ran, with its status and error count. Light mutation: runs the gate path. Pass `whole_project: true` (default) when you changed files in arbitrary places; pass it `false` with a scoped `paths_hint` for a known small change set.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -4751,7 +4765,7 @@
     }
   },
   "unity_open_mcp_recompile_scripts": {
-    "description": "Force Unity to recompile ALL scripts and block until the compile settles. Use this when unity_open_mcp_assets_refresh or unity_open_mcp_execute_csharp fail to recompile after a C# edit (Unity's incremental compiler frequently no-ops on unchanged-import views, leaving the running assembly stale while read_compile_errors reports the old healthy state). Mutating: calls CompilationPipeline.RequestScriptCompilation and blocks on the compile via its restart_then_settle lifecycle (a domain reload may follow). The response reports dllMtimeBefore / dllMtimeAfter (newest Library/ScriptAssemblies/*.dll mtime, in UTC ticks) and a recompiled boolean so a no-op recompile is detectable; agentNextSteps branches on the outcome. paths_hint is the set of script assets you edited (the gate validates the post-recompile state of those paths). Prefer this over assets_refresh when you need a DETERMINISTIC recompile of edited C#.",
+    "description": "Force Unity to recompile ALL scripts and block until the compile settles. Use this when unity_open_mcp_assets_refresh or unity_open_mcp_execute_csharp fail to recompile after a C# edit (Unity's incremental compiler frequently no-ops on unchanged-import views, leaving the running assembly stale while read_compile_errors reports the old healthy state). Mutating: calls CompilationPipeline.RequestScriptCompilation and blocks on the compile via its restart_then_settle lifecycle (a domain reload may follow). The response reports dllMtimeBefore / dllMtimeAfter (newest Library/ScriptAssemblies/*.dll mtime, in UTC ticks) and a recompiled boolean so a no-op recompile is detectable; agentNextSteps branches on the outcome. The domain reload usually cuts the response off (`triggered_reload`): wait with unity_open_mcp_editor_status {\"wait_until\":\"idle\"} for the compile status and error count. paths_hint is the set of script assets you edited (the gate validates the post-recompile state of those paths). Prefer this over assets_refresh when you need a DETERMINISTIC recompile of edited C#.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -4893,7 +4907,7 @@
     }
   },
   "unity_open_mcp_editor_set_state": {
-    "description": "Set the Unity Editor play / pause / stop state. Complements unity_open_mcp_editor_status (the read side). play = enter play mode (EditorApplication.EnterPlaymode); pause = pause the current play session (idempotent — a retry after a timeout no longer resumes the game); stop = exit play mode. Entering play mode is disruptive — when a loaded scene has unsaved changes, Unity's native save modal can interrupt the flow, so the bridge preflights and refuses with code `scene_dirty`; pass ignore_scene_dirty: true to accept the risk. Writes no assets, so the call is gate-free and returns the post-transition state directly. Prefer this over raw execute_csharp EditorApplication.isPlaying = true — schema-validated, undo-safe, and the dirty-scene refusal is surfaced as a structured error instead of a hanging save dialog.",
+    "description": "Set the Unity Editor play / pause / stop state. Complements unity_open_mcp_editor_status (the read side). play = enter play mode (EditorApplication.EnterPlaymode); pause = pause the current play session (idempotent — a retry after a timeout no longer resumes the game); stop = exit play mode. Entering play mode is disruptive — when a loaded scene has unsaved changes, Unity's native save modal can interrupt the flow, so the bridge preflights and refuses with code `scene_dirty`; pass ignore_scene_dirty: true to accept the risk. Writes no assets, so the call is gate-free. play / stop only REQUEST the change: Unity switches on a later update (with a domain reload unless Enter Play Mode Options skip it), so the response reports `transition` and the next step is unity_open_mcp_editor_status {\"wait_until\":\"playing\"} (or \"edit\" after stop), which returns once the mode is reached — do not poll. Prefer this over raw execute_csharp EditorApplication.isPlaying = true — schema-validated, undo-safe, and the dirty-scene refusal is surfaced as a structured error instead of a hanging save dialog.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -5254,7 +5268,7 @@
     }
   },
   "unity_open_mcp_script_write": {
-    "description": "Create or overwrite a C# source (.cs) file under the project. Mutating: writes the file, then Roslyn-validates it before persisting and refreshes the asset database (which may trigger a recompile / domain reload). Runs the full gate path; `paths_hint` must be scoped to the .cs path. By default the call refuses to overwrite an existing file unless `overwrite: true` is set. `validate: true` (default) runs a Roslyn parse compile of the source first and returns the diagnostics — a failed parse returns `validation_failed` and the file is not written. Set `validate: false` only when you intentionally want to write a fragment that is not a full compilation unit. Prefer this over execute_csharp File.WriteAllText — schema-validated, Roslyn-checked, and the gate surfaces any fallout (the new script can break prefab references).",
+    "description": "Create or overwrite a C# source (.cs) file under the project. Mutating: writes the file, then Roslyn-validates it before persisting and refreshes the asset database (which starts a recompile / domain reload after the call returns — the result's `compile` block and agentNextSteps name unity_open_mcp_editor_status {\"wait_until\":\"idle\",\"after_generation\":N}; calls sent meanwhile wait for the reload too). Runs the full gate path; `paths_hint` must be scoped to the .cs path. By default the call refuses to overwrite an existing file unless `overwrite: true` is set. `validate: true` (default) runs a Roslyn parse compile of the source first and returns the diagnostics — a failed parse returns `validation_failed` and the file is not written. Set `validate: false` only when you intentionally want to write a fragment that is not a full compilation unit. Prefer this over execute_csharp File.WriteAllText — schema-validated, Roslyn-checked, and the gate surfaces any fallout (the new script can break prefab references).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -10662,7 +10676,7 @@
     }
   },
   "unity_open_mcp_asmdef_create": {
-    "description": "Create a new Assembly Definition (.asmdef) file. Mutating: runs the full gate path with the RestartThenSettle lifecycle (creating an asmdef forces a domain reload + recompile — the gate waits for the settle window, and the active-scene dirty guard preflights it). `paths_hint` must be scoped to the new asset path. Builds the .asmdef JSON from the typed params; `name` defaults to the filename when omitted. After create, poll editor_status / compile_check to confirm the recompile settled, then run scan_paths on the new asmdef to catch any broken references. To edit an existing asmdef use asmdef_modify.",
+    "description": "Create a new Assembly Definition (.asmdef) file. Mutating: runs the full gate path with the RestartThenSettle lifecycle (creating an asmdef forces a domain reload + recompile — the gate waits for the settle window, and the active-scene dirty guard preflights it). `paths_hint` must be scoped to the new asset path. Builds the .asmdef JSON from the typed params; `name` defaults to the filename when omitted. After create, wait with unity_open_mcp_editor_status {\"wait_until\":\"idle\"} (compile status and error count once the recompile settled), then run scan_paths on the new asmdef to catch any broken references. To edit an existing asmdef use asmdef_modify.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -10769,7 +10783,7 @@
     }
   },
   "unity_open_mcp_asmdef_modify": {
-    "description": "Modify an existing Assembly Definition (.asmdef). Mutating: runs the full gate path with the RestartThenSettle lifecycle (editing references / platforms / define constraints can force a domain reload + recompile — the gate waits for the settle window, and the active-scene dirty guard preflights it). `paths_hint` must be scoped to the asset path. Only supplied params mutate — omitted params keep their current value. References are additive by default (add_references / remove_references); pass `references` for a full replacement. Setting include_platforms clears exclude_platforms and vice versa. After modify, poll editor_status / compile_check to confirm the recompile settled, then run scan_paths to catch any broken references.",
+    "description": "Modify an existing Assembly Definition (.asmdef). Mutating: runs the full gate path with the RestartThenSettle lifecycle (editing references / platforms / define constraints can force a domain reload + recompile — the gate waits for the settle window, and the active-scene dirty guard preflights it). `paths_hint` must be scoped to the asset path. Only supplied params mutate — omitted params keep their current value. References are additive by default (add_references / remove_references); pass `references` for a full replacement. Setting include_platforms clears exclude_platforms and vice versa. After modify, wait with unity_open_mcp_editor_status {\"wait_until\":\"idle\"} until the recompile settled (it reports the compile status and error count), then run scan_paths to catch any broken references.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -13133,7 +13147,7 @@
     }
   },
   "unity_open_mcp_jobs": {
-    "description": "Observe session-owned asynchronous jobs: start, status, bounded wait, cooperative cancel, and paged list. Supported targets: unity_senses_run_tests, available async project commands, and play-mode operations (unity_open_mcp_inputsim_gesture, unity_open_mcp_playtest_wait, unity_senses_capture_series; cancellable — cancel releases held input and restores a wait's time scale). Other tools are unsupported. Test args are ordinary filters without run_id; project args contain nested args plus scope/gate options; play-mode operation args are the tool's own arguments (the job owns operation_id). Mutating starts require idempotency_key. Records expire 30 minutes after completion; server restart loses all records. Never blindly retry an orphaned job.",
+    "description": "Observe session-owned asynchronous jobs: start, status, bounded wait, cooperative cancel, and paged list. Supported targets: unity_senses_run_tests, available async project commands, and play-mode operations (unity_open_mcp_inputsim_gesture, unity_open_mcp_playtest_wait, unity_senses_capture_series; cancellable — cancel releases held input and restores a wait's time scale), and Editor waits (unity_open_mcp_editor_status with wait_until — what a long editor_status wait continues as; an observer that holds no project slot; cancellable). Other tools are unsupported. Test args are ordinary filters without run_id; project args contain nested args plus scope/gate options; play-mode operation args are the tool's own arguments (the job owns operation_id). Mutating starts require idempotency_key. Records expire 30 minutes after completion; server restart loses all records. Never blindly retry an orphaned job.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

@@ -111,10 +111,21 @@ namespace UnityOpenMcpBridge
             }
         }
 
+        // The lock's `compile` block (BridgeCompileState.LockJson): the last
+        // compile generation, whether that compile failed, and whether a
+        // compile is due. Built on the main thread by the heartbeat and kept
+        // here so a write from any thread carries the last known value; it is
+        // what a reader sees while the bridge is down for a reload.
+        private static volatile string _compileJson;
+
         // Rewrite the lock with fresh state. Called by the heartbeat tick and
         // on forced transitions. No-op if Acquire has not run or failed.
         public static void UpdateState(string state, bool isPlaying, bool isCompiling)
+            => UpdateState(state, isPlaying, isCompiling, null);
+
+        internal static void UpdateState(string state, bool isPlaying, bool isCompiling, string compileJson)
         {
+            if (compileJson != null) _compileJson = compileJson;
             if (!_acquired) return;
             try
             {
@@ -249,7 +260,8 @@ namespace UnityOpenMcpBridge
             sb.Append("\"isPlaying\":").Append(isPlaying ? "true" : "false").Append(',');
             sb.Append("\"isCompiling\":").Append(isCompiling ? "true" : "false").Append(',');
             sb.Append("\"bridgeVersion\":").Append(Escape(BridgeSession.BridgeVersion)).Append(',');
-            sb.Append("\"unityVersion\":").Append(Escape(NullToEmpty(BridgeSession.UnityVersion)));
+            sb.Append("\"unityVersion\":").Append(Escape(NullToEmpty(BridgeSession.UnityVersion))).Append(',');
+            sb.Append("\"compile\":").Append(_compileJson ?? "null");
             sb.Append('}');
             return sb.ToString();
         }

@@ -404,7 +404,9 @@ namespace UnityOpenMcpBridge.TypedTools
                 sb.Append(",\"validationDiagnostics\":\"")
                   .Append(OutputSerializer.EscapeJsonString(validationDiagnostics)).Append('"');
             }
-            sb.Append(",\"note\":\"AssetDatabase.ImportAsset queued; a recompile / domain reload may follow. Poll editor_status / compile_check to confirm.\"");
+            sb.Append(",\"note\":").Append(BridgeJson.EscapeString(
+                "AssetDatabase.ImportAsset queued; a recompile / domain reload follows. Wait for it with "
+                + BridgeJson.WaitCall("idle", null) + " (compile status and error count) before calling code that uses the script."));
             sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }

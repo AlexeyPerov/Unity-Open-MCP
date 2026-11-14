@@ -62,6 +62,8 @@ function makeFakeLive(opts: {
   available?: boolean;
   result?: CallToolResult;
   bridgeTools?: Set<string> | null;
+  /** /compile-state body; omitted = a fake without live compile state (read_compile_errors reads the log). */
+  compileState?: Record<string, unknown> | null;
 } = {}): LiveClient & { calls: LiveCall[] } {
   const calls: LiveCall[] = [];
   const available = opts.available ?? true;
@@ -80,6 +82,17 @@ function makeFakeLive(opts: {
     calls,
     async isLiveAvailable() {
       return available;
+    },
+    // The editor-state reader (reload policy, editor_status, the wait): a
+    // reachable fake answers a settled /ping and a clean /compile-state.
+    async pingProbe() {
+      return available
+        ? { reachable: true, httpStatus: 200, body: { connected: true, compiling: false, isPlaying: false, transition: null } }
+        : { reachable: false, httpStatus: null, body: null };
+    },
+    ...(opts.compileState !== undefined ? { async readCompileState() { return available ? opts.compileState : null; } } : {}),
+    async readEditorStatus() {
+      return available ? { isPlaying: false, isCompiling: false, isPaused: false, currentScene: "Assets/Scenes/Main.unity", dirtySceneCount: 0, dirtyScenes: [] } : null;
     },
     async route(tool: string, args: Record<string, unknown>) {
       calls.push({ tool, args });
@@ -1878,6 +1891,12 @@ function makePingFakeLive(opts: {
     calls,
     async isLiveAvailable() {
       return available;
+    },
+    // bridge_status reads /ping through the shared editor-state reader.
+    async pingProbe() {
+      calls.push({ tool: "unity_open_mcp_ping", args: {} });
+      if (pingBody === null || pingIsError) return { reachable: false, httpStatus: null, body: null };
+      return { reachable: true, httpStatus: 200, body: pingBody };
     },
     async route(tool: string, args: Record<string, unknown>) {
       calls.push({ tool, args });
@@ -4748,7 +4767,18 @@ test("live compile_failed without pipeline diagnostics promotes the Editor.log e
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("fresh reloading lock causes one bounded live re-probe and never calls batch", async () => {
+const CLEAN_COMPILE_STATE = { status: "no_errors_found", generation: 4, sourceMatches: true, pending: false, errors: [] };
+
+/** A router whose mid-reload wait budget is `ms` (UNITY_OPEN_MCP_RELOAD_WAIT_MS is read at construction). */
+function withReloadBudget<T>(ms: number, make: () => T): T {
+  const prev = process.env.UNITY_OPEN_MCP_RELOAD_WAIT_MS;
+  process.env.UNITY_OPEN_MCP_RELOAD_WAIT_MS = String(ms);
+  try { return make(); } finally {
+    if (prev === undefined) delete process.env.UNITY_OPEN_MCP_RELOAD_WAIT_MS; else process.env.UNITY_OPEN_MCP_RELOAD_WAIT_MS = prev;
+  }
+}
+
+test("a call during a reload waits out its budget, then refuses with a stable editor_reloading — never batch", async () => {
   const root = await mkdtemp(join(tmpdir(), "reload-route-"));
   const path = lockPath(root);
   mkdirSync(dirname(path), { recursive: true });
@@ -4756,20 +4786,92 @@ test("fresh reloading lock causes one bounded live re-probe and never calls batc
     state: "reloading", heartbeatAt: new Date().toISOString() }));
   try {
     const live = makeFakeLive({ available: false });
-    let probes = 0;
-    live.isLiveAvailable = async (budget) => { probes++; assert.equal(budget, 750); return false; };
     const batch = makeFakeBatch({ batchTools: new Set(["unity_open_mcp_compile_check"]) });
-    const router = new ToolRouter(live, batch, root, makeFakeEventStream(), new ToolSessionState());
+    const router = withReloadBudget(600, () => new ToolRouter(live, batch, root, makeFakeEventStream(), new ToolSessionState()));
+    const started = Date.now();
     const result = await router.route("unity_open_mcp_compile_check", {});
     const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.ok(Date.now() - started >= 500, "it waited for the reload first");
+    assert.equal(result.isError, true);
     assert.equal(body.error.code, "editor_reloading");
-    assert.equal(body.retryAfterMs, 1000);
-    assert.equal(probes, 1);
+    assert.equal(body.dispatched, false);
+    assert.equal(body.transition, "reloading");
+    assert.equal(typeof body.retryAfterMs, "number");
+    assert.match(body.agentNextSteps[0], /unity_open_mcp_editor_status \{"wait_until":"idle"\}/);
     assert.equal(batch.calls.length, 0);
+    assert.equal(live.calls.length, 0);
   } finally { rmSync(path, { force: true }); await rm(root, { recursive: true, force: true }); }
 });
 
-test("default project's reloading lock does not refuse a port override aimed at another Editor", async () => {
+test("a call during a reload dispatches once the Editor settles (and not before)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "reload-settle-"));
+  const path = lockPath(root);
+  mkdirSync(dirname(path), { recursive: true });
+  const writeLock = (state: string) => writeFileSync(path, JSON.stringify({ pid: process.pid, projectPath: root, port: 27999,
+    state, heartbeatAt: new Date().toISOString(), isPlaying: false, isCompiling: state === "compiling",
+    compile: { generation: 5, running: false, completed: true, failed: false, errorCount: 0, pending: false, requestedAt: null } }));
+  writeLock("reloading");
+  try {
+    const live = makeFakeLive({ available: true, compileState: CLEAN_COMPILE_STATE });
+    let reloading = true;
+    let dispatchedWhileReloading = false;
+    const route = live.route.bind(live);
+    live.route = async (tool, args) => { if (reloading) dispatchedWhileReloading = true; return route(tool, args); };
+    live.pingProbe = async () => reloading
+      ? { reachable: false, httpStatus: null, body: null }
+      : { reachable: true, httpStatus: 200, body: { connected: true, compiling: false, isPlaying: false, transition: null } as never };
+    setTimeout(() => { writeLock("idle"); reloading = false; }, 400);
+    const router = withReloadBudget(10_000, () => makeRouter(live, makeFakeBatch(), root, makeFakeEventStream()));
+    const result = await router.route("unity_open_mcp_gameobject_find", { game_object_path: "Player" });
+    assert.equal(result.isError, false);
+    assert.equal(dispatchedWhileReloading, false);
+    assert.equal(live.calls.length, 1);
+    assert.equal(live.calls[0].tool, "unity_open_mcp_gameobject_find");
+  } finally { rmSync(path, { force: true }); await rm(root, { recursive: true, force: true }); }
+});
+
+test("a compile a call left pending holds the next call until it ran (the lock handshake)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "reload-pending-"));
+  const path = lockPath(root);
+  mkdirSync(dirname(path), { recursive: true });
+  const writeLock = (generation: number, pending: boolean) => writeFileSync(path, JSON.stringify({ pid: process.pid, projectPath: root, port: 27999,
+    state: "idle", heartbeatAt: new Date().toISOString(), isPlaying: false, isCompiling: false,
+    compile: { generation, running: false, completed: true, failed: false, errorCount: 0, pending, requestedAt: pending ? new Date().toISOString() : null } }));
+  writeLock(5, true);
+  try {
+    const live = makeFakeLive({ available: true });
+    let generation = 5;
+    live.readCompileState = async () => ({ status: generation === 5 ? "assembly_stale" : "no_errors_found", generation, sourceMatches: generation !== 5, pending: generation === 5, errors: [] });
+    setTimeout(() => { generation = 6; writeLock(6, false); }, 500);
+    const router = withReloadBudget(10_000, () => makeRouter(live, makeFakeBatch(), root, makeFakeEventStream()));
+    const started = Date.now();
+    await router.route("unity_open_mcp_gameobject_find", { game_object_path: "Player" });
+    assert.ok(Date.now() - started >= 450, "held while the requested compile had not started");
+    assert.equal(live.calls.length, 1);
+  } finally { rmSync(path, { force: true }); await rm(root, { recursive: true, force: true }); }
+});
+
+test("a bridge refusal that ran nothing (editor_reloading, dispatched:false) is sent again once the Editor settles", async () => {
+  await withTmp("reload-resend-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makeFakeLive({ available: true, compileState: CLEAN_COMPILE_STATE });
+    let first = true;
+    live.route = async (tool, args) => {
+      live.calls.push({ tool, args });
+      if (first) {
+        first = false;
+        return { content: [{ type: "text", text: JSON.stringify({ error: { code: "editor_reloading", message: "not run" }, dispatched: false, retryAfterMs: 1000 }) }], isError: true };
+      }
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true }) }], isError: false };
+    };
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+    const result = await router.route("unity_open_mcp_gameobject_find", { game_object_path: "Player" });
+    assert.equal(result.isError, false);
+    assert.equal(live.calls.length, 2);
+  });
+});
+
+test("default project's reloading lock does not hold a port override aimed at another Editor", async () => {
   const root = await mkdtemp(join(tmpdir(), "reload-override-"));
   const path = lockPath(root);
   mkdirSync(dirname(path), { recursive: true });
@@ -4778,7 +4880,7 @@ test("default project's reloading lock does not refuse a port override aimed at 
   try {
     const defaultLive = makeFakeLive({ available: false });
     const overrideLive = makeFakeLive({ available: true });
-    const router = new ToolRouter(defaultLive, makeFakeBatch(), root, makeFakeEventStream(), new ToolSessionState());
+    const router = withReloadBudget(300, () => new ToolRouter(defaultLive, makeFakeBatch(), root, makeFakeEventStream(), new ToolSessionState()));
     const args = { game_object_path: "Player", name: "Hero", paths_hint: ["Assets/Scenes/Main.unity"] };
 
     const routed = await router.routeOverride("unity_open_mcp_gameobject_modify", args,
@@ -4788,9 +4890,9 @@ test("default project's reloading lock does not refuse a port override aimed at 
     assert.equal(overrideLive.calls[0].tool, "unity_open_mcp_gameobject_modify");
     assert.equal(defaultLive.calls.length, 0);
 
-    // An override naming the default Editor's own port still hits the probe.
+    // An override naming the default Editor's own port still waits for it.
     const samePort = await router.routeOverride("unity_open_mcp_gameobject_modify", args,
-      makeFakeLive({ available: true }) as unknown as LiveClient, { agent: "A", port: 27999 });
+      makeFakeLive({ available: false }) as unknown as LiveClient, { agent: "A", port: 27999 });
     assert.equal(errorCode(samePort), "editor_reloading");
 
     // The default route is unchanged: the reloading lock refuses the call.
@@ -4810,9 +4912,7 @@ test("compiling/reloading lock still serves offline-capable reads from disk", as
         writeFileSync(path, JSON.stringify({ pid: process.pid, projectPath: tmp, port: 27999,
           state, heartbeatAt: new Date().toISOString() }));
         const live = makeFakeLive({ available: false });
-        let probes = 0;
-        live.isLiveAvailable = async () => { probes++; return false; };
-        const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+        const router = withReloadBudget(300, () => makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream()));
         const reads: Array<[string, Record<string, unknown>]> = [
           ["unity_open_mcp_list_assets", {}],
           ["unity_open_mcp_find_references", { guid: "0000000000000000000000000000aaaa" }],
@@ -4824,13 +4924,107 @@ test("compiling/reloading lock still serves offline-capable reads from disk", as
           assert.notEqual(errorCode(result), "editor_reloading", `${state}: ${tool}`);
         }
         assert.equal(live.calls.length, 0, `${state}: no live dispatch`);
-        // A live-only tool is still refused by the probe under the same lock.
+        // A live-only tool waits under the same lock, then is refused.
         const refused = await router.route("unity_open_mcp_gameobject_find", { game_object_path: "Player" });
         assert.equal(errorCode(refused), "editor_reloading", state);
-        assert.ok(probes > 0);
       }
     } finally { rmSync(path, { force: true }); }
   });
+});
+
+test("editor_status during a reload answers from the lock, not editor_reloading", async () => {
+  const root = await mkdtemp(join(tmpdir(), "status-reload-"));
+  const path = lockPath(root);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({ pid: process.pid, projectPath: root, port: 27999,
+    state: "entering_playmode", heartbeatAt: new Date().toISOString(), isPlaying: false, isCompiling: false,
+    compile: { generation: 9, running: false, completed: true, failed: false, errorCount: 0, pending: false, requestedAt: null } }));
+  try {
+    const live = makeFakeLive({ available: false });
+    const router = new ToolRouter(live, makeFakeBatch(), root, makeFakeEventStream(), new ToolSessionState());
+    const result = await router.route("unity_open_mcp_editor_status", {});
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(result.isError, false);
+    assert.equal(body.source, "lock");
+    assert.equal(body.reloading, true);
+    assert.equal(body.transition, "entering_playmode");
+    assert.equal(body.state, "entering_playmode");
+    assert.equal(body.isPlaying, false);
+    assert.equal(body.compileGeneration, 9);
+    assert.equal(typeof body.retryAfterMs, "number");
+    assert.match(body.agentNextSteps[0], /"wait_until":"playing"/);
+    assert.equal(live.calls.length, 0);
+
+    // ping likewise answers from the lock while the listener is away.
+    const ping = await router.route("unity_open_mcp_ping", {});
+    const pingBody = JSON.parse((ping.content[0] as { text: string }).text);
+    assert.equal(ping.isError, false);
+    assert.equal(pingBody.connected, false);
+    assert.equal(pingBody.source, "lock");
+    assert.equal(pingBody.transition, "entering_playmode");
+  } finally { rmSync(path, { force: true }); await rm(root, { recursive: true, force: true }); }
+});
+
+test("editor_status on a settled Editor is the bridge's answer plus the lock's state and compile generation, flat", async () => {
+  await withTmp("status-live-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makeFakeLive({ available: true });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+    const result = await router.route("unity_open_mcp_editor_status", {});
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(result.isError, false);
+    assert.equal(body.source, "live");
+    assert.equal(body.currentScene, "Assets/Scenes/Main.unity");
+    assert.equal(body.reloading, false);
+    assert.equal(body.transition, null);
+    assert.equal(body.mutation, undefined, "a flat status, not a gate envelope");
+  });
+});
+
+test("editor_status wait_until: reaches idle with the compile summary read_compile_errors would give", async () => {
+  await withTmp("status-wait-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makeFakeLive({ available: true, compileState: CLEAN_COMPILE_STATE });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+    const result = await router.route("unity_open_mcp_editor_status", { wait_until: "idle", timeout_ms: 5_000 });
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(result.isError, false);
+    assert.equal(body.reached, true);
+    assert.equal(body.status, "idle");
+    assert.equal(body.compile.generation, 4);
+    assert.equal(body.compile.status, "no_errors_found");
+    assert.equal(body.compile.errorCount, 0);
+
+    const bad = await router.route("unity_open_mcp_editor_status", { after_generation: 3 });
+    assert.equal(errorCode(bad), "invalid_arguments");
+  });
+});
+
+test("editor_status wait_until past the inline window continues as an observer job", async () => {
+  const root = await mkdtemp(join(tmpdir(), "status-wait-job-"));
+  const path = lockPath(root);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({ pid: process.pid, projectPath: root, port: 27999,
+    state: "compiling", heartbeatAt: new Date().toISOString(), isPlaying: false, isCompiling: true }));
+  try {
+    const live = makeFakeLive({ available: true });
+    live.pingProbe = async () => ({ reachable: true, httpStatus: 200, body: { connected: true, compiling: true, isPlaying: false, transition: "compiling" } as never });
+    const router = new ToolRouter(live, makeFakeBatch(), root, makeFakeEventStream(), new ToolSessionState());
+    router.waitInlineLimitMs = 300;
+    try {
+      const result = await router.route("unity_open_mcp_editor_status", { wait_until: "idle", timeout_ms: 60_000 });
+      const body = JSON.parse((result.content[0] as { text: string }).text);
+      assert.equal(result.isError, false);
+      assert.equal(body.status, "waiting");
+      assert.equal(typeof body.job_id, "string");
+      assert.match(body.agentNextSteps[0], /unity_open_mcp_jobs \{"action":"wait"/);
+      const job = JSON.parse(((await router.route("unity_open_mcp_jobs", { action: "status", job_id: body.job_id })).content[0] as { text: string }).text);
+      assert.equal(job.operation, "unity_open_mcp_editor_status");
+      assert.ok(["queued", "running"].includes(job.state), job.state);
+      const cancelled = JSON.parse(((await router.route("unity_open_mcp_jobs", { action: "cancel", job_id: body.job_id })).content[0] as { text: string }).text);
+      assert.ok(["cancel_requested", "cancelled"].includes(cancelled.state), cancelled.state);
+    } finally { router.closeJobs(); }
+  } finally { rmSync(path, { force: true }); await rm(root, { recursive: true, force: true }); }
 });
 
 test("core project selectors use the selected project's endpoint instead of the configured project", async () => {

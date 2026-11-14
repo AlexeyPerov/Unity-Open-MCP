@@ -5,9 +5,10 @@ available when Unity is offline or reloading. It owns jobs in one MCP server
 session; it does not turn synchronous tool calls into background work.
 
 Supported targets are `unity_senses_run_tests`, available project commands
-that declare `Async = true` with the async authoring signature, and play-mode
+that declare `Async = true` with the async authoring signature, play-mode
 operations (`unity_open_mcp_inputsim_gesture`, `unity_open_mcp_playtest_wait`,
-`unity_senses_capture_series`). Other targets return
+`unity_senses_capture_series`), and Editor waits
+(`unity_open_mcp_editor_status` with `wait_until`). Other targets return
 `job_operation_unsupported`; builds, imports, package resolution, and baking
 retain their existing contracts.
 
@@ -136,6 +137,30 @@ an answer, or without a terminal state by the deadline — 10 minutes, or the
 operation's worst case plus 2 minutes when longer (a 10-minute wait) — the job is
 `orphaned` (a cancel is sent first).
 
+## Editor waits
+
+An [`editor_status`](mcp-tools.md#unity_open_mcp_editor_status) wait whose
+`timeout_ms` outlasts its 40 s inline window continues as a job: the call returns
+`status: "waiting"` with the `job_id`, and the job's result is the wait's answer
+(`reached`, `mode`, `transitionsSeen`, `compile: {generation, status,
+errorCount}`). It can also be started directly:
+
+```json
+{
+  "action": "start",
+  "tool_or_command": "unity_open_mcp_editor_status",
+  "args": { "wait_until": "idle", "after_generation": 42, "timeout_ms": 300000 }
+}
+```
+
+The wait polls the instance lock, `/ping` and `/compile-state` from the server, so
+a domain reload is something it waits through, not a lost owner. A wait that is
+not reached fails with the wait's code (`wait_timeout`, `wait_not_reached`,
+`bridge_compile_failed`, `bridge_offline`); `cancel` stops it at once. It is an
+**observer**: it changes nothing, needs no `idempotency_key`, and holds no
+project or agent execution slot — it never queues behind a running test job nor
+blocks one. Up to eight observers run at a time.
+
 ## Calls
 
 | Action | Arguments | Result |
@@ -187,7 +212,8 @@ Validation and key reservation precede scheduling, so concurrent retries cannot
 start the same mutation twice.
 
 Defaults are four executing jobs globally, one per project/port and one per
-project/agent. Additional jobs queue in creation order; an eligible independent
+project/agent (Editor waits, which only observe, run beside them with their own
+limit of eight). Additional jobs queue in creation order; an eligible independent
 project can proceed while another project is busy. An orphan whose adapter has
 not returned keeps its execution slot, because its work may still be running.
 

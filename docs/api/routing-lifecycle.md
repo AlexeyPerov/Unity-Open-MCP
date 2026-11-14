@@ -27,6 +27,10 @@ Pinned exceptions:
   `regression_check`.
 - Always offline: `list_assets`.
 - Live compile snapshot with offline log fallback, never batch: `read_compile_errors`.
+- Live status with an instance-lock fallback, never batch: `editor_status`
+  (`_route` `live` / `local`); its `wait_until` form is a local wait that polls
+  the lock, `/ping` and `/compile-state`. `ping` answers from the lock the same
+  way while the listener is down.
 - Always local: `capabilities`, `manage_tools`, `generate_skill`,
   `bridge_status`, `restart_editor`, `resource_pressure`, `jobs`,
   `playtest_session` (its bridge reads go through the normal route), `hub_*`, and
@@ -56,9 +60,9 @@ Without a live bridge, these tools retain useful disk-backed behavior:
 - `dependencies`
 - `read_compile_errors`
 
-These tools also skip the reload probe: while the instance lock reports a
-compiling or reloading Editor they still reach their handler (and its disk
-fallback) instead of returning `editor_reloading`.
+These tools also skip the [mid-reload wait](#calls-during-a-compile-reload-or-play-mode-change):
+while the instance lock reports a compiling or reloading Editor they still
+reach their handler (and its disk fallback) at once.
 
 `read_asset` normalizes forward and backward slashes before both disk reads and
 live fallback. Its session cache checks the asset's modification time, its own
@@ -95,7 +99,7 @@ Every tool declares `capabilities.tools[].lifecycle` and may add a
 | Class | Concern | Recovery |
 |---|---|---|
 | `none` | Read-only or side-effect-free operation. | Retry only when the underlying error is transient. |
-| `compile-reload` | Script, asmdef, package, scene-open, or settings work can trigger compilation/domain reload. | Verify post-state with `editor_status`, `bridge_status`, and `read_compile_errors`; do not repeat a mutation blindly. |
+| `compile-reload` | Script, asmdef, package, scene-open, or settings work can trigger compilation/domain reload. | Wait with `editor_status {"wait_until":"idle"}` (pass the result's `compile.generationAtStart` as `after_generation`): it outlives the reload and returns the compile status and error count. Do not repeat a mutation blindly. |
 | `modal-dialog` | The operation or Unity startup can raise an OS modal. | Follow [Dialog policy](../dialog-policy.md); obtain operator consent for destructive/irreversible choices. |
 | `scene-dirty` | The operation mutates scene, prefab, hierarchy, or asset state. | Read the gate delta; save/discard dirty scenes or deliberately accept the risk. |
 | `process-stale` | A long operation can pause bridge responses/heartbeat. | Wait and re-probe before declaring the bridge dead. |
@@ -211,13 +215,13 @@ pointed at a top-level call it cannot make.
 | `batch_aborted` | Unity exited nonzero before a report with no recognized compiler/package/spawn cause. | Inspect the captured output tail. |
 | `compile_failed` | The child emitted compiler diagnostics before its report. | Fix those diagnostics, then retry. |
 | `project_load_failed` | Headless Unity stopped at package/project resolution before its entry point; no compile ran. | Read the Package Manager notice at the end of the captured output tail (the error also names offending packages), fix `Packages/manifest.json`, then retry. |
-| `editor_reloading` | A fresh instance lock identifies a live compiling/reloading Editor. | Retry after `retryAfterMs`; the router makes one bounded live re-probe and never launches headless Unity. Local tools, the [offline-coverage](#offline-coverage) reads, and calls whose `_meta.port` override targets a different Editor than the configured project's lock are exempt. |
+| `editor_reloading` | The Editor was still compiling, reloading or changing play mode after the call's [mid-reload wait](#calls-during-a-compile-reload-or-play-mode-change) (`dispatched: false`, nothing ran), or a reload closed the response of a call that may have run (`dispatched: true` / `null`). | Wait with `editor_status {"wait_until":"idle"}`, then retry a `dispatched: false` call; verify the effect of a `dispatched: true` / `null` mutation before repeating it. Carries `retryAfterMs` and `transition`. Never launches headless Unity. |
 | `batch_in_progress` | Another headless operation owns the project: one this MCP server is driving, or a `-batchmode` Unity another process (a second MCP server, CI) has open on it. Checked before the Editor-ownership checks, so a headless Unity is never reported as `editor_instance_locked`; the message names the foreign process when there is one. | Wait for it to finish. |
 | `markers_missing` | A non-compile batch operation exited 0 without its report. | Inspect the captured output tail and the operation's post-state before repeating a mutation. |
 | `batch_spawn_failed` | Headless Unity produced no classifiable result (non-zero exit, no markers). | Inspect compile errors, package state, project lock, and path. |
 | `batch_step_requires_server_poll` | A `batch_execute` step's terminal result is produced by the server polling a results file, which the batch route does not do (today: `unity_senses_run_tests`, `unity_open_mcp_inputsim_gesture`, `unity_open_mcp_playtest_wait`, `unity_senses_capture_series`, `unity_open_mcp_game_view` set actions). | Call the tool as a single top-level call. The message also names a reachable `execute_csharp` / `invoke_method` equivalent for clients that cannot see the tool. |
 | `scene_dirty` | A disruptive call was refused because a loaded scene has unsaved work, including unsaved additive scenes. The guard covers every `restart_then_settle` call (recompile, package and asmdef edits, build target/defines, player settings, menus, single-mode scene switches, upgrade, and an `execute_csharp` snippet whose text can disrupt the Editor) plus `editor_set_state` play and `run_tests`; each publishes `ignore_scene_dirty`. A snippet that only writes assets is not refused, and one that saves scenes is refused only for an untitled dirty scene — see [`execute_csharp`](mcp-tools.md#unity_open_mcp_execute_csharp). | Follow `agentNextSteps`, in order: save with `scene_save` (the step carries the call and the dirty scene's path; an untitled scene gets a save-as path), or discard by reopening the scene with `scene_open` + `ignore_scene_dirty: true`, or deliberately retry with `ignore_scene_dirty: true` and accept Unity's native save prompt. |
-| `bridge_response_unparsable` | A substantial bridge response could not be parsed. | Do not trust partial output; check bridge health before retrying. |
+| `bridge_response_unparsable` | A bridge response could not be parsed while the Editor was settled (no reload or play-mode change explains it). | Do not trust partial output; check bridge health before retrying. A response cut off by a reload is `editor_reloading` / `triggered_reload` instead. |
 
 A failed tool POST is replayed only for proven pre-connection failures
 (`ECONNREFUSED`, DNS lookup failures, or a connect timeout). A socket reset,
@@ -228,8 +232,58 @@ post-state before retrying, even if `/ping` succeeds again. Explicit compiling
 
 Retry tunables include `UNITY_OPEN_MCP_COMPILE_WAIT_MS`,
 `UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS`,
-`UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS`, and
-`UNITY_OPEN_MCP_TRANSIENT_BACKOFF_MS`.
+`UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS`,
+`UNITY_OPEN_MCP_TRANSIENT_BACKOFF_MS`, and `UNITY_OPEN_MCP_RELOAD_WAIT_MS` (the
+mid-reload wait budget, default 30000; `0` refuses at once).
+
+### Calls during a compile, reload or play-mode change
+
+A compile ends in a domain reload that tears the bridge's listener down, and
+entering play mode reloads it too. The MCP server reads the Editor from outside
+for the whole window — the instance lock (heartbeat `state`, `isPlaying` /
+`isCompiling`, and a `compile` block with the last generation, `failed`,
+`errorCount` and `pending`), one `/ping` probe (`transition`) and, once settled,
+`/compile-state` — through one reader shared by `bridge_status`,
+`editor_status`, `ping`, the policy below and the CLI `wait-for-ready`.
+
+- **Status always answers.** `editor_status` and `ping` answer from the lock and
+  `/ping` (`source: "lock"`, `reloading: true`, `transition`,
+  `compileGeneration`, `retryAfterMs`) when the bridge cannot.
+- **One wait.** `editor_status {"wait_until":"idle"|"playing"|"edit"}` blocks
+  until the Editor is settled in that mode with no compile due and reports the
+  compile generation, status and error count
+  ([contract](mcp-tools.md#unity_open_mcp_editor_status)); past 40 s it continues
+  as a [`jobs`](jobs.md) wait.
+- **The compile handshake.** Unity starts a requested compile on a later update,
+  and `isCompiling` can read false in the gap. A call that leaves a compile
+  requested records it (`pending` in the lock and `/compile-state`, cleared when
+  the next compile starts); its envelope's `compile.generationAtStart` lets the
+  caller require a compile after it (`after_generation`). The wait holds while
+  a compile is pending (up to 60 s from the request).
+- **Calls that arrive mid-transition wait.** While the lock shows a compile,
+  reload, play-mode change or a pending compile, a call (other than the local,
+  offline-capable and status tools above) waits for the Editor to settle —
+  bounded by `UNITY_OPEN_MCP_RELOAD_WAIT_MS` (default 30 s) so it stays inside a
+  host's request timeout — and is then dispatched; past the budget it is refused
+  with `editor_reloading` (`dispatched: false`, `retryAfterMs`, the wait call).
+  A `_meta.port` override aimed at another Editor is not held by the configured
+  project's lock.
+- **The bridge never runs a mutation into a transition.** A mutation that
+  reaches the main thread while a compile is running or due, or a play-mode
+  change is pending, is answered HTTP 503 `editor_reloading` with
+  `dispatched: false`; the client waits for the Editor (bounded) and sends it
+  once more — nothing ran, so the resend is safe.
+- **A reload never reads as corruption.** A tool call whose response a domain
+  reload cuts off is answered with a well-formed body before the listener stops:
+  HTTP 503 `editor_reloading` (`dispatched: false`) when its work never reached
+  the main thread, HTTP 200 `editor_reloading` with `dispatched: true` (and the
+  call's `compile.generationAtStart`) when it ran. A compile-reload call (and
+  `assets_refresh`) reads the latter as `triggered_reload` (its expected end,
+  with the wait keyed to that generation); any other call gets
+  `editor_reloading` — verify a mutation's effect before repeating it. An empty
+  body while the lock or `/ping` shows a transition maps to `editor_reloading`
+  with `dispatched: null`; only an unparsable body from a settled Editor stays
+  `bridge_response_unparsable`.
 
 ## Multi-agent scheduling
 
@@ -264,9 +318,12 @@ operator health:
 - `unreachable`
 - `wedged`
 
-It combines the instance-lock classifier with one ping probe and never errors
-merely because the bridge is offline. `dead_bridge` includes a
-`recoveryHint` pointing to `unity_open_mcp_read_compile_errors`.
+It combines the instance-lock classifier with one ping probe — the same
+[editor-state reader](#calls-during-a-compile-reload-or-play-mode-change)
+`editor_status` uses — and never errors merely because the bridge is offline. It
+also reports `transition`, `compileGeneration` and `compilePending`.
+`dead_bridge` includes a `recoveryHint` pointing to
+`unity_open_mcp_read_compile_errors`.
 
 `running` means **the listener answers**, not **the Editor can compile**. Two
 failure modes leave the process, the heartbeat and `/ping` all looking healthy
@@ -318,9 +375,13 @@ The block is `null` when `/ping` was unreachable (there is nothing to compare).
 A successful `unity_open_mcp_ping` answer is always the result of a fresh HTTP
 probe, never a lock-derived guess — and the response says so: `source:
 "probe"` plus `asOf` (when the probe was answered), so an agent can re-probe
-before acting on a possibly-seconds-stale `connected: true`. The batch-route
-fallback ping (live route unavailable, no probe possible) reports
-`source: "unprobed"` with `connected: false`. When the probe answers but the
+before acting on a possibly-seconds-stale `connected: true`. While the
+listener is down for a compile, reload or play-mode change (or answers 503 while
+its session initializes) and the lock shows a live Editor, ping answers from the
+lock: `source: "lock"`, `connected: false`, `reloading: true`, `transition`,
+`compileGeneration`, `retryAfterMs` — not an error. The batch-route fallback
+ping (no live Editor, no probe possible) reports `source: "unprobed"` with
+`connected: false`. When the probe answers but the
 project's instance lock is `gone`, the response additionally carries a
 `lockCheck: { classification, note }` warning — the answering listener may be
 a dying Editor mid-shutdown or a foreign process on the port, so

@@ -12,7 +12,7 @@ import { IGNORE_SCENE_DIRTY_BASE, GATE_PROP, PATHS_HINT_TYPE, makeTool } from ".
 // reports dllMtimeBefore / dllMtimeAfter (newest Library/ScriptAssemblies/*.dll
 // mtime, in UTC ticks) and a recompiled boolean so a no-op recompile is
 // detectable; on a no-op or an already-in-flight compile, agentNextSteps points
-// at the right fallback (assets_refresh / reimport_package / poll isCompiling).
+// at the right fallback (assets_refresh / reimport_package / the editor_status wait).
 export const recompileScripts = makeTool(
   "unity_open_mcp_recompile_scripts",
   "Force Unity to recompile ALL scripts and block until the compile settles. Use this when " +
@@ -22,7 +22,9 @@ export const recompileScripts = makeTool(
     "CompilationPipeline.RequestScriptCompilation and blocks on the compile via its restart_then_settle " +
     "lifecycle (a domain reload may follow). The response reports dllMtimeBefore / dllMtimeAfter (newest " +
     "Library/ScriptAssemblies/*.dll mtime, in UTC ticks) and a recompiled boolean so a no-op recompile is " +
-    "detectable; agentNextSteps branches on the outcome. paths_hint is the set of script assets you edited " +
+    "detectable; agentNextSteps branches on the outcome. The domain reload usually cuts the response off " +
+    "(`triggered_reload`): wait with unity_open_mcp_editor_status {\"wait_until\":\"idle\"} for the compile " +
+    "status and error count. paths_hint is the set of script assets you edited " +
     "(the gate validates the post-recompile state of those paths). Prefer this over assets_refresh when you " +
     "need a DETERMINISTIC recompile of edited C#.",
   {

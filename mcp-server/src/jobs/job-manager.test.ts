@@ -202,3 +202,27 @@ test("an adapter that orphans the job before returning keeps its evidence withou
   assert.deepEqual(snapshot.result, { runId: "abc" });
   assert.ok(snapshot.events.some(e => e.kind === "adapter_outcome" && e.detail.includes("test_results_timeout")));
 });
+
+test("an observer (an Editor wait) holds no project slot: it runs beside a running job and never queues behind one", async t => {
+  const m = manager(t, { maxObservers: 2 });
+  const worker = fixture();
+  const pending: Array<{ context: JobContext; finish: (outcome: JobOutcome) => void }> = [];
+  const observer: JobOperation = { mutating: false, cancellable: true, observer: true, validate: () => {},
+    run: (_args, context) => new Promise(resolve => pending.push({ context, finish: resolve })) };
+  m.register("work", worker.operation); m.register("wait", observer);
+  const busy = m.start(owner, "work", {}, "w");
+  await tick(); assert.equal(worker.pending.length, 1);
+  const queuedWork = m.start(owner, "work", {}, "w2");
+  const waits = [m.start(owner, "wait", {}), m.start(owner, "wait", {}), m.start(owner, "wait", {})];
+  await tick();
+  assert.equal(m.status(owner, queuedWork.job_id).state, "queued", "a second worker still waits for the project slot");
+  assert.equal(pending.length, 2, "observers run beside it, up to their own cap");
+  assert.equal(m.status(owner, waits[2].job_id).state, "queued");
+  pending[0].finish({ state: "succeeded", result: { reached: true } }); await tick();
+  assert.equal(pending.length, 3, "a finished observer frees an observer slot");
+  worker.pending[0].finish({ state: "succeeded", result: null }); await tick();
+  assert.equal(m.status(owner, busy.job_id).state, "succeeded");
+  assert.equal(worker.pending.length, 2);
+  for (const p of pending.slice(1)) p.finish({ state: "succeeded", result: null });
+  worker.pending[1].finish({ state: "succeeded", result: null }); await tick();
+});

@@ -33,11 +33,15 @@ namespace UnityOpenMcpBridge.MetaTools
             long mtimeBefore = NewestAssemblyMtime(dllDir);
 
             bool wasCompiling = EditorApplication.isCompiling;
+            int generationAtStart = BridgeCompileState.Generation;
 
             // Request a script compilation. Wrapped because
             // CompilationPipeline.RequestScriptCompilation throws if a compile
             // is already in flight — the worker-side settle path covers that.
             bool requested = TryRequestScriptCompilation(out var requestError);
+            // The compile starts on a later tick: publish that one is due, so
+            // a wait cannot read the gap before it starts as idle.
+            if (requested) BridgeCompileState.NoteRequested();
 
             // Deliberately NO inline wait here. Execute runs on the MAIN
             // thread (via MainThreadDispatcher), and RequestScriptCompilation
@@ -53,7 +57,7 @@ namespace UnityOpenMcpBridge.MetaTools
 
             return ToolDispatchResult.Ok(BuildResult(
                 requested, requestError, wasCompiling,
-                mtimeBefore, mtimeAfter, isCompiling, dllDir, afterSettle: false));
+                mtimeBefore, mtimeAfter, isCompiling, dllDir, afterSettle: false, generationAtStart));
         }
 
         // Worker-side post-settle rebuild — called by BridgeHttpServer on the
@@ -78,6 +82,7 @@ namespace UnityOpenMcpBridge.MetaTools
             long mtimeBefore = JsonBody.GetLongFlexible(output, "dllMtimeBefore", long.MinValue);
             if (mtimeBefore == long.MinValue) return output;
             bool wasCompiling = JsonBody.GetBool(output, "wasCompiling", false);
+            int generationAtStart = JsonBody.GetInt(output, "compileGenerationAtStart", 0);
 
             const int graceCapMs = 2000;
             const int tickMs = 100;
@@ -98,7 +103,7 @@ namespace UnityOpenMcpBridge.MetaTools
 
             long mtimeAfter = NewestAssemblyMtime(dllDir);
             return BuildResult(true, null, wasCompiling,
-                mtimeBefore, mtimeAfter, BridgeSession.IsCompiling, dllDir, afterSettle: true);
+                mtimeBefore, mtimeAfter, BridgeSession.IsCompiling, dllDir, afterSettle: true, generationAtStart);
         }
 
         // Shared payload builder for the pre-settle (Execute, main thread) and
@@ -107,9 +112,12 @@ namespace UnityOpenMcpBridge.MetaTools
         // guidance differ.
         private static string BuildResult(bool requested, string requestError,
             bool wasCompiling, long mtimeBefore, long mtimeAfter, bool isCompiling,
-            string dllDir, bool afterSettle)
+            string dllDir, bool afterSettle, int generationAtStart)
         {
             bool recompiled = mtimeAfter > mtimeBefore;
+            // The wait that outlives this call's domain reload and returns the
+            // compile's status and error count.
+            var wait = BridgeJson.WaitCall("idle", generationAtStart);
 
             var sb = new StringBuilder(256);
             sb.Append("{\"status\":\"ok\"");
@@ -120,6 +128,7 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append(",\"dllMtimeBefore\":").Append(mtimeBefore);
             sb.Append(",\"dllMtimeAfter\":").Append(mtimeAfter);
             sb.Append(",\"scriptAssembliesDir\":").Append(BridgeJson.EscapeString(dllDir));
+            sb.Append(",\"compileGenerationAtStart\":").Append(generationAtStart);
 
             // Actionable next steps so an agent can branch on the outcome.
             var steps = new StringBuilder(128);
@@ -131,25 +140,26 @@ namespace UnityOpenMcpBridge.MetaTools
             else if (recompiled)
             {
                 steps.Append("- Assembly rebuilt (dllMtimeAfter > dllMtimeBefore). ");
-                steps.Append("Run unity_open_mcp_read_compile_errors to confirm the new code is healthy. ");
+                steps.Append("Confirm the result with ").Append(wait).Append(" (compile status and error count; ");
+                steps.Append("it also waits out the domain reload), then unity_open_mcp_read_compile_errors for diagnostics. ");
             }
             else if (isCompiling)
             {
                 steps.Append("- The requested compile is still in progress. ");
-                steps.Append("Poll unity_open_mcp_editor_status.isCompiling until false, then read_compile_errors. ");
+                steps.Append("Wait for it with ").Append(wait).Append(", then read_compile_errors if it failed. ");
             }
             else if (wasCompiling)
             {
                 steps.Append("- A compile was already in flight when recompile_scripts was called. ");
-                steps.Append("Poll unity_open_mcp_editor_status.isCompiling until false, then read_compile_errors. ");
+                steps.Append("Wait for it with ").Append(wait).Append(", then read_compile_errors if it failed. ");
             }
             else if (!afterSettle)
             {
                 steps.Append("- The compile was scheduled but runs on a later editor tick, AFTER this payload ");
                 steps.Append("was built — recompiled:false here does NOT mean the recompile no-opped. The ");
                 steps.Append("dispatcher re-checks the DLL mtimes after its settle wait; if this text still ");
-                steps.Append("reaches you, poll unity_open_mcp_editor_status.isCompiling until false, then ");
-                steps.Append("unity_open_mcp_read_compile_errors. ");
+                steps.Append("reaches you, wait with ").Append(wait).Append(" — it returns once the compile ran, ");
+                steps.Append("with its status and error count. ");
             }
             else
             {

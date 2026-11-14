@@ -7,6 +7,8 @@ import { inputsimGesture } from "../tools/inputsim-gesture.js";
 import { playtestWait, PLAYTEST_WAIT_DEFAULT_TIMEOUT_MS } from "../tools/playtest-wait.js";
 import { captureSeries, CAPTURE_SERIES_DEFAULT_START_TIMEOUT_MS } from "../tools/capture-series.js";
 import { JobManagerError, type JobOperation, type JobOutcome, type JobOwner } from "./job-manager.js";
+import { editorStatus } from "../tools/editor-status.js";
+import { describeWait, waitForEditor, WAIT_DEFAULT_TIMEOUT_MS, type WaitDeps, type WaitRequest, type WaitUntil } from "../editor-state.js";
 
 type ClientFor = (owner: JobOwner) => LiveClient;
 function invalid(errors: string[]): void {
@@ -352,6 +354,43 @@ export function playmodeOperation(tool: string, schema: Record<string, any>, cli
       // (a wait that timed out, a game exception: the operation's own error_code).
       return { state: "failed", error: { code: playmodeFailureCode(snapshot),
         message: String(snapshot.result?.error ?? snapshot.reason ?? "Play-mode operation did not complete.") }, result };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Editor wait — `editor_status {"wait_until":…}` past its inline window. The
+// wait polls from the server (instance lock, /ping, /compile-state), so it
+// survives the domain reloads it waits for. An observer: it changes nothing,
+// holds no project slot (a wait never queues behind a test run, nor blocks
+// one) and is cancellable at any time.
+// ---------------------------------------------------------------------------
+
+export function editorWaitOperation(depsFor: (owner: JobOwner) => WaitDeps): JobOperation {
+  return {
+    mutating: false, cancellable: true, observer: true,
+    validate(args) {
+      invalid(validateSchema(args, editorStatus.inputSchema as Record<string, any>));
+      if (args.wait_until === undefined) throw new JobManagerError("invalid_arguments", "An editor_status job is a wait: pass wait_until.");
+    },
+    async run(args, context): Promise<JobOutcome> {
+      const request: WaitRequest = {
+        until: args.wait_until as WaitUntil,
+        ...(typeof args.after_generation === "number" ? { afterGeneration: args.after_generation } : {}),
+        timeoutMs: typeof args.timeout_ms === "number" ? args.timeout_ms : WAIT_DEFAULT_TIMEOUT_MS,
+      };
+      context.lifecycle("connected", "Waiting from the server: instance lock, /ping and /compile-state.", true);
+      let phase = "waiting";
+      context.report({ phase });
+      const outcome = await waitForEditor(request, {
+        ...depsFor(context.owner),
+        signal: context.signal,
+        onProgress: next => { if (next !== phase) { phase = next; context.report({ phase }); } },
+      });
+      const { body, isError } = describeWait(request, outcome);
+      if (outcome.reason === "aborted") return { state: "cancelled", result: body };
+      if (isError) return { state: "failed", error: body.error as { code: string; message: string }, result: body };
+      return { state: "succeeded", result: body };
     },
   };
 }

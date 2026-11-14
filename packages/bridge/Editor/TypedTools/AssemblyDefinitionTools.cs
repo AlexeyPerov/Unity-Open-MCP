@@ -330,8 +330,9 @@ namespace UnityOpenMcpBridge.TypedTools
             // old form emitted `…may follow. "Poll …confirm."}`, which is
             // unparseable, so every successful asmdef write returned a transport
             // failure even though the file had already been written.
-            sb.Append(",\"note\":\"ImportAsset queued; a recompile / domain reload may follow. " +
-                      "Poll editor_status / compile_check to confirm.\"}");
+            sb.Append(",\"note\":").Append(BridgeJson.EscapeString(
+                "ImportAsset queued; a recompile / domain reload follows. Wait for it with "
+                + BridgeJson.WaitCall("idle", null) + " (compile status and error count).")).Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }
 

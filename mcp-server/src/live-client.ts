@@ -53,6 +53,7 @@ import {
   type CompileVerifySnapshot,
 } from "./compile-verify.js";
 import { lifecycleForCall } from "./capabilities/lifecycle.js";
+import { waitCall } from "./editor-state.js";
 // M23 Plan 3 — per-process agent identity (sent as X-Agent-Id so the bridge's
 // fair round-robin queue can schedule across agents).
 import { PROCESS_AGENT_ID } from "./agent-identity.js";
@@ -163,7 +164,15 @@ const STALE_DOMAIN_ANNOTATION_TOOLS: ReadonlySet<string> = new Set([
   "unity_open_mcp_invoke_method",
 ]);
 
-interface PingResponse {
+/** What one /ping probe saw (see {@link LiveClient.pingProbe}). */
+export interface PingProbe {
+  reachable: boolean;
+  /** HTTP status, or null when no response arrived (refused / timed out). */
+  httpStatus: number | null;
+  body: PingResponse | null;
+}
+
+export interface PingResponse {
   connected: boolean;
   projectPath: string | null;
   unityVersion: string | null;
@@ -177,6 +186,8 @@ interface PingResponse {
   mode: string;
   compiling: boolean;
   isPlaying: boolean;
+  /** compiling / entering_playmode / exiting_playmode, or null when settled (wire contract 8). */
+  transition?: string | null;
 }
 
 interface HttpErrorBody {
@@ -201,6 +212,60 @@ interface CompileRepostSentinel {
   readonly __compileRepost: unique symbol;
 }
 const COMPILE_REPOST_SENTINEL = { __compileRepost: 0 } as unknown as CompileRepostSentinel;
+
+/**
+ * How long a tool POST the bridge refused with 503 (editor_reloading — it was
+ * compiling, reloading or changing play mode, and did not run the call) waits
+ * for the Editor before it is sent once more. Bounded so the call, with its
+ * own run time, stays inside a typical MCP host's request timeout.
+ */
+export const RELOAD_REDISPATCH_WAIT_MS = 20_000;
+
+/**
+ * Whether a domain reload is the expected end of this call (compile-reload
+ * tools, restart_then_settle project commands, and a refresh, which reloads
+ * whenever it imported scripts): a response it cut off is triggered_reload,
+ * not an error.
+ */
+function reloadIsExpectedEnd(toolName: string, args: Record<string, unknown>, commandLifecycle?: string): boolean {
+  return commandLifecycle === "restart_then_settle"
+    || toolName === "unity_open_mcp_assets_refresh"
+    || lifecycleForCall(toolName, args).class === "compile-reload";
+}
+
+/**
+ * The answer for a compile-reload call whose response a domain reload cut off:
+ * the reload is the call's expected end, and its effect very likely committed
+ * (compile-reload tools commit before the reload begins). `generationAtStart`
+ * (from the bridge's reload answer) keys the wait to the compile the call
+ * caused.
+ */
+function triggeredReloadResult(toolName: string, generationAtStart: number | undefined): CallToolResult {
+  const wait = waitCall("idle", generationAtStart);
+  return {
+    content: [{
+      type: "text",
+      text: JSON.stringify({
+        status: "triggered_reload",
+        triggeredReload: true,
+        message:
+          `'${toolName}' reached the bridge, and the domain reload it triggered closed the ` +
+          `response before it was written. The call very likely committed (compile-reload ` +
+          `tools commit before the reload begins), so do NOT retry blindly — that would ` +
+          `run it again. Wait for the reload with ${wait}: it returns once the compile and ` +
+          `reload are done, with the compile status and error count.`,
+        ...(generationAtStart !== undefined ? { compile: { generationAtStart } } : {}),
+        agentNextSteps: [
+          `Wait for the reload: ${wait} — its result carries the compile status and error count.`,
+          "If the compile failed, call unity_open_mcp_read_compile_errors for the diagnostics.",
+          "Do NOT retry the original call — it likely committed before the reload. Verify the effect with the matching read tool instead.",
+        ],
+        _route: { route: "live", outcome: "triggered_reload" },
+      }),
+    }],
+    isError: false,
+  };
+}
 function isCompileRepostSentinel(v: unknown): v is CompileRepostSentinel {
   return typeof v === "object" && v !== null && "__compileRepost" in v;
 }
@@ -435,6 +500,78 @@ export class LiveClient implements Router {
     return same;
   }
 
+  /**
+   * One /ping probe that reports what it saw instead of a boolean: reachable
+   * or not, the HTTP status (503 = the listener is up but the session is still
+   * initializing after a reload), and the body. The editor-state reader
+   * (editor-state.ts) builds every reload-aware answer from it plus the
+   * instance lock. Re-syncs the endpoint from the lock first: a domain reload
+   * mints a new bearer token, and a probe with the old one would read as
+   * unreachable for the rest of the session.
+   */
+  async pingProbe(fetchTimeoutMs = 2_000): Promise<PingProbe> {
+    try {
+      this.refreshEndpointFromLock();
+      const res = await this.fetchWithTimeout("/ping", { method: "GET" }, fetchTimeoutMs);
+      if (res.status === 503) {
+        const body = (await res.json().catch(() => null)) as PingResponse | null;
+        return { reachable: true, httpStatus: 503, body };
+      }
+      if (!res.ok) return { reachable: false, httpStatus: res.status, body: null };
+      const body = (await res.json()) as PingResponse;
+      this.pingCache.record(body);
+      return { reachable: true, httpStatus: res.status, body };
+    } catch {
+      return { reachable: false, httpStatus: null, body: null };
+    }
+  }
+
+  /**
+   * editor_status from the bridge, once and briefly: no readiness wait, no
+   * retry. The flat tool output (the envelope's mutation.output), or null when
+   * the bridge did not answer with one — the caller then answers from the
+   * instance lock and /ping.
+   */
+  async readEditorStatus(timeoutMs = 5_000): Promise<Record<string, unknown> | null> {
+    try {
+      this.refreshEndpointFromLock();
+      const res = await this.fetchWithTimeout("/tools/unity_open_mcp_editor_status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ timeout_ms: Math.max(BRIDGE_MIN_TIMEOUT_MS, timeoutMs) }),
+      }, timeoutMs + 2_000);
+      if (!res.ok) { await res.text().catch(() => ""); return null; }
+      const body = (await res.json()) as Record<string, unknown>;
+      const mutation = body.mutation as { output?: unknown } | undefined;
+      const output = (mutation && typeof mutation.output === "object" ? mutation.output : body) as Record<string, unknown> | null;
+      if (!output || typeof output !== "object" || output.error || typeof output.isPlaying !== "boolean") return null;
+      return output;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The Editor transition the lock or /ping shows right now (compiling,
+   * reloading, entering/exiting play mode, or a listener that went away), or
+   * null when it looks settled. Used to tell a response cut off by a reload
+   * from a corrupt one.
+   */
+  private async observedTransition(): Promise<string | null> {
+    if (this.projectPath) {
+      try {
+        const lock = readInstanceLock(this.projectPath);
+        if (lock && isPidAlive(lock.pid) && ["compiling", "reloading", "entering_playmode", "exiting_playmode"].includes(lock.state))
+          return lock.state;
+      } catch { /* fall through to the probe */ }
+    }
+    const probe = await this.pingProbe(1_000);
+    if (!probe.reachable) return this.projectPath && this.classifyLockNow() !== "gone" ? "reloading" : null;
+    if (probe.httpStatus === 503) return "reloading";
+    if (probe.body?.compiling) return "compiling";
+    return typeof probe.body?.transition === "string" ? probe.body.transition : null;
+  }
+
   async isLiveAvailable(fetchTimeoutMs?: number): Promise<boolean> {
     try {
       const res = await this.fetchWithTimeout("/ping", { method: "GET" }, fetchTimeoutMs);
@@ -654,9 +791,18 @@ export class LiveClient implements Router {
     const readyError = await this.ensureReady();
     if (readyError) return readyError;
     const { timeout_ms: _budget, ...startArgs } = args;
-    const response = await this.fetchWithTimeout("/tools/unity_senses_run_tests", {
+    const start = () => this.fetchWithTimeout("/tools/unity_senses_run_tests", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(startArgs),
     }, 10_000);
+    let response = await start();
+    if (response.status === 503) {
+      // The bridge did not start the run (compiling, reloading or changing
+      // play mode — editor_reloading, dispatched:false): wait, then start once more.
+      await response.text().catch(() => "");
+      const settleError = await this.waitForCompile(RELOAD_REDISPATCH_WAIT_MS);
+      if (settleError) return settleError;
+      response = await start();
+    }
     if (!response.ok) throw new Error(`Test start HTTP ${response.status}; execution outcome unknown.`);
     const body = await response.json() as Record<string, unknown>;
     if (body.status !== "started" || body.runId !== args.run_id) {
@@ -1037,8 +1183,13 @@ export class LiveClient implements Router {
       fetchTimeout,
     );
 
+    // 503 on a tool POST: the bridge did not run the call — it is compiling,
+    // reloading or changing play mode (editor_reloading, dispatched:false).
+    // Wait for it to settle (bounded so the call stays inside the host-safe
+    // window) and send it once more; nothing ran, so the replay is safe.
     if (res.status === 503 && retryOn503) {
-      const compileError = await this.waitForCompile();
+      await res.text().catch(() => "");
+      const compileError = await this.waitForCompile(RELOAD_REDISPATCH_WAIT_MS);
       if (compileError) return compileError;
       return COMPILE_REPOST_SENTINEL;
     }
@@ -1047,6 +1198,10 @@ export class LiveClient implements Router {
       const body = (await res
         .json()
         .catch(() => null)) as HttpErrorBody | null;
+      // Still transitioning after the bounded wait: the bridge's own
+      // well-formed refusal (nothing ran; retryable), not a transport error.
+      if (body?.error?.code === "editor_reloading")
+        return { content: [{ type: "text", text: JSON.stringify({ ...body, _route: { route: "live", outcome: "editor_reloading" } }) }], isError: true };
       return makeErrorResult({
         code: "bridge_http_error",
         message: body?.error?.message ?? `Bridge returned HTTP ${res.status}`,
@@ -1254,6 +1409,17 @@ export class LiveClient implements Router {
       };
     }
 
+    // The bridge answered a call that a domain reload cut off after it ran
+    // (editor_reloading, dispatched:true). For a compile-reload call that is
+    // its expected end — the reload it triggered — so it reads as
+    // triggered_reload; for anything else it stays an error that says the
+    // effect may have committed.
+    if (parsed != null && (parsed.error as { code?: unknown } | undefined)?.code === "editor_reloading" && parsed.dispatched === true
+      && reloadIsExpectedEnd(toolName, args, commandLifecycle)) {
+      const generation = (parsed.compile as { generationAtStart?: unknown } | undefined)?.generationAtStart;
+      return triggeredReloadResult(toolName, typeof generation === "number" ? generation : undefined);
+    }
+
     // Mutation envelope vs direct body, decided from the body itself.
     if (parsed != null && typeof parsed.mutation === "object" && parsed.mutation !== null) {
       const body = parsed as unknown as MutationEnvelope;
@@ -1303,44 +1469,38 @@ export class LiveClient implements Router {
     // 2026-07-03-c contract) — that path keeps bridge_response_unparsable.
     if (parsed == null) {
       const isEmptyLikeReload = rawText.trim().length === 0;
-      if (isEmptyLikeReload && (commandLifecycle === "restart_then_settle" || lifecycleForCall(toolName, args).class === "compile-reload")) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                status: "triggered_reload",
-                // The bridge returned 200 (the mutation reached the
-                // dispatcher and the response was started) but the body was
-                // empty — the hallmark of a domain reload tearing down the
-                // socket mid-response. The mutation very likely committed;
-                // treat this as "verify post-state" rather than "response
-                // corrupt, retry".
-                triggeredReload: true,
-                message:
-                  `Bridge returned HTTP 200 for '${toolName}' with an empty ` +
-                  `response body. '${toolName}' is a compile-reload tool, so ` +
-                  `this is the expected signature of a mutation that triggered ` +
-                  `a domain reload mid-response — the bridge tore down its HTTP ` +
-                  `socket for the reload and the in-flight response was lost ` +
-                  `before any bytes were written. The mutation very likely ` +
-                  `committed (compile-reload tools commit before the reload ` +
-                  `begins). Do NOT treat this as corruption and do NOT retry ` +
-                  `blindly (that would re-run the mutation). Verify post-state: ` +
-                  `call unity_open_mcp_editor_status / bridge_status to confirm ` +
-                  `the reload settled, then unity_open_mcp_read_compile_errors ` +
-                  `to confirm there are no compile errors.`,
-                agentNextSteps: [
-                  "Poll unity_open_mcp_editor_status / bridge_status until the bridge reports running and not compiling.",
-                  "Call unity_open_mcp_read_compile_errors to confirm the recompiled assembly has no CSxxxx errors (note: if the response carries staleLogSuspected, force a recompile via reimport_package / compile_check first).",
-                  "Do NOT retry the original call — the mutation likely committed before the reload. Verify the effect via the appropriate read tool instead.",
-                ],
-                _route: { route: "live", outcome: "triggered_reload" },
-              }),
-            },
-          ],
-          isError: false,
-        };
+      if (isEmptyLikeReload && reloadIsExpectedEnd(toolName, args, commandLifecycle)) {
+        // The bridge returned 200 (the call reached the dispatcher and the
+        // response was started) but the body was empty — the hallmark of a
+        // domain reload tearing down the socket mid-response (a bridge older
+        // than wire contract 8; a newer one writes editor_reloading instead).
+        return triggeredReloadResult(toolName, undefined);
+      }
+      // An empty body from any other call while the Editor is compiling,
+      // reloading or changing play mode is the same race seen from a call that
+      // did not cause it: the reload closed the response. Retryable — but the
+      // call may have run, so say so instead of calling the body corrupt.
+      if (isEmptyLikeReload) {
+        const transition = await this.observedTransition();
+        if (transition !== null) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({
+              error: {
+                code: "editor_reloading",
+                message: `A domain reload (${transition}) closed the response to '${toolName}' before it was written; ` +
+                  "the call may or may not have run.",
+              },
+              dispatched: null,
+              transition,
+              retryAfterMs: 1000,
+              agentNextSteps: [
+                `Wait for the Editor with ${waitCall("idle")}, then check the call's effect (a read is safe to repeat) before sending it again.`,
+              ],
+              _route: { route: "live", outcome: "editor_reloading" },
+            }) }],
+            isError: true,
+          };
+        }
       }
       return makeErrorResult({
         code: "bridge_response_unparsable",
@@ -1458,7 +1618,7 @@ export class LiveClient implements Router {
         });
       }
 
-      if (body.compiling) {
+      if (body.compiling || body.transition) {
         return this.waitForCompile();
       }
 
@@ -1491,7 +1651,7 @@ export class LiveClient implements Router {
         if (retryRes.ok) {
           const retryBody = (await retryRes.json()) as PingResponse;
           this.pingCache.record(retryBody);
-          if (retryBody.compiling) return this.waitForCompile();
+          if (retryBody.compiling || retryBody.transition) return this.waitForCompile();
           if (retryBody.connected) return null; // recovered against the new endpoint
         }
       } catch {
@@ -1790,8 +1950,8 @@ export class LiveClient implements Router {
     };
   }
 
-  private async waitForCompile(): Promise<CallToolResult | null> {
-    const compileWaitMs = this.retry.compileWaitMs;
+  private async waitForCompile(maxWaitMs?: number): Promise<CallToolResult | null> {
+    const compileWaitMs = maxWaitMs === undefined ? this.retry.compileWaitMs : Math.min(maxWaitMs, this.retry.compileWaitMs);
     const deadline = Date.now() + compileWaitMs;
 
     // M13 T4.5 — run the launch-errors / Safe Mode dialog auto-dismiss loop
@@ -1834,7 +1994,7 @@ export class LiveClient implements Router {
 
           const body = (await res.json()) as PingResponse;
 
-          if (!body.compiling && body.connected) {
+          if (!body.compiling && body.connected && !body.transition) {
             // M31-optimizations Plan 1 / M3 — a compile settle means the
             // bridge recompiled, so its tool inventory likely changed (new /
             // removed scripts, asmdef edits, package_add/remove, …). Drop the

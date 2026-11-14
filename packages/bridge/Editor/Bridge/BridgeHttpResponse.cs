@@ -38,32 +38,53 @@ namespace UnityOpenMcpBridge
             var state = States.GetValue(context, _ => new ResponseState());
             lock (state)
             {
-                if (state.Sent) return;
-                // Build and validate the entire body before committing any headers.
-                if (!BridgeJson.IsCompleteJson(json))
-                {
-                    statusCode = 500;
-                    json = "{\"error\":{\"code\":\"invalid_response_json\",\"message\":\"Tool produced invalid JSON.\"}}";
-                }
-                var bytes = Encoding.UTF8.GetBytes(json);
-                state.Sent = true; // a failed/partial write must never append a second envelope
-                try
-                {
-                    context.Response.StatusCode = statusCode;
-                    context.Response.ContentType = "application/json; charset=utf-8";
-                    // Keep-alive stays on: the X-Request-Id echo below already
-                    // correlates each reply with its request, and closing the
-                    // connection per response would cost the MCP server a new
-                    // TCP handshake (and the Editor a socket) on every tool call.
-                    var requestId = context.Request.Headers["X-Request-Id"];
-                    if (!string.IsNullOrEmpty(requestId) && requestId.Length <= 128)
-                        context.Response.Headers["X-Request-Id"] = requestId;
-                    context.Response.ContentLength64 = bytes.Length;
-                    context.Response.OutputStream.Write(bytes, 0, bytes.Length);
-                    context.Response.Close();
-                }
-                catch { try { context.Response.Abort(); } catch { } }
+                Write(context, state, statusCode, json);
             }
+        }
+
+        // SendJson for a caller that must not wait (the main-thread reload
+        // teardown): false when another thread is writing this response right
+        // now or it was already sent.
+        internal static bool TrySendJsonNow(HttpListenerContext context, int statusCode, string json)
+        {
+            var state = States.GetValue(context, _ => new ResponseState());
+            if (!System.Threading.Monitor.TryEnter(state)) return false;
+            try
+            {
+                if (state.Sent) return false;
+                Write(context, state, statusCode, json);
+                return true;
+            }
+            finally { System.Threading.Monitor.Exit(state); }
+        }
+
+        private static void Write(HttpListenerContext context, ResponseState state, int statusCode, string json)
+        {
+            if (state.Sent) return;
+            // Build and validate the entire body before committing any headers.
+            if (!BridgeJson.IsCompleteJson(json))
+            {
+                statusCode = 500;
+                json = "{\"error\":{\"code\":\"invalid_response_json\",\"message\":\"Tool produced invalid JSON.\"}}";
+            }
+            var bytes = Encoding.UTF8.GetBytes(json);
+            state.Sent = true; // a failed/partial write must never append a second envelope
+            try
+            {
+                context.Response.StatusCode = statusCode;
+                context.Response.ContentType = "application/json; charset=utf-8";
+                // Keep-alive stays on: the X-Request-Id echo below already
+                // correlates each reply with its request, and closing the
+                // connection per response would cost the MCP server a new
+                // TCP handshake (and the Editor a socket) on every tool call.
+                var requestId = context.Request.Headers["X-Request-Id"];
+                if (!string.IsNullOrEmpty(requestId) && requestId.Length <= 128)
+                    context.Response.Headers["X-Request-Id"] = requestId;
+                context.Response.ContentLength64 = bytes.Length;
+                context.Response.OutputStream.Write(bytes, 0, bytes.Length);
+                context.Response.Close();
+            }
+            catch { try { context.Response.Abort(); } catch { } }
         }
     }
 }

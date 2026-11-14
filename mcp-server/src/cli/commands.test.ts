@@ -69,6 +69,14 @@ function makeFakeLive(opts: FakeLiveOpts = {}): LiveClient {
     async isLiveAvailable() {
       return available;
     },
+    // The shared editor-state reader (wait-for-ready's wait) probes /ping and
+    // reads /compile-state through these two.
+    async pingProbe() {
+      return available ? { reachable: true, httpStatus: 200, body: pingBody } : { reachable: false, httpStatus: null, body: null };
+    },
+    async readCompileState() {
+      return available ? { status: "no_errors_found", generation: 3, sourceMatches: true, pending: false, errors: [] } : null;
+    },
     getCachedPing() {
       // Mirrors the real client: returns the snapshot recorded by the last
       // successful /ping probe (null when none, e.g. a pure-503 compile state).
@@ -169,6 +177,23 @@ test("runWaitForReadyCommand: ready on first poll → exit 0", async () => {
   assert.equal(result.exitCode, 0);
   assert.equal((result.json as { ready: boolean }).ready, true);
   assert.equal((result.json as { status: string }).status, "ready");
+  assert.deepEqual((result.json as { compile: unknown }).compile, { generation: 3, status: "no_errors_found", errorCount: 0 });
+});
+
+test("runWaitForReadyCommand: --after-generation waits for a compile past it, then says none ran", async () => {
+  const result = await runWaitForReadyCommand(makeStack({}), {
+    json: true,
+    timeoutMs: 1_000,
+    intervalMs: 50,
+    afterGeneration: 3,
+  });
+  // No compile after generation 3 within the 1 s budget: not ready, still holding for it.
+  assert.equal(result.exitCode, 1);
+  assert.equal((result.json as { status: string }).status, "timeout");
+  assert.equal((result.json as { holdingFor: string }).holdingFor, "compile_after_generation");
+  const done = await runWaitForReadyCommand(makeStack({}), { json: true, timeoutMs: 5_000, intervalMs: 50, afterGeneration: 2 });
+  assert.equal(done.exitCode, 0);
+  assert.equal((done.json as { compile: { ranAfterGeneration: boolean } }).compile.ranAfterGeneration, true);
 });
 
 test("runWaitForReadyCommand: never-ready bridge → exit 1, status=timeout", async () => {

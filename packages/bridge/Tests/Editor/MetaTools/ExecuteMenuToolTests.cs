@@ -8,13 +8,32 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void IsReadOnlyMenu_AllowlistedMenu_ReturnsTrue()
         {
-            Assert.IsTrue(ExecuteMenuTool.IsReadOnlyMenu("Assets/Refresh"));
+            Assert.IsTrue(ExecuteMenuTool.IsReadOnlyMenu("Assets/Reveal in Finder"));
         }
 
         [Test]
         public static void IsReadOnlyMenu_AllowlistedMenu_CaseInsensitive()
         {
-            Assert.IsTrue(ExecuteMenuTool.IsReadOnlyMenu("assets/refresh"));
+            Assert.IsTrue(ExecuteMenuTool.IsReadOnlyMenu("window/general/console"));
+        }
+
+        // Assets/Refresh imports changed files, runs their postprocessors and
+        // can start a compile + domain reload: a refresh mutation (the menu
+        // form of assets_refresh), never read-only with the gate skipped.
+        [Test]
+        public static void AssetsRefresh_IsARefreshMutation_NotReadOnly()
+        {
+            Assert.IsFalse(ExecuteMenuTool.IsReadOnlyMenu("Assets/Refresh"));
+            Assert.IsFalse(ExecuteMenuTool.IsReadOnlyMenu("assets/refresh"));
+            Assert.IsTrue(ExecuteMenuTool.IsRefreshMenu("Assets/Refresh"));
+            Assert.IsTrue(ExecuteMenuTool.IsRefreshMenu("assets/refresh"));
+            Assert.IsFalse(ExecuteMenuTool.IsRefreshMenu("Assets/Reimport All"));
+            const string body = "{\"menu_path\":\"Assets/Refresh\"}";
+            Assert.IsTrue(EffectiveToolContract.IsMutating("unity_open_mcp_execute_menu", body));
+            Assert.AreEqual(ToolLifecycle.Resolve("unity_open_mcp_assets_refresh"),
+                EffectiveToolContract.Lifecycle("unity_open_mcp_execute_menu", body),
+                "the menu settles like assets_refresh (and, like it, is not dirty-guarded)");
+            Assert.IsTrue(ExecuteMenuTool.IsBatchViable("Assets/Refresh"));
         }
 
         [Test]

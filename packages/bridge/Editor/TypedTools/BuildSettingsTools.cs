@@ -213,9 +213,9 @@ namespace UnityOpenMcpBridge.TypedTools
                 sb.Append(",\"success\":").Append(success ? "true" : "false");
                 sb.Append(",\"target\":\"").Append(EscName(target.ToString()));
                 sb.Append("\",\"group\":\"").Append(EscName(group.ToString()));
-                sb.Append("\",\"note\":\"Switching the active build target can trigger a " +
-                          "recompile / domain reload; poll editor_status or compile_check " +
-                          "to confirm.\"}");
+                sb.Append("\",\"note\":").Append(BridgeJson.EscapeString(
+                    "Switching the active build target can trigger a recompile / domain reload; wait for it with "
+                    + BridgeJson.WaitCall("idle", null) + ".")).Append('}');
                 return ToolDispatchResult.Ok(sb.ToString());
             }
             catch (Exception e)
@@ -400,8 +400,9 @@ namespace UnityOpenMcpBridge.TypedTools
                 sb.Append(",\"group\":\"").Append(EscName(group.ToString()));
                 sb.Append("\",\"namedTarget\":\"").Append(EscName(namedTarget.TargetName));
                 sb.Append("\",\"defines\":\"").Append(EscName(defines));
-                sb.Append("\",\"note\":\"Changing scripting define symbols triggers a " +
-                          "recompile; poll compile_check / editor_status to confirm.\"}");
+                sb.Append("\",\"note\":").Append(BridgeJson.EscapeString(
+                    "Changing scripting define symbols triggers a recompile; wait for it with "
+                    + BridgeJson.WaitCall("idle", null) + " (compile status and error count).")).Append('}');
                 return ToolDispatchResult.Ok(sb.ToString());
             }
             catch (Exception e)

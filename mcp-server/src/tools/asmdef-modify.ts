@@ -21,8 +21,9 @@ export const asmdefModify = makeTool(
     "be scoped to the asset path. Only supplied params mutate — omitted params keep " +
     "their current value. References are additive by default (add_references / " +
     "remove_references); pass `references` for a full replacement. Setting " +
-    "include_platforms clears exclude_platforms and vice versa. After modify, poll " +
-    "editor_status / compile_check to confirm the recompile settled, then run " +
+    "include_platforms clears exclude_platforms and vice versa. After modify, wait " +
+    "with unity_open_mcp_editor_status {\"wait_until\":\"idle\"} until the recompile " +
+    "settled (it reports the compile status and error count), then run " +
     "scan_paths to catch any broken references.",
   {
     required: ["asset_path", "paths_hint"],

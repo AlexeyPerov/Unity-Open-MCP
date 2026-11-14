@@ -33,6 +33,13 @@ clients don't accumulate subscriber state.
   - Unity arg `-UNITY_OPEN_MCP_BRIDGE_PORT=<port>`
 - Running bridge writes an instance lock file under `~/.unity-open-mcp/instances/`.
 - MCP server uses that lock for project-to-port resolution.
+- The lock doubles as the heartbeat (rewritten every 0.5 s and on every
+  transition): `state` (`idle`, `compiling`, `reloading`, `entering_playmode`,
+  `playing`, `exiting_playmode`), `isPlaying`, `isCompiling`, `heartbeatAt`, and
+  (wire contract 8) a `compile` block — `generation`, `running`, `completed`,
+  `failed`, `errorCount`, `pending` (a compile requested and not started yet)
+  and `requestedAt`. It stays on disk across a domain reload, so it is what the
+  MCP server reads while the listener is down.
 
 ## Authentication and bind mode
 
@@ -122,6 +129,11 @@ Use `/ping` to confirm:
 - readiness before running mutating tools
 - the installed bridge's wire-contract revision
 
+`/ping` also reports `transition` (wire contract 8): `compiling`,
+`entering_playmode`, `exiting_playmode`, or `null` when settled. A reachable,
+non-compiling bridge is not settled while play mode is changing. While the
+session initializes after a reload `/ping` answers HTTP 503.
+
 The response body carries `bridgeVersion` (the package semver) **and**
 `wireContract` (an integer bumped for every observable change to the
 request/response contract — accepted parameter keys, error codes, envelope
@@ -162,6 +174,37 @@ it), on refusal, timeout and fault envelopes, and by bridges that predate it; a
 client then reads `GET /compile-state`. The MCP server asks for it on
 `execute_csharp` and `invoke_method`, the results it qualifies with
 `_compileState`.
+
+## Compile handshake and reload answers
+
+Wire contract 8. A compile a call requests (a refresh that imported scripts,
+`recompile_scripts`, `script_write`) starts on a later Editor update, and
+`isCompiling` can read false in the gap. The dispatch that left such a compile
+due records it — `pending: true` in the lock's `compile` block and in
+`/compile-state`, cleared when the next compile starts — and the gate envelope
+of calls that can leave a compile due (`assets_refresh`, `script_write` /
+`script_delete`, `execute_menu "Assets/Refresh"`, `restart_then_settle` calls,
+or any call that left one due) carries
+`"compile": {"generationAtStart": N, "generation": N, "pending": bool, "running": bool}`.
+`agentNextSteps` then names
+`unity_open_mcp_editor_status {"wait_until":"idle","after_generation":N}`, the
+MCP server's wait.
+
+Calls and reloads:
+
+- A mutation that reaches the main thread while a compile is running or due, or
+  a play-mode change is requested and not finished, is not run: HTTP 503 with
+  `{"error":{"code":"editor_reloading",…},"dispatched":false,"transition":…,"retryAfterMs":1000}`.
+  Reads still run.
+- When a domain reload starts, every tool call still in flight is answered
+  before the listener stops: HTTP 503 `editor_reloading` with
+  `"dispatched": false` if its work never reached the main thread, HTTP 200
+  `editor_reloading` with `"dispatched": true` and
+  `"compile": {"generationAtStart": N}` if it ran (its effect may have
+  committed). A response a worker is writing at that moment is left to finish.
+  Before contract 8 such a call saw HTTP 200 with an empty body.
+- `execute_menu "Assets/Refresh"` is a refresh mutation, not a read-only menu:
+  `assets_refresh`'s lifecycle and default scope (`Assets`).
 
 ## Dispatch timeouts
 

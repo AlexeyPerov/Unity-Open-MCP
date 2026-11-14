@@ -202,12 +202,20 @@ namespace UnityOpenMcpBridge.Tests
                 body => Assert.IsTrue(body.Contains("\"paths_hint_required\""), $"Expected paths_hint_required for non-allowlisted menu in: {body}"));
         }
 
+        // Assets/Refresh is a refresh mutation with assets_refresh's default
+        // scope: an empty paths_hint is filled with Assets, the gate runs, and
+        // the envelope carries the compile handshake.
         [UnityTest]
-        public static IEnumerator ExecuteMenu_EmptyPathsHint_Allowlisted_Proceeds()
+        public static IEnumerator ExecuteMenu_AssetsRefresh_DefaultsScopeLikeAssetsRefresh()
         {
             return PostAndWait("/tools/unity_open_mcp_execute_menu",
                 "{\"menu_path\":\"Assets/Refresh\",\"paths_hint\":[]}",
-                body => Assert.IsFalse(body.Contains("\"paths_hint_required\""), $"Allowlisted menu should not return paths_hint_required: {body}"));
+                body =>
+                {
+                    Assert.IsFalse(body.Contains("\"paths_hint_required\""), $"Assets/Refresh defaults its scope: {body}");
+                    StringAssert.Contains("\"effectiveReadOnly\":false", body);
+                    StringAssert.Contains("\"compile\":{\"generationAtStart\":", body);
+                });
         }
 
         [UnityTest]

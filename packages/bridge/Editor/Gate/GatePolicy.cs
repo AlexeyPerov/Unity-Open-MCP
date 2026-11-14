@@ -84,6 +84,12 @@ namespace UnityOpenMcpBridge
         // compiling after the mutation. Surfaced in the response envelope as
         // settleMs so callers know whether the op blocked on a settle/reload.
         public long SettleMs;
+        // The envelope's `compile` block (BridgeCompileState.EnvelopeJson):
+        // the generation the call started at, the generation at its end, and
+        // whether a compile is still due. Null when the call has no bearing on
+        // compilation. CompileGenerationAtStart feeds the wait hint.
+        internal string CompileJson;
+        internal int CompileGenerationAtStart;
         // M13 T4.2 — dirty-scene paths collected by SceneDirtyGuard when the
         // op was refused because of unsaved scene changes. Null when allowed.
         public string[] DirtyScenePaths;

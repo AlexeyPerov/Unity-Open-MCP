@@ -229,9 +229,89 @@ namespace UnityOpenMcpBridge
             catch { return 0; }
         }
 
+        // ---- Compile handshake ------------------------------------------------
+        //
+        // A refresh / script write / recompile request leaves Unity with a
+        // compile it has not STARTED yet: EditorApplication.isCompiling may read
+        // true for a moment and then false again for seconds before
+        // compilationStarted fires (an unfocused Editor defers it), so "not
+        // compiling" right after such a call is not "idle". The dispatch that
+        // left a compile requested records the generation it saw; Started()
+        // clears the record when the next compile begins. The instance lock and
+        // /compile-state publish it as `pending`, and the server-side wait holds
+        // until it clears (bounded by its own grace period, since Unity can drop
+        // a request that turns out to need no compile). SessionState: the record
+        // survives the domain reload it announces.
+        private const string RequestedKey = Prefix + "requestedAtGeneration";
+        private const string RequestedAtKey = Prefix + "requestedAtUtc";
+        private const string RunningKey = Prefix + "running";
+
+        internal static int Generation => SessionState.GetInt(Prefix + "generation", 0);
+
+        /// <summary>A compile was requested and has not started since.</summary>
+        internal static bool Pending => SessionState.GetInt(RequestedKey, -1) >= 0;
+
+        // Test seam: restore the handshake record a test changed (main thread).
+        internal static void RestoreRequestForTest(int requestedAtGeneration, string requestedAtUtc)
+        {
+            SessionState.SetInt(RequestedKey, requestedAtGeneration);
+            SessionState.SetString(RequestedAtKey, requestedAtUtc ?? "");
+        }
+
+        internal static int RequestedAtGenerationForTest => SessionState.GetInt(RequestedKey, -1);
+        internal static string RequestedAtUtcForTest => SessionState.GetString(RequestedAtKey, "");
+
+        /// <summary>Record that a compile is due (main thread).</summary>
+        internal static void NoteRequested()
+        {
+            SessionState.SetInt(RequestedKey, Generation);
+            SessionState.SetString(RequestedAtKey, DateTime.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        /// <summary>
+        /// End of a tool's main-thread dispatch: a compile Unity reports as due
+        /// (isCompiling) while no pipeline run is in progress was requested by
+        /// this call (or just before it) and has not started yet.
+        /// </summary>
+        internal static void NoteDispatchEnd()
+        {
+            try
+            {
+                if (EditorApplication.isCompiling && !SessionState.GetBool(RunningKey, false)) NoteRequested();
+            }
+            catch { /* the handshake is advisory; a dispatch never fails on it */ }
+        }
+
+        // The compile part of the instance lock (main thread: SessionState).
+        // Readable while the bridge is down, so a status built from the lock
+        // during a reload still knows the last generation and whether a compile
+        // is due.
+        internal static string LockJson()
+        {
+            var requestedAt = Pending ? SessionState.GetString(RequestedAtKey, "") : "";
+            return "{\"generation\":" + Generation
+                + ",\"running\":" + (SessionState.GetBool(RunningKey, false) ? "true" : "false")
+                + ",\"completed\":" + (SessionState.GetBool(Prefix + "completed", false) ? "true" : "false")
+                + ",\"failed\":" + (SessionState.GetBool(Prefix + "failed", false) ? "true" : "false")
+                + ",\"errorCount\":" + SessionState.GetInt(Prefix + "errorCount", 0)
+                + ",\"pending\":" + (Pending ? "true" : "false")
+                + ",\"requestedAt\":" + (requestedAt.Length > 0 ? BridgeJson.EscapeString(requestedAt) : "null") + "}";
+        }
+
+        // The `compile` block of a gate envelope: the generation the call
+        // started at (a compile the call triggered gets a higher one), the
+        // generation now, and whether a compile is still due.
+        internal static string EnvelopeJson(int generationAtStart)
+            => "{\"generationAtStart\":" + generationAtStart
+                + ",\"generation\":" + Generation
+                + ",\"pending\":" + (Pending ? "true" : "false")
+                + ",\"running\":" + (SessionState.GetBool(RunningKey, false) ? "true" : "false") + "}";
+
         private static void Started(object context)
         {
             SessionState.SetInt(Prefix + "generation", SessionState.GetInt(Prefix + "generation", 0) + 1);
+            SessionState.SetInt(RequestedKey, -1);
+            SessionState.SetBool(RunningKey, true);
             SessionState.SetBool(Prefix + "completed", false);
             SessionState.SetString(Prefix + "inputs", Sources(force: true) ?? "");
             SessionState.SetString(Prefix + "before", AssemblyMtime().ToString("R", System.Globalization.CultureInfo.InvariantCulture));
@@ -259,6 +339,7 @@ namespace UnityOpenMcpBridge
             SessionState.SetInt(Prefix + "errorCount", _errorCount);
             SessionState.SetBool(Prefix + "failed", Errors.Length > 0);
             SessionState.SetBool(Prefix + "completed", true);
+            SessionState.SetBool(RunningKey, false);
             SessionState.SetString(Prefix + "after", AssemblyMtime().ToString("R", System.Globalization.CultureInfo.InvariantCulture));
         }
 
@@ -302,6 +383,7 @@ namespace UnityOpenMcpBridge
                 + ",\"projectPath\":" + BridgeJson.EscapeString(projectPath)
                 + ",\"generation\":" + SessionState.GetInt(Prefix + "generation", 0)
                 + ",\"sourceMatches\":" + (matches ? "true" : "false")
+                + ",\"pending\":" + (Pending ? "true" : "false")
                 + ",\"beforeAssemblyMtimeMs\":" + SessionState.GetString(Prefix + "before", "0")
                 + ",\"afterAssemblyMtimeMs\":" + SessionState.GetString(Prefix + "after", "0")
                 + (summary

@@ -646,7 +646,14 @@ function buildSuite() {
     file_path: FT_SCRIPT,
     content: "using UnityEngine;\npublic class FT_Script : MonoBehaviour { public int ft = 1; }",
     paths_hint: [FT_SCRIPT],
-  }, { gate: true, expect: "gate", timeoutMs: 180_000 });
+  }, { gate: true, expect: "gate", timeoutMs: 180_000, after: (r, ctx) => { ctx.scriptCompileGeneration = pluck(r, "compile.generationAtStart"); } });
+
+  // The write leaves a compile due; the wait outlives the compile + domain
+  // reload and returns once both are done (calls arriving mid-reload would
+  // wait too, but this exercises the primitive and its compile report).
+  s("editor_status_wait_script", "C", "unity_open_mcp_editor_status", {
+    resolveArgs: (ctx) => ({ wait_until: "idle", timeout_ms: 120_000, ...(Number.isInteger(ctx.scriptCompileGeneration) ? { after_generation: ctx.scriptCompileGeneration } : {}) }),
+  }, { expect: "ok", timeoutMs: 150_000 });
 
   s("script_read_back", "C", "unity_open_mcp_script_read", { file_path: FT_SCRIPT, max_lines: 5 });
 
@@ -664,6 +671,8 @@ function buildSuite() {
   s("script_delete", "C", "unity_open_mcp_script_delete", {
     file_paths: [FT_SCRIPT], paths_hint: [FT_SCRIPT],
   }, { gate: true, expect: "gate", timeoutMs: 180_000 });
+
+  s("editor_status_wait_script_delete", "C", "unity_open_mcp_editor_status", { wait_until: "idle", timeout_ms: 120_000 }, { expect: "ok", timeoutMs: 150_000 });
 
   // --- ScriptableObject create (VolumeProfile is a real URP SO type) ---
   s("scriptableobject_create", "C", "unity_open_mcp_scriptableobject_create", {

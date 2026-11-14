@@ -27,14 +27,22 @@ import {
   type InstanceLock,
 } from "../instance-discovery.js";
 import {
-  pollUntilReady,
   singlePing,
   DEFAULT_WAIT_TIMEOUT_MS,
   DEFAULT_POLL_INTERVAL_MS,
   PING_FETCH_TIMEOUT_MS,
-  type PollOutcome,
   type PingBody,
 } from "./ping-poller.js";
+import { hasRecentPendingTestRun } from "../instance-discovery.js";
+import { findUnityForProject } from "../running-unity.js";
+import {
+  readEditorSignals,
+  waitForEditor,
+  describeWait,
+  WAIT_POLL_MS,
+  type WaitRequest,
+  type WaitUntil,
+} from "../editor-state.js";
 import { checkBridgeCompat } from "../compat.js";
 import { closeToolNames } from "../tool-name-suggest.js";
 import {
@@ -164,36 +172,84 @@ export interface WaitForReadyCommandOptions {
   json: boolean;
   timeoutMs: number;
   intervalMs: number;
+  /** Also require a compile after this generation (the `compile.generationAtStart` a call returned). */
+  afterGeneration?: number;
+  /** idle (default) | playing | edit. */
+  until?: WaitUntil;
 }
 
+/**
+ * The same wait as `editor_status {"wait_until":…}` (editor-state.ts): ready
+ * means settled — reachable, no compile / domain reload / play-mode change in
+ * progress, no requested compile still to start (the instance lock announces
+ * one) — and, with --after-generation, a compile after that generation has
+ * run. "Connected and not compiling" alone used to answer ready in the gap
+ * between a refresh and the compile it triggered.
+ */
 export async function runWaitForReadyCommand(
   stack: RouterStack,
   opts: WaitForReadyCommandOptions,
 ): Promise<CliCommandResult> {
-  const outcome: PollOutcome = await pollUntilReady(
-    stack.live,
-    stack.projectPath,
-    (live) => singlePing(live, PING_FETCH_TIMEOUT_MS),
-    {
-      timeoutMs: opts.timeoutMs,
-      intervalMs: opts.intervalMs,
+  const request: WaitRequest = {
+    until: opts.until ?? "idle",
+    ...(opts.afterGeneration !== undefined ? { afterGeneration: opts.afterGeneration } : {}),
+    timeoutMs: opts.timeoutMs,
+    pollMs: opts.intervalMs,
+  };
+  const outcome = await waitForEditor(request, {
+    signals: () => readEditorSignals(stack.projectPath, stack.live),
+    compileState: async () => {
+      const body = await stack.live.readCompileState();
+      return body && typeof body.generation === "number" && typeof body.status === "string"
+        ? {
+            status: body.status,
+            generation: body.generation,
+            errorCount: Array.isArray(body.errors) ? body.errors.length : 0,
+            ...(typeof body.sourceMatches === "boolean" ? { sourceMatches: body.sourceMatches } : {}),
+            ...(typeof body.pending === "boolean" ? { pending: body.pending } : {}),
+          }
+        : null;
     },
-  );
+    pendingTestRun: () => hasRecentPendingTestRun(),
+  });
+  const { body } = describeWait(request, outcome);
+  // Cold Safe Mode: no lock was ever written, but Unity runs for this project.
+  const coldSafeMode = outcome.reason === "gone" && !!stack.projectPath && findUnityForProject(stack.projectPath) !== null;
+  const status = outcome.reached ? "ready"
+    : coldSafeMode || outcome.reason === "dead_bridge" ? "dead_bridge"
+    : outcome.reason === "gone" ? "offline"
+    : outcome.reason;
+  const compile = body.compile as { generation?: unknown; status?: unknown; errorCount?: unknown };
+  const reason = outcome.reached
+    ? `Editor is ${request.until} (compile generation ${String(compile.generation ?? "unknown")}, ` +
+      `${String(compile.status ?? "compile state unknown")}${typeof compile.errorCount === "number" && compile.errorCount > 0 ? `, ${compile.errorCount} error(s)` : ""}).`
+    : status === "dead_bridge"
+      ? "Bridge assembly failed to recompile — Unity is in a bad state (safe mode / compile errors). Run " +
+        "'unity-open-mcp run-tool unity_open_mcp_read_compile_errors --json' to retrieve the compiler errors, " +
+        "fix them, then re-run wait-for-ready."
+      : String((body.error as { message?: unknown } | undefined)?.message ?? status);
 
   const json = {
     command: "wait-for-ready",
-    ready: outcome.ready,
-    status: outcome.status,
-    elapsedMs: outcome.elapsedMs,
-    reason: outcome.reason,
-    lastPing: outcome.lastPing,
+    ready: outcome.reached,
+    status,
+    elapsedMs: outcome.waitedMs,
+    reason,
+    until: request.until,
+    ...(request.afterGeneration !== undefined ? { afterGeneration: request.afterGeneration } : {}),
+    state: body.state,
+    isPlaying: body.isPlaying,
+    transitionsSeen: body.transitionsSeen,
+    compile: body.compile,
+    ...(outcome.holdingFor && !outcome.reached ? { holdingFor: outcome.holdingFor } : {}),
+    lastPing: stack.live.getCachedPing(),
   };
 
   return {
-    exitCode: outcome.ready ? 0 : 1,
+    exitCode: outcome.reached ? 0 : 1,
     json,
-    human: outcome.reason,
-    errorLabel: outcome.ready ? undefined : outcome.status,
+    human: reason,
+    errorLabel: outcome.reached ? undefined : status,
   };
 }
 
@@ -1075,4 +1131,5 @@ export function versionText(version: string): string {
 export {
   DEFAULT_WAIT_TIMEOUT_MS,
   DEFAULT_POLL_INTERVAL_MS,
+  WAIT_POLL_MS,
 };

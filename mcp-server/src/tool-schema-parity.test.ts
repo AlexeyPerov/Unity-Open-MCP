@@ -261,12 +261,16 @@ test("no tool file inlines the canonical gate enum literal (all use ...GATE_PROP
  *  - `playtest_wait` uses it as the wait's own wall-clock limit; the start POST
  *    returns at once and the live client forwards it unclamped
  *    (TOOL_OWNED_TIMEOUT_TOOLS); long waits run as jobs.
+ *  - `editor_status` uses it as the budget of its server-side wait (wait_until),
+ *    which polls from outside the Editor and continues as a job past the inline
+ *    window; its plain read caps the bridge's answer at 5 s.
  */
 const NON_TRANSPORT_TIMEOUT_TOOLS = new Set([
   "unity_open_mcp_jobs", // Local bounded observation, not a bridge POST timeout.
   "unity_open_mcp_compile_check",
   "unity_senses_run_tests",
   "unity_open_mcp_playtest_wait",
+  "unity_open_mcp_editor_status",
 ]);
 
 test("every timeout_ms declares both a minimum and a maximum", () => {

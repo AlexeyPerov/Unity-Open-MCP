@@ -8,6 +8,7 @@
 // Command shapes:
 //   unity-open-mcp ping [--json] [--timeout-ms N]
 //   unity-open-mcp wait-for-ready [--json] [--timeout-ms N] [--interval-ms N]
+//                                 [--after-generation N] [--until idle|playing|edit]
 //   unity-open-mcp status [--json]
 //   unity-open-mcp run-tool <name> [--json] [--args '<json>'] [--arg k=v]...
 //   unity-open-mcp stream-events [--json] [--max-events N] [--follow]
@@ -35,6 +36,8 @@
 //   --port <n>      | -p <n>       override UNITY_OPEN_MCP_BRIDGE_PORT
 //   --timeout-ms <n>               ping/wait timeout in milliseconds
 //   --interval-ms <n>              wait-for-ready poll interval
+//   --after-generation <n>         wait-for-ready: require a compile after generation n
+//   --until idle|playing|edit      wait-for-ready: the Editor mode to wait for (default idle)
 //   --json                         emit JSON instead of human-readable output
 
 export type CliCommand =
@@ -93,6 +96,10 @@ export interface ParsedCli {
   timeoutMs: number | undefined;
   /** wait-for-ready poll interval (ms). */
   intervalMs: number | undefined;
+  /** wait-for-ready: require a compile after this compile generation. */
+  afterGeneration: number | undefined;
+  /** wait-for-ready: idle (default) | playing | edit. */
+  until: "idle" | "playing" | "edit" | undefined;
   /** Tool name for run-tool. */
   toolName: string | undefined;
   /** Tool args for run-tool, merged from --args + --arg. */
@@ -157,6 +164,8 @@ export function emptyParsed(): ParsedCli {
     port: undefined,
     timeoutMs: undefined,
     intervalMs: undefined,
+    afterGeneration: undefined,
+    until: undefined,
     toolName: undefined,
     toolArgs: {},
     maxEvents: undefined,
@@ -300,6 +309,27 @@ export function parseCliArgs(argv: string[]): ParsedCli {
         return parsed;
       }
       parsed.timeoutMs = n;
+      i += 2;
+      continue;
+    }
+    if (tok === "--after-generation") {
+      const v = args[i + 1];
+      const n = v !== undefined && /^\d+$/.test(v) ? Number(v) : undefined;
+      if (n === undefined || !Number.isSafeInteger(n)) {
+        parsed.error = "--after-generation requires a non-negative integer (a compile generation).";
+        return parsed;
+      }
+      parsed.afterGeneration = n;
+      i += 2;
+      continue;
+    }
+    if (tok === "--until") {
+      const v = args[i + 1];
+      if (v !== "idle" && v !== "playing" && v !== "edit") {
+        parsed.error = "--until requires idle, playing or edit.";
+        return parsed;
+      }
+      parsed.until = v;
       i += 2;
       continue;
     }

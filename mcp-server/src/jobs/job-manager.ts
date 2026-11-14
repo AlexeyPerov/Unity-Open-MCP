@@ -16,6 +16,12 @@ export interface JobContext {
 export interface JobOperation {
   mutating: boolean;
   cancellable: boolean;
+  /**
+   * An observer only watches (a wait for the Editor to settle): it holds no
+   * project or agent execution slot, so it never queues behind a running job
+   * nor blocks one. Observers have their own concurrency cap.
+   */
+  observer?: boolean;
   /** Pure preflight. Execution must preserve the owning operation's scope/gate/validation contract. */
   validate(args: Record<string, unknown>): void;
   /** Must yield promptly; use callbacks/async transport, never a blocking main-thread operation. */
@@ -62,11 +68,11 @@ function canonical(value: unknown): string {
 }
 export interface JobManagerOptions {
   maxJobs: number; retentionMs: number; maxConcurrent: number; perProject: number; perAgent: number;
-  maxEvents: number; maxPayloadBytes: number; maxWaiters: number;
+  maxEvents: number; maxPayloadBytes: number; maxWaiters: number; maxObservers: number;
 }
 const defaults: JobManagerOptions = {
   maxJobs: 256, retentionMs: 30 * 60_000, maxConcurrent: 4, perProject: 1, perAgent: 1,
-  maxEvents: 32, maxPayloadBytes: 256 * 1024, maxWaiters: 128,
+  maxEvents: 32, maxPayloadBytes: 256 * 1024, maxWaiters: 128, maxObservers: 8,
 };
 
 /** Session-only owner. No replay, disk persistence, or automatic transport retries. */
@@ -236,10 +242,15 @@ export class JobManager {
     if (this.closed) return;
     for (const entry of this.entries.values()) {
       if (entry.view.state !== "queued") continue;
-      const active = [...this.entries.values()].filter(e => e.executing);
-      if (active.length >= this.options.maxConcurrent) break;
-      if (active.filter(e => sameProject(e.view.owner, entry.view.owner)).length >= this.options.perProject ||
-          active.filter(e => sameOwner(e.view.owner, entry.view.owner)).length >= this.options.perAgent) continue;
+      const observer = entry.operation.observer === true;
+      const active = [...this.entries.values()].filter(e => e.executing && (e.operation.observer === true) === observer);
+      if (observer) {
+        if (active.length >= this.options.maxObservers) continue;
+      } else {
+        if (active.length >= this.options.maxConcurrent) continue;
+        if (active.filter(e => sameProject(e.view.owner, entry.view.owner)).length >= this.options.perProject ||
+            active.filter(e => sameOwner(e.view.owner, entry.view.owner)).length >= this.options.perAgent) continue;
+      }
       entry.executing = true;
       entry.view.started_at = this.now();
       this.transition(entry, "running");

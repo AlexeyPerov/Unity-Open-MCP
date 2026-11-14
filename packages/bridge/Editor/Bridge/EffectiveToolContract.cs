@@ -204,6 +204,9 @@ namespace UnityOpenMcpBridge
             if (tool == ExecuteCSharp) return SnippetLifecycle(body);
             if (tool == "unity_open_mcp_execute_menu" && ExecuteMenuTool.IsNonDisruptiveReadOnlyMenu(
                 JsonBody.GetString(JsonBody.TopLevelField(body, "menu_path"), "menu_path"))) return LifecyclePolicy.None;
+            if (tool == "unity_open_mcp_execute_menu" && ExecuteMenuTool.IsRefreshMenu(
+                JsonBody.GetString(JsonBody.TopLevelField(body, "menu_path"), "menu_path")))
+                return ToolLifecycle.Resolve("unity_open_mcp_assets_refresh");
             if (tool == "unity_open_mcp_batch_execute" && !IsMutating(tool, body)) return LifecyclePolicy.None;
             if (IsUpgradePreview(tool, body)) return LifecyclePolicy.None;
             return ToolLifecycle.Resolve(tool);

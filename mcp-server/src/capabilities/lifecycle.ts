@@ -433,7 +433,9 @@ export const LIFECYCLE_TAXONOMY: LifecycleTaxonomyEntry[] = [
     bridge:
       "Blocks up to 60s for the compile to settle; the active-scene dirty guard preflights.",
     recovery:
-      "After the call, poll editor_status / read_compile_errors before assuming success. " +
+      "After the call, wait with editor_status {\"wait_until\":\"idle\"} (pass the result's " +
+      "compile.generationAtStart as after_generation): it outlives the reload and returns the " +
+      "compile status and error count, so do not poll. " +
       "compile_check is batch-only and returns editor_instance_locked when a live Editor " +
       "holds the project lock — do not retry blindly.",
   },

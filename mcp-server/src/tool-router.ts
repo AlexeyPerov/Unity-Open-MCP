@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { testRunOperation, projectCommandOperation, playmodeOperation, pollPlaymodeOperation, playmodeResult, toolOutput, toolResultBody, PLAYMODE_OPERATION_TOOLS, playmodeEstimateMs, playmodeFailureCode } from "./jobs/adapters.js";
+import { testRunOperation, projectCommandOperation, playmodeOperation, pollPlaymodeOperation, playmodeResult, toolOutput, toolResultBody, PLAYMODE_OPERATION_TOOLS, playmodeEstimateMs, playmodeFailureCode, editorWaitOperation } from "./jobs/adapters.js";
+import {
+  WAIT_TOOL, WAIT_DEFAULT_TIMEOUT_MS, WAIT_INLINE_LIMIT_MS, PENDING_COMPILE_GRACE_MS,
+  readEditorSignals, viewEditor, statusFields, retryAfterMsFor, waitForEditor, describeWait, reloadingRefusal, waitCall,
+  type CompileReading, type WaitDeps, type WaitRequest, type WaitUntil, type EditorView,
+} from "./editor-state.js";
+import { lifecycleForCall } from "./capabilities/lifecycle.js";
 import { PLAYMODE_ROUTES } from "./playmode-routes.js";
 import { routeGameView as settleGameView } from "./game-view-settle.js";
 import { JobManager, JobManagerError, type JobOwner } from "./jobs/job-manager.js";
@@ -16,7 +22,7 @@ import { skipsReloadProbe } from "./local-tools.js";
 import { confirmBridgeReleaseTag, resolveLatestVersion, type BridgeTagConfirmation } from "./release-lookup.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
-import { LiveClient } from "./live-client.js";
+import { LiveClient, type PingResponse } from "./live-client.js";
 import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline, dependenciesOffline } from "./offline.js";
@@ -47,7 +53,7 @@ import { viewCapabilities } from "./capabilities/capabilities-view.js";
 import { generateSkill } from "./skill/generate-skill.js";
 import { getKnownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
-import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
+import { lockPath, readInstanceLock, classifyInstance, isPidAlive, hasRecentPendingTestRun, findInstanceLockByPort, type InstanceLock } from "./instance-discovery.js";
 import { PORT_ENV_VAR, EXPECTED_BRIDGE_WIRE_CONTRACT, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS } from "./constants.js";
 import { findUnityForProject, readProcessCommandLine } from "./running-unity.js";
 import { PlaytestRecorder, PlaytestError, PLAYTEST_SESSION_TOOL, type ToolCaller } from "./playtest/recorder.js";
@@ -383,46 +389,6 @@ function activeGroupsEqual(
   const sa = [...a].sort();
   const sb = [...b].sort();
   return sa.every((v, i) => v === sb[i]);
-}
-
-// Extract the typed /ping body from a CallToolResult's first text content.
-// Returns null on a non-text / non-JSON / non-object result so the
-// bridge_status synthesis can fall through to the "stopped" branch without
-// throwing.
-function parsePingBody(result: {
-  isError?: boolean;
-  content: Array<{ type: string; text?: string }>;
-}): {
-  connected?: boolean;
-  compiling?: boolean;
-  isPlaying?: boolean;
-  unityVersion?: string | null;
-  bridgeVersion?: string;
-  /** Optional — absent on a bridge predating the field (see wireContractBlock). */
-  wireContract?: number;
-  mode?: string;
-} | null {
-  const first = result.content[0];
-  if (!first || first.type !== "text" || typeof first.text !== "string") {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(first.text);
-    if (parsed && typeof parsed === "object") {
-      return parsed as {
-        connected?: boolean;
-        compiling?: boolean;
-        isPlaying?: boolean;
-        unityVersion?: string | null;
-        bridgeVersion?: string;
-        wireContract?: number;
-        mode?: string;
-      };
-    }
-  } catch {
-    // fall through
-  }
-  return null;
 }
 
 // Compact lock summary for the bridge_status response. Mirrors the field set
@@ -801,6 +767,52 @@ function bridgeStatusRecoveryHint(
   return null;
 }
 
+/**
+ * Whether the instance lock says the Editor is not ready for a call: a
+ * compile, domain reload or play-mode change in progress, or a compile a call
+ * requested that has not started yet (within its grace window). A missing,
+ * stale or dead lock is not a transition — the normal route reports those.
+ */
+function lockShowsTransition(lock: InstanceLock | null, now = Date.now()): boolean {
+  if (!lock) return false;
+  const classification = classifyInstance(lock, now);
+  if (classification === "gone" || classification === "dead_bridge") return false;
+  if (["compiling", "reloading", "entering_playmode", "exiting_playmode"].includes(lock.state)) return true;
+  if (lock.compile?.pending !== true) return false;
+  const requestedAt = Date.parse(lock.compile.requestedAt ?? "");
+  return !Number.isFinite(requestedAt) || now - requestedAt < PENDING_COMPILE_GRACE_MS;
+}
+
+/** A refusal the bridge gave without running the call (editor_reloading, dispatched:false): safe to send again. */
+function resendAfterReload(result: CallToolResult): boolean {
+  if (!result.isError) return false;
+  const body = toolResultBody(result);
+  return body.error?.code === "editor_reloading" && body.dispatched === false;
+}
+
+/** /compile-state (or read_compile_errors' live summary) as a wait reading; null when it is not one. */
+function compileReading(body: Record<string, unknown> | null): CompileReading | null {
+  if (!body || typeof body.generation !== "number" || typeof body.status !== "string") return null;
+  return {
+    status: body.status,
+    generation: body.generation,
+    errorCount: typeof body.errorCount === "number" ? body.errorCount : Array.isArray(body.errors) ? body.errors.length : 0,
+    ...(typeof body.sourceMatches === "boolean" ? { sourceMatches: body.sourceMatches } : {}),
+    ...(typeof body.pending === "boolean" ? { pending: body.pending } : {}),
+    ...(typeof body.errorSource === "string" ? { errorSource: body.errorSource } : {}),
+    ...(typeof body.headline === "string" ? { headline: body.headline } : {}),
+  };
+}
+
+/** The mid-reload wait budget: UNITY_OPEN_MCP_RELOAD_WAIT_MS (0 disables the wait), default 30 s, capped below the host-safe window. */
+export function readReloadWaitMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.UNITY_OPEN_MCP_RELOAD_WAIT_MS);
+  if (env.UNITY_OPEN_MCP_RELOAD_WAIT_MS === undefined || env.UNITY_OPEN_MCP_RELOAD_WAIT_MS.trim() === "" || !Number.isFinite(raw) || raw < 0)
+    return DEFAULT_RELOAD_WAIT_MS;
+  return Math.min(Math.floor(raw), BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS - 10_000);
+}
+export const DEFAULT_RELOAD_WAIT_MS = 30_000;
+
 /** Named-tool route: the call's live client, its arguments, and its request identity. */
 type RouteHandler = (live: LiveClient, args: Record<string, unknown>, identity: RequestIdentity) => Promise<CallToolResult>;
 
@@ -828,6 +840,13 @@ export class ToolRouter implements Router {
         const name = args.tool_or_command, key = args.idempotency_key;
         if (name === "unity_senses_run_tests") {
           if (!this.jobs.hasOperation(name)) this.jobs.register(name, testRunOperation(clientFor));
+        } else if (name === WAIT_TOOL) {
+          // An observer: it holds no project slot, so a wait never queues behind (or blocks) a test run.
+          if (!this.jobs.hasOperation(name)) this.jobs.register(name, editorWaitOperation(jobOwner => {
+            const client = clientFor(jobOwner);
+            const projectPath = jobOwner.port === undefined ? this.projectPath : findInstanceLockByPort(jobOwner.port)?.projectPath;
+            return this.waitDeps(client, projectPath);
+          }));
         } else if (PLAYMODE_OPERATION_TOOLS.has(name)) {
           // One generic adapter for every tool on the bridge's shared play-mode scheduler.
           if (!this.jobs.hasOperation(name)) this.jobs.register(name, playmodeOperation(name, PLAYMODE_OPERATION_TOOLS.get(name)!, clientFor));
@@ -979,6 +998,9 @@ export class ToolRouter implements Router {
       // bridge's settle watch here so set_* returns once the game sees the size.
       ["unity_open_mcp_game_view", (l, a) => this.routeGameView(a, l)],
       ["unity_open_mcp_bridge_status", (l, a) => this.routeBridgeStatus(a, l)],
+      // The status tool always answers (from the lock + /ping during a
+      // reload) and is the one wait primitive (wait_until).
+      [WAIT_TOOL, (l, a, id) => this.routeEditorStatus(a, l, id)],
       // M31 Plan 3 — Editor fd-exhaustion operator surfaces. restart_editor
       // is the reactive kill half (acts AFTER the Editor is hung);
       // resource_pressure is the proactive prediction half (samples fd usage
@@ -1257,22 +1279,84 @@ export class ToolRouter implements Router {
   }
 
   private async routeUnchecked(live: LiveClient, toolName: string, args: Record<string, unknown>, identity: RequestIdentity): Promise<CallToolResult> {
-    const localProbe = skipsReloadProbe(toolName);
-    const lock = !localProbe && this.projectPath ? readInstanceLock(this.projectPath) : null;
+    // Mid-reload policy. A call that arrives while the Editor is compiling,
+    // reloading or changing play mode (or right after a call left a compile
+    // due) waits for it to settle — bounded by reloadWaitMs so it stays inside
+    // a host's request timeout — and only then dispatches; past the budget it
+    // is refused with a stable editor_reloading + retryAfterMs and the wait
+    // call to make. Local tools, offline-capable reads and the catalog probe
+    // answer without the bridge; editor_status and ping answer for themselves.
+    const exempt = skipsReloadProbe(toolName) || toolName === WAIT_TOOL || toolName === "unity_open_mcp_ping";
+    if (exempt) return this.routeHandled(live, toolName, args, identity);
+    const lock = this.projectPath ? readInstanceLock(this.projectPath) : null;
     // The lock describes the default project's Editor. A per-request port
     // override aimed elsewhere has no lock of its own (override clients never
     // read locks) and its LiveClient handles that bridge's readiness, so the
-    // default Editor's reload must not refuse it. An override naming the
+    // default Editor's reload must not hold it. An override naming the
     // default Editor's own port still targets the reloading Editor.
     const targetsLockedEditor = identity.port === undefined || identity.port === lock?.port;
-    if (targetsLockedEditor && classifyInstance(lock) === "reloading") {
-      // One bounded re-probe. No headless fallback can acquire this Editor's project.
-      await new Promise(resolve => setTimeout(resolve, 250));
-      const available = await live.isLiveAvailable(750);
-      if (!available || classifyInstance(readInstanceLock(this.projectPath)) === "reloading") {
-        return sourceResult({ error: { code: "editor_reloading", message: "The live Editor is compiling or reloading. Retry after it settles." }, retryAfterMs: 1000 }, "local", true);
-      }
+    if (!targetsLockedEditor) return this.routeHandled(live, toolName, args, identity);
+    let budgetMs = this.reloadWaitMs;
+    if (lockShowsTransition(lock)) {
+      // No headless fallback can acquire this Editor's project: wait, never batch.
+      const settled = await this.waitForDispatch(live, toolName, budgetMs);
+      if (settled.refusal) return settled.refusal;
+      budgetMs -= settled.waitedMs;
     }
+    const result = await this.routeHandled(live, toolName, args, identity);
+    // The bridge refused the call (nothing ran) even after the client's own
+    // wait, or a read's response was cut off by a reload: wait once more
+    // within what is left of the budget and send it again. A mutation that may
+    // have run is never resent.
+    if (budgetMs > 0 && resendAfterReload(result)) {
+      const settled = await this.waitForDispatch(live, toolName, budgetMs);
+      if (settled.refusal) return result;
+      return this.routeHandled(live, toolName, args, identity);
+    }
+    return result;
+  }
+
+  /**
+   * How long an editor_status wait runs inside one call before it continues as
+   * a job. The stdio server keeps it under a host's request timeout; the CLI
+   * (no host, and a job would end with its process) waits inline throughout.
+   */
+  waitInlineLimitMs = WAIT_INLINE_LIMIT_MS;
+
+  /** How long a call that meets a transition waits before it is refused (env: UNITY_OPEN_MCP_RELOAD_WAIT_MS). */
+  private readonly reloadWaitMs = readReloadWaitMs();
+
+  /**
+   * Wait (bounded) until the Editor is settled enough to take a call. A dead
+   * bridge or a missing Editor is not waited out: the normal route reports it
+   * (bridge_compile_failed / bridge_offline).
+   */
+  private async waitForDispatch(live: LiveClient, toolName: string, budgetMs: number): Promise<{ waitedMs: number; refusal?: CallToolResult }> {
+    const outcome = await waitForEditor({ until: "idle", timeoutMs: Math.max(0, budgetMs) }, this.waitDeps(live, this.projectPath, false));
+    if (outcome.reached || outcome.reason === "dead_bridge" || outcome.reason === "gone") return { waitedMs: outcome.waitedMs };
+    return { waitedMs: outcome.waitedMs, refusal: reloadingRefusal(toolName, outcome.view, outcome.waitedMs) };
+  }
+
+  /**
+   * What the wait primitive reads: lock + /ping, /compile-state, and (for the
+   * final answer) the same compile summary read_compile_errors gives, so the
+   * wait's error count agrees with it.
+   */
+  private waitDeps(live: LiveClient, projectPath: string | undefined, withSummary = true): WaitDeps {
+    return {
+      signals: () => readEditorSignals(projectPath, live),
+      compileState: async () => compileReading(await live.readCompileState?.() ?? null),
+      ...(withSummary ? {
+        compileSummary: async () => {
+          const summary = toolResultBody(await this.routeReadCompileErrors({}, live));
+          return summary._source === "live" ? compileReading(summary) : compileReading(await live.readCompileState?.() ?? null);
+        },
+      } : {}),
+      pendingTestRun: () => hasRecentPendingTestRun(),
+    };
+  }
+
+  private async routeHandled(live: LiveClient, toolName: string, args: Record<string, unknown>, identity: RequestIdentity): Promise<CallToolResult> {
     // Named-tool dispatch (T3.2): the handler map covers every exact-name
     // route. The per-tool policy rationale (offline / local / hub / offline-
     // first / verify-fold / scene-paging) lives in each routeXxx method's
@@ -1352,6 +1436,9 @@ export class ToolRouter implements Router {
     if (liveAvailable) {
       logRoute(`[unity-open-mcp] Route: ${toolName} -> live`);
       const result = await live.route(toolName, args);
+      // ping answered 503 (the listener is back, the session not yet): the
+      // Editor is still coming out of a reload — say so, not an error.
+      if (isPing && result.isError) return (await this.lockDerivedPing(live)) ?? injectRouteMeta(result, { route: "live" });
       return injectRouteMeta(result, { route: "live" });
     }
 
@@ -1360,7 +1447,10 @@ export class ToolRouter implements Router {
     );
 
     if (isPing) {
-      return this.batchPingResult();
+      // The listener is down: a fresh lock still says what the Editor is doing
+      // (compiling, reloading, changing play mode). Answer with that instead
+      // of an error, like bridge_status and editor_status do.
+      return (await this.lockDerivedPing(live)) ?? this.batchPingResult();
     }
 
     const result = await this.batch.route(toolName, args);
@@ -1371,6 +1461,29 @@ export class ToolRouter implements Router {
       fallbackReason: "live_unavailable",
     });
     return injectRouteMeta(result, meta);
+  }
+
+  /** ping while the listener is away but the instance lock shows a live Editor; null otherwise. */
+  private async lockDerivedPing(live: LiveClient): Promise<CallToolResult | null> {
+    if (!this.projectPath) return null;
+    const view = viewEditor(await readEditorSignals(this.projectPath, live, 1_000), hasRecentPendingTestRun());
+    if (view.phase !== "transition" && view.phase !== "unreachable" && view.phase !== "wedged") return null;
+    return sourceResult({
+      connected: false,
+      projectPath: this.projectPath,
+      mode: "live",
+      compiling: view.isCompiling,
+      isPlaying: view.isPlaying,
+      phase: view.phase,
+      ...statusFields(view),
+      retryAfterMs: retryAfterMsFor(view),
+      source: "lock",
+      note: "The bridge listener is not answering while the Editor " +
+        (view.transition ? `is ${view.transition.replace(/_/g, " ")}` : "is unreachable") +
+        "; this answer is read from the instance lock.",
+      agentNextSteps: [`Wait for the Editor with ${waitCall("idle")} before live calls.`],
+      _route: { route: "local", fallbackReason: "live_unavailable" },
+    }, "local");
   }
 
   private batchPingResult(): CallToolResult {
@@ -2710,6 +2823,100 @@ export class ToolRouter implements Router {
     );
   }
 
+  /**
+   * `editor_status` — the status tool, and the one wait primitive.
+   *
+   * Without `wait_until` it always answers: a settled bridge is asked once
+   * (play / pause / compile state, active scene, dirty scenes); while the
+   * Editor compiles, reloads or changes play mode — when the bridge cannot
+   * answer — the status comes from the instance lock and /ping (the same
+   * reader bridge_status uses) with `reloading: true`, the `transition`, the
+   * last compile generation and `retryAfterMs`. Only a missing Editor or a
+   * dead bridge is an error.
+   *
+   * With `wait_until` it blocks until the Editor is settled in that mode with
+   * no compile due (see editor-state.ts#waitForEditor), inline for up to
+   * WAIT_INLINE_LIMIT_MS; a longer `timeout_ms` continues as a `jobs` wait.
+   */
+  private async routeEditorStatus(args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity): Promise<CallToolResult> {
+    const until = args.wait_until as WaitUntil | undefined;
+    if (until === undefined) {
+      if (args.after_generation !== undefined)
+        return localError("invalid_arguments", "after_generation applies to a wait: pass wait_until (\"idle\", \"playing\" or \"edit\") with it.");
+      return this.editorStatusNow(args, live);
+    }
+    const timeoutMs = typeof args.timeout_ms === "number" ? args.timeout_ms : WAIT_DEFAULT_TIMEOUT_MS;
+    const request: WaitRequest = {
+      until,
+      ...(typeof args.after_generation === "number" ? { afterGeneration: args.after_generation } : {}),
+      timeoutMs,
+    };
+    const outcome = await waitForEditor({ ...request, timeoutMs: Math.min(timeoutMs, this.waitInlineLimitMs) }, this.waitDeps(live, this.projectPath));
+    if (outcome.reason === "timeout" && timeoutMs > outcome.waitedMs + 1_000) {
+      // Past the host-safe inline window the wait continues as a job, the
+      // way a long playtest_wait does; the job's result is this wait's answer.
+      const remaining = Math.max(1_000, timeoutMs - outcome.waitedMs);
+      const started = await this.routeJobs({ action: "start", tool_or_command: WAIT_TOOL,
+        args: { wait_until: until, ...(request.afterGeneration !== undefined ? { after_generation: request.afterGeneration } : {}), timeout_ms: remaining } }, identity);
+      const job = toolResultBody(started);
+      if (started.isError || typeof job.job_id !== "string") return started;
+      const { body } = describeWait(request, outcome);
+      delete body.error;
+      return sourceResult({
+        ...body,
+        status: "waiting",
+        job_id: job.job_id,
+        job: { state: job.state, operation: job.operation },
+        note: `Not ${until} after ${outcome.waitedMs} ms; the wait continues as job ${job.job_id} for up to ${remaining} ms more.`,
+        agentNextSteps: [`Call unity_open_mcp_jobs {"action":"wait","job_id":"${job.job_id}","timeout_ms":30000} until the job is terminal; its result is this wait's answer (state, compile status and error count).`],
+      }, "local");
+    }
+    const { body, isError } = describeWait(request, outcome);
+    return sourceResult(body, "local", isError);
+  }
+
+  /** editor_status without a wait: the bridge's answer when it can give one, else the lock's. */
+  private async editorStatusNow(args: Record<string, unknown>, live: LiveClient): Promise<CallToolResult> {
+    const signals = await readEditorSignals(this.projectPath, live);
+    const view = viewEditor(signals, hasRecentPendingTestRun());
+    const settling = view.transition !== null || view.phase !== "settled";
+    const waitHint = settling ? {
+      retryAfterMs: retryAfterMsFor(view),
+      agentNextSteps: [`The Editor is ${view.transition ? view.transition.replace(/_/g, " ") : view.phase}. Wait for it with ${waitCall(view.transition === "entering_playmode" ? "playing" : view.transition === "exiting_playmode" ? "edit" : "idle")} instead of polling.`],
+    } : {};
+    if (signals.ping.reachable && signals.ping.httpStatus === 200 && signals.ping.body?.connected !== false && view.phase !== "wedged") {
+      const timeoutMs = typeof args.timeout_ms === "number" ? Math.min(args.timeout_ms, 5_000) : 5_000;
+      const output = await live.readEditorStatus(timeoutMs);
+      if (output) {
+        return sourceResult({ ...output, ...statusFields(view), source: "live", ...waitHint, _route: { route: "live" } }, "live");
+      }
+    }
+    if (view.phase === "gone" || view.phase === "dead_bridge") {
+      const deadBridge = view.phase === "dead_bridge";
+      return sourceResult({
+        error: deadBridge
+          ? { code: "bridge_compile_failed", message: "Unity is running but the bridge did not come back (Safe Mode / compile failure): its heartbeat stopped and /ping does not answer." }
+          : { code: "bridge_offline", message: `No live Unity Editor for ${this.projectPath || "this project"} (no instance lock with a running process).` },
+        ...statusFields(view),
+        agentNextSteps: [deadBridge
+          ? "Call unity_open_mcp_read_compile_errors (it reads Editor.log without the bridge), fix the errors, then recompile."
+          : "Open the project in Unity, then call unity_open_mcp_bridge_status to confirm the bridge is running."],
+        _route: { route: "local" },
+      }, "local", true);
+    }
+    return sourceResult({
+      isPlaying: view.isPlaying,
+      isCompiling: view.isCompiling,
+      phase: view.phase,
+      ...statusFields(view),
+      source: "lock",
+      note: "The bridge is not answering (" + (view.transition ? view.transition.replace(/_/g, " ") : view.phase.replace(/_/g, " ")) +
+        "); this status is read from the instance lock and /ping. Scene and pause fields return once the Editor settles.",
+      ...(settling ? waitHint : { retryAfterMs: 2_000 }),
+      _route: { route: "local" },
+    }, "local");
+  }
+
   // testsuite-tauri phase-3 — bridge_status. Combines the instance-lock
   // classifier (the same pure function the LiveClient uses for dead-bridge
   // detection) with a single /ping probe. The /ping is driven through the
@@ -2749,24 +2956,19 @@ export class ToolRouter implements Router {
     live: LiveClient,
   ): Promise<CallToolResult> {
     const lockOnDisk = lockPath(this.projectPath);
-    let lock: InstanceLock | null = null;
-    try {
-      lock = readInstanceLock(this.projectPath);
-    } catch {
-      // Unreadable lock → treat as no lock (gone).
-      lock = null;
-    }
-    const classification = classifyInstance(lock);
-
-    // One /ping probe. The LiveClient's ping handler returns the full body
-    // on success, or an isError result with `bridge_offline` on ECONNREFUSED
-    // — both shapes are valid inputs here. A compile-in-progress bridge
-    // returns HTTP 503 from /ping which isLiveAvailable() treats as reachable;
-    // the ping body's `compiling` field is the authoritative signal.
-    const pingResult = await live.route("unity_open_mcp_ping", {});
-    const pingBody = parsePingBody(pingResult);
-    const pingReachable = !pingResult.isError && pingBody !== null;
-    const compiling = pingReachable === true && pingBody?.compiling === true;
+    // The shared editor-state reader (lock + one /ping probe) — the same one
+    // editor_status, ping and the wait use, so the tools cannot disagree. A
+    // 503 /ping (listener up, session still initializing after a reload)
+    // reads as reachable + compiling.
+    const signals = await readEditorSignals(this.projectPath, live);
+    const lock: InstanceLock | null = signals.lock;
+    const classification = signals.classification;
+    const view = viewEditor(signals, hasRecentPendingTestRun());
+    const pingBody: Partial<PingResponse> | null = signals.ping.reachable
+      ? (signals.ping.body ?? (signals.ping.httpStatus === 503 ? { connected: false, compiling: true } : null))
+      : null;
+    const pingReachable = pingBody !== null;
+    const compiling = pingReachable === true && (pingBody?.compiling === true || signals.ping.httpStatus === 503);
     const connected = pingReachable === true && pingBody?.connected === true;
 
     // T-fix-3 — when the ping is unreachable, distinguish "Unity is running but
@@ -2888,6 +3090,12 @@ export class ToolRouter implements Router {
       // Safe Mode / compile failure", not the generic "stopped" the bare
       // status used to suggest.
       classification,
+      // What the Editor is doing (compiling / reloading / entering_playmode /
+      // exiting_playmode, or null) and the last compile generation — the same
+      // fields editor_status reports.
+      transition: view.transition,
+      compileGeneration: view.compile?.generation ?? null,
+      compilePending: view.compile?.pending ?? null,
       recoveryHint: bridgeStatusRecoveryHint(status, wedge),
       // specs/feedback.md 2026-08-14 — present ONLY when the editor is wedged.
       // `classification` keeps mirroring the instance lock verbatim (healthy |
@@ -2914,6 +3122,7 @@ export class ToolRouter implements Router {
             bridgeVersion: pingBody?.bridgeVersion ?? null,
             wireContract: pingBody?.wireContract ?? null,
             mode: pingBody?.mode ?? null,
+            transition: pingBody?.transition ?? null,
           }
         : { reachable: false },
       // specs/feedback.md 2026-08-24 — null when /ping was unreachable; a

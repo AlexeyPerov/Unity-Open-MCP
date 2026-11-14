@@ -19,8 +19,9 @@ export const asmdefCreate = makeTool(
     "reload + recompile — the gate waits for the settle window, and the active-scene " +
     "dirty guard preflights it). `paths_hint` must be scoped to the new asset path. " +
     "Builds the .asmdef JSON from the typed params; `name` defaults to the filename " +
-    "when omitted. After create, poll editor_status / compile_check to confirm the " +
-    "recompile settled, then run scan_paths on the new asmdef to catch any broken " +
+    "when omitted. After create, wait with unity_open_mcp_editor_status " +
+    "{\"wait_until\":\"idle\"} (compile status and error count once the recompile " +
+    "settled), then run scan_paths on the new asmdef to catch any broken " +
     "references. To edit an existing asmdef use asmdef_modify.",
   {
     required: ["asset_path", "paths_hint"],

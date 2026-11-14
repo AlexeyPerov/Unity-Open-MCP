@@ -37,6 +37,22 @@ export type InstanceState =
   | "playing"
   | "exiting_playmode";
 
+/**
+ * The lock's `compile` block (bridge BridgeCompileState.LockJson, wire contract
+ * 8): readable while the bridge is down for a reload. `pending` — a compile was
+ * requested (a refresh imported scripts, recompile_scripts) and has not started
+ * yet; `requestedAt` is when (ISO UTC).
+ */
+export interface LockCompile {
+  generation: number;
+  running: boolean;
+  completed: boolean;
+  failed: boolean;
+  errorCount: number;
+  pending: boolean;
+  requestedAt: string | null;
+}
+
 /** Shape of ~/.unity-open-mcp/instances/<hash>.json (bridge BridgeInstanceLock). */
 export interface InstanceLock {
   pid: number;
@@ -55,6 +71,8 @@ export interface InstanceLock {
   isCompiling: boolean;
   bridgeVersion: string;
   unityVersion: string;
+  /** Absent on a bridge older than wire contract 8. */
+  compile?: LockCompile | null;
 }
 
 /**

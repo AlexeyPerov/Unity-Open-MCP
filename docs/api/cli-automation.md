@@ -9,7 +9,7 @@ uses the same routing stack from a terminal or CI job.
 | Command | Purpose | Backend |
 |---|---|---|
 | `ping` | Probe the live bridge once. | `unity_open_mcp_ping` |
-| `wait-for-ready` | Poll until the bridge is ready or the timeout expires. | Ping loop |
+| `wait-for-ready` | Wait until the Editor is settled — no compile, domain reload or play-mode change in progress, no requested compile still to start — or the timeout expires. | The `editor_status` wait |
 | `status` | Show resolved port, instance lock, readiness, and compatibility. | `unity_open_mcp_bridge_status` |
 | `run-tool <name>` | Invoke any MCP tool by full name. | Tool router |
 | `stream-events` | Stream bridge console/state events. | `unity_senses_pull_events` |
@@ -52,6 +52,27 @@ npx -y unity-open-mcp@1.6.0 run-tool unity_open_mcp_capabilities \
 ```
 
 `run-tool` returns the same JSON payload as an MCP call to that tool.
+
+`wait-for-ready` runs the same wait as
+[`editor_status {"wait_until":…}`](mcp-tools.md#unity_open_mcp_editor_status):
+"connected and not compiling" is not enough, because Unity starts a compile a
+refresh requested on a later update and `/ping` can read idle in that gap. It
+also waits while the instance lock announces a requested compile that has not
+started. `--after-generation N` additionally requires a compile after
+generation N (the `compile.generationAtStart` a call returned); `--until
+idle|playing|edit` picks the mode (default `idle`). The JSON reports `status`
+(`ready`, `timeout`, `not_reached`, `dead_bridge`, `offline`), `transitionsSeen`
+and `compile: {generation, status, errorCount}`. `run-tool
+unity_open_mcp_editor_status` with `wait_until` waits inline for its whole
+`timeout_ms` (no MCP host timeout applies to the CLI, and a job would end with
+the process).
+
+```bash
+npx -y unity-open-mcp@1.6.0 run-tool unity_open_mcp_assets_refresh \
+  --project /absolute/path/to/MyGame --json --arg whole_project=true
+npx -y unity-open-mcp@1.6.0 wait-for-ready \
+  --project /absolute/path/to/MyGame --json --after-generation 42
+```
 
 ## Project setup
 

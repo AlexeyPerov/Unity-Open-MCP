@@ -194,7 +194,18 @@ namespace UnityOpenMcpBridge
                 state = BridgeInstanceLock.StateIdle;
             }
 
-            BridgeInstanceLock.UpdateState(state, isPlaying, isCompiling);
+            string compileJson = null;
+            try { compileJson = BridgeCompileState.LockJson(); }
+            catch { /* the compile block is advisory; the heartbeat must still beat */ }
+            BridgeInstanceLock.UpdateState(state, isPlaying, isCompiling, compileJson);
+        }
+
+        // Write the lock now, outside the 0.5 s cadence (main thread). A tool
+        // that just requested a compile publishes it before its response leaves,
+        // so a reader that polls the lock next already sees the request.
+        internal static void WriteNowIfRunning()
+        {
+            if (_registered) WriteNow();
         }
     }
 }

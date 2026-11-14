@@ -345,6 +345,21 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void Execute_EditorStatusWait_RefusedAsServerPolled_PlainStatusAllowed()
+        {
+            // The editor_status wait is run by the MCP server outside the
+            // Editor; nothing it waits for can finish while the batch holds the
+            // main thread.
+            var wait = BatchExecuteTool.Execute(
+                "{\"commands\":[{\"tool\":\"unity_open_mcp_editor_status\",\"params\":{\"wait_until\":\"idle\"}}]}");
+            Assert.AreEqual("batch_step_requires_server_poll", wait.ErrorCode);
+            StringAssert.Contains("wait_until", wait.ErrorMessage);
+            var plain = BatchExecuteTool.Execute(
+                "{\"commands\":[{\"tool\":\"unity_open_mcp_editor_status\",\"params\":{}}]}");
+            Assert.IsTrue(plain.Success, plain.ErrorMessage);
+        }
+
+        [Test]
         public void Execute_RunTests_RefusalNamesAReachableAlternative()
         {
             // The whole point of the field report: "use it as a single top-level

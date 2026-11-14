@@ -160,6 +160,7 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
     runRegressionCommand,
     DEFAULT_WAIT_TIMEOUT_MS,
     DEFAULT_POLL_INTERVAL_MS,
+    WAIT_POLL_MS,
   } = commandModule;
 
   // Build the router stack. Every command needs a project path + resolved
@@ -172,6 +173,9 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
     });
     logResolve(env.port, env.projectPath, env.authToken);
     stack = buildRouterStack(env);
+    // A CLI process has no MCP host timeout to stay under, and a job would end
+    // with the process: editor_status waits run inline for their whole budget.
+    stack.router.waitInlineLimitMs = Number.POSITIVE_INFINITY;
     // run-tool / verify / baseline / regression can spawn headless Unity via
     // the batch router. Supervise those children so a Ctrl+C on a wedged CLI
     // run kills the Unity (and releases the project lock) instead of
@@ -198,7 +202,9 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
         result = await runWaitForReadyCommand(stack, {
           json: parsed.json,
           timeoutMs: parsed.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS,
-          intervalMs: parsed.intervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+          intervalMs: parsed.intervalMs ?? WAIT_POLL_MS,
+          ...(parsed.afterGeneration !== undefined ? { afterGeneration: parsed.afterGeneration } : {}),
+          ...(parsed.until !== undefined ? { until: parsed.until } : {}),
         });
         break;
       case "status":

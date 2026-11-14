@@ -33,7 +33,9 @@ test('input schemas explain named release, touch resolution, and settle truth', 
   assert.match(String(property('inputsim_step', 'settle_ms').description), /does not wait/);
 });
 test('live timeout schemas agree with the bridge host ceiling', () => {
-  for (const suffix of ['editor_status', 'memory_snapshot_capture'])
+  // editor_status's timeout_ms is its server-side wait budget (wait_until),
+  // not a bridge POST timeout; see tool-schema-parity.test.ts.
+  for (const suffix of ['memory_snapshot_capture'])
     assert.equal(property(suffix, 'timeout_ms').maximum, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS);
 });
 test('touch, gesture and raycast_real pointer share the backend contract', () => {

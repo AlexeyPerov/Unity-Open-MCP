@@ -213,8 +213,19 @@ checkpoint before comparing again.
 `compilePending: true` (next to `settleMs`) is emitted when the editor is still
 compiling after the post-mutation settle wait — the gate's delta then reflects
 the **pre-compile** state, so a `passed` / `newErrors:0` does not verify the new
-code. Poll `editor_status.isCompiling` until false, then `read_compile_errors`.
+code. Wait with [`editor_status`](#unity_open_mcp_editor_status)
+`{"wait_until":"idle"}`, then `read_compile_errors` for the diagnostics.
 `agentNextSteps` repeats the advisory.
+
+A call that can leave a script compile due — `assets_refresh`, `script_write` /
+`script_delete`, `execute_menu "Assets/Refresh"`, and every `restart_then_settle`
+call — carries a `compile` block next to `settleMs`:
+`{"generationAtStart":N,"generation":N,"pending":bool,"running":bool}`. Unity
+starts that compile on a later update, and `isCompiling` can read false in the
+gap, so `pending` (a compile requested and not started yet) is the handshake:
+when a compile is due, `agentNextSteps` names
+`editor_status {"wait_until":"idle","after_generation":N}`, which returns only
+after that compile (and its domain reload) ran.
 
 `execute_csharp` accepts `read_only: true` for pure-read probes (type lookups,
 `SessionState` reads, console reads): it waives the `paths_hint` requirement and
@@ -374,7 +385,7 @@ concrete meta-tool equivalent exists, the refusal message also names it — a
 client that ignores `tools/list_changed` cannot see a tool `manage_tools` just
 activated, so "use it as a single top-level call" alone would be a dead end for
 it. `recompile_scripts` points at the `CompilationPipeline.RequestScriptCompilation()`
-`execute_csharp` one-liner plus an `editor_status` poll; `run_tests` points at
+`execute_csharp` one-liner plus the `editor_status` wait; `run_tests` points at
 `invoke_method` / a `TestRunnerApi` snippet.
 
 Nestability is a separate axis from the capability surface's `batchCapable` flag,
@@ -784,10 +795,12 @@ incremental compiler frequently no-ops on unchanged-import views, leaving the
 running assembly stale. The response reports `dllMtimeBefore` / `dllMtimeAfter`
 (newest `Library/ScriptAssemblies/*.dll` mtime, UTC ticks) and a `recompiled`
 boolean so a no-op is detectable; `agentNextSteps` branches on the outcome
-(`read_compile_errors` when rebuilt, poll `isCompiling` when a compile was
-already in flight, fall back to `assets_refresh` / `reimport_package` when Unity
-judged sources unchanged). The recompile is project-wide; `paths_hint` exists
-only to give the gate a scoped hint (the edited scripts).
+(the `editor_status` wait keyed to `compileGenerationAtStart` when rebuilt or
+still compiling, fall back to `assets_refresh` / `reimport_package` when Unity
+judged sources unchanged). The domain reload usually cuts the response off; the
+call then answers `triggered_reload` with the same wait. The recompile is
+project-wide; `paths_hint` exists only to give the gate a scoped hint (the
+edited scripts).
 
 ### `unity_open_mcp_upgrade`
 
@@ -911,6 +924,12 @@ usually still running and completes. Confirm with `editor_status` or an asset
 probe; a blind retry of an authoring menu can double-write assets. The timeout
 envelope's `agentNextSteps` says exactly this.
 
+`Assets/Refresh` is the menu form of `assets_refresh`, not a read-only menu: it
+imports changed files, runs their postprocessors and can start a compile and
+domain reload. It is a gated mutation with `assets_refresh`'s lifecycle
+(`editor_settle`, no dirty-scene guard) and default scope (`Assets` when
+`paths_hint` is empty), and its envelope carries the same `compile` block.
+
 A menu that does not run answers with one of two codes: `menu_not_found` (no
 item is registered at that path — fix the path) or `menu_disabled` (the item
 exists but its validate function rejected the current Editor state, for
@@ -996,13 +1015,56 @@ preview scene.
 
 ### `unity_open_mcp_editor_status`
 
-In addition to play/compile/pause state and the active scene path, reports
-`dirtySceneCount` + `dirtyScenes: [{name, path}]` — every loaded scene with
-unsaved in-memory changes. This is the memory-vs-disk signal: after a structural
-op (`gameobject_set_parent`) that marks a scene dirty without writing it, check
-`dirtySceneCount > 0` to know a `scene_save` is pending before reasoning against
-on-disk YAML. `reserialize` reports `touchedOpenScenes` and marks opened scenes
-dirty when it rewrites their on-disk YAML, for the same reason.
+The status tool, and the one way to wait for the Editor.
+
+**Status (no `wait_until`).** Always answers. On a settled Editor the bridge's
+answer — play / pause / compile state, the active scene path, and
+`dirtySceneCount` + `dirtyScenes: [{name, path}]`, every loaded scene with
+unsaved in-memory changes (the memory-vs-disk signal: after a structural op such
+as `gameobject_set_parent` that marks a scene dirty without writing it, check
+`dirtySceneCount > 0` before reasoning against on-disk YAML; `reserialize`
+reports `touchedOpenScenes` for the same reason). Every answer adds `state`
+(the instance lock's heartbeat state), `transition` (`compiling`, `reloading`,
+`entering_playmode`, `exiting_playmode`, or `null`), `reloading`,
+`compileGeneration`, `compilePending`, `lastCompileFailed` and `source`
+(`live` / `lock`). While the Editor compiles, reloads or changes play mode — when
+the bridge cannot answer — the status is read from the instance lock and
+`/ping` (`source: "lock"`, scene fields absent) with `retryAfterMs` and the wait
+to call, instead of an error. Only a missing Editor (`bridge_offline`) or a
+bridge that did not come back (`bridge_compile_failed`) is an error. The answer
+is flat (not a gate envelope).
+
+**Wait (`wait_until`: `idle` | `playing` | `edit`).** Blocks until the Editor is
+settled — reachable, no compile, domain reload or play-mode change in progress,
+no requested compile still to start — and in the requested mode (`idle`: either
+mode), then returns `reached`, `status`, `waitedMs`, `mode`, `state`,
+`transitionsSeen` and `compile: {generation, status, errorCount}` — the same
+count `read_compile_errors` reports. A failed compile is reported there (with a
+`read_compile_errors` next step), not as a failed wait. The wait polls from the
+MCP server (instance lock, `/ping`, `/compile-state`), so it survives the
+domain reload it waits for.
+
+- `after_generation`: also require a compile that started after this
+  generation — pass the `compile.generationAtStart` of the call that changed
+  scripts. If the Editor reports none due, the wait returns after a short grace
+  with `compile.ranAfterGeneration: false`.
+- Without it the bridge's own handshake still holds the wait: a call that left a
+  compile requested but not started publishes `pending` in the lock and
+  `/compile-state` until that compile starts (given up after 60 s:
+  `compile.dueButNotStarted`).
+- A mode that does not come (play mode refused because scripts do not compile)
+  ends with `wait_not_reached` once the Editor has been settled in the other
+  mode for a few seconds; a dead bridge ends with `bridge_compile_failed`.
+- `timeout_ms` is the wait's budget (default 120000, up to 600000). Up to 40 s
+  is waited inside the call; a longer budget continues as a
+  [`jobs`](jobs.md) wait and the call returns `status: "waiting"` with the
+  `job_id` (the job's result is the wait's answer). The CLI waits inline for
+  the whole budget. On budget exhaustion: `wait_timeout` with `holdingFor`.
+
+Use it after `editor_set_state`, `assets_refresh`, `recompile_scripts`,
+`script_write`, asmdef / package / define edits and `Assets/Refresh` instead of
+polling; their `agentNextSteps` name the exact call. Inside `batch_execute` a
+`wait_until` step is refused (`batch_step_requires_server_poll`).
 
 ### `unity_open_mcp_dependencies`
 

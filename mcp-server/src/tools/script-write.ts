@@ -9,7 +9,10 @@ export const scriptWrite = makeTool(
   "unity_open_mcp_script_write",
   "Create or overwrite a C# source (.cs) file under the project. Mutating: writes the " +
     "file, then Roslyn-validates it before persisting and refreshes the asset database " +
-    "(which may trigger a recompile / domain reload). Runs the full gate path; `paths_hint` " +
+    "(which starts a recompile / domain reload after the call returns — the result's " +
+    "`compile` block and agentNextSteps name unity_open_mcp_editor_status " +
+    "{\"wait_until\":\"idle\",\"after_generation\":N}; calls sent meanwhile wait for the " +
+    "reload too). Runs the full gate path; `paths_hint` " +
     "must be scoped to the .cs path. By default the call refuses to overwrite an existing " +
     "file unless `overwrite: true` is set. `validate: true` (default) runs a Roslyn parse " +
     "compile of the source first and returns the diagnostics — a failed parse returns " +

@@ -1600,6 +1600,100 @@ test("empty body on compile-reload tool surfaces as triggered_reload, not unpars
   }
 });
 
+// ----- Reload races: a well-formed editor_reloading from the bridge, and an
+// empty body while the Editor is changing play mode, never read as corruption.
+
+const SETTLED_PING = JSON.stringify({ connected: true, projectPath: REFRESH_PROJECT, unityVersion: "6000.0.0f1",
+  bridgeVersion: "0.1.0", mode: "live", compiling: false, isPlaying: false, transition: null });
+
+test("empty body on a read while the lock says entering_playmode is editor_reloading, not unparsable", async () => {
+  const s = makeSandbox();
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(req.url === "/ping" ? SETTLED_PING : "");
+    });
+    const client = new LiveClient(bridge.port, new PingCache(), "deadbeef", REFRESH_PROJECT);
+    // The pre-flight sees a settled Editor; the play-mode reload begins while the call is in flight.
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    await client.isLiveAvailable();
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "entering_playmode", bridge.port);
+    const result = await client.route("unity_open_mcp_editor_get_tags", {});
+    await bridge.close();
+    assert.equal(result.isError, true);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "editor_reloading");
+    assert.equal(body.transition, "entering_playmode");
+    assert.equal(body.dispatched, null, "an empty body cannot say whether the call ran");
+    assert.match(body.agentNextSteps[0], /"wait_until":"idle"/);
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("a 503 editor_reloading tool answer (nothing ran) is sent again once the Editor settles; a second one stays editor_reloading", async () => {
+  const s = makeSandbox();
+  const prevWait = process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS;
+  const prevPoll = process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
+  process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = "2000";
+  process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = "20";
+  try {
+    let posts = 0;
+    let refuseAlways = false;
+    const refusal = JSON.stringify({ error: { code: "editor_reloading", message: "not run" }, dispatched: false, transition: "entering_playmode", retryAfterMs: 1000 });
+    const bridge = await startBridgeStub((req, res) => {
+      if (req.url === "/ping") { res.writeHead(200, { "Content-Type": "application/json" }); res.end(SETTLED_PING); return; }
+      posts++;
+      if (refuseAlways || posts === 1) { res.writeHead(503, { "Content-Type": "application/json" }); res.end(refusal); return; }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ tags: ["Untagged"] }));
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(bridge.port, new PingCache(), "deadbeef", REFRESH_PROJECT);
+    const ok = await client.route("unity_open_mcp_editor_get_tags", {});
+    assert.equal(ok.isError, false);
+    assert.equal(posts, 2, "refused once, then sent again");
+
+    refuseAlways = true;
+    posts = 0;
+    const refused = await client.route("unity_open_mcp_editor_get_tags", {});
+    await bridge.close();
+    assert.equal(refused.isError, true);
+    const body = JSON.parse((refused.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "editor_reloading", "the bridge's own refusal, not bridge_http_error");
+    assert.equal(body.dispatched, false);
+    assert.equal(posts, 2);
+  } finally {
+    if (prevWait === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS; else process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = prevWait;
+    if (prevPoll === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS; else process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = prevPoll;
+    disposeSandbox(s);
+  }
+});
+
+test("a compile-reload call cut off by its own reload (editor_reloading, dispatched:true) is triggered_reload keyed to its generation", async () => {
+  const s = makeSandbox();
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(req.url === "/ping" ? SETTLED_PING : JSON.stringify({
+        error: { code: "editor_reloading", message: "ran; reload cut the response" }, dispatched: true,
+        transition: "reloading", retryAfterMs: 1000, compile: { generationAtStart: 41 },
+      }));
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(bridge.port, new PingCache(), "deadbeef", REFRESH_PROJECT);
+    const result = await client.route("unity_open_mcp_reimport_package", { package_id: "com.alexeyperov.unity-open-mcp-bridge" });
+    await bridge.close();
+    assert.equal(result.isError, false);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.status, "triggered_reload");
+    assert.deepEqual(body.compile, { generationAtStart: 41 });
+    assert.match(body.agentNextSteps[0], /"wait_until":"idle","after_generation":41/);
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
 test("empty body on NON-compile-reload tool still surfaces as bridge_response_unparsable", async () => {
   // The reload split is gated on lifecycle === compile-reload. A read-only
   // tool whose body is empty is genuine corruption (the bridge should always
