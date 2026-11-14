@@ -17,11 +17,12 @@
 //
 // No runtime deps beyond node built-ins (mcp-server/AGENTS.md).
 
-import { existsSync, openSync, readSync, fstatSync, closeSync, statSync, readdirSync } from "node:fs";
+import { existsSync, openSync, readSync, fstatSync, closeSync, statSync, readdirSync, readFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { toolHintReference } from "./tool-hint.js";
+import { extractStructuredCompilerErrors, type CompilerError } from "./compiler-errors.js";
 
 export type UnityLogPlatform = "win32" | "darwin" | "linux";
 
@@ -232,7 +233,7 @@ export function resolveEditorLogPath(
 
 /** Read a file's mtime in epoch ms, or 0 on any failure (missing/unreadable).
  *  Used to compare log freshness without throwing. */
-function statMtimeMs(path: string): number {
+export function statMtimeMs(path: string): number {
   try {
     return existsSync(path) ? statSync(path).mtimeMs : 0;
   } catch {
@@ -514,25 +515,29 @@ const MAX_CS_SCAN = 4000;
  *     .dll mtime.
  * Never throws; returns a clean "not stale" on any resolution failure.
  */
-export function detectStaleAssembly(projectRoot: string | null | undefined): StaleAssemblyResult {
-  const empty: StaleAssemblyResult = { staleAssembly: false, newerSources: [], hint: "" };
-  if (!projectRoot) return empty;
-
+/** Newest `<project>/Library/ScriptAssemblies/*.dll` mtime (epoch ms), or undefined when none is built or readable. */
+export function newestScriptAssemblyMtimeMs(projectRoot: string | null | undefined): number | undefined {
+  if (!projectRoot) return undefined;
   const dllDir = join(projectRoot, "Library", "ScriptAssemblies");
-  let dllMtimeMs: number | undefined;
   try {
-    if (!existsSync(dllDir)) return empty;
+    if (!existsSync(dllDir)) return undefined;
     let newest = 0;
     for (const entry of readdirSync(dllDir)) {
       if (!entry.endsWith(".dll")) continue;
       const m = statSync(join(dllDir, entry)).mtimeMs;
       if (m > newest) newest = m;
     }
-    if (newest === 0) return empty; // no DLLs built yet
-    dllMtimeMs = newest;
+    return newest > 0 ? newest : undefined; // no DLLs built yet
   } catch {
-    return empty;
+    return undefined;
   }
+}
+
+export function detectStaleAssembly(projectRoot: string | null | undefined): StaleAssemblyResult {
+  const empty: StaleAssemblyResult = { staleAssembly: false, newerSources: [], hint: "" };
+  if (!projectRoot) return empty;
+  const dllMtimeMs = newestScriptAssemblyMtimeMs(projectRoot);
+  if (dllMtimeMs === undefined) return empty;
 
   // Scan Assets/ for .cs sources newer than the newest DLL. Walk top-down,
   // skipping Library/Temp/obj etc. (Assets/ has none of those, but be safe).
@@ -658,6 +663,144 @@ export function detectErrorsPredatingEdits(
   }
 
   return files.length > 0 ? { files, dllMtimeMs } : null;
+}
+
+// ---------------------------------------------------------------------------
+// Historical log errors. Editor.log keeps every compile of the session (and,
+// for the global log, of earlier sessions), so an error block in the tail can
+// describe code that has since compiled. Unity writes no timestamp on a block,
+// but it closes every script build with one line:
+//
+//   *** Tundra build success (0.60 seconds), 10 items updated, 1066 evaluated
+//   *** Tundra build failed (2.22 seconds), 106 items updated, 1057 evaluated
+//
+// An error logged before a later "success" was superseded by a compile that
+// built the assemblies — it predates the newest Library/ScriptAssemblies DLL.
+// Only the errors after the last successful build can still be current, and of
+// those, one whose cited file is gone or shorter than the cited line no longer
+// matches the source; a log last written before the newest DLL predates it
+// entirely. Such errors are `historical`: kept as evidence, never the verdict.
+// ---------------------------------------------------------------------------
+
+export type LogBuildOutcome = "succeeded" | "failed" | "interrupted";
+
+/** Why a log error is historical. */
+export type HistoricalReason =
+  | "superseded_by_later_build"
+  | "log_predates_assemblies"
+  | "source_missing"
+  | "source_changed";
+
+export type HistoricalCompilerError = CompilerError & { historical: true; historicalReason: HistoricalReason };
+
+export interface ClassifiedLogErrors {
+  /** Errors after the log's last successful build whose source still matches. */
+  current: CompilerError[];
+  /** Errors that cannot describe the current compile, with the reason. */
+  historical: HistoricalCompilerError[];
+  /** Outcome of the last script build the tail records, or null when it records none. */
+  lastBuild: LogBuildOutcome | null;
+}
+
+const BUILD_MARKER_RE = /\*\*\* Tundra build (success|failed|interrupted)\b/g;
+
+/** A log last written this long before the newest DLL predates it (filesystem mtime slack). */
+const LOG_PREDATES_TOLERANCE_MS = 2_000;
+/** Cited sources larger than this are not read for the line check. */
+const MAX_SOURCE_CHECK_BYTES = 4 * 1024 * 1024;
+
+/** Where the last successful build line starts, and the last build's outcome. */
+export function lastLogBuild(tail: string): { outcome: LogBuildOutcome | null; lastSuccessEnd: number } {
+  let outcome: LogBuildOutcome | null = null;
+  let lastSuccessEnd = -1;
+  BUILD_MARKER_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = BUILD_MARKER_RE.exec(tail)) !== null) {
+    outcome = m[1] === "success" ? "succeeded" : m[1] === "failed" ? "failed" : "interrupted";
+    if (outcome === "succeeded") lastSuccessEnd = m.index + m[0].length;
+  }
+  return { outcome, lastSuccessEnd };
+}
+
+/**
+ * Split the compiler errors of a log tail into current and historical ones.
+ * Pure over the tail plus filesystem reads of the cited sources (bounded).
+ *
+ * - `superseded_by_later_build`: logged before the last "Tundra build success".
+ * - `log_predates_assemblies`: the log was last written before the newest
+ *   `Library/ScriptAssemblies` DLL (`logMtimeMs` < `dllMtimeMs`).
+ * - `source_missing`: the cited file under `Assets/` (or an absolute path) is gone.
+ * - `source_changed`: the cited line is past the end of the current file.
+ *
+ * `Packages/…` paths of `file:` packages do not resolve under the project, so
+ * they are only line-checked when the file exists there.
+ */
+export function classifyLogCompileErrors(
+  tail: string,
+  opts: { projectRoot?: string | null; logMtimeMs?: number; dllMtimeMs?: number } = {},
+): ClassifiedLogErrors {
+  const { outcome, lastSuccessEnd } = lastLogBuild(tail);
+  // Extract the two segments separately: the extractor caps its list, and a
+  // long history of old errors must not crowd out the current ones.
+  const candidates = lastSuccessEnd >= 0 ? extractStructuredCompilerErrors(tail.slice(lastSuccessEnd)) : extractStructuredCompilerErrors(tail);
+  const currentRaw = new Set(candidates.map(e => e.raw));
+  const superseded = lastSuccessEnd >= 0
+    ? extractStructuredCompilerErrors(tail.slice(0, lastSuccessEnd)).filter(e => !currentRaw.has(e.raw))
+    : [];
+
+  const historical: HistoricalCompilerError[] = superseded.map(e => ({ ...e, historical: true, historicalReason: "superseded_by_later_build" }));
+  const logPredates = opts.logMtimeMs !== undefined && opts.dllMtimeMs !== undefined
+    && opts.logMtimeMs < opts.dllMtimeMs - LOG_PREDATES_TOLERANCE_MS;
+  const lineCounts = new Map<string, number | null>();
+  const current: CompilerError[] = [];
+  for (const error of candidates) {
+    const reason: HistoricalReason | null = logPredates ? "log_predates_assemblies" : sourceMismatch(error, opts.projectRoot, lineCounts);
+    if (reason) historical.push({ ...error, historical: true, historicalReason: reason });
+    else current.push(error);
+  }
+  return { current, historical, lastBuild: outcome };
+}
+
+/** `source_missing` / `source_changed` for a cited file, or null when it still matches (or cannot be checked). */
+function sourceMismatch(
+  error: CompilerError,
+  projectRoot: string | null | undefined,
+  lineCounts: Map<string, number | null>,
+): HistoricalReason | null {
+  const file = error.file.trim();
+  if (!file) return null;
+  let abs: string;
+  let missingMeansGone: boolean;
+  if (isAbsolute(file)) {
+    abs = file;
+    missingMeansGone = true;
+  } else {
+    if (!projectRoot) return null;
+    abs = join(projectRoot, file);
+    missingMeansGone = /^Assets[\\/]/.test(file);
+  }
+  let lines = lineCounts.get(abs);
+  if (lines === undefined) {
+    lines = countSourceLines(abs);
+    lineCounts.set(abs, lines);
+  }
+  if (lines === null) return missingMeansGone && !existsSync(abs) ? "source_missing" : null;
+  return error.line > lines ? "source_changed" : null;
+}
+
+/** Line count of a source file; null when it is missing, unreadable or too large to check. */
+function countSourceLines(abs: string): number | null {
+  try {
+    if (!existsSync(abs)) return null;
+    if (statSync(abs).size > MAX_SOURCE_CHECK_BYTES) return null;
+    const text = readFileSync(abs, "utf8");
+    let count = 1;
+    for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) count++;
+    // A trailing newline does not open a line a diagnostic can cite.
+    return text.endsWith("\n") ? count - 1 : count;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

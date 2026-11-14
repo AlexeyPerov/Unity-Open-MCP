@@ -374,10 +374,14 @@ export function mergePackageCacheIssues(issues: HealthIssue[], cacheIssues: Heal
  * compiler errors with the package/assembly health issues and produces a
  * single aggregate verdict + headline. Pure over the log; with `projectPath`
  * it also reads Packages/packages-lock.json and lists Library/PackageCache
- * (detectMissingCachedPackages).
+ * (detectMissingCachedPackages). `compilerErrors` replaces the log's own
+ * extraction when the caller already separated current from historical errors.
  */
-export function summarizeProjectHealth(log: string, projectPath?: string | null): ProjectHealth {
-  const compilerErrors = extractStructuredCompilerErrors(log);
+export function summarizeProjectHealth(
+  log: string,
+  projectPath?: string | null,
+  compilerErrors: CompilerError[] = extractStructuredCompilerErrors(log),
+): ProjectHealth {
   const issues = mergePackageCacheIssues(extractProjectHealthIssues(log), detectMissingCachedPackages(projectPath));
   const unhealthy = compilerErrors.length > 0 || issues.length > 0;
 

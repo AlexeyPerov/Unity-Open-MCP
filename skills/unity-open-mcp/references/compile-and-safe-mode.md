@@ -2,14 +2,30 @@
 
 ## Compile and reload evidence
 
-`read_compile_errors` prefers a bounded live CompilationPipeline snapshot, falling
-back to logs if unavailable. `currently_compiling` means wait; `assembly_stale`
-means source changed after the last completed compile; `compile_failed` reports
-current diagnostics (`errorSource: "Editor.log"` when the failing compile ran
-before the bridge loaded, e.g. at Editor startup). A confirmed `no_errors_found`
-with `sourceMatches:true` outranks `historicalLogErrors`. Inspect generation and
-before/after assembly mtimes.
-For stale sources, activate `typed-editor`, call `recompile_scripts`, then re-read.
+`read_compile_errors` prefers a bounded live CompilationPipeline snapshot.
+`currently_compiling` means wait; `assembly_stale` means source changed after
+the last completed compile; `compile_failed` reports current diagnostics
+(`errorSource: "Editor.log"` when the failing compile ran before the bridge
+loaded, e.g. at Editor startup). A confirmed `no_errors_found` with
+`sourceMatches:true` outranks `historicalLogErrors`. Read `determinacy` first:
+`current` is backed by the live Editor (a compile generation, or — while it
+compiles, reloads or is busy — its instance lock, `compileSource:
+"instance_lock"`); `log_evidence` and `indeterminate` come from `Editor.log`
+alone, read only when no live Editor answers. An offline clean read is
+`indeterminate`, never "clean": confirm with the live Editor or `compile_check`.
+Log errors superseded by a later successful build, older than the newest built
+assembly, or citing a file/line that no longer exists are `historicalLogErrors`
+(`historicalReason`) — never fix them.
+
+**Recompiling.** After writing, adding or deleting C# on disk, activate
+`typed-editor` and call `recompile_scripts {}` (`paths_hint` is optional). It
+imports scripts Unity has not seen yet (`mutation.output.scriptImport`),
+compiles, waits through the domain reload, and answers with the compile:
+`status: "compiled"` + `compile.generation`, or `status: "compile_failed"` —
+a failed call (`isError`, `mutation.error.code: "compile_failed"`) carrying the
+error count and the first errors; fix them and call it again. Past ~40 s it
+answers `status: "compiling"` with a `job_id`: `jobs {"action":"wait"}` on it.
+`assets_refresh` answers the same way when it started a compile.
 `capabilities` and `bridge_status` accept `project_path` for a different project
 (also via `manage_tools` invoke); omit `_meta.port` on that call.
 
@@ -90,10 +106,10 @@ Compile failures surface as **machine-readable error codes** — branch on the c
 - **`editor_instance_locked`** — a batch/`compile_check` spawn cannot run while an Editor holds the project lock. The error names the tool you actually called and its message + `agentNextSteps[]` split the diagnosis three ways: a **fresh instance lock** (the live bridge should be reachable — retry the live route / check `bridge_status`), a **live process with the listener not up yet** (a booting Editor or Safe Mode — wait and retry; the call takes the live route once the listener binds), or **no matching process** (a stale `Temp/UnityLockfile` from a crashed session). Do not read this code as "close the Editor" until you have read which variant it reports.
 - **`package_install_failed`** (an `issues[]` kind of `read_compile_errors`) — the Package Manager could not install a package (`reason`: often `ENOSPC` on a full disk, or a network error). The CS0234/CS0246 errors in packages that depend on it (e.g. Collections missing `Unity.Burst`) are a consequence — do not edit package code. **Recovery:** follow the issue's `hint` (free disk space / fix the network), then reopen the project or run `compile_check` headless so UPM re-resolves.
 - **`unity_spawn_refused`** — the Unity binary could not be executed (spawn `ENOENT`/`EACCES`, or exit code `127`). Do **not** retry `compile_check` blindly. Verify `UNITY_PATH`, then fall back to `read_compile_errors` / `bridge_status` to check compile state without headless spawn.
-- **`_compileVerify: { code: "compile_noop" | "dll_stale" }`** — a recompile *reported success* but the compiled state did not advance. Surfaced as an additive annotation on a **successful** result (not an error), so check for it after any `compile-reload` tool. `compile_noop` = tool registry count + DLL mtime unchanged (incremental no-op); `dll_stale` = `Library/ScriptAssemblies/*.dll` older than your source edit. Both mean: do **not** trust the success — force a rebuild (no-op `package_add`/`package_remove`, or operator refocus of the Editor), then verify DLL mtime > edit mtime before tests.
+- **`_compileVerify: { code: "compile_noop" | "dll_stale" }`** — a recompile *reported success* but the compiled state did not advance. Surfaced as an additive annotation on a **successful** result (not an error), so check for it after any `compile-reload` tool except `recompile_scripts` (whose answer is the compile result itself). `compile_noop` = tool registry count + DLL mtime unchanged (incremental no-op); `dll_stale` = `Library/ScriptAssemblies/*.dll` older than your source edit. Both mean: do **not** trust the success — force a rebuild (no-op `package_add`/`package_remove`, or operator refocus of the Editor), then verify DLL mtime > edit mtime before tests.
 - **`compilePending: true`** (additive, on the gate envelope next to `settleMs`) — the editor was **still compiling** when the gate validated after the post-mutation settle wait. The gate's `passed` / `delta.newErrors:0` reflects the **PRE-compile** state, not the new code, so a clean-looking gate does **not** mean the new code is verified healthy. `agentNextSteps[]` carries the same advisory. Wait with `editor_status {"wait_until":"idle"}` (it reports the compile status and error count), then `read_compile_errors` for diagnostics. (Root cause: `RequestScriptCompilation` can no-op silently — the compile may be queued but not yet started, or the settle cap elapsed mid-compile.)
 - **`_route.fallbackReason: "editor_busy"`** (with `_route.editorPid`) — a tool fell back to the batch route because the live bridge was unreachable, and the batch reported `editor_instance_locked` with a **live** editor PID. The actionable truth is "the editor is busy (a TestRunner run or long import is holding the main thread); retry shortly", **not** a lock conflict. Retry the call after a short wait; if it persists, check `editor_status` / `bridge_status`. Contrast `fallbackReason: "live_unavailable"` (no live PID, or a genuine lock conflict / offline bridge), which is not transient.
-- **`status: "triggered_reload"`** (not an error) — a compile-reload tool (`reimport_package`, `asmdef_create`/`asmdef_modify`, `package_add`/`package_remove`, `recompile_scripts`, `execute_csharp`, …) ran, and the domain reload it triggered closed the response. The mutation almost certainly committed; do **not** retry blindly (that would re-run the mutation). Wait with the `editor_status` call its `agentNextSteps[]` names (keyed to `compile.generationAtStart`), which returns once the compile and reload are done with the compile status and error count.
+- **`status: "triggered_reload"`** (not an error) — a compile-reload tool (`reimport_package`, `asmdef_create`/`asmdef_modify`, `package_add`/`package_remove`, `execute_csharp`, …) ran, and the domain reload it triggered closed the response (`recompile_scripts` and `assets_refresh` wait past it themselves and answer with the compile; `triggeredReload: true` stays on that answer). The mutation almost certainly committed; do **not** retry blindly (that would re-run the mutation). Wait with the `editor_status` call its `agentNextSteps[]` names (keyed to `compile.generationAtStart`), which returns once the compile and reload are done with the compile status and error count.
 
 For `bridge_compile_failed` / `bridge_offline`: call `**unity_open_mcp_read_compile_errors`** → fix `errors[].file`/`line`/`code` → trigger recompile. (If no Editor is open, `Editor.log` is stale from the previous session and won't reflect your latest edits — recompile verification needs Unity running.)
 
@@ -103,9 +119,9 @@ For `bridge_compile_failed` / `bridge_offline`: call `**unity_open_mcp_read_comp
 
 **`status: "stale_log"` downgrade.** When the log is stale (`staleLogSuspected`) **or** authored by a different Unity (`logAuthorshipMismatch`), the top-level `status` is downgraded from `compile_failed` to `"stale_log"` and `unhealthy` is suppressed — the `errors[]` are still attached as evidence, but the headline makes clear they **may not apply** to the running editor and must be confirmed by a genuine recompile before acting on them. The raw log verdict is preserved in `logVerdict`. Branch on `unhealthy`/`status === "stale_log"` rather than `errorCount > 0` so you do not "fix" a burst of phantom errors that were already resolved on disk.
 
-**Stale-assembly guard.** The response carries `staleAssembly: true` when at least one `Assets/**/*.cs` source is newer than the newest `Library/ScriptAssemblies/*.dll` — the running assembly predates the latest source (Unity's incremental compiler no-op'd a recompile), so a `no_errors_found` signal **cannot** be trusted until the assembly is rebuilt. This runs even on a clean log, and when it coincides with errors the **headline itself** carries the may-predate caveat (the error block can come from an earlier compile — do not act on it as fact). Recovery: call `**unity_open_mcp_recompile_scripts`** (deterministic `CompilationPipeline.RequestScriptCompilation`, blocks until settled, reports `dllMtimeBefore`/`After` + `recompiled`), then re-read compile errors. Prefer it over `assets_refresh` / `execute_csharp` when you need a guaranteed recompile of edited C#.
+**Stale-assembly guard.** The response carries `staleAssembly: true` when at least one `Assets/**/*.cs` source is newer than the newest `Library/ScriptAssemblies/*.dll` — the running assembly predates the latest source (Unity's incremental compiler no-op'd a recompile), so a clean log says nothing about the current code until the assembly is rebuilt. This runs even on a clean log, and when it coincides with errors the **headline itself** carries the may-predate caveat (the error block can come from an earlier compile — do not act on it as fact). Recovery: call `**unity_open_mcp_recompile_scripts`** — it imports new scripts, recompiles deterministically and answers with the compile result (status, generation, error count, first errors). Prefer it over `assets_refresh` / `execute_csharp` when you need a guaranteed recompile of edited C#.
 
-**`status: "indeterminate"` (rotated-log read).** When `logSource` is a `prev_log_*` value (the resolver read the ROTATED `Editor-prev.log`) and the read finds no errors, `status` is `indeterminate`, **not** `no_errors_found` — a clean read from the rotated log is not a verified clean bill of health while a live Editor may be writing a different log. Confirm via the live bridge (`editor_status` / a live probe) or re-read after the Editor settles; the raw verdict is preserved in `logVerdict`.
+**`status: "indeterminate"`.** An offline read with no current errors (including one from the ROTATED `Editor-prev.log`, `logSource: prev_log_*`), or a live Editor that did not report a determinate compile state, is `indeterminate`, **not** `no_errors_found` — nothing backs it with a compile generation. Follow its `agentNextSteps` (the `editor_status` wait with a live Editor; open the project or `compile_check` without one); the raw log verdict is preserved in `logVerdict`.
 
 **Stale-domain guard (`_staleDomain`).** `execute_csharp` / `invoke_method` responses carry `_staleDomain: { hint, newerSources, dllMtimeMs }` (additive, on a successful non-error body) when an `Assets/**/*.cs` source is newer than the newest built DLL — the snippet ran against the **pre-edit** assembly, so its results reflect code that has not been loaded. This is the runtime-facing twin of the `staleAssembly` read guard: same mtime check, attached to the two tools where a stale domain silently produces wrong answers. The signal is promoted to a top-level `staleAssembly: true` + `warning` on the same body so it cannot be skimmed past next to a `mutation.success: true`. Treat any such result as suspect: call `**unity_open_mcp_recompile_scripts`**, then re-invoke. The signal is cached short-TTL and refreshed on dead-bridge/compile-settle, so it tracks a genuine reload without re-scanning on every call.
 

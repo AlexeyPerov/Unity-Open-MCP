@@ -16,6 +16,8 @@ import {
   detectStaleAssembly,
   parseLogAuthorship,
   compareLogAuthorship,
+  classifyLogCompileErrors,
+  lastLogBuild,
   DEFAULT_LOG_TAIL_BYTES,
 } from "./unity-log.js";
 
@@ -618,4 +620,93 @@ test("compareLogAuthorship does not flag a mismatch when no live version is know
   assert.equal(r.liveUnityVersion, null);
   // batch-mode hint still surfaces so the agent knows it's a headless log
   assert.ok(r.hint.includes("batchmode"));
+});
+
+// ---------------------------------------------------------------------------
+// Historical log errors — an error block superseded by a later successful
+// build, a log older than the newest built assembly, or a cited file/line that
+// no longer exists never drives the verdict.
+// ---------------------------------------------------------------------------
+
+function classifyProject(files: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), "uomcp-classify-"));
+  for (const [rel, text] of Object.entries(files)) {
+    const abs = join(root, rel);
+    mkdirSync(join(abs, ".."), { recursive: true });
+    writeFileSync(abs, text);
+  }
+  return root;
+}
+
+const TEN_LINES = "// line\n".repeat(10);
+
+test("lastLogBuild reads the last Tundra build outcome", () => {
+  assert.deepEqual(lastLogBuild("nothing here").outcome, null);
+  const tail = "*** Tundra build failed (2.22 seconds), 106 items updated\nx\n*** Tundra build success (0.60 seconds), 10 items updated\n";
+  const result = lastLogBuild(tail);
+  assert.equal(result.outcome, "succeeded");
+  assert.ok(result.lastSuccessEnd > tail.indexOf("success"));
+  assert.equal(lastLogBuild("*** Tundra build success (1 s)\n*** Tundra build interrupted (0.4 s)\n").outcome, "interrupted");
+});
+
+test("classifyLogCompileErrors marks errors before a later successful build as superseded", () => {
+  const root = classifyProject({ "Assets/Old.cs": TEN_LINES, "Assets/New.cs": TEN_LINES });
+  const tail =
+    "Assets/Old.cs(4,2): error CS0102: The type already contains a definition for 'X'\n" +
+    "*** Tundra build failed (1.0 seconds), 4 items updated, 1057 evaluated\n" +
+    "Assets/Old.cs(4,2): error CS0102: The type already contains a definition for 'X'\n" +
+    "*** Tundra build success (0.6 seconds), 10 items updated, 1057 evaluated\n" +
+    "Reloading assemblies after finishing script compilation.\n" +
+    "Assets/New.cs(2,1): error CS1002: ; expected\n" +
+    "*** Tundra build failed (0.7 seconds), 3 items updated, 1057 evaluated\n";
+  const result = classifyLogCompileErrors(tail, { projectRoot: root });
+  assert.equal(result.lastBuild, "failed");
+  assert.deepEqual(result.current.map(e => e.file), ["Assets/New.cs"]);
+  assert.equal(result.historical.length, 1);
+  assert.equal(result.historical[0].file, "Assets/Old.cs");
+  assert.equal(result.historical[0].historical, true);
+  assert.equal(result.historical[0].historicalReason, "superseded_by_later_build");
+});
+
+test("classifyLogCompileErrors marks every error of a log older than the newest built assembly", () => {
+  const root = classifyProject({ "Assets/A.cs": TEN_LINES });
+  const result = classifyLogCompileErrors("Assets/A.cs(3,1): error CS0246: missing type\n", {
+    projectRoot: root, logMtimeMs: 1_000_000, dllMtimeMs: 2_000_000,
+  });
+  assert.equal(result.current.length, 0);
+  assert.equal(result.historical[0].historicalReason, "log_predates_assemblies");
+  // A log written after the newest DLL keeps the error current.
+  const fresh = classifyLogCompileErrors("Assets/A.cs(3,1): error CS0246: missing type\n", {
+    projectRoot: root, logMtimeMs: 2_000_000, dllMtimeMs: 1_999_500,
+  });
+  assert.equal(fresh.current.length, 1);
+});
+
+test("classifyLogCompileErrors marks a cited file/line that no longer matches the source", () => {
+  const root = classifyProject({ "Assets/Short.cs": "class Short {}\n", "Assets/Long.cs": TEN_LINES });
+  const tail =
+    "Assets/Short.cs(246,54): error CS0102: duplicate definition\n" +
+    "Assets/Gone.cs(3,1): error CS0103: name does not exist\n" +
+    "/nonexistent-uomcp/abs/Gone.cs(3,1): error CS0103: name does not exist\n" +
+    "Assets/Long.cs(10,1): error CS1002: ; expected\n" +
+    "Packages/com.example.local/Runtime/X.cs(5,1): error CS0246: missing type\n";
+  const result = classifyLogCompileErrors(tail, { projectRoot: root });
+  const reasons = Object.fromEntries(result.historical.map(e => [e.file, e.historicalReason]));
+  assert.equal(reasons["Assets/Short.cs"], "source_changed");
+  assert.equal(reasons["Assets/Gone.cs"], "source_missing");
+  assert.equal(reasons["/nonexistent-uomcp/abs/Gone.cs"], "source_missing");
+  // The last line of the file still matches; a file: package path that does
+  // not resolve under the project cannot be checked and stays current.
+  assert.deepEqual(result.current.map(e => e.file).sort(), ["Assets/Long.cs", "Packages/com.example.local/Runtime/X.cs"]);
+});
+
+test("classifyLogCompileErrors keeps current errors when a long history precedes them", () => {
+  // The extractor caps its list; old superseded errors must not crowd out the current ones.
+  const root = classifyProject({ "Assets/Now.cs": TEN_LINES });
+  let tail = "";
+  for (let i = 0; i < 80; i++) tail += `Assets/Old${i}.cs(1,1): error CS0103: old ${i}\n`;
+  tail += "*** Tundra build success (0.6 seconds), 10 items updated\nAssets/Now.cs(2,1): error CS1002: ; expected\n";
+  const result = classifyLogCompileErrors(tail, { projectRoot: root });
+  assert.deepEqual(result.current.map(e => e.file), ["Assets/Now.cs"]);
+  assert.ok(result.historical.length > 0);
 });

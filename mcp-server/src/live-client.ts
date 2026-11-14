@@ -124,7 +124,10 @@ export const TOOL_OWNED_TIMEOUT_TOOLS: ReadonlySet<string> = new Set([
 // compile nothing, so the no-op detector fired a false `compile_noop` on
 // every such call (e.g. `execute_csharp {code:"return 42;"}` came back
 // carrying a "force a rebuild" recommendation). scene_open is also excluded:
-// its reload concern is unsaved-scene loss, not a script compile.
+// its reload concern is unsaved-scene loss, not a script compile. So is
+// recompile_scripts: the router waits for its compile and reports the result
+// as the call's own status (compile-result.ts), which a snapshot taken before
+// that compile finished could only contradict.
 const COMPILE_RELOAD_ANNOTATION_TOOLS: ReadonlySet<string> = new Set([
   "unity_open_mcp_asmdef_create",
   "unity_open_mcp_asmdef_modify",
@@ -137,7 +140,6 @@ const COMPILE_RELOAD_ANNOTATION_TOOLS: ReadonlySet<string> = new Set([
   "unity_open_mcp_package_remove",
   "unity_open_mcp_reimport_package",
   "unity_open_mcp_compile_check",
-  "unity_open_mcp_recompile_scripts",
 ]);
 
 /**

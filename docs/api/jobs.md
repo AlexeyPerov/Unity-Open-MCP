@@ -143,7 +143,9 @@ An [`editor_status`](mcp-tools.md#unity_open_mcp_editor_status) wait whose
 `timeout_ms` outlasts its 40 s inline window continues as a job: the call returns
 `status: "waiting"` with the `job_id`, and the job's result is the wait's answer
 (`reached`, `mode`, `transitionsSeen`, `compile: {generation, status,
-errorCount}`). It can also be started directly:
+errorCount}`). `recompile_scripts` and a compile-starting `assets_refresh` start
+the same job when their compile outlasts the inline window (they answer
+`status: "compiling"` with its `job_id`). It can also be started directly:
 
 ```json
 {

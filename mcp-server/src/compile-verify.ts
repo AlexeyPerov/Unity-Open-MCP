@@ -15,6 +15,12 @@
 // `_compileVerify` field (additive — never blocks a successful response) so an
 // agent can branch instead of trusting a no-op success.
 //
+// Deliberate exception: for the compile-type tools — recompile_scripts, and an
+// assets_refresh that started a compile — the compile result is not an
+// annotation but the call's answer. The router waits for that compile and
+// makes its outcome the call's status (a failed compile fails the call); see
+// compile-result.ts. recompile_scripts is therefore not annotated here.
+//
 // The other compile-verify codes are emitted elsewhere:
 //   - editor_instance_locked — batch-spawn.ts (M22 Plan 3)
 //   - bridge_compile_failed  — live-client.ts deadBridgeResult (M20)

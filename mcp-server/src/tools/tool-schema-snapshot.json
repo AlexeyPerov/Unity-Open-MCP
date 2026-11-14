@@ -1982,7 +1982,7 @@
     }
   },
   "unity_open_mcp_read_compile_errors": {
-    "description": "Read current compiler state from the live CompilationPipeline when available, with a bounded read-only probe and offline Editor.log fallback (never spawns Unity). Live status distinguishes currently_compiling, assembly_stale, compile_failed, and no_errors_found. A completed compile generation with matching source content outranks historical log errors; generation and before/after assembly mtimes identify the evidence. historicalLogErrors and historicalLogIssues preserve older log evidence separately. Without confirmed live state, returns log diagnostics with source/authorship and staleAssembly/staleLogSuspected caveats; a clean rotated log is indeterminate. Log issues include assembly_resolution, package_deprecated, package_manager_error, and editor_fd_exhaustion. For stale sources call unity_open_mcp_recompile_scripts (in the typed-editor group, not enabled by default — activate with manage_tools(action:\"activate\", group:\"typed-editor\")), then re-read. With the Editor closed, unity_open_mcp_compile_check can verify headlessly; never launch a second Unity while a live Editor owns the project. Check unhealthy, status, headline, errors, and issues; offline partialCompileLikely means a failing assembly may hide downstream errors.",
+    "description": "Read current compiler state from the live CompilationPipeline when available, with a bounded read-only probe and offline Editor.log fallback (never spawns Unity). Live status distinguishes currently_compiling, assembly_stale, compile_failed, and no_errors_found. A completed compile generation with matching source content outranks historical log errors; generation and before/after assembly mtimes identify the evidence. historicalLogErrors and historicalLogIssues preserve older log evidence separately. `determinacy` says how far to trust the answer: `current` (live generation, or the live Editor's instance lock while it compiles, reloads or is busy — then compileSource `instance_lock`), `log_evidence`, or `indeterminate`. The log is read alone only when no live Editor answers: errors superseded by a later successful build or citing a file/line that no longer exists are historical (historicalReason) and never drive compile_failed, and a clean offline read is `indeterminate`, never a verified clean compile. Log issues include assembly_resolution, package_install_failed, package_deprecated, package_manager_error, and editor_fd_exhaustion. For stale sources call unity_open_mcp_recompile_scripts (in the typed-editor group, not enabled by default — activate with manage_tools(action:\"activate\", group:\"typed-editor\")), then re-read. With the Editor closed, unity_open_mcp_compile_check can verify headlessly; never launch a second Unity while a live Editor owns the project. Check unhealthy, status, headline, errors, and issues; offline partialCompileLikely means a failing assembly may hide downstream errors.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -2199,7 +2199,7 @@
     }
   },
   "unity_open_mcp_assets_refresh": {
-    "description": "Refresh the AssetDatabase to pick up files added/removed/changed on disk outside Unity. Use after direct filesystem edits (e.g. creating folders, dropping textures). May trigger asset import and, for .cs files, a recompile + domain reload that runs AFTER the call returns: the result's `compile` block (`generationAtStart`, `pending`) and agentNextSteps then name unity_open_mcp_editor_status {\"wait_until\":\"idle\",\"after_generation\":N}, which returns once that compile ran, with its status and error count. Light mutation: runs the gate path. Pass `whole_project: true` (default) when you changed files in arbitrary places; pass it `false` with a scoped `paths_hint` for a known small change set.",
+    "description": "Refresh the AssetDatabase to pick up files added/removed/changed on disk outside Unity. Use after direct filesystem edits (e.g. creating folders, dropping textures). When the refresh imports scripts and starts a compile, the call waits for that compile and its domain reload and the compile is the answer: `status` `compiled` | `compile_failed` | `compiling` (past ~40 s the wait continues as a unity_open_mcp_jobs job) and `compile: {generationAtStart, generation, status, errorCount, errors}`; a failed compile fails the call (mutation.error.code `compile_failed`; the import itself is kept). A refresh that starts no compile answers at once, unchanged. Light mutation: runs the gate path. Pass `whole_project: true` (default) when you changed files in arbitrary places; pass it `false` with a scoped `paths_hint` for a known small change set.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -4765,13 +4765,13 @@
     }
   },
   "unity_open_mcp_recompile_scripts": {
-    "description": "Force Unity to recompile ALL scripts and block until the compile settles. Use this when unity_open_mcp_assets_refresh or unity_open_mcp_execute_csharp fail to recompile after a C# edit (Unity's incremental compiler frequently no-ops on unchanged-import views, leaving the running assembly stale while read_compile_errors reports the old healthy state). Mutating: calls CompilationPipeline.RequestScriptCompilation and blocks on the compile via its restart_then_settle lifecycle (a domain reload may follow). The response reports dllMtimeBefore / dllMtimeAfter (newest Library/ScriptAssemblies/*.dll mtime, in UTC ticks) and a recompiled boolean so a no-op recompile is detectable; agentNextSteps branches on the outcome. The domain reload usually cuts the response off (`triggered_reload`): wait with unity_open_mcp_editor_status {\"wait_until\":\"idle\"} for the compile status and error count. paths_hint is the set of script assets you edited (the gate validates the post-recompile state of those paths). Prefer this over assets_refresh when you need a DETERMINISTIC recompile of edited C#.",
+    "description": "Force Unity to recompile ALL scripts and return the compile result. Use it after editing or adding C# (it is deterministic where unity_open_mcp_assets_refresh / execute_csharp can leave the running assembly stale). First imports script files Unity has not seen yet — new or deleted .cs / .asmdef / .asmref written outside Unity (`scriptImport` lists them) — then calls CompilationPipeline.RequestScriptCompilation and waits for that compile and its domain reload. The answer is the compile: `status` `compiled` | `compile_failed` | `no_compile_ran` | `compiling` (past ~40 s the wait continues as a unity_open_mcp_jobs job — wait on its job_id) and `compile: {generationAtStart, generation, status, errorCount, errors}` with the first errors inline. A failed compile is a failed call (isError, mutation.error.code `compile_failed`); fix the errors and call it again. dllMtimeBefore / dllMtimeAfter / recompiled in mutation.output show whether the assemblies were rewritten. Disruptive: refused with `scene_dirty` while a loaded scene has unsaved changes. paths_hint is optional (default [\"Assets\"]).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "gate": {
           "default": "enforce",
-          "description": "Gate mode. Default 'enforce' — fails the call if the recompile surfaces new errors.",
+          "description": "Gate mode. Default 'enforce' — fails the call if the recompile surfaces new asset-validation errors. The compile result is reported either way.",
           "enum": [
             "enforce",
             "warn",
@@ -4784,16 +4784,13 @@
           "type": "boolean"
         },
         "paths_hint": {
-          "description": "Mutation scope — the script asset(s) you edited (e.g. [\"Assets/Scripts/MyClass.cs\"]). The gate validates the post-recompile state of these paths. The recompile itself is project-wide; paths_hint exists to give the gate a non-empty, scoped hint.",
+          "description": "Optional gate scope — the script asset(s) you edited (e.g. [\"Assets/Scripts/MyClass.cs\"]). Defaults to [\"Assets\"]: the recompile itself is project-wide, so the gate validates the whole Assets tree unless you narrow it.",
           "items": {
             "type": "string"
           },
           "type": "array"
         }
       },
-      "required": [
-        "paths_hint"
-      ],
       "type": "object"
     }
   },

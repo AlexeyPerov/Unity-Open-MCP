@@ -194,6 +194,8 @@ export interface CompileReading {
   pending?: boolean;
   errorSource?: string;
   headline?: string;
+  /** The first few diagnostics of a failed compile (file, line, code, message). */
+  errors?: Array<Record<string, unknown>>;
 }
 
 export interface WaitRequest {

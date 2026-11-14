@@ -26,7 +26,18 @@ Pinned exceptions:
 - Always batch: `compile_check`, `scan_all`, `baseline_create`,
   `regression_check`.
 - Always offline: `list_assets`.
-- Live compile snapshot with offline log fallback, never batch: `read_compile_errors`.
+- Live compile snapshot, never batch: `read_compile_errors`. While a live
+  Editor holds the project (fresh instance lock) but `/compile-state` gives no
+  determinate answer — it is compiling, reloading or busy — the answer comes
+  from the lock's compile block (`_route`/`_source` `local`,
+  `compileSource: "instance_lock"`); the `Editor.log` is read alone only when no
+  live Editor answers (`offline`), and then historical errors never drive
+  `compile_failed` and a clean read is `indeterminate`
+  ([contract](mcp-tools.md#unity_open_mcp_read_compile_errors)).
+- Live call, then a local wait for the compile it started: `recompile_scripts`,
+  and `assets_refresh` when it started a compile. The compile result (inline,
+  or a `jobs` wait past ~40 s) is the call's answer; a failed compile fails the
+  call ([contract](mcp-tools.md#unity_open_mcp_recompile_scripts)).
 - Live status with an instance-lock fallback, never batch: `editor_status`
   (`_route` `live` / `local`); its `wait_until` form is a local wait that polls
   the lock, `/ping` and `/compile-state`. `ping` answers from the lock the same
@@ -279,7 +290,9 @@ for the whole window — the instance lock (heartbeat `state`, `isPlaying` /
   the main thread, HTTP 200 `editor_reloading` with `dispatched: true` (and the
   call's `compile.generationAtStart`) when it ran. A compile-reload call (and
   `assets_refresh`) reads the latter as `triggered_reload` (its expected end,
-  with the wait keyed to that generation); any other call gets
+  with the wait keyed to that generation — `recompile_scripts` and
+  `assets_refresh` run that wait themselves and answer with the compile
+  result); any other call gets
   `editor_reloading` — verify a mutation's effect before repeating it. An empty
   body while the lock or `/ping` shows a transition maps to `editor_reloading`
   with `dispatched: null`; only an unparsable body from a settled Editor stays

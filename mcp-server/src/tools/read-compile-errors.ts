@@ -18,9 +18,13 @@ export const readCompileErrors = makeTool(
     "currently_compiling, assembly_stale, compile_failed, and no_errors_found. A completed compile " +
     "generation with matching source content outranks historical log errors; generation and before/after " +
     "assembly mtimes identify the evidence. historicalLogErrors and historicalLogIssues preserve older " +
-    "log evidence separately. Without confirmed live state, returns log diagnostics with source/authorship " +
-    "and staleAssembly/staleLogSuspected caveats; a clean rotated log is indeterminate. Log issues include " +
-    "assembly_resolution, package_deprecated, package_manager_error, and editor_fd_exhaustion. " +
+    "log evidence separately. `determinacy` says how far to trust the answer: `current` (live generation, " +
+    "or the live Editor's instance lock while it compiles, reloads or is busy — then compileSource " +
+    "`instance_lock`), `log_evidence`, or `indeterminate`. The log is read alone only when no live Editor " +
+    "answers: errors superseded by a later successful build or citing a file/line that no longer exists are " +
+    "historical (historicalReason) and never drive compile_failed, and a clean offline read is " +
+    "`indeterminate`, never a verified clean compile. Log issues include " +
+    "assembly_resolution, package_install_failed, package_deprecated, package_manager_error, and editor_fd_exhaustion. " +
     `For stale sources call ${RECOMPILE_SCRIPTS_HINT}, then re-read. ` +
     `With the Editor closed, ${COMPILE_CHECK_HINT} can verify headlessly; never launch a second Unity ` +
     "while a live Editor owns the project. Check unhealthy, status, headline, errors, and issues; " +

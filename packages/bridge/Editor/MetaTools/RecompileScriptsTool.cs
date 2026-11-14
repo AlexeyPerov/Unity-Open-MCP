@@ -15,18 +15,17 @@ namespace UnityOpenMcpBridge.MetaTools
     // project-wide (no package scoping). The compile itself is observed on the
     // dispatcher's WORKER thread after the RestartThenSettle settle wait (see
     // RebuildAfterSettle) — Execute runs on the main thread, where the
-    // scheduled compile can never start until this call returns.
+    // scheduled compile can never start until this call returns. Its RESULT is
+    // not known here at all (a successful compile ends in a domain reload that
+    // closes the response): the MCP server waits for the compile and reports
+    // its status as the call's answer.
+    //
+    // paths_hint is optional — a recompile has no natural asset scope; the
+    // dispatcher scopes the gate to "Assets" when it is omitted.
     public static class RecompileScriptsTool
     {
         public static ToolDispatchResult Execute(string body)
         {
-            var pathsHint = JsonBody.GetStringArray(body, "paths_hint");
-            if (pathsHint == null || pathsHint.Length == 0)
-                return ToolDispatchResult.Fail("paths_hint_required",
-                    "recompile_scripts is mutating; pass a non-empty paths_hint. The natural scope is " +
-                    "the set of script assets you edited (e.g. [\"Assets/Scripts/MyClass.cs\"]) — the " +
-                    "gate validates the post-recompile state of those paths.");
-
             var dllDir = Path.Combine(
                 Directory.GetParent(Application.dataPath).FullName,
                 "Library", "ScriptAssemblies");
@@ -35,13 +34,21 @@ namespace UnityOpenMcpBridge.MetaTools
             bool wasCompiling = EditorApplication.isCompiling;
             int generationAtStart = BridgeCompileState.Generation;
 
+            // New or deleted script files written outside Unity: import them
+            // first, or the compile cannot see them (ScriptImportSync).
+            var scriptImport = ScriptImportSync.Run();
+
             // Request a script compilation. Wrapped because
             // CompilationPipeline.RequestScriptCompilation throws if a compile
             // is already in flight — the worker-side settle path covers that.
             bool requested = TryRequestScriptCompilation(out var requestError);
+            if (!requested)
+                return ToolDispatchResult.Fail("compile_request_failed",
+                    requestError + " Nothing was compiled. Import the edited scripts with " +
+                    "unity_open_mcp_assets_refresh, which starts the compile they need.");
             // The compile starts on a later tick: publish that one is due, so
             // a wait cannot read the gap before it starts as idle.
-            if (requested) BridgeCompileState.NoteRequested();
+            BridgeCompileState.NoteRequested();
 
             // Deliberately NO inline wait here. Execute runs on the MAIN
             // thread (via MainThreadDispatcher), and RequestScriptCompilation
@@ -56,8 +63,7 @@ namespace UnityOpenMcpBridge.MetaTools
             bool isCompiling = EditorApplication.isCompiling;
 
             return ToolDispatchResult.Ok(BuildResult(
-                requested, requestError, wasCompiling,
-                mtimeBefore, mtimeAfter, isCompiling, dllDir, afterSettle: false, generationAtStart));
+                wasCompiling, mtimeBefore, mtimeAfter, isCompiling, dllDir, generationAtStart, scriptImport.ToJson()));
         }
 
         // Worker-side post-settle rebuild — called by BridgeHttpServer on the
@@ -83,6 +89,7 @@ namespace UnityOpenMcpBridge.MetaTools
             if (mtimeBefore == long.MinValue) return output;
             bool wasCompiling = JsonBody.GetBool(output, "wasCompiling", false);
             int generationAtStart = JsonBody.GetInt(output, "compileGenerationAtStart", 0);
+            var scriptImport = JsonBody.GetTopLevelRawValue(output, "scriptImport");
 
             const int graceCapMs = 2000;
             const int tickMs = 100;
@@ -102,26 +109,24 @@ namespace UnityOpenMcpBridge.MetaTools
             extraWaitMs = waited;
 
             long mtimeAfter = NewestAssemblyMtime(dllDir);
-            return BuildResult(true, null, wasCompiling,
-                mtimeBefore, mtimeAfter, BridgeSession.IsCompiling, dllDir, afterSettle: true, generationAtStart);
+            return BuildResult(wasCompiling, mtimeBefore, mtimeAfter, BridgeSession.IsCompiling, dllDir,
+                generationAtStart, scriptImport);
         }
 
         // Shared payload builder for the pre-settle (Execute, main thread) and
         // post-settle (RebuildAfterSettle, worker thread) shapes. The field
-        // set is identical in both — only the values and the agentNextSteps
-        // guidance differ.
-        private static string BuildResult(bool requested, string requestError,
-            bool wasCompiling, long mtimeBefore, long mtimeAfter, bool isCompiling,
-            string dllDir, bool afterSettle, int generationAtStart)
+        // set is identical in both — only the values differ. It describes the
+        // REQUEST (and the DLL evidence), never the compile's outcome, which
+        // only a wait past this call can see: the gate envelope names that
+        // wait (the compile is due), and the MCP server runs it and reports
+        // the compile status as the call's answer.
+        private static string BuildResult(bool wasCompiling, long mtimeBefore, long mtimeAfter, bool isCompiling,
+            string dllDir, int generationAtStart, string scriptImportJson)
         {
             bool recompiled = mtimeAfter > mtimeBefore;
-            // The wait that outlives this call's domain reload and returns the
-            // compile's status and error count.
-            var wait = BridgeJson.WaitCall("idle", generationAtStart);
-
             var sb = new StringBuilder(256);
-            sb.Append("{\"status\":\"ok\"");
-            sb.Append(",\"requested\":").Append(requested ? "true" : "false");
+            sb.Append("{\"status\":\"compile_requested\"");
+            sb.Append(",\"requested\":true");
             sb.Append(",\"wasCompiling\":").Append(wasCompiling ? "true" : "false");
             sb.Append(",\"recompiled\":").Append(recompiled ? "true" : "false");
             sb.Append(",\"isCompiling\":").Append(isCompiling ? "true" : "false");
@@ -129,47 +134,7 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append(",\"dllMtimeAfter\":").Append(mtimeAfter);
             sb.Append(",\"scriptAssembliesDir\":").Append(BridgeJson.EscapeString(dllDir));
             sb.Append(",\"compileGenerationAtStart\":").Append(generationAtStart);
-
-            // Actionable next steps so an agent can branch on the outcome.
-            var steps = new StringBuilder(128);
-            if (!requested && requestError != null)
-            {
-                steps.Append("- RequestScriptCompilation was unavailable (").Append(requestError).Append("). ");
-                steps.Append("Fall back to unity_open_mcp_assets_refresh or reimport the edited .cs files. ");
-            }
-            else if (recompiled)
-            {
-                steps.Append("- Assembly rebuilt (dllMtimeAfter > dllMtimeBefore). ");
-                steps.Append("Confirm the result with ").Append(wait).Append(" (compile status and error count; ");
-                steps.Append("it also waits out the domain reload), then unity_open_mcp_read_compile_errors for diagnostics. ");
-            }
-            else if (isCompiling)
-            {
-                steps.Append("- The requested compile is still in progress. ");
-                steps.Append("Wait for it with ").Append(wait).Append(", then read_compile_errors if it failed. ");
-            }
-            else if (wasCompiling)
-            {
-                steps.Append("- A compile was already in flight when recompile_scripts was called. ");
-                steps.Append("Wait for it with ").Append(wait).Append(", then read_compile_errors if it failed. ");
-            }
-            else if (!afterSettle)
-            {
-                steps.Append("- The compile was scheduled but runs on a later editor tick, AFTER this payload ");
-                steps.Append("was built — recompiled:false here does NOT mean the recompile no-opped. The ");
-                steps.Append("dispatcher re-checks the DLL mtimes after its settle wait; if this text still ");
-                steps.Append("reaches you, wait with ").Append(wait).Append(" — it returns once the compile ran, ");
-                steps.Append("with its status and error count. ");
-            }
-            else
-            {
-                steps.Append("- No DLL mtime change detected after the settle wait (recompiled:false). Unity's ");
-                steps.Append("incremental compiler may have judged the sources unchanged. If you edited C#, verify ");
-                steps.Append("the file on disk and consider unity_open_mcp_reimport_package (local package) or ");
-                steps.Append("editing then unity_open_mcp_assets_refresh. Execute_csharp + RequestScriptCompilation ");
-                steps.Append("is also available as a stronger nudge. ");
-            }
-            sb.Append(",\"agentNextSteps\":").Append(BridgeJson.EscapeString(steps.ToString()));
+            if (!string.IsNullOrEmpty(scriptImportJson)) sb.Append(",\"scriptImport\":").Append(scriptImportJson);
             sb.Append('}');
             return sb.ToString();
         }

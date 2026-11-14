@@ -221,9 +221,31 @@ warnings from a session that ended hours earlier).
 ### Recovery
 
 Do not act on the errors until a genuine recompile confirms them. Call
-`unity_open_mcp_recompile_scripts` (deterministic force-recompile) and re-read
-compile errors. If the status returns to `no_errors_found` or `compile_failed`
-without the `stale_log` downgrade, the errors are current.
+`unity_open_mcp_recompile_scripts` (deterministic force-recompile): its answer
+is the compile result itself (`compiled` / `compile_failed` with the errors).
+With the Editor closed, run `compile_check` headless.
+
+## `read_compile_errors` says `indeterminate` or lists `historicalLogErrors`
+
+### What it means
+
+The answer is not backed by a live compile generation. Either a live Editor
+holds the project but did not report its compile state in time (it is
+compiling, reloading, or its main thread is busy — the answer then comes from
+its instance lock, `compileSource: "instance_lock"`), or no live Editor answers
+and only `Editor.log` was read. An offline read never certifies a clean compile:
+the log can predate your edits or come from another Editor session. Log errors
+that cannot describe the current compile — logged before a later successful
+build, from a log older than the newest built assembly, or citing a file/line
+that no longer exists — are listed in `historicalLogErrors` with a
+`historicalReason` and do not make the status `compile_failed`.
+
+### Recovery
+
+Follow `agentNextSteps`: with a live Editor, wait with
+`editor_status {"wait_until":"idle"}` (it returns the compile status and error
+count) and re-read; with no Editor, open the project or run `compile_check`
+headless. Do not fix historical errors.
 
 ### Why the wrong log file is read
 

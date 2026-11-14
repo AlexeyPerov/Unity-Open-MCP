@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { testRunOperation, projectCommandOperation, playmodeOperation, pollPlaymodeOperation, playmodeResult, toolOutput, toolResultBody, PLAYMODE_OPERATION_TOOLS, playmodeEstimateMs, playmodeFailureCode, editorWaitOperation } from "./jobs/adapters.js";
 import {
-  WAIT_TOOL, WAIT_DEFAULT_TIMEOUT_MS, WAIT_INLINE_LIMIT_MS, PENDING_COMPILE_GRACE_MS,
+  WAIT_TOOL, WAIT_DEFAULT_TIMEOUT_MS, WAIT_INLINE_LIMIT_MS, WAIT_MAX_TIMEOUT_MS, PENDING_COMPILE_GRACE_MS,
   readEditorSignals, viewEditor, statusFields, retryAfterMsFor, waitForEditor, describeWait, reloadingRefusal, waitCall,
   type CompileReading, type WaitDeps, type WaitRequest, type WaitUntil, type EditorView,
 } from "./editor-state.js";
+import { COMPILE_RESULT_FIRST_ERRORS, compileToAwait, foldCompileResult, foldCompileJob } from "./compile-result.js";
 import { lifecycleForCall } from "./capabilities/lifecycle.js";
 import { PLAYMODE_ROUTES } from "./playmode-routes.js";
 import { routeGameView as settleGameView } from "./game-view-settle.js";
@@ -26,7 +27,7 @@ import { LiveClient, type PingResponse } from "./live-client.js";
 import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline, dependenciesOffline } from "./offline.js";
-import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES, detectStaleLog, detectStaleAssembly, detectErrorsPredatingEdits, parseLogAuthorship, compareLogAuthorship } from "./unity-log.js";
+import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES, detectStaleLog, detectStaleAssembly, detectErrorsPredatingEdits, parseLogAuthorship, compareLogAuthorship, classifyLogCompileErrors, newestScriptAssemblyMtimeMs, statMtimeMs, type ClassifiedLogErrors, type HistoricalReason } from "./unity-log.js";
 import { toolHintReference } from "./tool-hint.js";
 import { scanForFdExhaustion } from "./editor-wedge.js";
 import { summarizeProjectHealth, extractProjectHealthIssues } from "./project-health.js";
@@ -801,8 +802,54 @@ function compileReading(body: Record<string, unknown> | null): CompileReading | 
     ...(typeof body.pending === "boolean" ? { pending: body.pending } : {}),
     ...(typeof body.errorSource === "string" ? { errorSource: body.errorSource } : {}),
     ...(typeof body.headline === "string" ? { headline: body.headline } : {}),
+    ...(Array.isArray(body.errors) && body.errors.length > 0
+      ? { errors: (body.errors as unknown[]).filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null).slice(0, COMPILE_RESULT_FIRST_ERRORS) }
+      : {}),
   };
 }
+
+/**
+ * Editor phases in which a live Editor holds the project and its instance lock
+ * is fresh: read_compile_errors answers from the lock's compile block then, not
+ * from an old log. `gone` and `dead_bridge` are the genuinely unreachable ones.
+ */
+const LIVE_EDITOR_PHASES: ReadonlySet<string> = new Set(["settled", "transition", "wedged", "unreachable"]);
+
+const HISTORICAL_REASON_TEXT: Record<HistoricalReason, string> = {
+  superseded_by_later_build: "superseded by a later successful build",
+  log_predates_assemblies: "the log predates the newest built assembly",
+  source_missing: "the cited file no longer exists",
+  source_changed: "the cited line is past the end of the current file",
+};
+
+/** " (its N error(s) are historical: …)" for a headline, or "" when none are. */
+function historicalNote(classified: ClassifiedLogErrors): string {
+  if (classified.historical.length === 0) return "";
+  const counts = new Map<HistoricalReason, number>();
+  for (const e of classified.historical) counts.set(e.historicalReason, (counts.get(e.historicalReason) ?? 0) + 1);
+  const reasons = [...counts].map(([reason, n]) => `${n} ${HISTORICAL_REASON_TEXT[reason]}`).join("; ");
+  return ` (its ${classified.historical.length} error(s) are historical: ${reasons})`;
+}
+
+/** How to get a determinate compile answer after an indeterminate offline read. */
+function offlineCompileNextSteps(view: EditorView | null): string[] {
+  if (view?.phase === "dead_bridge") {
+    return [
+      "Unity is running but its bridge did not come back (Safe Mode, or a compile failure in the bridge or a " +
+        "package it depends on); raise tail_bytes if the errors scrolled out of the tail, check " +
+        `unity_open_mcp_bridge_status, and once the bridge is back ${waitCall("idle")} reports the live compile state.`,
+    ];
+  }
+  if (view && view.phase !== "gone") {
+    return [`Wait for the live Editor with ${waitCall("idle")} — it reports the compile generation, status and error count — then re-read.`];
+  }
+  return [
+    "No live Editor holds the project. Open it in Unity (its live compile state is authoritative), or with the " +
+      `Editor closed run ${toolHintReference("unity_open_mcp_compile_check")} for a definitive headless compile.`,
+  ];
+}
+
+const sleepMs = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 /** The mid-reload wait budget: UNITY_OPEN_MCP_RELOAD_WAIT_MS (0 disables the wait), default 30 s, capped below the host-safe window. */
 export function readReloadWaitMs(env: NodeJS.ProcessEnv = process.env): number {
@@ -1001,6 +1048,10 @@ export class ToolRouter implements Router {
       // The status tool always answers (from the lock + /ping during a
       // reload) and is the one wait primitive (wait_until).
       [WAIT_TOOL, (l, a, id) => this.routeEditorStatus(a, l, id)],
+      // Compile-type calls: the compile they started is the answer, so the
+      // route waits for it (inline, then as a job) and reports its result.
+      ["unity_open_mcp_recompile_scripts", (l, a, id) => this.routeCompileTool("unity_open_mcp_recompile_scripts", a, l, id)],
+      ["unity_open_mcp_assets_refresh", (l, a, id) => this.routeCompileTool("unity_open_mcp_assets_refresh", a, l, id)],
       // M31 Plan 3 — Editor fd-exhaustion operator surfaces. restart_editor
       // is the reactive kill half (acts AFTER the Editor is hung);
       // resource_pressure is the proactive prediction half (samples fd usage
@@ -1585,7 +1636,18 @@ export class ToolRouter implements Router {
     const logPath = resolvedLog.path;
     const tail = readLogTail(logPath, tailBytes);
 
-    const compile = await live.readCompileState?.();
+    // The log's errors split into current and historical (classifyLogCompileErrors),
+    // anchored on the newest built assembly. Computed only off the live happy
+    // path: a determinate live answer needs it just for a failure the bridge
+    // did not observe.
+    let classifiedMemo: ClassifiedLogErrors | undefined;
+    const classify = (): ClassifiedLogErrors => classifiedMemo ??= classifyLogCompileErrors(tail.content, {
+      projectRoot: this.projectPath,
+      logMtimeMs: tail.exists && !tail.error && statMtimeMs(logPath) > 0 ? statMtimeMs(logPath) : undefined,
+      dllMtimeMs: newestScriptAssemblyMtimeMs(this.projectPath),
+    });
+
+    const { compile, view } = await this.readLiveCompileState(live);
     if (compile && compile.status !== "indeterminate") {
       const historical = summarizeProjectHealth(tail.content, this.projectPath);
       const failed = compile.status === "compile_failed";
@@ -1593,16 +1655,24 @@ export class ToolRouter implements Router {
       // Unity can report a failed compile the bridge never observed (it ran
       // before the bridge domain loaded, e.g. the Editor-startup compile), so
       // the pipeline holds no diagnostics for it. Editor.log does: promote its
-      // errors instead of answering "failed" with nothing to fix.
+      // current errors (not the historical ones) instead of answering "failed"
+      // with nothing to fix.
       const fromLog = failed && pipelineErrors.length === 0;
-      const currentErrors = fromLog ? historical.compilerErrors : pipelineErrors;
+      const currentErrors = fromLog ? classify().current : pipelineErrors;
+      const generation = typeof compile.generation === "number" ? compile.generation : null;
+      const due = compile.status === "currently_compiling" || compile.pending === true;
+      // A running compile already carries its own generation (it is counted
+      // when it starts): wait for idle. A requested one is past the last.
+      const wait = compile.status === "currently_compiling" ? waitCall("idle") : waitCall("idle", generation);
       return sourceResult({
         ...compile, errorCount: currentErrors.length, errors: currentErrors,
         errorSource: fromLog ? "Editor.log" : "CompilationPipeline",
+        determinacy: "current",
         unhealthy: failed,
         staleAssembly: compile.status === "assembly_stale",
-        headline: compile.status === "no_errors_found" ? "Current compile is clean; source content matches the completed generation."
-          : compile.status === "currently_compiling" ? "Compilation is active; wait for completion."
+        headline: compile.status === "currently_compiling" ? `Compilation is active (generation ${generation}); wait for it with ${wait}.`
+          : compile.pending === true ? `A compile was requested and has not started yet; the last completed generation is ${generation}. Wait for it with ${wait}.`
+          : compile.status === "no_errors_found" ? "Current compile is clean; source content matches the completed generation."
           : compile.status === "assembly_stale" ? "Source content changed after the last compile; recompile before trusting assemblies."
           : !fromLog ? "Current compilation failed. Fix the compiler diagnostics and recompile."
           : currentErrors.length > 0
@@ -1610,15 +1680,26 @@ export class ToolRouter implements Router {
               `startup); errors are the ${currentErrors.length} compiler diagnostic(s) from Editor.log. ` +
               "Fix them and recompile."
             : "Current compilation failed in a compile the bridge did not observe (e.g. at Editor " +
-              "startup), and the Editor.log tail holds no compiler diagnostics. Raise tail_bytes or " +
+              "startup), and the Editor.log tail holds no current compiler diagnostics. Raise tail_bytes or " +
               `recompile (${toolHintReference("unity_open_mcp_recompile_scripts")}) to capture them.`,
+        ...(due ? { agentNextSteps: [`Wait for the compile with ${wait}: it returns once it ran, with its status and error count.`] } : {}),
         compileSource: "CompilationPipeline", logPath, logSource: resolvedLog.reason,
         logAuthorship: parseLogAuthorship(tail.content),
-        historicalLogErrors: fromLog ? [] : historical.compilerErrors,
+        historicalLogErrors: fromLog ? classify().historical : historical.compilerErrors,
         historicalLogIssues: historical.issues,
         logReadError: tail.error ?? null,
       }, "live");
     }
+
+    // The live Editor is there (its instance lock is fresh) but did not give
+    // a determinate compile state: it is compiling or reloading, its main
+    // thread did not answer in time, or its source fingerprint is still
+    // warming after a reload. The lock still carries the last generation and
+    // whether it failed — that is the answer, not an old log read as current.
+    if (view?.compile && LIVE_EDITOR_PHASES.has(view.phase)) {
+      return this.lockCompileAnswer(view, compile, classify(), tail, logPath, resolvedLog.reason);
+    }
+    const classified = classify();
 
     if (tail.error) {
       return {
@@ -1645,11 +1726,13 @@ export class ToolRouter implements Router {
             type: "text",
             text: JSON.stringify({
               status: "log_not_found",
+              determinacy: "indeterminate",
               errorCount: 0,
               errors: [],
               message: `No Editor.log found at ${logPath}. The Unity Editor ` +
                 "may not have written errors yet, or it is running with a " +
                 "custom -logFile path that this tool does not resolve.",
+              agentNextSteps: offlineCompileNextSteps(view),
               logPath,
             }),
           },
@@ -1658,13 +1741,14 @@ export class ToolRouter implements Router {
       };
     }
 
-    // Build the full health summary: CSxxxx compiler errors PLUS package /
-    // assembly-level red flags (unresolved-assembly Cecil failures, package
-    // deprecation, Package Manager errors) from the SAME log tail. The
-    // compilerErrors list is the same shape as before (kept as `errors` for
-    // backward compatibility) so existing callers do not break.
-    const health = summarizeProjectHealth(tail.content, this.projectPath);
-    const errors = health.compilerErrors;
+    // Build the full health summary: the CURRENT CSxxxx compiler errors (the
+    // historical ones — superseded by a later successful build, or citing
+    // source that no longer matches — are reported apart and never drive the
+    // verdict) PLUS package / assembly-level red flags (unresolved-assembly
+    // Cecil failures, package deprecation, Package Manager errors, failed
+    // package installs) from the SAME log tail.
+    const errors = classified.current;
+    const health = summarizeProjectHealth(tail.content, this.projectPath, errors);
 
     // specs/feedback.md 2026-07-05 — stale-log detection. When an assembly is
     // stuck in a failed-compile state, AssetDatabase.Refresh no-ops and the
@@ -1685,12 +1769,11 @@ export class ToolRouter implements Router {
     }
 
     // feedback-01-08-glm §5b — stale-ASSEMBLY detection. Runs UNCONDITIONALLY
-    // (even on no_errors_found): after a C# edit, AssetDatabase.Refresh often
-    // no-ops, the DLL is never rebuilt, and the log carries no fresh CSxxxx —
-    // so a healthy signal reported against a stale assembly misleads the agent
-    // into trusting code that has not actually been rebuilt. Cross-check the
-    // newest Library/ScriptAssemblies/*.dll mtime against Assets/**/*.cs source
-    // mtimes and surface staleAssembly when any source is newer than the DLL.
+    // offline: after a C# edit, AssetDatabase.Refresh often no-ops, the DLL is
+    // never rebuilt, and the log carries no fresh CSxxxx — so a clean log
+    // against a stale assembly misleads the agent into trusting code that has
+    // not actually been rebuilt. Cross-check the newest
+    // Library/ScriptAssemblies/*.dll mtime against Assets/**/*.cs source mtimes.
     const staleAsm = detectStaleAssembly(this.projectPath);
 
     // specs/feedback.md 2026-08-14 — "these errors may predate your edits".
@@ -1740,17 +1823,21 @@ export class ToolRouter implements Router {
     const errorsMayNotApply =
       health.unhealthy &&
       (!!staleLog || authorshipCheck.versionMismatch);
-    // feedback 2026-08-17 — a clean bill of health read from the ROTATED log
-    // is not a clean bill of health. When logSource is a prev_log_* value the
-    // resolver fell back to Editor-prev.log while a live Editor writes a
-    // different file; an agent reading only `status` got a false green. A
-    // no-errors read from a rotated log is explicitly `indeterminate`.
+    // A clean offline read is never a clean bill of health: no compile
+    // generation backs it, and the log can predate the edits, come from
+    // another Editor session or miss a compile still running (an agent once
+    // reported "compilation is clean" on exactly this shape while the live
+    // Editor was busy). A no-errors read — including one from the ROTATED
+    // Editor-prev.log (feedback 2026-08-17) — is `indeterminate`, with the
+    // raw verdict in `logVerdict` and the way to a determinate answer in
+    // agentNextSteps.
     const prevLogRead = resolvedLog.reason.startsWith("prev_log_");
     const status = errorsMayNotApply
       ? "stale_log"
-      : logVerdict === "no_errors_found" && prevLogRead
+      : logVerdict === "no_errors_found"
         ? "indeterminate"
         : logVerdict;
+    const indeterminateSteps = status === "indeterminate" ? offlineCompileNextSteps(view) : [];
 
     // specs/feedback.md 2026-08-12 — partial-compile signal. Unity compiles
     // assemblies in dependency order; when an early assembly fails the pipeline
@@ -1790,8 +1877,8 @@ export class ToolRouter implements Router {
     //      errorsPredateEdits shape; this extends the headline caveat to the
     //      staleAssembly shape (the field report's 12 stale CS errors had
     //      staleAssembly:true but the headline stated them as fact).
-    //   4. indeterminate (feedback 2026-08-17) — no errors, but read from the
-    //      ROTATED log: not a verified clean bill of health.
+    //   4. indeterminate — no current errors: not a verified clean compile
+    //      (the ROTATED-log case says which file was read, feedback 2026-08-17).
     //   5. the plain health headline.
     const headline: string = errorsMayNotApply
       ? `${errors.length} error(s) in Editor.log, but the log appears ` +
@@ -1813,13 +1900,19 @@ export class ToolRouter implements Router {
             "from an earlier compile. Force a recompile " +
             `(${toolHintReference("unity_open_mcp_recompile_scripts")}) and ` +
             "re-read before acting on them."
-          : status === "indeterminate"
+          : status === "indeterminate" && prevLogRead
             ? "No errors found, but this is NOT a verified clean bill of " +
               `health: the read came from the ROTATED log (${resolvedLog.reason === "prev_log_live_editor" ? "Editor-prev.log chosen because a live editor holds the project" : "Editor-prev.log fallback"}) ` +
               "while a live Editor may be writing a different log. Confirm via " +
               "the live bridge (unity_open_mcp_editor_status / a live tool " +
               "probe) or re-read after the Editor settles."
-            : health.headline;
+            : status === "indeterminate"
+              ? "No current compiler errors in Editor.log" + historicalNote(classified) +
+                ", but this is NOT a verified clean compile: an offline read has no " +
+                "compile generation behind it, and the log can predate your edits, " +
+                "come from another Editor session or miss a compile still running. " +
+                indeterminateSteps[0]
+              : health.headline;
 
     return sourceResult(
       {
@@ -1832,12 +1925,25 @@ export class ToolRouter implements Router {
         // literal signal regardless of freshness.
         unhealthy: errorsMayNotApply ? false : health.unhealthy,
         headline,
+        // How far the verdict can be trusted: `log_evidence` (errors or issues
+        // the log still holds as current — no compile generation confirms them)
+        // or `indeterminate` (nothing current either way). Only the live
+        // CompilationPipeline answer is `current`.
+        determinacy: status === "compile_failed" || status === "project_unhealthy" ? "log_evidence" : "indeterminate",
         // Raw verdict preserved whenever the top-level status was rewritten
-        // (stale_log downgrade OR the indeterminate prev-log case), so callers
-        // can still read what the log literally said.
+        // (stale_log downgrade OR an indeterminate clean read), so callers can
+        // still read what the log literally said.
         ...(errorsMayNotApply || status === "indeterminate" ? { logVerdict } : {}),
+        ...(indeterminateSteps.length ? { agentNextSteps: indeterminateSteps } : {}),
         errorCount: errors.length,
         errors,
+        // Errors the log holds that cannot describe the current compile:
+        // superseded by a later successful build, a log older than the newest
+        // built assembly, or a cited file/line that no longer exists. Kept as
+        // evidence; they never drive `status`.
+        historicalLogErrors: classified.historical,
+        lastLogBuild: classified.lastBuild,
+        ...(view && view.phase !== "gone" ? { editorPhase: view.phase } : {}),
         // specs/feedback.md 2026-08-12 — present only when there are errors AND
         // the project has multiple compile assemblies. Unity's dependency-ordered
         // pipeline means these errors may be a subset; fixing them lets dependent
@@ -1930,6 +2036,108 @@ export class ToolRouter implements Router {
       },
       "offline",
     );
+  }
+
+  /**
+   * How long read_compile_errors keeps asking a settled Editor whose
+   * /compile-state did not answer (main thread busy: an unfocused Editor can
+   * take ~1.5 s per main-thread hop) or answered `indeterminate` (its source
+   * fingerprint is recomputed in the background right after a reload).
+   */
+  compileStateRetryMs = 3_000;
+
+  /**
+   * The live compile state, or — when it is not determinate — what the live
+   * Editor looks like from outside (instance lock + /ping). A settled Editor
+   * is asked again within {@link compileStateRetryMs}; an Editor mid-compile,
+   * mid-reload or blocked is not waited for (the caller says so instead).
+   * `view` is null when the state was determinate or there is no project.
+   */
+  private async readLiveCompileState(live: LiveClient): Promise<{ compile: Record<string, unknown> | null; view: EditorView | null }> {
+    const canRead = typeof live.readCompileState === "function";
+    let compile = canRead ? await live.readCompileState() : null;
+    if (compile && compile.status !== "indeterminate") return { compile, view: null };
+    if (!this.projectPath) return { compile, view: null };
+    const look = async () => viewEditor(await readEditorSignals(this.projectPath, live, 1_000), hasRecentPendingTestRun());
+    let view = await look();
+    const deadline = Date.now() + this.compileStateRetryMs;
+    while (canRead && view.phase === "settled" && Date.now() < deadline) {
+      await sleepMs(Math.min(500, Math.max(0, deadline - Date.now())));
+      compile = (await live.readCompileState()) ?? compile;
+      if (compile && compile.status !== "indeterminate") return { compile, view: null };
+      view = await look();
+    }
+    return { compile, view };
+  }
+
+  /**
+   * read_compile_errors while the live Editor holds the project but gave no
+   * determinate compile state: the instance lock's compile block (generation,
+   * running / pending, last result) is the answer. A compile running or due is
+   * `currently_compiling`; a last compile that failed stays `compile_failed`
+   * (current until the next compile finishes) with the log's current
+   * diagnostics; anything else is `indeterminate` — never a clean verdict.
+   */
+  private lockCompileAnswer(
+    view: EditorView,
+    compile: Record<string, unknown> | null,
+    classified: ClassifiedLogErrors,
+    tail: { content: string; error?: string },
+    logPath: string,
+    logSource: string,
+  ): CallToolResult {
+    const lock = view.compile!;
+    const generation = lock.generation;
+    const running = view.isCompiling || view.transition === "compiling" || lock.running || compile?.status === "currently_compiling";
+    const pending = !running && (lock.pending || compile?.pending === true);
+    const failed = !running && !pending && lock.completed && lock.failed;
+    const status = running || pending ? "currently_compiling" : failed ? "compile_failed" : "indeterminate";
+    const errors = failed ? classified.current : [];
+    const health = summarizeProjectHealth(tail.content, this.projectPath, errors);
+    const why = view.phase === "transition" ? `the Editor is ${(view.transition ?? "reloading").replace(/_/g, " ")}`
+      : view.phase === "wedged" ? "its main thread is blocked (a modal dialog or a long synchronous import)"
+      : view.phase === "unreachable" ? "its bridge listener is not answering"
+      : compile ? "its source fingerprint is still being computed after a reload"
+      : "its main thread did not answer the compile-state probe in time";
+    const wait = waitCall("idle", pending ? generation : null);
+    const lastCompile = lock.completed ? (lock.failed ? `failed with ${lock.errorCount} error(s)` : "succeeded") : "has not completed in this Editor session";
+    const headline = running
+      ? `Compilation is active (${why}); the compile state comes from the live Editor's instance lock (last generation ${generation}). Wait for it with ${wait}: it returns once the compile ran, with its status and error count.`
+      : pending
+        ? `A compile was requested and has not started yet (last generation ${generation}). Wait for it with ${wait}: it returns once that compile ran, with its status and error count.`
+        : failed
+          ? `The live Editor's last compile (generation ${generation}) failed with ${lock.errorCount} error(s); its compile state was read from the instance lock because ${why}, so the errors are the ${errors.length} current diagnostic(s) in Editor.log. Fix them and recompile.`
+          : `Compile state indeterminate: the live Editor holds the project but ${why}. Its last compile (generation ${generation}) ${lastCompile}, but whether the sources changed since is unverified — this is NOT a verified clean compile. Wait with ${waitCall("idle")} (it reports the compile status and error count), then re-read.`;
+    const steps = view.phase === "wedged"
+      ? ["The Editor's main thread is blocked — usually a modal dialog an operator must close in the Unity UI. Check unity_open_mcp_bridge_status, then re-read."]
+      : failed
+        ? [`Fix the errors, then recompile (${toolHintReference("unity_open_mcp_recompile_scripts")}); it waits for the compile and reports the result.`]
+        : [`Wait with ${wait}, then re-read if you need the diagnostics.`];
+    return sourceResult({
+      status,
+      determinacy: status === "indeterminate" ? "indeterminate" : "current",
+      compileSource: "instance_lock",
+      generation,
+      pending,
+      running,
+      lastCompileFailed: lock.completed ? lock.failed : null,
+      unhealthy: failed,
+      headline,
+      agentNextSteps: steps,
+      errorCount: errors.length,
+      errors,
+      errorSource: "Editor.log",
+      historicalLogErrors: failed ? classified.historical : [...classified.current, ...classified.historical],
+      issues: health.issues,
+      issueCount: health.issues.length,
+      editorPhase: view.phase,
+      transition: view.transition,
+      liveProbe: compile ? "indeterminate" : "unanswered",
+      logPath,
+      logSource,
+      lastLogBuild: classified.lastBuild,
+      logReadError: tail.error ?? null,
+    }, "local");
   }
 
   // Resolve the live Unity Editor PID for this project from the instance lock,
@@ -2873,6 +3081,42 @@ export class ToolRouter implements Router {
     }
     const { body, isError } = describeWait(request, outcome);
     return sourceResult(body, "local", isError);
+  }
+
+  /**
+   * `recompile_scripts`, and `assets_refresh` when it started a compile: the
+   * compile result is the call's answer (compile-result.ts). The call runs on
+   * the bridge as usual; then the editor_status wait (keyed to the call's
+   * `compile.generationAtStart`) waits out the compile and its domain reload
+   * — inline within what is left of the host-safe window, then as a `jobs`
+   * wait — and the outcome is folded into the answer. A call that left no
+   * compile, or was refused, is returned unchanged.
+   */
+  private async routeCompileTool(toolName: string, args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity): Promise<CallToolResult> {
+    const startedAt = Date.now();
+    const result = injectRouteMeta(await live.route(toolName, args), { route: "live" });
+    const body = toolResultBody(result);
+    const due = compileToAwait(toolName, body, result.isError === true);
+    if (!due) return result;
+    const request: WaitRequest = {
+      until: "idle",
+      ...(due.generationAtStart !== undefined ? { afterGeneration: due.generationAtStart } : {}),
+      timeoutMs: WAIT_MAX_TIMEOUT_MS,
+    };
+    // What is left of the inline window after the bridge call (at least a few
+    // seconds, so a slow call still gets a short wait before the job).
+    const inlineMs = Math.max(Math.min(5_000, this.waitInlineLimitMs), this.waitInlineLimitMs - (Date.now() - startedAt));
+    const outcome = await waitForEditor({ ...request, timeoutMs: Math.min(request.timeoutMs, inlineMs) }, this.waitDeps(live, this.projectPath));
+    if (outcome.reason === "timeout" && request.timeoutMs > outcome.waitedMs + 1_000) {
+      const remaining = Math.max(1_000, request.timeoutMs - outcome.waitedMs);
+      const started = await this.routeJobs({ action: "start", tool_or_command: WAIT_TOOL,
+        args: { wait_until: "idle", ...(request.afterGeneration !== undefined ? { after_generation: request.afterGeneration } : {}), timeout_ms: remaining } }, identity);
+      const job = toolResultBody(started);
+      if (!started.isError && typeof job.job_id === "string")
+        return { ...withResultBody(result, foldCompileJob(body, request, outcome, job as { job_id: string }, remaining)), isError: false };
+    }
+    const folded = foldCompileResult(toolName, body, request, outcome);
+    return { ...withResultBody(result, folded.body), isError: folded.isError };
   }
 
   /** editor_status without a wait: the bridge's answer when it can give one, else the lock's. */

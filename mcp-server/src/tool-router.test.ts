@@ -1076,7 +1076,7 @@ test("route: read_compile_errors attaches staleLogSuspected when a cited source 
       "Assets/Scripts/Bridge.cs(10,14): error CS0118: " +
         "'ParticleSystem' is a namespace but is used like a type\n",
     );
-    await writeFile(srcPath, "namespace Fixed {}");
+    await writeFile(srcPath, "namespace Fixed {}\n" + "//\n".repeat(20));
     utimesSync(logPath, new Date(1000_000), new Date(1000_000));
     utimesSync(srcPath, new Date(2000_000), new Date(2000_000));
 
@@ -1114,7 +1114,7 @@ test("route: read_compile_errors omits staleLogSuspected when the log is fresher
       logPath,
       "Assets/Scripts/Bridge.cs(10,14): error CS0118: still broken\n",
     );
-    await writeFile(srcPath, "namespace Still.Broken {}");
+    await writeFile(srcPath, "namespace Still.Broken {}\n" + "//\n".repeat(20));
     utimesSync(srcPath, new Date(1000_000), new Date(1000_000));
     utimesSync(logPath, new Date(2000_000), new Date(2000_000));
 
@@ -1199,7 +1199,7 @@ test("route: read_compile_errors puts the may-predate caveat in the headline whe
     const newerPath = join(tmp, "Assets", "Scripts", "Newer.cs");
     const dllPath = join(tmp, "Library", "ScriptAssemblies", "Game.dll");
     await writeFile(logPath, "Assets/Scripts/Cited.cs(3,10): error CS0246: type not found\n");
-    await writeFile(citedPath, "class Cited {}");
+    await writeFile(citedPath, "class Cited {}\n" + "//\n".repeat(20));
     await writeFile(newerPath, "class Newer {}");
     await writeFile(dllPath, "not-a-real-dll");
     // Timeline: cited (1000) < dll (2000) < other source (3000) < log (4000).
@@ -2487,7 +2487,7 @@ test("route: read_compile_errors flags errors that predate the cited files' edit
     const dll = join(asmDir, "Assembly-CSharp.dll");
     await writeFile(dll, "pe");
     const src = join(scriptsDir, "Broken.cs");
-    await writeFile(src, "// fixed already");
+    await writeFile(src, "// fixed already\n" + "//\n".repeat(40));
 
     await mkdir(join(tmp, "Logs"), { recursive: true });
     const logPath = join(tmp, "Logs", "Editor.log");
@@ -2533,7 +2533,7 @@ test("route: read_compile_errors does not flag predating when the build is newer
     await mkdir(asmDir, { recursive: true });
 
     const src = join(scriptsDir, "Broken.cs");
-    await writeFile(src, "// still broken");
+    await writeFile(src, "// still broken\n" + "//\n".repeat(40));
     const dll = join(asmDir, "Assembly-CSharp.dll");
     await writeFile(dll, "pe");
 
@@ -4729,6 +4729,8 @@ test("live compile_failed without pipeline diagnostics promotes the Editor.log e
     await mkdir(join(root, "Logs"));
     const logPath = join(root, "Logs/Editor.log");
     await writeFile(logPath, "Assets/Broken.cs(3,5): error CS1002: ; expected\n");
+    await mkdir(join(root, "Assets"));
+    await writeFile(join(root, "Assets/Broken.cs"), "class Broken {\n  void M() {\n    int x = 1\n  }\n}\n");
     const live = makeFakeLive();
     let errors: unknown[] = [];
     live.readCompileState = async () => ({ status: "compile_failed", generation: 0, sourceMatches: false,
@@ -5321,6 +5323,14 @@ test("route: activated compile recovery uses its top-level route through invoke"
   assert.equal(live.calls.at(-1)?.tool, "unity_open_mcp_recompile_scripts");
   assert.deepEqual(live.calls.at(-1)?.args.paths_hint, ["Assets/Probe.cs"]);
   assert.equal(live.calls.at(-1)?.args.gate, "enforce");
+
+  // paths_hint is optional: the first call of most sessions is `{}`.
+  const bare = await router.route("unity_open_mcp_manage_tools", {
+    action: "invoke", tool_name: "unity_open_mcp_recompile_scripts", arguments: {},
+  });
+  assert.notEqual(errorCode(bare), "invalid_arguments");
+  assert.equal(live.calls.length, 2);
+  assert.equal(live.calls.at(-1)?.args.paths_hint, undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -5422,4 +5432,277 @@ test("route: upgrade lookup failure is latest_version_failed and never reaches t
   } finally {
     restore();
   }
+});
+
+// ---------------------------------------------------------------------------
+// read_compile_errors never presents stale or indeterminate data as current
+// truth: a reachable live Editor answers from its instance lock when its
+// /compile-state is not determinate, and an offline read marks historical log
+// errors and never calls a clean log "clean".
+// ---------------------------------------------------------------------------
+
+/** A fresh instance lock for `root` (this process stands in for Unity). */
+function writeCompileLock(root: string, opts: { state?: string; isCompiling?: boolean; compile: Record<string, unknown> }): string {
+  const path = lockPath(root);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({ pid: process.pid, projectPath: root, port: 27999,
+    state: opts.state ?? "idle", heartbeatAt: new Date().toISOString(), isPlaying: false, isCompiling: opts.isCompiling ?? false,
+    compile: { generation: 0, running: false, completed: true, failed: false, errorCount: 0, pending: false, requestedAt: null, ...opts.compile } }));
+  return path;
+}
+
+async function readCompileErrorsBody(router: ToolRouter): Promise<Record<string, any>> {
+  return parseBody(await router.route("unity_open_mcp_read_compile_errors", {}));
+}
+
+test("read_compile_errors: a busy live Editor answers from its lock, never as an offline clean read", async () => {
+  // The 2026-11-11 replay: the compile had finished, the Editor's main thread
+  // did not answer /compile-state in time, and the read fell back to the
+  // global log — `no_errors_found` with no generation, reported as "clean".
+  const root = await mkdtemp(join(tmpdir(), "rce-busy-"));
+  const lock = writeCompileLock(root, { compile: { generation: 2 } });
+  try {
+    await mkdir(join(root, "Logs"));
+    await writeFile(join(root, "Logs/Editor.log"), "*** Tundra build success (0.6 seconds), 10 items updated\n");
+    const live = makeFakeLive({ available: true, compileState: null });
+    const router = makeRouter(live, makeFakeBatch(), root, makeFakeEventStream());
+    router.compileStateRetryMs = 0;
+    const body = await readCompileErrorsBody(router);
+    assert.equal(body.status, "indeterminate");
+    assert.equal(body.determinacy, "indeterminate");
+    assert.equal(body.compileSource, "instance_lock");
+    assert.equal(body._source, "local");
+    assert.equal(body.generation, 2);
+    assert.equal(body.lastCompileFailed, false);
+    assert.equal(body.liveProbe, "unanswered");
+    assert.match(body.headline, /NOT a verified clean compile/);
+    assert.match(body.agentNextSteps[0], /"wait_until":"idle"/);
+  } finally { rmSync(lock, { force: true }); await rm(root, { recursive: true, force: true }); }
+});
+
+test("read_compile_errors: mid-compile and requested-but-not-started compiles say so, with the generation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rce-compiling-"));
+  let lock = writeCompileLock(root, { state: "compiling", isCompiling: true, compile: { generation: 7, running: true, completed: false } });
+  try {
+    const router = makeRouter(makeFakeLive({ available: false, compileState: null }), makeFakeBatch(), root, makeFakeEventStream());
+    router.compileStateRetryMs = 0;
+    let body = await readCompileErrorsBody(router);
+    assert.equal(body.status, "currently_compiling");
+    assert.equal(body.determinacy, "current");
+    assert.equal(body.running, true);
+    assert.equal(body.generation, 7);
+    assert.match(body.headline, /"wait_until":"idle"/);
+
+    lock = writeCompileLock(root, { compile: { generation: 3, pending: true, requestedAt: new Date().toISOString() } });
+    const settledRouter = makeRouter(makeFakeLive({ available: true, compileState: null }), makeFakeBatch(), root, makeFakeEventStream());
+    settledRouter.compileStateRetryMs = 0;
+    body = await readCompileErrorsBody(settledRouter);
+    assert.equal(body.status, "currently_compiling");
+    assert.equal(body.pending, true);
+    assert.match(body.agentNextSteps[0], /"after_generation":3/);
+  } finally { rmSync(lock, { force: true }); await rm(root, { recursive: true, force: true }); }
+});
+
+test("read_compile_errors: a busy Editor whose last compile failed reports the log's current errors", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rce-busy-failed-"));
+  const lock = writeCompileLock(root, { compile: { generation: 4, failed: true, errorCount: 1 } });
+  try {
+    await mkdir(join(root, "Logs"));
+    await mkdir(join(root, "Assets"));
+    await writeFile(join(root, "Assets/Broken.cs"), "class Broken {\n  int x = 1\n}\n");
+    await writeFile(join(root, "Logs/Editor.log"),
+      "Assets/Gone.cs(1,1): error CS0103: old\n*** Tundra build success (1 s)\n" +
+      "Assets/Broken.cs(2,12): error CS1002: ; expected\n*** Tundra build failed (1 s)\n");
+    const router = makeRouter(makeFakeLive({ available: true, compileState: null }), makeFakeBatch(), root, makeFakeEventStream());
+    router.compileStateRetryMs = 0;
+    const body = await readCompileErrorsBody(router);
+    assert.equal(body.status, "compile_failed");
+    assert.equal(body.unhealthy, true);
+    assert.equal(body.errorSource, "Editor.log");
+    assert.deepEqual(body.errors.map((e: { file: string }) => e.file), ["Assets/Broken.cs"]);
+    assert.equal(body.historicalLogErrors[0].historicalReason, "superseded_by_later_build");
+  } finally { rmSync(lock, { force: true }); await rm(root, { recursive: true, force: true }); }
+});
+
+test("read_compile_errors: an indeterminate first probe of a settled Editor is asked again", async () => {
+  await withTmp("rce-warming-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makeFakeLive({ available: true, compileState: null });
+    let probes = 0;
+    live.readCompileState = async () => ++probes === 1
+      ? { status: "indeterminate", generation: 3, sourceMatches: false, pending: false, errors: [] }
+      : { status: "no_errors_found", generation: 3, sourceMatches: true, pending: false, errors: [] };
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+    const body = await readCompileErrorsBody(router);
+    assert.equal(body._source, "live");
+    assert.equal(body.status, "no_errors_found");
+    assert.equal(body.determinacy, "current");
+    assert.ok(probes >= 2);
+  });
+});
+
+test("read_compile_errors offline: superseded or no-longer-matching log errors are historical, not compile_failed", async () => {
+  // The 2026-09-28 replay: the global Editor.log still held a CS0102 at a line
+  // the current source no longer has, from a compile before a successful one.
+  await withTmp("rce-historical-", async (tmp) => {
+    await setupProject(tmp);
+    await mkdir(join(tmp, "Assets", "Scripts"), { recursive: true });
+    await writeFile(join(tmp, "Assets/Scripts/Canopy.cs"), "partial class Canopy {\n}\n");
+    const globalLog = join(tmp, "global-logs", "Editor.log");
+    await mkdir(dirname(globalLog), { recursive: true });
+    await writeFile(globalLog,
+      "Assets/Scripts/Canopy.cs(1,9): error CS0102: The type 'Canopy' already contains a definition for 'Ring'\n" +
+      "*** Tundra build failed (2.2 seconds), 106 items updated, 1057 evaluated\n" +
+      "*** Tundra build success (0.6 seconds), 10 items updated, 1057 evaluated\n" +
+      "Assets/Scripts/Canopy.cs(246,54): error CS0102: The type 'Canopy' already contains a definition for 'Arc'\n");
+    const router = makeRouter(makeFakeLive({ available: false }), makeFakeBatch(), tmp, makeFakeEventStream(),
+      undefined, undefined, undefined, globalLog);
+    const body = await readCompileErrorsBody(router);
+    assert.equal(body._source, "offline");
+    assert.notEqual(body.status, "compile_failed");
+    assert.equal(body.status, "indeterminate");
+    assert.equal(body.determinacy, "indeterminate");
+    assert.equal(body.unhealthy, false);
+    assert.equal(body.errorCount, 0);
+    assert.deepEqual(body.historicalLogErrors.map((e: { historicalReason: string }) => e.historicalReason).sort(),
+      ["source_changed", "superseded_by_later_build"]);
+    assert.equal(body.lastLogBuild, "succeeded");
+    assert.match(body.headline, /historical/);
+  });
+});
+
+test("read_compile_errors offline: a clean log without a compile generation is indeterminate, with the way to a real answer", async () => {
+  await withTmp("rce-offline-clean-", async (tmp) => {
+    await setupProject(tmp);
+    await mkdir(join(tmp, "Logs"));
+    await writeFile(join(tmp, "Logs/Editor.log"), "Refreshing native plugins compatible for Editor in 1.2 ms\n");
+    const router = makeRouter(makeFakeLive({ available: false }), makeFakeBatch(), tmp, makeFakeEventStream());
+    const body = await readCompileErrorsBody(router);
+    assert.equal(body.status, "indeterminate");
+    assert.equal(body.logVerdict, "no_errors_found");
+    assert.equal(body.determinacy, "indeterminate");
+    assert.equal(body.unhealthy, false);
+    assert.match(body.headline, /NOT a verified clean compile/);
+    assert.match(body.agentNextSteps[0], /unity_open_mcp_compile_check/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// recompile_scripts / assets_refresh: the compile they start is the answer.
+// ---------------------------------------------------------------------------
+
+function recompileEnvelope(output: Record<string, unknown>, compile: Record<string, unknown>): CallToolResult {
+  return { content: [{ type: "text", text: JSON.stringify({
+    mutation: { success: true, output, error: null },
+    gate: { mode: "enforce", outcome: "passed", delta: { newErrors: 0 } },
+    lifecycle: "restart_then_settle", settleMs: 900, compile,
+    agentNextSteps: [
+      "Gate passed — no new issues detected.",
+      `This call left a script compile due. Wait for it with unity_open_mcp_editor_status {"wait_until":"idle","after_generation":${compile.generationAtStart}} — it returns once that compile and its domain reload are done.`,
+    ],
+  }) }], isError: false };
+}
+
+test("recompile_scripts {} reports a failed compile as its own failed result", async () => {
+  await withTmp("recompile-failed-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makeFakeLive({ available: true, compileState: null });
+    live.route = async (tool, args) => {
+      live.calls.push({ tool, args });
+      return recompileEnvelope({ status: "compile_requested", requested: true, recompiled: false, compileGenerationAtStart: 5,
+        scriptImport: { action: "imported", newScripts: ["Assets/New.cs"], newCount: 1, deletedScripts: [], deletedCount: 0 } },
+        { generationAtStart: 5, generation: 5, pending: true, running: false });
+    };
+    live.readCompileState = async () => ({ status: "compile_failed", generation: 6, sourceMatches: true, pending: false,
+      errors: [{ file: "Assets/Uses.cs", line: 1, column: 71, code: "CS0103", message: "Assets/Uses.cs(1,71): error CS0103: The name 'NewType' does not exist in the current context" }] });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+    const result = await router.route("unity_open_mcp_recompile_scripts", {});
+    const body: Record<string, any> = parseBody(result);
+    assert.equal(live.calls.length, 1, "no paths_hint needed");
+    assert.equal(live.calls[0].args.paths_hint, undefined);
+    assert.equal(result.isError, true);
+    assert.equal(body.status, "compile_failed");
+    assert.equal(body.mutation.success, false);
+    assert.equal(body.mutation.error.code, "compile_failed");
+    assert.equal(body.mutation.output.scriptImport.action, "imported");
+    assert.equal(body.compile.generationAtStart, 5);
+    assert.equal(body.compile.generation, 6);
+    assert.equal(body.compile.errorCount, 1);
+    assert.equal(body.compile.errors[0].code, "CS0103");
+    assert.match(body.headline, /Compile failed: 1 error/);
+    assert.match(body.agentNextSteps[0], /The compile failed with 1 error/);
+    assert.ok(!body.agentNextSteps.some((s: string) => s.startsWith("Gate passed")), "no gate-passed headline over a failed compile");
+    assert.ok(!body.agentNextSteps.some((s: string) => s.includes("wait_until")), "the wait already ran");
+    assert.equal(body._compileVerify, undefined);
+  });
+});
+
+test("recompile_scripts reports a clean compile with its generation", async () => {
+  await withTmp("recompile-clean-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makeFakeLive({ available: true, compileState: null });
+    live.route = async (tool, args) => {
+      live.calls.push({ tool, args });
+      // A successful compile reloads the domain, which closes the response.
+      return { content: [{ type: "text", text: JSON.stringify({ status: "triggered_reload", triggeredReload: true, message: "cut",
+        compile: { generationAtStart: 8 }, agentNextSteps: ["Wait for the reload: unity_open_mcp_editor_status {\"wait_until\":\"idle\",\"after_generation\":8}"] }) }], isError: false };
+    };
+    live.readCompileState = async () => ({ status: "no_errors_found", generation: 9, sourceMatches: true, pending: false, errors: [] });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+    const result = await router.route("unity_open_mcp_recompile_scripts", { paths_hint: ["Assets/Scripts/A.cs"] });
+    const body: Record<string, any> = parseBody(result);
+    assert.equal(result.isError, false);
+    assert.equal(body.status, "compiled");
+    assert.equal(body.triggeredReload, true);
+    assert.equal(body.compile.generation, 9);
+    assert.equal(body.compile.ran, true);
+    assert.equal(body.compile.errorCount, 0);
+    assert.equal(body.message, undefined, "the pre-wait message is gone");
+    assert.deepEqual(body.agentNextSteps, ["Compiled clean: generation 9, 0 errors."], "the reload answer's wait steps are gone");
+  });
+});
+
+test("assets_refresh that started no compile answers at once, unchanged", async () => {
+  await withTmp("refresh-nocompile-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makeFakeLive({ available: true, compileState: CLEAN_COMPILE_STATE });
+    const envelope = recompileEnvelope({ refreshed: true, wholeProject: true, isCompiling: false, compileDue: false, compileGenerationAtStart: 4 },
+      { generationAtStart: 4, generation: 4, pending: false, running: false });
+    live.route = async (tool, args) => { live.calls.push({ tool, args }); return envelope; };
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+    const body: Record<string, any> = parseBody(await router.route("unity_open_mcp_assets_refresh", {}));
+    assert.equal(body.status, undefined);
+    assert.equal(body.mutation.output.refreshed, true);
+    assert.equal(body.agentNextSteps[0], "Gate passed — no new issues detected.");
+  });
+});
+
+test("a compile that outlives the inline window continues as a jobs wait", async () => {
+  const root = await mkdtemp(join(tmpdir(), "recompile-job-"));
+  const path = lockPath(root);
+  try {
+    const live = makeFakeLive({ available: true, compileState: null });
+    live.route = async (tool, args) => {
+      live.calls.push({ tool, args });
+      // The compile the call requested starts right after it returns.
+      writeCompileLock(root, { state: "compiling", isCompiling: true, compile: { generation: 6, running: true, completed: false } });
+      return recompileEnvelope({ status: "compile_requested", requested: true, compileGenerationAtStart: 5 },
+        { generationAtStart: 5, generation: 5, pending: true, running: false });
+    };
+    live.pingProbe = async () => ({ reachable: false, httpStatus: null, body: null });
+    const router = new ToolRouter(live, makeFakeBatch(), root, makeFakeEventStream(), new ToolSessionState());
+    router.waitInlineLimitMs = 300;
+    try {
+      const result = await router.route("unity_open_mcp_recompile_scripts", {});
+      const body: Record<string, any> = parseBody(result);
+      assert.equal(result.isError, false);
+      assert.equal(body.status, "compiling");
+      assert.equal(typeof body.job_id, "string");
+      assert.equal(body.compile.generationAtStart, 5);
+      assert.match(body.agentNextSteps[0], /unity_open_mcp_jobs \{"action":"wait"/);
+      const job = parseBody(await router.route("unity_open_mcp_jobs", { action: "status", job_id: body.job_id }));
+      assert.equal(job.operation, "unity_open_mcp_editor_status");
+      await router.route("unity_open_mcp_jobs", { action: "cancel", job_id: body.job_id });
+    } finally { router.closeJobs(); }
+  } finally { rmSync(path, { force: true }); await rm(root, { recursive: true, force: true }); }
 });

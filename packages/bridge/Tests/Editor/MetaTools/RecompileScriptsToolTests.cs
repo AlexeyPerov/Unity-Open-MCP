@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 using UnityOpenMcpBridge.MetaTools;
 
@@ -11,27 +13,20 @@ namespace UnityOpenMcpBridge.Tests
     // wait via RebuildAfterSettle (on the worker thread). These tests pin that
     // contract without triggering a real recompile (which would domain-reload
     // the test run):
-    //   - the paths_hint guard,
     //   - RebuildAfterSettle leaving unparseable / not-requested payloads
-    //     untouched, and
+    //     untouched,
     //   - RebuildAfterSettle detecting a DLL mtime change from a synthetic
-    //     ScriptAssemblies dir (the recompiled:true flip).
+    //     ScriptAssemblies dir (the recompiled:true flip) and carrying the
+    //     scriptImport block through, and
+    //   - the script-import planning that brings new / deleted scripts in
+    //     before the compile is requested (ScriptImportSync, pure parts).
     public class RecompileScriptsToolTests
     {
         [Test]
-        public void Execute_MissingPathsHint_ReturnsPathsHintRequired()
-        {
-            var result = RecompileScriptsTool.Execute("{}");
-            Assert.IsFalse(result.Success);
-            Assert.AreEqual("paths_hint_required", result.ErrorCode);
-        }
-
-        [Test]
         public void RebuildAfterSettle_NotRequested_ReturnsInputUnchanged()
         {
-            // requested:false means nothing was scheduled — the payload keeps
-            // its request-error guidance and no worker-side wait happens.
-            var output = "{\"status\":\"ok\",\"requested\":false,\"wasCompiling\":false," +
+            // requested:false means nothing was scheduled — no worker-side wait.
+            var output = "{\"status\":\"compile_requested\",\"requested\":false,\"wasCompiling\":false," +
                 "\"recompiled\":false,\"isCompiling\":false,\"dllMtimeBefore\":1," +
                 "\"dllMtimeAfter\":1,\"scriptAssembliesDir\":\"X\"}";
             var rebuilt = RecompileScriptsTool.RebuildAfterSettle(output, out var extraWaitMs);
@@ -60,20 +55,84 @@ namespace UnityOpenMcpBridge.Tests
                 // loop exits immediately (mtime changed) and the rebuilt
                 // payload must flip recompiled:true with the contract fields
                 // intact.
-                var output = "{\"status\":\"ok\",\"requested\":true,\"wasCompiling\":false," +
+                var output = "{\"status\":\"compile_requested\",\"requested\":true,\"wasCompiling\":false," +
                     "\"recompiled\":false,\"isCompiling\":false,\"dllMtimeBefore\":1," +
-                    "\"dllMtimeAfter\":1,\"scriptAssembliesDir\":" + BridgeJson.EscapeString(dir) + "}";
+                    "\"dllMtimeAfter\":1,\"scriptAssembliesDir\":" + BridgeJson.EscapeString(dir) +
+                    ",\"compileGenerationAtStart\":7," +
+                    "\"scriptImport\":{\"action\":\"imported\",\"newScripts\":[\"Assets/New.cs\"],\"newCount\":1,\"deletedScripts\":[],\"deletedCount\":0}}";
                 var rebuilt = RecompileScriptsTool.RebuildAfterSettle(output, out _);
                 Assert.IsTrue(BridgeJson.IsValidJsonObject(rebuilt),
                     "rebuilt payload must be valid JSON: " + rebuilt);
                 StringAssert.Contains("\"recompiled\":true", rebuilt);
                 StringAssert.Contains("\"dllMtimeBefore\":1", rebuilt);
-                StringAssert.Contains("\"agentNextSteps\":", rebuilt);
+                StringAssert.Contains("\"compileGenerationAtStart\":7", rebuilt);
+                StringAssert.Contains("\"status\":\"compile_requested\"", rebuilt);
+                StringAssert.Contains("\"scriptImport\":{\"action\":\"imported\"", rebuilt);
+                StringAssert.DoesNotContain("\"status\":\"ok\"", rebuilt,
+                    "the request payload never claims the compile succeeded");
             }
             finally
             {
                 Directory.Delete(dir, true);
             }
+        }
+
+        [Test]
+        public void ScriptImportSync_Detect_FindsUnknownScriptsAndMissingCompiledInputs()
+        {
+            var known = new HashSet<string> { "Assets/Old.cs", "Assets/Game.asmdef" };
+            var onDisk = new[] { "Assets/Old.cs", "Assets/Game.asmdef", "Assets/New/NewType.cs", "Assets/Uses.asmref" };
+            var compiled = new[] { "Assets/Old.cs", "Assets/Gone.cs", "Assets/Game.asmdef", "Library/PackageCache/x/Y.cs" };
+            var exists = new HashSet<string> { "Assets/Old.cs", "Assets/Game.asmdef" };
+
+            var plan = ScriptImportSync.Detect(onDisk, known.Contains, compiled,
+                path => path.StartsWith("Assets/"), exists.Contains);
+
+            CollectionAssert.AreEqual(new[] { "Assets/New/NewType.cs", "Assets/Uses.asmref" }, plan.NewPaths);
+            CollectionAssert.AreEqual(new[] { "Assets/Gone.cs" }, plan.DeletedPaths,
+                "an immutable package's source is never reported as deleted");
+        }
+
+        [Test]
+        public void ScriptImportSync_Detect_InSyncProjectPlansNothing()
+        {
+            var paths = new[] { "Assets/A.cs", "Assets/B.cs" };
+            var plan = ScriptImportSync.Detect(paths, _ => true, paths, _ => true, _ => true);
+            Assert.IsEmpty(plan.NewPaths);
+            Assert.IsEmpty(plan.DeletedPaths);
+        }
+
+        [Test]
+        public void ScriptImportSync_ImportTargets_ImportsTheTopmostUnknownFolderOnce()
+        {
+            var knownFolders = new HashSet<string> { "Assets", "Assets/Scripts" };
+            var targets = ScriptImportSync.ImportTargets(new[]
+            {
+                "Assets/Scripts/Direct.cs",          // in a known folder: the file itself
+                "Assets/Scratch/NewType.cs",         // new folder: the folder, recursively
+                "Assets/Scratch/Deep/UsesIt.cs",     // inside that folder: covered already
+                "Assets/Scripts/Fresh/Other.cs",     // new sub-folder of a known one
+            }, knownFolders.Contains);
+
+            CollectionAssert.AreEquivalent(new[]
+            {
+                ("Assets/Scripts/Direct.cs", false),
+                ("Assets/Scratch", true),
+                ("Assets/Scripts/Fresh", true),
+            }, targets.Select(t => (t.Path, t.Recursive)).ToArray());
+        }
+
+        [Test]
+        public void ScriptImportSync_OutcomeJson_ListsWhatItImported()
+        {
+            var outcome = new ScriptImportSync.Outcome { Action = "imported" };
+            outcome.Plan.NewPaths.Add("Assets/New.cs");
+            var json = outcome.ToJson();
+            Assert.IsTrue(BridgeJson.IsValidJsonObject(json), json);
+            StringAssert.Contains("\"action\":\"imported\"", json);
+            StringAssert.Contains("\"newScripts\":[\"Assets/New.cs\"]", json);
+            StringAssert.Contains("\"newCount\":1", json);
+            StringAssert.Contains("\"deletedCount\":0", json);
         }
     }
 }

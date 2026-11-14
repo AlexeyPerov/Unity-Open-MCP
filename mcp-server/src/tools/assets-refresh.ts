@@ -11,10 +11,12 @@ export const assetsRefresh = makeTool(
   "unity_open_mcp_assets_refresh",
   "Refresh the AssetDatabase to pick up files added/removed/changed on disk outside " +
     "Unity. Use after direct filesystem edits (e.g. creating folders, dropping textures). " +
-    "May trigger asset import and, for .cs files, a recompile + domain reload that runs AFTER " +
-    "the call returns: the result's `compile` block (`generationAtStart`, `pending`) and " +
-    "agentNextSteps then name unity_open_mcp_editor_status {\"wait_until\":\"idle\",\"after_generation\":N}, " +
-    "which returns once that compile ran, with its status and error count. Light mutation: " +
+    "When the refresh imports scripts and starts a compile, the call waits for that compile " +
+    "and its domain reload and the compile is the answer: `status` `compiled` | `compile_failed` | " +
+    "`compiling` (past ~40 s the wait continues as a unity_open_mcp_jobs job) and " +
+    "`compile: {generationAtStart, generation, status, errorCount, errors}`; a failed compile " +
+    "fails the call (mutation.error.code `compile_failed`; the import itself is kept). A refresh " +
+    "that starts no compile answers at once, unchanged. Light mutation: " +
     "runs the gate path. Pass `whole_project: true` (default) " +
     "when you changed files in arbitrary places; pass it `false` with a scoped `paths_hint` " +
     "for a known small change set.",

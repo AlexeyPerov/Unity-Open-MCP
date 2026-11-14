@@ -1112,6 +1112,13 @@ namespace UnityOpenMcpBridge
                         // default scope.
                         pathsHint = new[] { "Assets" };
                     }
+                    else if (toolName == "unity_open_mcp_recompile_scripts")
+                    {
+                        // A recompile is project-wide and has no natural asset
+                        // scope; without an explicit hint the gate validates
+                        // the Assets tree, like a whole-project refresh.
+                        pathsHint = new[] { "Assets" };
+                    }
                     else if (toolName == "unity_open_mcp_reimport_package")
                     {
                         // reimport_package's scope IS the named local package;

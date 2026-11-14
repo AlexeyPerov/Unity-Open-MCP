@@ -107,7 +107,11 @@ The check runs before dispatch, so a missing `paths_hint` returns
 "request_rejected"` — nothing ran and no gate was evaluated. Tools that expose
 `read_only` (today: `execute_csharp`) waive the requirement for inspection-only
 requests; known disruptive calls keep it. A read-only `execute_menu` path and
-an all-read batch waive it too.
+an all-read batch waive it too. The project-wide operations have a declared
+default scope instead: `assets_refresh` with `whole_project: true`, its menu
+form `execute_menu "Assets/Refresh"`, and `recompile_scripts` scope the gate to
+`["Assets"]` when `paths_hint` is omitted; `reimport_package` scopes it to
+`Packages/<package_id>`.
 
 Rule auto-selection maps the `paths_hint` extensions to rule families. Only
 **registered** rule families are ever auto-selected: image (`.png`, `.jpg`,

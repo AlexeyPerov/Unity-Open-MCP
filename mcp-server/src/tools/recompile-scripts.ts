@@ -7,38 +7,34 @@ import { IGNORE_SCENE_DIRTY_BASE, GATE_PROP, PATHS_HINT_TYPE, makeTool } from ".
 // change), leaving the running assembly stale while read_compile_errors reports
 // the old healthy state.
 //
-// Mutating: calls CompilationPipeline.RequestScriptCompilation and blocks on
-// the post-request compile via its restart_then_settle lifecycle. The response
-// reports dllMtimeBefore / dllMtimeAfter (newest Library/ScriptAssemblies/*.dll
-// mtime, in UTC ticks) and a recompiled boolean so a no-op recompile is
-// detectable; on a no-op or an already-in-flight compile, agentNextSteps points
-// at the right fallback (assets_refresh / reimport_package / the editor_status wait).
+// Mutating: imports script files Unity has not seen yet (new or deleted .cs /
+// .asmdef / .asmref), calls CompilationPipeline.RequestScriptCompilation, and
+// the router waits for that compile (compile-result.ts): its status, generation
+// and error count are the call's answer, and a failed compile fails the call.
 export const recompileScripts = makeTool(
   "unity_open_mcp_recompile_scripts",
-  "Force Unity to recompile ALL scripts and block until the compile settles. Use this when " +
-    "unity_open_mcp_assets_refresh or unity_open_mcp_execute_csharp fail to recompile after a C# edit " +
-    "(Unity's incremental compiler frequently no-ops on unchanged-import views, leaving the running " +
-    "assembly stale while read_compile_errors reports the old healthy state). Mutating: calls " +
-    "CompilationPipeline.RequestScriptCompilation and blocks on the compile via its restart_then_settle " +
-    "lifecycle (a domain reload may follow). The response reports dllMtimeBefore / dllMtimeAfter (newest " +
-    "Library/ScriptAssemblies/*.dll mtime, in UTC ticks) and a recompiled boolean so a no-op recompile is " +
-    "detectable; agentNextSteps branches on the outcome. The domain reload usually cuts the response off " +
-    "(`triggered_reload`): wait with unity_open_mcp_editor_status {\"wait_until\":\"idle\"} for the compile " +
-    "status and error count. paths_hint is the set of script assets you edited " +
-    "(the gate validates the post-recompile state of those paths). Prefer this over assets_refresh when you " +
-    "need a DETERMINISTIC recompile of edited C#.",
+  "Force Unity to recompile ALL scripts and return the compile result. Use it after editing or adding C# " +
+    "(it is deterministic where unity_open_mcp_assets_refresh / execute_csharp can leave the running assembly " +
+    "stale). First imports script files Unity has not seen yet — new or deleted .cs / .asmdef / .asmref written " +
+    "outside Unity (`scriptImport` lists them) — then calls CompilationPipeline.RequestScriptCompilation and " +
+    "waits for that compile and its domain reload. The answer is the compile: `status` `compiled` | " +
+    "`compile_failed` | `no_compile_ran` | `compiling` (past ~40 s the wait continues as a unity_open_mcp_jobs " +
+    "job — wait on its job_id) and `compile: {generationAtStart, generation, status, errorCount, errors}` with " +
+    "the first errors inline. A failed compile is a failed call (isError, mutation.error.code `compile_failed`); " +
+    "fix the errors and call it again. dllMtimeBefore / dllMtimeAfter / recompiled in mutation.output show " +
+    "whether the assemblies were rewritten. Disruptive: refused with `scene_dirty` while a loaded scene has " +
+    "unsaved changes. paths_hint is optional (default [\"Assets\"]).",
   {
-    required: ["paths_hint"],
         properties: {
           ignore_scene_dirty: { ...IGNORE_SCENE_DIRTY_BASE, description: "Opt out of the active-scene dirty guard. When false (default), the call is refused with code `scene_dirty` if any loaded scene has unsaved changes (the reload this call triggers could raise Unity's native save modal). Set true to proceed and accept the risk." },
           paths_hint: {
             ...PATHS_HINT_TYPE,
             description:
-              "Mutation scope — the script asset(s) you edited (e.g. [\"Assets/Scripts/MyClass.cs\"]). " +
-              "The gate validates the post-recompile state of these paths. The recompile itself is " +
-              "project-wide; paths_hint exists to give the gate a non-empty, scoped hint.",
+              "Optional gate scope — the script asset(s) you edited (e.g. [\"Assets/Scripts/MyClass.cs\"]). " +
+              "Defaults to [\"Assets\"]: the recompile itself is project-wide, so the gate validates the " +
+              "whole Assets tree unless you narrow it.",
           },
-          gate: { ...GATE_PROP, description: "Gate mode. Default 'enforce' — fails the call if the recompile surfaces new errors." },
+          gate: { ...GATE_PROP, description: "Gate mode. Default 'enforce' — fails the call if the recompile surfaces new asset-validation errors. The compile result is reported either way." },
         },
   },
 );

@@ -225,7 +225,10 @@ starts that compile on a later update, and `isCompiling` can read false in the
 gap, so `pending` (a compile requested and not started yet) is the handshake:
 when a compile is due, `agentNextSteps` names
 `editor_status {"wait_until":"idle","after_generation":N}`, which returns only
-after that compile (and its domain reload) ran.
+after that compile (and its domain reload) ran. The compile-type tools —
+`recompile_scripts`, and `assets_refresh` when it started a compile — make
+that wait themselves and replace the block with the compile result; see
+[`recompile_scripts`](#unity_open_mcp_recompile_scripts).
 
 `execute_csharp` accepts `read_only: true` for pure-read probes (type lookups,
 `SessionState` reads, console reads): it waives the `paths_hint` requirement and
@@ -385,8 +388,9 @@ concrete meta-tool equivalent exists, the refusal message also names it — a
 client that ignores `tools/list_changed` cannot see a tool `manage_tools` just
 activated, so "use it as a single top-level call" alone would be a dead end for
 it. `recompile_scripts` points at the `CompilationPipeline.RequestScriptCompilation()`
-`execute_csharp` one-liner plus the `editor_status` wait; `run_tests` points at
-`invoke_method` / a `TestRunnerApi` snippet.
+`execute_csharp` one-liner plus the `editor_status` wait (scripts Unity has not
+imported yet need an `assets_refresh` first — the top-level tool imports them
+itself); `run_tests` points at `invoke_method` / a `TestRunnerApi` snippet.
 
 Nestability is a separate axis from the capability surface's `batchCapable` flag,
 which is about the headless batch-spawn fallback. Read the refusals above, not
@@ -669,10 +673,48 @@ start their own compile and never flip a clean generation to `assembly_stale` on
 their own.
 Right after a domain reload the bridge recomputes that fingerprint in the
 background; until the pass completes it reports `indeterminate` — never
-`assembly_stale` — and the server falls back to its log and mtime heuristics
-for that result.
+`assembly_stale`. A live `currently_compiling` or `pending` answer names the
+`editor_status` wait (with `after_generation`) in its headline and
+`agentNextSteps`.
 Old log errors and issues remain separately in `historicalLogErrors` and
 `historicalLogIssues`; they do not override a confirmed current compile.
+
+Every answer carries `determinacy`: `current` (backed by the live Editor —
+a compile generation, or its instance lock as below), `log_evidence` (offline
+log errors or issues no compile generation confirms), or `indeterminate`.
+
+**The live Editor is reachable but gives no determinate state.** Its instance
+lock is fresh (it is compiling, reloading, changing play mode, its main thread
+is busy — an unfocused Editor can take over a second per main-thread hop — or
+its fingerprint is still warming), but `/compile-state` did not answer or
+answered `indeterminate`. A settled Editor is asked again for up to ~3 s.
+After that the answer comes from the lock's compile block, never from the log
+alone: `compileSource: "instance_lock"`, `_source: "local"`, `generation`,
+`pending`, `running`, `lastCompileFailed`, `editorPhase`, `transition`,
+`liveProbe` (`unanswered` / `indeterminate`). A compile running or requested is
+`currently_compiling`; a last compile that failed stays `compile_failed` (with
+the log's current diagnostics as `errors`, `errorSource: "Editor.log"`);
+anything else is `indeterminate` with the last generation's outcome in the
+headline and the `editor_status {"wait_until":"idle"}` call in
+`agentNextSteps` — never a clean verdict.
+
+**Offline (no live Editor, or a dead bridge).** The log is read alone only
+then, and its errors are classified first. Unity writes no timestamp on a
+compile block, but it ends every script build with
+`*** Tundra build success|failed|interrupted`. An error is **historical**
+(`historical: true`, `historicalReason`) and never drives `status` when it was
+logged before a later successful build (`superseded_by_later_build`), when the
+log was last written before the newest `Library/ScriptAssemblies` DLL
+(`log_predates_assemblies`), or when the cited file under `Assets/` (or an
+absolute path) is gone (`source_missing`) or shorter than the cited line
+(`source_changed`). Historical errors are listed in `historicalLogErrors`;
+`errors` holds only the current ones, and `lastLogBuild` names the last build's
+outcome. A read with no current errors is **`indeterminate`** — never
+`no_errors_found`: no compile generation backs it, and the log can predate the
+edits, come from another Editor session or miss a compile still running. The
+raw verdict stays in `logVerdict`, and `agentNextSteps` names the way to a
+determinate answer (open the project / headless `compile_check` with no
+Editor; the `editor_status` wait when an Editor is there).
 
 Besides CSxxxx diagnostics, the log scan reports package- and assembly-level
 `issues` (`kind`: `editor_fd_exhaustion`, `package_install_failed`,
@@ -690,8 +732,8 @@ the remedy: free disk space for ENOSPC, check the network for download
 errors, otherwise delete the package's cache folder; then reopen the project
 (or run `compile_check` headless) so UPM re-resolves.
 
-If the bridge cannot provide a confirmed generation, the tool falls back to
-log evidence with the following freshness and authorship caveats. It never spawns Unity.
+Offline answers also carry the following freshness and authorship caveats. The
+tool never spawns Unity.
 
 Resolves the authoritative `Editor.log` per platform. Unity 6000.5+ writes a
 project-relative log (`<project>/Logs/Editor.log`); pre-6000.5 writes the global
@@ -747,7 +789,7 @@ that branches on `unhealthy` will not treat phantom errors as a hard failure.
 The response also carries `staleAssembly: true` when at least one
 `Assets/**/*.cs` source is newer than the newest `Library/ScriptAssemblies/*.dll`
 — the running assembly predates the latest source (Unity's incremental compiler
-no-op'd a recompile), so a `no_errors_found` signal **cannot** be trusted until
+no-op'd a recompile), so a clean log says nothing about the current code until
 the assembly is rebuilt. When that flag is set **with errors**, the `headline`
 itself carries the may-predate caveat (not only the separate
 `staleAssemblyHint` field) — errors parsed from a compile that predates the
@@ -765,12 +807,9 @@ group-table ↔ registry parity plus every call site), so a hint can no longer
 send an agent to activate a group for a tool that does not exist.
 
 When `logSource` is a `prev_log_*` value (the resolver fell back to the
-ROTATED `Editor-prev.log`) and the read finds no errors, `status` is
-**`indeterminate`**, not `no_errors_found` — a clean read from the rotated log
-is not a verified clean bill of health while a live Editor may be writing a
-different log. The headline says exactly that and points at the live bridge
-(`editor_status` / a live probe) for confirmation; the raw verdict is preserved
-in `logVerdict`.
+ROTATED `Editor-prev.log`) and the read finds no errors, the `indeterminate`
+headline says the read came from the rotated log while a live Editor may be
+writing a different one.
 
 When the log header was parseable (a short `-batchmode` run usually fits in the
 tail; a long live-editor session usually does not), the response also carries
@@ -787,20 +826,57 @@ the inverse of the stale-log trap is just as dangerous.
 
 ### `unity_open_mcp_recompile_scripts`
 
-A deterministic "force a real recompile and wait for it" primitive. Calls
-`CompilationPipeline.RequestScriptCompilation()` and blocks until the
-compile settles via its `restart_then_settle` lifecycle. Use this when
-`assets_refresh` / `execute_csharp` fail to recompile after a C# edit — Unity's
-incremental compiler frequently no-ops on unchanged-import views, leaving the
-running assembly stale. The response reports `dllMtimeBefore` / `dllMtimeAfter`
-(newest `Library/ScriptAssemblies/*.dll` mtime, UTC ticks) and a `recompiled`
-boolean so a no-op is detectable; `agentNextSteps` branches on the outcome
-(the `editor_status` wait keyed to `compileGenerationAtStart` when rebuilt or
-still compiling, fall back to `assets_refresh` / `reimport_package` when Unity
-judged sources unchanged). The domain reload usually cuts the response off; the
-call then answers `triggered_reload` with the same wait. The recompile is
-project-wide; `paths_hint` exists only to give the gate a scoped hint (the
-edited scripts).
+A deterministic "recompile and tell me the result" primitive. Use it after
+editing or adding C# — Unity's incremental compiler can leave the running
+assembly stale after `assets_refresh` / `execute_csharp`.
+
+1. **Imports scripts Unity has not seen.** New or deleted `.cs` / `.asmdef` /
+   `.asmref` files written outside Unity (under `Assets/` and local or embedded
+   packages) are brought in first: new files with a scoped import (the topmost
+   folder Unity does not know, recursively, or the file), a deletion with one
+   `AssetDatabase.Refresh`. Without this a new type is in no assembly and every
+   use of it fails with CS0103 / CS0246. `mutation.output.scriptImport` reports
+   `action` (`none` / `imported` / `refreshed`) and the paths.
+2. **Requests the compile** (`CompilationPipeline.RequestScriptCompilation()`)
+   and reports the request: `status: "compile_requested"`, `dllMtimeBefore` /
+   `dllMtimeAfter` (newest `Library/ScriptAssemblies/*.dll` mtime, UTC ticks),
+   `recompiled`, `compileGenerationAtStart`.
+3. **Waits for that compile and answers with it.** The MCP server runs the
+   `editor_status` wait keyed to the call's generation, through the domain
+   reload (which usually closes the bridge's response — `triggeredReload: true`
+   then stays on the answer). Top-level `status`: `compiled` (`compile.status`
+   `no_errors_found`, or `assembly_stale` when sources changed again during the
+   compile), `compile_failed`, `no_compile_ran`, `compile_unverified`, or the
+   wait's error code (`bridge_compile_failed` when the bridge did not come
+   back). `compile: {generationAtStart, generation, status, errorCount,
+   errorSource, ran, errors (first 5), transitionsSeen, waitedMs}` and a
+   `headline` carry the result. The wait runs inside the call for what is left
+   of ~40 s; a longer compile answers `status: "compiling"` with the `job_id`
+   of the [`jobs`](jobs.md) wait that continues (its result is the compile
+   status and error count). The CLI waits inline.
+
+**A failed compile is a failed call** (decision for the compile-type tools):
+`isError: true`, `mutation.success: false` and `mutation.error` =
+`{code: "compile_failed", message, errorCount, generation, errors}` — the same
+refusal shape as any failed tool call — with `mutation.output` kept. Its
+`agentNextSteps` lead with the failure and the first error; the gate's
+"Gate passed" line (it only validated assets, before the compile ran) and the
+bridge's wait advice are dropped. `_compileVerify` is not attached to this tool:
+the compile result supersedes that pre-compile snapshot (other compile-reload
+tools keep the additive annotation).
+
+`assets_refresh` follows the same contract **when it started a compile**
+(`compileDue`, a pending or running compile, or a generation past its start):
+it waits and answers with the compile, and a failed compile fails the call
+(the import itself is kept). A refresh that started no compile answers at
+once, unchanged.
+
+`paths_hint` is optional and defaults to `["Assets"]` on every route (direct,
+`manage_tools` invoke; inside `batch_execute` the tool is refused as
+reload-unsafe either way). The call is disruptive: refused with `scene_dirty`
+while a loaded scene has unsaved changes (`ignore_scene_dirty` opts out).
+`compile_request_failed` means `RequestScriptCompilation` itself threw; nothing
+was compiled.
 
 ### `unity_open_mcp_upgrade`
 
@@ -1061,10 +1137,14 @@ domain reload it waits for.
   `job_id` (the job's result is the wait's answer). The CLI waits inline for
   the whole budget. On budget exhaustion: `wait_timeout` with `holdingFor`.
 
-Use it after `editor_set_state`, `assets_refresh`, `recompile_scripts`,
-`script_write`, asmdef / package / define edits and `Assets/Refresh` instead of
-polling; their `agentNextSteps` name the exact call. Inside `batch_execute` a
-`wait_until` step is refused (`batch_step_requires_server_poll`).
+Use it after `editor_set_state`, `script_write`, asmdef / package / define
+edits and `Assets/Refresh` instead of polling; their `agentNextSteps` name the
+exact call. `recompile_scripts` and a compile-starting `assets_refresh` run
+this wait themselves and answer with the compile result (see
+[`recompile_scripts`](#unity_open_mcp_recompile_scripts)); a `compiling`
+answer carries the `job_id` of the wait that continues. Inside
+`batch_execute` a `wait_until` step is refused
+(`batch_step_requires_server_poll`).
 
 ### `unity_open_mcp_dependencies`
 

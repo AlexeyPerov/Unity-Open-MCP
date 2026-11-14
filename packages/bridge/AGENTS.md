@@ -53,7 +53,12 @@ Bridge reports compiled inventory only — no MCP session state.
 ## Gate policy
 
 - Every mutating path goes through `GatePolicy.Execute`.
-- `paths_hint` is mandatory — no whole-project fallback.
+- `paths_hint` is mandatory — no whole-project fallback. The exceptions are the
+  project-wide operations with a declared default scope in
+  `BridgeHttpServer` (`assets_refresh` whole-project and its `Assets/Refresh`
+  menu form, `recompile_scripts` → `Assets`; `reimport_package` →
+  `Packages/<id>`); keep them listed in
+  [Gate policy](../../docs/api/bridge-http.md#gate-policy).
 - Valid request `gate` wins; omitted/malformed/unknown →
   `BridgeGateDefaultPolicy`. `[BridgeTool].Gate` is catalog metadata only.
   Keep [Gate policy](../../docs/api/bridge-http.md#gate-policy) aligned.

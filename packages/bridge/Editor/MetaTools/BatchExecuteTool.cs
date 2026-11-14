@@ -109,8 +109,10 @@ namespace UnityOpenMcpBridge.MetaTools
                            "execute_csharp call with read_only:true — " +
                            "`UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation(); " +
                            "return \"requested\";` — then wait with unity_open_mcp_editor_status " +
-                           "{\"wait_until\":\"idle\"}. That is what this tool does; it only adds the before/after " +
-                           "Library/ScriptAssemblies mtimes that make a no-op recompile detectable.";
+                           "{\"wait_until\":\"idle\"}, which reports the compile status and error count. " +
+                           "Scripts written outside Unity that it has not imported yet need " +
+                           "unity_open_mcp_assets_refresh first; the top-level tool does that import itself " +
+                           "and waits for the compile.";
                 case "unity_senses_run_tests":
                     return "If your client cannot see the top-level tool (a manage_tools activation " +
                            "whose tools/list_changed it ignored), invoke the test class or method " +

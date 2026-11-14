@@ -153,14 +153,13 @@ export const TOOL_LIFECYCLE: Record<string, ToolLifecycle> = {
   "unity_open_mcp_recompile_scripts": {
     class: "compile-reload",
     note:
-      "Calls CompilationPipeline.RequestScriptCompilation and blocks until the " +
-      "compile settles; a domain reload follows. The recompile is project-wide " +
-      "(unlike reimport_package, which is package-scoped). The response reports " +
-      "dllMtimeBefore/After + recompiled so a no-op recompile is detectable; " +
-      "agentNextSteps branches on the outcome (read_compile_errors when " +
-      "recompiled, poll isCompiling when a compile was already in flight, fall " +
-      "back to assets_refresh/reimport_package when Unity judged sources " +
-      "unchanged).",
+      "Imports scripts Unity has not seen (new/deleted .cs/.asmdef/.asmref), " +
+      "calls CompilationPipeline.RequestScriptCompilation, and the server waits " +
+      "through the compile and its domain reload: the compile result (status, " +
+      "generation, error count, first errors) is the call's answer, and a failed " +
+      "compile fails the call. Past ~40 s the wait continues as a jobs job. The " +
+      "recompile is project-wide (unlike reimport_package, which is " +
+      "package-scoped); paths_hint defaults to Assets.",
   },
 
   // ----- process-stale: long-running / async; bridge may stall -------------
