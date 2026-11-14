@@ -430,6 +430,58 @@ namespace UnityOpenMcpBridge.Tests
             }
         }
 
+        // An EditMode run swaps scenes, and Unity destroys loose objects with
+        // default hide flags when it does. The api must outlive the run, and a
+        // finished run must leave the framework's callback holder and the
+        // registry even if its api is already destroyed — otherwise its
+        // callbacks fire for every later run and rewrite its results file.
+        [Test]
+        public void ReleaseCallbacks_DetachesAPairWhoseApiIsAlreadyDestroyed()
+        {
+            var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+            var registry = (System.Collections.IList)typeof(TestRunnerState).GetField("ActiveRegistry", flags).GetValue(null);
+            int before = registry.Count;
+
+            var api = TestRunnerState.CreateApi();
+            Assert.AreEqual(UnityEngine.HideFlags.HideAndDontSave, api.hideFlags,
+                "default flags do not survive the run's scene swap");
+            var callbacks = new TestCallbacks(onResult: _ => { }, onFinished: _ => { });
+            try
+            {
+                api.RegisterCallbacks(callbacks);
+                TestRunnerState.RegisterActive(api, callbacks, RunId("release"), "EditMode");
+                Assert.IsTrue(FrameworkHolds(callbacks), "precondition: the framework holds the callbacks");
+
+                UnityEngine.Object.DestroyImmediate(api);
+                TestRunnerState.ReleaseCallbacks(api, callbacks);
+
+                Assert.IsFalse(FrameworkHolds(callbacks), "a destroyed api must not keep the callbacks registered");
+                Assert.AreEqual(before, registry.Count, "the pair left the registry");
+            }
+            finally
+            {
+                // Never leave a stray registration behind in the real runner.
+                var cleanup = TestRunnerState.CreateApi();
+                cleanup.UnregisterCallbacks(callbacks);
+                UnityEngine.Object.DestroyImmediate(cleanup);
+                TestRunnerState.UnregisterActive(api, callbacks);
+                if (api != null) UnityEngine.Object.DestroyImmediate(api);
+            }
+        }
+
+        // The framework's callback holder is internal; read it by reflection.
+        private static bool FrameworkHolds(TestCallbacks callbacks)
+        {
+            var apiType = typeof(UnityEditor.TestTools.TestRunner.Api.TestRunnerApi);
+            var holder = apiType.GetProperty("CallbacksHolder",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)?.GetValue(null);
+            var all = holder?.GetType().GetMethod("GetAll")?.Invoke(holder, null) as System.Array;
+            if (all == null) Assert.Inconclusive("The Test Framework's callback holder is not readable in this version.");
+            foreach (var entry in all)
+                if (ReferenceEquals(entry, callbacks)) return true;
+            return false;
+        }
+
         [Test]
         public void ForeignLiveProcessMarkerIsNeitherSweptNorSuperseded()
         {

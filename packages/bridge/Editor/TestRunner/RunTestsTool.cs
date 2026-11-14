@@ -146,16 +146,11 @@ namespace UnityOpenMcpBridge.TestRunner
                     // session. On the next run, run 1's TestFinished fires again
                     // and appends run 2's results to run 1's list, then rewrites
                     // test-results-<runId1>.json with merged, wrong counts.
-                    // UnregisterCallbacks is the documented counterpart and
-                    // removes the instance from that holder.
-                    if (api != null && callbacks != null)
-                    {
-                        try { api.UnregisterCallbacks(callbacks); } catch { }
-                        // A6 — also drop the pair from the active registry so a
-                        // later DrainActiveCallbacks sweep does not touch it.
-                        TestRunnerState.UnregisterActive(api, callbacks);
-                        Object.DestroyImmediate(api);
-                    }
+                    // ReleaseCallbacks unregisters whether or not the api is
+                    // still alive, and drops the pair from the active registry
+                    // (A6) so a later DrainActiveCallbacks sweep does not report
+                    // this finished run as superseded.
+                    TestRunnerState.ReleaseCallbacks(api, callbacks);
                     // Unconditional for all modes — see MarkPending note above.
                     TestRunnerState.ClearPending(runId);
                     TestRunnerService.WriteResultsFile(runId, mode, results, includePasses);
@@ -193,7 +188,7 @@ namespace UnityOpenMcpBridge.TestRunner
                 // ScriptableObject and must be created on the main thread (which
                 // update guarantees), and the callbacks close over it so the
                 // onFinished callback can destroy it.
-                api = ScriptableObject.CreateInstance<TestRunnerApi>();
+                api = TestRunnerState.CreateApi();
                 api.RegisterCallbacks(callbacks);
                 TestRunnerState.RegisterActive(api, callbacks, runId, mode);
                 try
@@ -210,9 +205,7 @@ namespace UnityOpenMcpBridge.TestRunner
                     // callbacks were already registered above, so a rejected
                     // Execute still leaves them subscribed in the domain-level
                     // holder. Unregister before destroying the api.
-                    try { api.UnregisterCallbacks(callbacks); } catch { }
-                    TestRunnerState.UnregisterActive(api, callbacks);
-                    Object.DestroyImmediate(api);
+                    TestRunnerState.ReleaseCallbacks(api, callbacks);
                     // B9 — clear the pending marker so it does not linger. The
                     // onFinished callback (the only other ClearPending site)
                     // never fires for a rejected Execute, so without this the

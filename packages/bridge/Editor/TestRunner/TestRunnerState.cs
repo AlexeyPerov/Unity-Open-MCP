@@ -59,8 +59,8 @@ namespace UnityOpenMcpBridge.TestRunner
             // Import workers also load Editor assemblies. They must not sweep
             // or reattach the interactive Editor's test runs.
             if (Application.isBatchMode) return;
-            // A destroyed runner can leave a callback registration after terminal output.
-            // The pending marker, cleared before result publication, owns execution.
+            // The pending marker, cleared before result publication, owns
+            // execution; a registry entry alone does not mean a run is active.
             ProjectCommandJobs.TestRunActive = () => Tool_TestRunner.RunScheduled
                 || ActiveRegistry.Exists(a => File.Exists(PendingFilePath(a.RunId)));
             // specs/feedback.md 2026-08-24 — finalize markers from a DEAD Editor
@@ -113,6 +113,38 @@ namespace UnityOpenMcpBridge.TestRunner
             ActiveRegistry.RemoveAll(a => ReferenceEquals(a.Api, api) && ReferenceEquals(a.Callbacks, callbacks));
         }
 
+        /// <summary>The api a run registers its callbacks through. It must be
+        /// HideAndDontSave: an EditMode run swaps scenes, and Unity destroys
+        /// loose objects with default flags when it does — the api was already
+        /// destroyed by RunFinished, and every cleanup guarded by `api != null`
+        /// was skipped.</summary>
+        internal static TestRunnerApi CreateApi()
+        {
+            var api = ScriptableObject.CreateInstance<TestRunnerApi>();
+            api.hideFlags = HideFlags.HideAndDontSave;
+            return api;
+        }
+
+        /// <summary>Detach a pair for good: unregister the callbacks from the
+        /// framework's domain-level holder, drop the pair from the registry and
+        /// destroy the api. Unregistering never depends on the api still being
+        /// alive — `api` may be destroyed (Unity-null) while its managed object
+        /// still reaches the holder. Left registered, the callbacks fire for
+        /// every later run: they sum its results into this run's list, rewrite
+        /// test-results-&lt;this runId&gt;.json and re-write its started marker.</summary>
+        internal static void ReleaseCallbacks(TestRunnerApi api, TestCallbacks callbacks)
+        {
+            if (!ReferenceEquals(api, null) && callbacks != null)
+            {
+                try { api.UnregisterCallbacks(callbacks); } catch { }
+            }
+            UnregisterActive(api, callbacks);
+            if (api != null)
+            {
+                try { Object.DestroyImmediate(api); } catch { }
+            }
+        }
+
         /// <summary>Unregister + destroy every pair still in the registry. Only
         /// leaks reach here: a pair whose onFinished fired already removed
         /// itself. Safe to call when the registry is empty.</summary>
@@ -129,14 +161,9 @@ namespace UnityOpenMcpBridge.TestRunner
             ActiveRegistry.RemoveAll(entry => onlyMode == null || entry.Mode == onlyMode);
             foreach (var entry in snapshot)
             {
-                if (entry.Api != null && entry.Callbacks != null)
-                {
-                    try { entry.Api.UnregisterCallbacks(entry.Callbacks); } catch { }
-                }
-                if (entry.Api != null)
-                {
-                    try { Object.DestroyImmediate(entry.Api); } catch { }
-                }
+                // Already out of the registry (RemoveAll above); this unregisters
+                // from the framework and destroys the api, dead or alive.
+                ReleaseCallbacks(entry.Api, entry.Callbacks);
                 // feedback #7 — leave a terminal file so the poller stops
                 // waiting. Only when a reason is supplied (superseded by a new
                 // run, or play mode entered); the beforeAssemblyReload drain
@@ -476,17 +503,12 @@ namespace UnityOpenMcpBridge.TestRunner
                     // previous instance's closure (capturing this `results`
                     // list and `runId`) stays subscribed and pollutes the next
                     // run with merged counts.
-                    if (api != null && callbacks != null)
-                    {
-                        try { api.UnregisterCallbacks(callbacks); } catch { }
-                        UnregisterActive(api, callbacks);
-                        Object.DestroyImmediate(api);
-                    }
+                    ReleaseCallbacks(api, callbacks);
                     ClearPending(runId);
                     TestRunnerService.WriteResultsFile(runId, mode, results, includePasses);
                 });
 
-            api = ScriptableObject.CreateInstance<TestRunnerApi>();
+            api = CreateApi();
             api.RegisterCallbacks(callbacks);
             RegisterActive(api, callbacks, runId);
             // Deliberately NOT calling api.Execute(...) — see the B8 note above.
