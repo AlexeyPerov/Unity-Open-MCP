@@ -836,14 +836,16 @@ function buildSuite() {
   s("spriteatlas_delete", "C", "unity_open_mcp_spriteatlas_delete", { asset_path: FT_SPRITEATLAS, paths_hint: [FT_SPRITEATLAS] }, { gate: true, expect: "gate" });
   s("texture_get", "C", "unity_open_mcp_texture_get", { asset_path: "Assets/Textures/rainbowtexture.png" });
   s("texture_get_importer", "C", "unity_open_mcp_texture_get_importer", { asset_path: "Assets/Textures/rainbowtexture.png" }, {
-    after: (r, ctx) => { ctx.textureMaxSize = pluck(r, "maxTextureSize") ?? pluck(r, "importer.maxTextureSize") ?? pluck(r, "settings.maxTextureSize"); },
+    after: (r, ctx) => { ctx.textureMaxSize = pluck(r, "mutation.output.maxTextureSize") ?? pluck(r, "maxTextureSize"); },
   });
   s("texture_reimport", "C", "unity_open_mcp_texture_reimport", { asset_path: "Assets/Textures/rainbowtexture.png", paths_hint: ["Assets/Textures/rainbowtexture.png"] }, { gate: true, expect: "gate" });
-  // Get-then-set-same: re-applies the current max size so the tracked .meta does not change.
+  // Get-then-set-same: re-applies the max size texture_get_importer read, so
+  // the import settings keep their values (Unity may still re-serialize an
+  // old-format .meta). The fallback is the demo texture's tracked value.
   s("texture_set_import", "C", "unity_open_mcp_texture_set_import", {
     resolveArgs: (ctx) => ({
       asset_path: "Assets/Textures/rainbowtexture.png",
-      settings_json: JSON.stringify({ max_texture_size: ctx.textureMaxSize ?? 2048 }),
+      settings_json: JSON.stringify({ max_texture_size: ctx.textureMaxSize ?? 1024 }),
       paths_hint: ["Assets/Textures/rainbowtexture.png"],
     }),
   }, { gate: true, expect: "gate" });
