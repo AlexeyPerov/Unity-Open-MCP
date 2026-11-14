@@ -71,6 +71,10 @@ These drive tools through `unity-open-mcp run-tool` (one fresh process per call)
 S1 gate explanations compare the captured `checkpoint_id` against current state;
 `mutation_explain` does not accept a nested mutation `args` payload.
 
+`node scripts/mcp-full-test.mjs --check-args` validates every S0 step's arguments
+against the built tool schemas without Unity (exit 1 on any mismatch); the
+`mcp-server` tests run it, so update the step in the same change as a schema.
+
 Shared helpers for S0–S5 live in [`mcp-test-lib.mjs`](mcp-test-lib.mjs) (not run directly). Every CLI invocation runs in its own process group and the whole group is killed when the call completes — a timed-out step takes its headless Unity child with it instead of orphaning an Editor that holds the project lock until its own 10-minute timeout.
 
 ### Common flags

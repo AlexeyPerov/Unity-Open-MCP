@@ -78,6 +78,19 @@ test("value aliases translate their value; plain aliases keep it", () => {
   assert.deepEqual(wireArguments({ text: "Victory" }, tool("ui_snapshot").inputSchema), { text_contains: "Victory" });
 });
 
+test("every instance_id property accepts the string ids tools return", () => {
+  const offenders: string[] = [];
+  const walk = (tool: string, schema: any, path: string) => {
+    for (const [key, prop] of Object.entries<any>(schema?.properties ?? {})) {
+      if (/(^|_)instance_id$/.test(key) && !(Array.isArray(prop.type) ? prop.type : [prop.type]).includes("string")) offenders.push(`${tool} ${path}${key}`);
+      if (prop.items) walk(tool, prop.items, `${path}${key}[].`);
+    }
+  };
+  for (const t of ALL_TOOLS) walk(t.name, t.inputSchema, "");
+  assert.deepEqual(offenders, []);
+  assert.deepEqual(validateSchema({ instance_id: "-16984", intensity: 2, paths_hint: ["Assets/A.unity"] }, tool("light_set").inputSchema), []);
+});
+
 test("null property values remain valid; shadowed selectors are rejected", () => {
   const schema = tool("component_modify").inputSchema;
   const args = { game_object_path: "A", component_type: "UnityEngine.Transform", fields: [{ property_path: "m_Reference", value: null }], paths_hint: ["Assets/A.unity"] };

@@ -4888,6 +4888,11 @@
           "description": "Shortcut to clear the selection entirely (Selection.objects = {}). Equivalent to passing targets: [].",
           "type": "boolean"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "instance_id": {
           "default": 0,
           "description": "Scene GameObject / Component instance id to select. Single-target shorthand — prefer targets[] when selecting more than one.",
@@ -4901,9 +4906,15 @@
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
+          "x-alias-for": "game_object_path"
+        },
+        "target_path": {
           "deprecated": true,
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
           "x-alias-for": "game_object_path"
         },
         "targets": {
@@ -4916,7 +4927,10 @@
               },
               "instance_id": {
                 "default": 0,
-                "type": "integer"
+                "type": [
+                  "string",
+                  "integer"
+                ]
               },
               "name": {
                 "type": "string"
@@ -4928,17 +4942,6 @@
             "type": "object"
           },
           "type": "array"
-        },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
-        "target_path": {
-          "type": "string",
-          "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
         }
       },
       "type": "object"
@@ -6501,6 +6504,11 @@
           "description": "Bake volume half-extent as 'x,y,z'.",
           "type": "string"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -6512,16 +6520,19 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -6531,16 +6542,11 @@
           },
           "type": "array"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -6554,6 +6560,11 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -6565,16 +6576,19 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -6584,16 +6598,11 @@
           },
           "type": "array"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -6612,6 +6621,11 @@
           "description": "NavMesh area name (e.g. 'Walkable', 'Door', 'Jump').",
           "type": "string"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -6628,7 +6642,10 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
@@ -6640,9 +6657,9 @@
           "type": "boolean"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -6652,16 +6669,11 @@
           },
           "type": "array"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -6685,6 +6697,11 @@
           "description": "Volume center as 'x,y,z' (local space).",
           "type": "string"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -6696,16 +6713,19 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -6720,16 +6740,11 @@
           "description": "Volume size as 'x,y,z' (local space).",
           "type": "string"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -6763,6 +6778,11 @@
           "description": "Link end position (local space) as 'x,y,z'.",
           "type": "string"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -6774,16 +6794,19 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -6798,21 +6821,16 @@
           "description": "Link start position (local space) as 'x,y,z'.",
           "type": "string"
         },
+        "target_path": {
+          "deprecated": true,
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
+        },
         "width": {
           "default": 0,
           "description": "Link width (0 = point-to-point).",
           "type": "number"
-        },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
-        "target_path": {
-          "type": "string",
-          "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -6836,6 +6854,11 @@
           "description": "Max turn speed (deg/sec).",
           "type": "number"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -6852,16 +6875,19 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -6886,16 +6912,11 @@
           "description": "Stop this far from the destination.",
           "type": "number"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -6913,6 +6934,11 @@
           "description": "World-space destination as 'x,y,z'.",
           "type": "string"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -6924,16 +6950,19 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -6943,16 +6972,11 @@
           },
           "type": "array"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -6975,31 +6999,34 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "type": "object"
@@ -7025,6 +7052,11 @@
           "description": "JSON array of { field, value, type? } patches. Example: [{\"field\":\"speed\",\"value\":5.5,\"type\":\"float\"}].",
           "type": "string"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -7036,16 +7068,19 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -7055,16 +7090,11 @@
           },
           "type": "array"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -7463,31 +7493,34 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "type": "object"
@@ -8199,6 +8232,11 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -8210,16 +8248,19 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -8254,16 +8295,11 @@
           "description": "Optional out-tangent as 'x,y,z'.",
           "type": "string"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -8277,6 +8313,11 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -8288,7 +8329,10 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "knot_index": {
           "description": "Index of the knot to replace (0-based).",
@@ -8299,9 +8343,9 @@
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -8332,16 +8376,11 @@
           "description": "Optional new out-tangent as 'x,y,z'.",
           "type": "string"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -8356,6 +8395,11 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -8367,7 +8411,10 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "knot_index": {
           "default": -1,
@@ -8379,9 +8426,9 @@
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -8400,16 +8447,11 @@
           "description": "Tangent mode. Valid: AutoSmooth, Broken, Mirrored, Linear, BezierSmooth.",
           "type": "string"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -8424,19 +8466,27 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "spline_index": {
@@ -8449,16 +8499,11 @@
           "description": "Normalized interpolation ratio (0..1, clamped).",
           "type": "number"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "type": "object"
@@ -8469,19 +8514,27 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "spline_index": {
@@ -8489,16 +8542,11 @@
           "description": "Spline index within the container (0 = primary).",
           "type": "integer"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "type": "object"
@@ -8513,6 +8561,11 @@
           "description": "JSON array of { field, value, type? } objects targeting SplineContainer serialized fields.",
           "type": "string"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -8524,16 +8577,19 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -8543,16 +8599,11 @@
           },
           "type": "array"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -8662,6 +8713,11 @@
           "description": "Culling mask as an int LayerMask value.",
           "type": "integer"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -8673,7 +8729,10 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "intensity": {
           "description": "Light intensity.",
@@ -8695,9 +8754,9 @@
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -8736,16 +8795,11 @@
           "description": "Spot angle in degrees (Spot only).",
           "type": "number"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -8763,6 +8817,11 @@
           "description": "JSON array of { field, value, type? } patches. Example: [{\"field\":\"intensity\",\"value\":5.5,\"type\":\"float\"},{\"field\":\"type\",\"value\":\"Point\",\"type\":\"string\"}].",
           "type": "string"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -8774,16 +8833,19 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -8793,16 +8855,11 @@
           },
           "type": "array"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -8827,6 +8884,11 @@
           ],
           "type": "string"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -8838,16 +8900,19 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -8860,11 +8925,6 @@
         "target_path": {
           "description": "Assets/-rooted .cubemap path (required for bake_mode='custom'). The cubemap asset is created if absent.",
           "type": "string"
-        },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
         }
       },
       "required": [
@@ -8878,31 +8938,34 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host GameObject name (first match).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "type": "object"
@@ -9065,6 +9128,11 @@
           "description": "Doppler factor (0-5).",
           "type": "number"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -9076,7 +9144,10 @@
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "loop": {
           "description": "Loop playback.",
@@ -9099,9 +9170,9 @@
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -9131,20 +9202,15 @@
           "description": "Spread angle 0-360.",
           "type": "number"
         },
+        "target_path": {
+          "deprecated": true,
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
+        },
         "volume": {
           "description": "Volume 0-1.",
           "type": "number"
-        },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
-        "target_path": {
-          "type": "string",
-          "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -10123,11 +10189,19 @@
         "bottom_instance_id": {
           "default": 0,
           "description": "Bottom neighbor Terrain GameObject instance ID (highest priority).",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "bottom_path": {
           "description": "Bottom neighbor Terrain GameObject hierarchy path. Pass an empty value or omit to clear the side. The GameObject must carry a Terrain component.",
           "type": "string"
+        },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
         },
         "gate": {
           "default": "enforce",
@@ -10148,7 +10222,10 @@
         "left_instance_id": {
           "default": 0,
           "description": "Left neighbor Terrain GameObject instance ID (highest priority).",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "left_path": {
           "description": "Left neighbor Terrain GameObject hierarchy path. Pass an empty value or omit to clear the side. The GameObject must carry a Terrain component.",
@@ -10159,9 +10236,9 @@
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -10174,31 +10251,32 @@
         "right_instance_id": {
           "default": 0,
           "description": "Right neighbor Terrain GameObject instance ID (highest priority).",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "right_path": {
           "description": "Right neighbor Terrain GameObject hierarchy path. Pass an empty value or omit to clear the side. The GameObject must carry a Terrain component.",
           "type": "string"
         },
+        "target_path": {
+          "deprecated": true,
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
+        },
         "top_instance_id": {
           "default": 0,
           "description": "Top neighbor Terrain GameObject instance ID (highest priority).",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "top_path": {
           "description": "Top neighbor Terrain GameObject hierarchy path. Pass an empty value or omit to clear the side. The GameObject must carry a Terrain component.",
           "type": "string"
-        },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
-        "target_path": {
-          "type": "string",
-          "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -10638,11 +10716,19 @@
       "properties": {
         "follow_instance_id": {
           "description": "Follow target GameObject instance id.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "follow_path": {
           "description": "Follow target hierarchy path.",
           "type": "string"
+        },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
         },
         "gate": {
           "default": "enforce",
@@ -10654,11 +10740,17 @@
         },
         "instance_id": {
           "description": "CinemachineCamera host GameObject instance id.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "look_at_instance_id": {
           "description": "Look At target GameObject instance id.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "look_at_path": {
           "description": "Look At target hierarchy path.",
@@ -10669,9 +10761,9 @@
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -10681,16 +10773,11 @@
           },
           "type": "array"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -10716,6 +10803,11 @@
           "description": "Field of view in degrees. Pass a value <= 0 to leave unchanged.",
           "type": "number"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -10726,7 +10818,10 @@
         },
         "instance_id": {
           "description": "CinemachineCamera host GameObject instance id.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host name (last-resort resolver).",
@@ -10737,9 +10832,9 @@
           "type": "number"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -10749,16 +10844,11 @@
           },
           "type": "array"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -10776,6 +10866,11 @@
           "description": "Unqualified Cinemachine Body component type name, e.g. 'CinemachineFollow', 'CinemachineFramingTransposer', 'CinemachineHardLockToTarget'.",
           "type": "string"
         },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -10786,16 +10881,19 @@
         },
         "instance_id": {
           "description": "CinemachineCamera host GameObject instance id.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host name (last-resort resolver).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -10805,16 +10903,11 @@
           },
           "type": "array"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -10829,6 +10922,11 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -10839,7 +10937,10 @@
         },
         "instance_id": {
           "description": "CinemachineCamera host GameObject instance id.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host name (last-resort resolver).",
@@ -10850,9 +10951,9 @@
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -10862,16 +10963,11 @@
           },
           "type": "array"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -10886,6 +10982,11 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -10896,16 +10997,19 @@
         },
         "instance_id": {
           "description": "Camera GameObject instance id.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Camera name (last-resort resolver).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -10915,16 +11019,11 @@
           },
           "type": "array"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -10996,7 +11095,10 @@
         },
         "instance_id": {
           "description": "TimelineAsset instance id (fallback when asset_path omitted).",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "parent_track_index": {
           "default": -1,
@@ -11072,7 +11174,10 @@
         },
         "instance_id": {
           "description": "TimelineAsset instance id.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "paths_hint": {
           "description": "Mutation scope — the timeline asset path.",
@@ -11108,7 +11213,10 @@
       "properties": {
         "asset_instance_id": {
           "description": "TimelineAsset instance id (fallback when asset_path omitted).",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "asset_path": {
           "description": "TimelineAsset path ('Assets/.../*.playable').",
@@ -11118,6 +11226,11 @@
           "default": false,
           "description": "When true, set playOnAwake = true on the director.",
           "type": "boolean"
+        },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
         },
         "gate": {
           "default": "enforce",
@@ -11129,16 +11242,19 @@
         },
         "instance_id": {
           "description": "PlayableDirector host GameObject instance id.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host name (last-resort resolver).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -11148,16 +11264,11 @@
           },
           "type": "array"
         },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
         "target_path": {
-          "type": "string",
           "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         }
       },
       "required": [
@@ -11194,7 +11305,10 @@
         },
         "instance_id": {
           "description": "TimelineAsset instance id.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "paths_hint": {
           "description": "Mutation scope — the timeline asset path.",
@@ -11264,6 +11378,11 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -11274,16 +11393,19 @@
         },
         "instance_id": {
           "description": "Tilemap host GameObject instance id.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host name (last-resort resolver).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -11292,6 +11414,12 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "target_path": {
+          "deprecated": true,
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         },
         "tile_asset_path": {
           "description": "Asset path to a TileBase (.asset).",
@@ -11311,17 +11439,6 @@
           "default": 0,
           "description": "Cell z coordinate.",
           "type": "integer"
-        },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
-        "target_path": {
-          "type": "string",
-          "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [
@@ -11336,6 +11453,11 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string",
+          "x-wire-key": "path"
+        },
         "gate": {
           "default": "enforce",
           "enum": [
@@ -11346,16 +11468,19 @@
         },
         "instance_id": {
           "description": "Tilemap host GameObject instance id.",
-          "type": "integer"
+          "type": [
+            "string",
+            "integer"
+          ]
         },
         "name": {
           "description": "Host name (last-resort resolver).",
           "type": "string"
         },
         "path": {
+          "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
-          "deprecated": true,
           "x-alias-for": "game_object_path"
         },
         "paths_hint": {
@@ -11364,6 +11489,12 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "target_path": {
+          "deprecated": true,
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
         },
         "tile_asset_path": {
           "description": "Asset path to a TileBase (.asset).",
@@ -11389,17 +11520,6 @@
           "default": 0,
           "description": "Cell z plane.",
           "type": "integer"
-        },
-        "game_object_path": {
-          "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or name.",
-          "x-wire-key": "path"
-        },
-        "target_path": {
-          "type": "string",
-          "deprecated": true,
-          "x-alias-for": "game_object_path",
-          "description": "Deprecated alias; use game_object_path."
         }
       },
       "required": [

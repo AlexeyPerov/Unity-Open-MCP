@@ -36,7 +36,11 @@ bare numbers. This is required because Unity 6000.5 widened `EntityId` to 8
 bytes — values exceed JS `Number.MAX_SAFE_INTEGER` (2^53) and would lose
 precision if serialized as JSON numbers. The parser
 (`JsonBody.GetLongFlexible`) accepts both the canonical string form and a bare
-number for backward compatibility with older clients.
+number for backward compatibility with older clients. On the MCP side every
+`*instance_id` input property accepts both forms too: `canonicalSchema`
+(`mcp-server/src/tool-contract.ts`) widens an `integer` declaration to
+`["string", "integer"]`, so the id one tool returns is always valid input for
+the next, and a `tool-contract` test fails on any schema that narrows it again.
 
 Under the hood, on `UNITY_6000_5_OR_NEWER` the helper calls
 `EntityId.ToULong(obj.GetEntityId())` (returns `ulong`, cast to `long`) and

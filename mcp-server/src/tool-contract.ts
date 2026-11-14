@@ -137,7 +137,22 @@ export function canonicalSchema(name: string, input: Schema): Tool["inputSchema"
     props.game_object_path.description = `GameObject hierarchy path, e.g. Root/Child. Supply only one host selector: instance_id, game_object_path, or ${nameSelector}.`;
   }
   if (props.component_type) props.component_type.description = "Component type (full name preferred); alternative to component_instance_id.";
+  widenInstanceIds(schema);
   return schema as Tool["inputSchema"];
+}
+
+/**
+ * Instance ids travel as strings (Unity 6000.5 ids exceed 2^53; see
+ * docs/code-conventions.md#instance-ids) and the bridge parses either form.
+ * A schema that declares one as `integer` refused the very id another tool
+ * had just returned, so every `*instance_id` property accepts both.
+ */
+function widenInstanceIds(schema: Schema): void {
+  for (const [key, prop] of Object.entries(schema.properties ?? {}) as [string, Schema][]) {
+    if (/(^|_)instance_id$/.test(key) && prop.type === "integer") prop.type = ["string", "integer"];
+    if (prop.items) widenInstanceIds(prop.items);
+    if (prop.properties) widenInstanceIds(prop);
+  }
 }
 
 /**

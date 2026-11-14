@@ -135,6 +135,14 @@ if save failed or a modal blocked the bridge.
 - JSON reports include an **`isolation`** block:
   `ft_scene_created`, `ft_scene_active`, `active_scene_at_teardown`,
   `main_dirty_at_finalize`.
+- **Arguments stay schema-valid.** `--check-args` builds every step (placeholder
+  values for ids an earlier step captures) and validates it with the server's own
+  preflight (`withSchemaDefaults` + `validateSchema`) — no Unity needed; the
+  `mcp-server` test suite runs it, so a schema change that breaks a step fails
+  `npm test`. Band F reachability probes derive their arguments from each tool's
+  schema (a GameObject path that does not exist, asset paths under the temp root),
+  so they reach the bridge; a `reachable` step refused by MCP preflight
+  (`invalid_arguments` on route `local`) fails instead of counting as reached.
 - **Tolerate scope.** The suite `tolerate`s only genuine ongoing limitations
   (screenshot/base64 serialization, post-domain-reload body truncation on
   asmdef/reserialize). The profiler `note`, `asmdef_list` bool, and

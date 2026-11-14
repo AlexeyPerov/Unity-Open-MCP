@@ -26,6 +26,7 @@
 //   node scripts/mcp-full-test.mjs --band A,B            # run named bands only
 //   node scripts/mcp-full-test.mjs --only needle         # subset by label
 //   node scripts/mcp-full-test.mjs --list                # list steps, don't run
+//   node scripts/mcp-full-test.mjs --check-args          # validate step args vs schemas, no Unity
 //   node scripts/mcp-full-test.mjs --no-cleanup          # leave fixtures (debug)
 //   node scripts/mcp-full-test.mjs --json-out report.json
 //
@@ -39,7 +40,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { dirname, resolve, isAbsolute } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   REPO_ROOT,
@@ -103,6 +104,7 @@ function parseArgs(argv) {
     band: null, // comma-separated band letters, null = all
     only: null, // comma-separated label needles, null = all
     list: false,
+    checkArgs: false,
     noCleanup: false,
     autoRevert: false,
     saveMain: false,
@@ -115,6 +117,7 @@ function parseArgs(argv) {
     else if (a === "--band") opts.band = argv[++i].split(",").map((s) => s.trim().toUpperCase());
     else if (a === "--only") opts.only = argv[++i].split(",").map((s) => s.trim());
     else if (a === "--list") opts.list = true;
+    else if (a === "--check-args") opts.checkArgs = true;
     else if (a === "--no-cleanup") opts.noCleanup = true;
     else if (a === "--auto-revert") opts.autoRevert = true;
     else if (a === "--save-main") opts.saveMain = true;
@@ -142,6 +145,8 @@ Options:
                          unavailable groups), G=run_tests
   --only needle          Run only steps whose label contains any needle
   --list                 List the suite steps and exit (no execution)
+  --check-args           Validate every step's arguments against the built MCP
+                         tool schemas and exit (no Unity; 1 on any mismatch)
   --no-cleanup           Leave temp fixtures in place (debug)
   --auto-revert          After the run, git-checkout tracked ProjectSettings
                           the setters mutated. Does NOT revert scene files
@@ -174,6 +179,70 @@ running.`);
 // direct body. `resolveArgs(ctx)` lets a step pull state stashed by an earlier
 // step's `after` hook (instanceId handoff for GameObject/component chains).
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Band F probe arguments, derived from each tool's published schema so the
+// probe passes MCP preflight and actually reaches the bridge (a preflight
+// refusal proves nothing about whether the domain is compiled in). Values are
+// chosen to be harmless: a GameObject path that does not exist, asset paths
+// under the temp root without a valid extension, empty JSON payloads.
+// ---------------------------------------------------------------------------
+
+const PROBE_GAMEOBJECT = "MCP_FullTest_Probe/Missing";
+
+async function loadToolSchemas() {
+  try {
+    const { ALL_TOOLS } = await import(pathToFileURL(resolve(REPO_ROOT, "mcp-server", "dist", "tools", "index.js")).href);
+    return new Map(ALL_TOOLS.map((t) => [t.name, t.inputSchema]));
+  } catch {
+    return null; // dist not built: main() reports it before anything runs
+  }
+}
+const TOOL_SCHEMAS = await loadToolSchemas();
+
+function probeValue(key, prop, short) {
+  if (key === "paths_hint") return HINT;
+  if (key === "game_object_path") return PROBE_GAMEOBJECT;
+  if (prop.enum) return prop.enum[0];
+  const type = Array.isArray(prop.type) ? prop.type[0] : prop.type;
+  if (type === "array") {
+    const item = key.replace(/s$/, "");
+    return Array.from({ length: prop.minItems ?? 0 }, () => probeValue(item, prop.items ?? {}, short));
+  }
+  if (type === "object") {
+    const out = {};
+    for (const k of prop.required ?? []) out[k] = probeValue(k, prop.properties?.[k] ?? {}, short);
+    return out;
+  }
+  if (type === "boolean") return false;
+  if (type === "integer" || type === "number") {
+    if (prop.minimum !== undefined) return prop.minimum;
+    if (prop.exclusiveMinimum !== undefined) return prop.exclusiveMinimum + 1;
+    return 0;
+  }
+  if (/_json$/.test(key)) return "{}";
+  if (/(^|_)path$/.test(key)) return `${FT}/Probe_${short}`;
+  return "probe";
+}
+
+/** Schema-valid, side-effect-free arguments for a reachability probe. */
+export function probeArgs(toolName) {
+  const schema = TOOL_SCHEMAS?.get(toolName);
+  if (!schema) return { paths_hint: HINT };
+  const short = toolName.replace(/^unity_(open_mcp_|senses_)/, "");
+  const props = schema.properties ?? {};
+  const keys = new Set(schema.required ?? []);
+  for (const clause of schema.allOf ?? []) for (const k of clause.anyOf?.[0]?.required ?? []) keys.add(k);
+  for (const k of schema.oneOf?.[0]?.required ?? []) keys.add(k);
+  if (props.paths_hint) keys.add("paths_hint");
+  if (props.game_object_path) keys.add("game_object_path");
+  const args = {};
+  for (const key of keys) {
+    const prop = props[key];
+    if (prop && !prop.deprecated) args[key] = probeValue(key, prop, short);
+  }
+  return args;
+}
 
 function buildSuite() {
   const { s, steps } = makeStepBuilder();
@@ -246,7 +315,7 @@ function buildSuite() {
   // mutation_explain needs a prior mutation context OR a checkpoint_id; pass a
   // sentinel checkpoint_id and tolerate no_mutation_context (the explain path is
   // still exercised + the contract gap is surfaced).
-  s("mutation_explain", "B", "unity_open_mcp_mutation_explain", { tool_name: "unity_open_mcp_material_set_property", args: { property: "_Color", type: "color", value: [1, 0, 0, 1] }, checkpoint_id: "ft-explain" }, { expect: "tolerate", tolerate: ["no_mutation_context", "checkpoint_not_found"] });
+  s("mutation_explain", "B", "unity_open_mcp_mutation_explain", { tool_name: "unity_open_mcp_material_set_property", checkpoint_id: "ft-explain" }, { expect: "tolerate", tolerate: ["no_mutation_context", "checkpoint_not_found"] });
 
   // --- diagnostics reads ---
   s("profiler_get_status", "B", "unity_open_mcp_profiler_get_status");
@@ -281,7 +350,7 @@ function buildSuite() {
   // Hub CLI output format varies by Hub version / install layout — tolerate unparseable.
   s("hub_get_install_path", "B", "unity_open_mcp_hub_get_install_path", {}, { expect: "tolerate", tolerate: ["install_path_unparseable"] });
   // hub_available_releases hits the network; keep it but tolerate failure
-  s("hub_available_releases", "B", "unity_open_mcp_hub_available_releases", { limit: 3 });
+  s("hub_available_releases", "B", "unity_open_mcp_hub_available_releases", {});
 
   // --- playtest reads (live-only, read-only; edit mode is fine) ---
   s("ui_snapshot", "B", "unity_open_mcp_ui_snapshot", { page_size: 5 });
@@ -301,20 +370,21 @@ function buildSuite() {
   // scene is empty, so both `bounds` (needs a GO) and `raycast` (needs
   // colliders) fail. Tolerate — the tool is reached; the failure is the empty
   // scene, not a tool bug. (gameobject_create in Band C populates the scene.)
-  s("spatial_query", "B", "unity_senses_spatial_query", { action: "raycast", origin: [0, 5, 0], direction: [0, -1, 0] }, { expect: "tolerate", tolerate: ["target_not_found", "execution_error"] });
+  s("spatial_query", "B", "unity_senses_spatial_query", { action: "raycast", origin: "0,5,0", direction: "0,-1,0" }, { expect: "tolerate", tolerate: ["target_not_found", "execution_error"] });
   // screenshot + capture_inline return bridge_response_unparsable (see
   // specs/feedback.md — inline base64 image data breaks JSON serialization).
   // Tolerate so the route is exercised + the bug surfaced without failing.
   s("screenshot", "B", "unity_senses_screenshot", { width: 64, height: 64 }, { expect: "tolerate", tolerate: ["bridge_response_unparsable"] });
-  s("screenshot_camera", "B", "unity_senses_screenshot_camera", { position: [0, 5, -10], rotation: [30, 0, 0], width: 64, height: 64 }, { expect: "tolerate", tolerate: ["bridge_response_unparsable", "missing_parameter"] });
+  s("screenshot_camera", "B", "unity_senses_screenshot_camera", { position: "0,5,-10", rotation: "30,0,0", width: 64, height: 64 }, { expect: "tolerate", tolerate: ["bridge_response_unparsable", "missing_parameter"] });
   s("capture_inline", "B", "unity_senses_capture_inline", { width: 64, height: 64 }, { expect: "tolerate", tolerate: ["bridge_response_unparsable"] });
-  s("screenshot_window", "B", "unity_senses_screenshot_window", { window: "Scene", width: 64, height: 64 }, { expect: "tolerate", tolerate: ["bridge_response_unparsable", "missing_parameter"] });
-  s("frame_debugger", "B", "unity_senses_frame_debugger", { action: "status" });
+  s("screenshot_window", "B", "unity_senses_screenshot_window", { window_title: "Scene", width: 64, height: 64 }, { expect: "tolerate", tolerate: ["bridge_response_unparsable", "missing_parameter", "not_supported"] });
+  // list without an enabled capture answers no_captured_frame — the read path is reached.
+  s("frame_debugger", "B", "unity_senses_frame_debugger", { action: "list", max_draw_calls: 5 }, { expect: "tolerate", tolerate: ["no_captured_frame", "frame_debugger_unavailable"] });
   s("profiler_capture_frame", "B", "unity_senses_profiler_capture_frame", {});
   // profiler_capture reads captured profiler frames; with no prior capture it
   // returns no_frame_data. Tolerate — profiler_capture_frame above exercises
   // the capture path; this exercises the read path.
-  s("profiler_capture", "B", "unity_senses_profiler_capture", { frames: 1 }, { expect: "tolerate", tolerate: ["no_frame_data"] });
+  s("profiler_capture", "B", "unity_senses_profiler_capture", { frames: 1 }, { expect: "tolerate", tolerate: ["no_frame_data", "profiler_empty"] });
   s("profiler_memory", "B", "unity_senses_profiler_memory", {});
   s("profiler_rendering", "B", "unity_senses_profiler_rendering", {});
 
@@ -606,7 +676,7 @@ function buildSuite() {
 
   // --- build-settings safe setters (get-then-set-same; prefs use temp keys) ---
   s("build_set_target", "C", "unity_open_mcp_build_set_target", { target: "StandaloneOSX", paths_hint: ["ProjectSettings/ProjectSettings.asset"] }, { gate: true, expect: "gate" });
-  s("build_set_scenes", "C", "unity_open_mcp_build_set_scenes", { scenes: [{ path: "Assets/Scenes/Main.unity", enabled: true }], mode: "overwrite", paths_hint: ["ProjectSettings/EditorBuildSettings.asset"] }, { gate: true, expect: "gate" });
+  s("build_set_scenes", "C", "unity_open_mcp_build_set_scenes", { scenes: [{ path: "Assets/Scenes/Main.unity", enabled: true }], paths_hint: ["ProjectSettings/EditorBuildSettings.asset"] }, { gate: true, expect: "gate" });
   s("build_set_defines", "C", "unity_open_mcp_build_set_defines", { defines: [], paths_hint: ["ProjectSettings/ProjectSettings.asset"] }, { gate: true, expect: "tolerate", tolerate: ["bridge_response_unparsable"] });
   // settings setters require a non-empty fields array of {key, value}; use real
   // keys confirmed via the getters, set to current values (no-op mutation).
@@ -657,16 +727,17 @@ function buildSuite() {
 
   // --- lighting (temp GOs for lights) ---
   s("light_add", "C", "unity_open_mcp_light_add", {
-    resolveArgs: (ctx) => ({ parent_instance_id: ctx.sphereId, light_type: "point", paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, light_type: "Point", paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.lightId = pluck(r, "mutation.output.instanceId"); } });
   s("light_set", "C", "unity_open_mcp_light_set", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.lightId, fields: { intensity: 2 }, paths_hint: SCENE_HINT }),
+    // The Light lives on the sphere light_add targeted; the setters resolve the host GameObject.
+    resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, intensity: 2, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("light_modify", "C", "unity_open_mcp_light_modify", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.lightId, fields: { color: [0, 0, 1, 1] }, paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, fields_json: JSON.stringify([{ field: "intensity", value: 3 }]), paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("skybox_get", "C", "unity_open_mcp_skybox_get");
-  s("skybox_set", "C", "unity_open_mcp_skybox_set", { material_asset_path: "Skybox/Procedural", paths_hint: SCENE_HINT }, { gate: true, expect: "gate" });
+  s("skybox_set", "C", "unity_open_mcp_skybox_set", { material_path: FT_MAT, paths_hint: SCENE_HINT }, { gate: true, expect: "gate" });
   s("reflection_probe_get", "C", "unity_open_mcp_reflection_probe_get", {
     resolveArgs: (ctx) => ({ instance_id: ctx.sphereId }),
   });
@@ -676,37 +747,38 @@ function buildSuite() {
 
   // --- audio ---
   s("audio_source_add", "C", "unity_open_mcp_audio_source_add", {
-    resolveArgs: (ctx) => ({ parent_instance_id: ctx.sphereId, paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.audioSrcId = pluck(r, "mutation.output.instanceId"); } });
   s("audio_source_modify", "C", "unity_open_mcp_audio_source_modify", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.audioSrcId, fields: { volume: 0.5 }, paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, volume: 0.5, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("audio_listener_get", "C", "unity_open_mcp_audio_listener_get");
-  s("audio_mixer_get_parameter", "C", "unity_open_mcp_audio_mixer_get_parameter", {});
+  // The demo ships no AudioMixer: the lookup path is reached and answers asset_not_found.
+  s("audio_mixer_get_parameter", "C", "unity_open_mcp_audio_mixer_get_parameter", { mixer_path: `${FT}/FT_Missing.mixer`, parameter_name: "Volume" }, { expect: "tolerate", tolerate: ["asset_not_found"] });
 
   // --- ui ---
   s("ui_canvas_add", "C", "unity_open_mcp_ui_canvas_add", {
     paths_hint: SCENE_HINT,
   }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.canvasId = pluck(r, "mutation.output.instanceId"); } });
   s("ui_element_add", "C", "unity_open_mcp_ui_element_add", {
-    resolveArgs: (ctx) => ({ parent_instance_id: ctx.canvasId, element_type: "text", paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ parent_instance_id: ctx.canvasId, element_type: "Text", paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.uiElemId = pluck(r, "mutation.output.instanceId"); } });
   s("ui_layout_group_add", "C", "unity_open_mcp_ui_layout_group_add", {
-    resolveArgs: (ctx) => ({ parent_instance_id: ctx.canvasId, layout_type: "vertical", paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.canvasId, layout_type: "VerticalLayoutGroup", paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("ui_element_modify", "C", "unity_open_mcp_ui_element_modify", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.uiElemId, fields: { text: "FT" }, paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.uiElemId, component_type: "UnityEngine.UI.Text", fields_json: JSON.stringify([{ field: "text", value: "FT" }]), paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
 
   // --- constraints / LOD ---
   s("constraint_add", "C", "unity_open_mcp_constraint_add", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.cubeId, constraint_type: "aim", paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.cubeId, constraint_type: "AimConstraint", paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("lod_group_configure", "C", "unity_open_mcp_lod_group_configure", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, lods: 2, paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, lod_count: 2, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.lodId = pluck(r, "mutation.output.instanceId"); } });
   s("lod_add_level", "C", "unity_open_mcp_lod_add_level", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.lodId, screen_relative_height: 0.5, paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.lodId ?? ctx.sphereId, index: 1, screen_relative_transition_height: 0.3, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
 
   // --- terrain ---
@@ -714,16 +786,17 @@ function buildSuite() {
     width: 100, length: 100, height: 50, paths_hint: [FT_TERRAIN_DATA_HINT, ...SCENE_HINT],
   }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.terrainId = pluck(r, "mutation.output.instanceId"); }, timeoutMs: 180_000 });
   s("terrain_set_heights", "C", "unity_open_mcp_terrain_set_heights", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.terrainId, height: 10, paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.terrainId, heights: [[0.1, 0.1], [0.1, 0.1]], paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate", timeoutMs: 180_000 });
   s("terrain_set_neighbors", "C", "unity_open_mcp_terrain_set_neighbors", {
     resolveArgs: (ctx) => ({ instance_id: ctx.terrainId, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("terrain_paint_layer", "C", "unity_open_mcp_terrain_paint_layer", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.terrainId, paths_hint: SCENE_HINT }),
+    // A fresh terrain has no layers: index 0 creates FT_Layer.terrainlayer under the temp root.
+    resolveArgs: (ctx) => ({ instance_id: ctx.terrainId, layer_index: 0, alphamap: [[1, 1], [1, 1]], layer_path: `${FT}/FT_Layer.terrainlayer`, paths_hint: [...SCENE_HINT, `${FT}/FT_Layer.terrainlayer`] }),
   }, { gate: true, expect: "gate", timeoutMs: 180_000 });
   s("terrain_place_trees", "C", "unity_open_mcp_terrain_place_trees", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.terrainId, count: 1, paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.terrainId, tree_prototype_index: 0, prototype_prefab_path: FT_PREFAB, instances: [{ position: "0.5,0.5" }], paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate", timeoutMs: 180_000 });
 
   // --- cinemachine (reflection-gated; package may be absent → tolerate tool_not_found via expect) ---
@@ -738,10 +811,10 @@ function buildSuite() {
     resolveArgs: (ctx) => ({ instance_id: ctx.vcamId, field_of_view: 60, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("cinemachine_set_body", "C", "unity_open_mcp_cinemachine_set_body", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.vcamId, paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.vcamId, body_name: "CinemachineFollow", paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("cinemachine_set_noise", "C", "unity_open_mcp_cinemachine_set_noise", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.vcamId, paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.vcamId, noise_name: "CinemachineBasicMultiChannelPerlin", paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("cinemachine_camera_list", "C", "unity_open_mcp_cinemachine_camera_list");
 
@@ -752,20 +825,27 @@ function buildSuite() {
   s("spriteatlas_get", "C", "unity_open_mcp_spriteatlas_get", { asset_path: FT_SPRITEATLAS });
   s("spriteatlas_list", "C", "unity_open_mcp_spriteatlas_list");
   s("spriteatlas_add_packable", "C", "unity_open_mcp_spriteatlas_add_packable", {
-    asset_path: FT_SPRITEATLAS, packable: { path: "Assets/Textures/rainbowtexture.png" }, paths_hint: [FT_SPRITEATLAS],
+    asset_path: FT_SPRITEATLAS, packable_paths: ["Assets/Textures/rainbowtexture.png"], paths_hint: [FT_SPRITEATLAS],
   }, { gate: true, expect: "gate" });
   s("spriteatlas_remove_packable", "C", "unity_open_mcp_spriteatlas_remove_packable", {
-    asset_path: FT_SPRITEATLAS, packable: { path: "Assets/Textures/rainbowtexture.png" }, paths_hint: [FT_SPRITEATLAS],
+    asset_path: FT_SPRITEATLAS, packable_paths: ["Assets/Textures/rainbowtexture.png"], paths_hint: [FT_SPRITEATLAS],
   }, { gate: true, expect: "gate" });
   s("spriteatlas_modify", "C", "unity_open_mcp_spriteatlas_modify", {
-    asset_path: FT_SPRITEATLAS, fields: {}, paths_hint: [FT_SPRITEATLAS],
+    asset_path: FT_SPRITEATLAS, settings_json: JSON.stringify({ include_in_build: true }), paths_hint: [FT_SPRITEATLAS],
   }, { gate: true, expect: "gate" });
   s("spriteatlas_delete", "C", "unity_open_mcp_spriteatlas_delete", { asset_path: FT_SPRITEATLAS, paths_hint: [FT_SPRITEATLAS] }, { gate: true, expect: "gate" });
   s("texture_get", "C", "unity_open_mcp_texture_get", { asset_path: "Assets/Textures/rainbowtexture.png" });
-  s("texture_get_importer", "C", "unity_open_mcp_texture_get_importer", { asset_path: "Assets/Textures/rainbowtexture.png" });
+  s("texture_get_importer", "C", "unity_open_mcp_texture_get_importer", { asset_path: "Assets/Textures/rainbowtexture.png" }, {
+    after: (r, ctx) => { ctx.textureMaxSize = pluck(r, "maxTextureSize") ?? pluck(r, "importer.maxTextureSize") ?? pluck(r, "settings.maxTextureSize"); },
+  });
   s("texture_reimport", "C", "unity_open_mcp_texture_reimport", { asset_path: "Assets/Textures/rainbowtexture.png", paths_hint: ["Assets/Textures/rainbowtexture.png"] }, { gate: true, expect: "gate" });
+  // Get-then-set-same: re-applies the current max size so the tracked .meta does not change.
   s("texture_set_import", "C", "unity_open_mcp_texture_set_import", {
-    asset_path: "Assets/Textures/rainbowtexture.png", fields: {}, paths_hint: ["Assets/Textures/rainbowtexture.png"],
+    resolveArgs: (ctx) => ({
+      asset_path: "Assets/Textures/rainbowtexture.png",
+      settings_json: JSON.stringify({ max_texture_size: ctx.textureMaxSize ?? 2048 }),
+      paths_hint: ["Assets/Textures/rainbowtexture.png"],
+    }),
   }, { gate: true, expect: "gate" });
 
   // --- core mutating entry points (non-destructive snippets / menus / methods) ---
@@ -872,13 +952,14 @@ function buildSuite() {
   s("find_members_batch", "D", "unity_open_mcp_find_members", { query: "Transform" });
   s("execute_csharp_batch", "D", "unity_open_mcp_execute_csharp", { code: "return 42;", paths_hint: HINT });
   s("invoke_method_batch", "D", "unity_open_mcp_invoke_method", { type_name: "UnityEngine.Time", method_name: "get_frameCount", is_static: true, paths_hint: HINT });
-  s("execute_menu_batch", "D", "unity_open_mcp_execute_menu", { menu_path: "Edit/Selection", paths_hint: HINT });
+  s("execute_menu_batch", "D", "unity_open_mcp_execute_menu", { menu_path: "Edit/Deselect All", paths_hint: HINT });
 
   // =====================================================================
   // BAND E — destructive refusal path (no bypass flags → expect deny heuristic)
   // =====================================================================
+  // Without confirm_bypass the build is refused (build_confirmation_required) before BuildPlayer runs.
   s("build_start_refused", "E", "unity_open_mcp_build_start", {
-    target: "StandaloneOSX", paths_hint: HINT,
+    paths_hint: HINT,
   }, { gate: true, expect: "refused" });
   s("execute_csharp_refused", "E", "unity_open_mcp_execute_csharp", {
     code: "EditorApplication.Exit(0); return 1;", paths_hint: HINT,
@@ -927,7 +1008,7 @@ function buildSuite() {
   ];
   for (const tool of REACHABLE_EXT_TOOLS) {
     const short = tool.replace(/^unity_(open_mcp_|senses_)/, "");
-    s(`ext_${short}`, "F", tool, { paths_hint: HINT }, { expect: "reachable" });
+    s(`ext_${short}`, "F", tool, probeArgs(tool), { expect: "reachable" });
   }
 
   // Packages deliberately NOT in the demo manifest (Band F unavailable sub-band).
@@ -945,7 +1026,7 @@ function buildSuite() {
   ];
   for (const tool of UNAVAIL_TOOLS) {
     const short = tool.replace(/^unity_(open_mcp_|senses_)/, "");
-    s(`unavail_${short}`, "F", tool, { paths_hint: HINT }, { expect: "unavailable" });
+    s(`unavail_${short}`, "F", tool, probeArgs(tool), { expect: "unavailable" });
   }
 
   // =====================================================================
@@ -1000,6 +1081,41 @@ const SAVE_DIRTY_AFTER = new Set(["gameobject_find_query"]);
 // main
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// --check-args: every step's arguments must pass the same preflight the MCP
+// server runs (schema defaults, then validateSchema). A step that fails it
+// only ever measures the script, not the tool — the drift this guards against
+// (renamed keys, enum changes, string-vs-array) used to show up as
+// "invalid_arguments (tolerated)" in live runs. Steps built by resolveArgs get
+// placeholder ctx values: 1 for ids and numbers, a name for *Name keys.
+// ---------------------------------------------------------------------------
+
+export async function checkStepArgs(steps) {
+  const dist = resolve(REPO_ROOT, "mcp-server", "dist");
+  const load = (rel) => import(pathToFileURL(resolve(dist, rel)).href);
+  const { ALL_TOOLS } = await load("tools/index.js");
+  const { validateSchema } = await load("tool-contract.js");
+  const { withSchemaDefaults } = await load("schema-defaults.js");
+  const placeholder = new Proxy({}, {
+    get: (_target, key) => (typeof key !== "string" ? undefined : /name$/i.test(key) ? "FT_Placeholder" : 1),
+  });
+  const problems = [];
+  for (const step of steps) {
+    const tool = ALL_TOOLS.find((t) => t.name === step.tool);
+    if (!tool) { problems.push(`${step.label}: unknown tool ${step.tool}`); continue; }
+    let args;
+    try {
+      args = step.resolveArgs ? step.resolveArgs(placeholder) : (step.args ?? {});
+    } catch (error) {
+      problems.push(`${step.label}: resolveArgs threw with placeholder ctx (${error.message})`);
+      continue;
+    }
+    const errors = validateSchema(withSchemaDefaults(tool, args ?? {}), tool.inputSchema);
+    if (errors.length) problems.push(`${step.label} (${step.tool}): ${errors.join("; ")}`);
+  }
+  return problems;
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
 
@@ -1007,6 +1123,20 @@ function main() {
     console.error(`CLI binary not found at ${CLI_BIN}.`);
     console.error(`Run \`npm run build\` in mcp-server/ first.`);
     process.exit(2);
+  }
+  if (opts.checkArgs) {
+    const steps = buildSuite();
+    checkStepArgs(steps).then((problems) => {
+      for (const p of problems) console.log(`✗ ${p}`);
+      console.log(problems.length
+        ? `\n${problems.length} of ${steps.length} step(s) send arguments their tool's schema rejects.`
+        : `All ${steps.length} step(s) send schema-valid arguments.`);
+      process.exit(problems.length ? 1 : 0);
+    }, (error) => {
+      console.error(`check-args failed: ${error.stack ?? error}`);
+      process.exit(2);
+    });
+    return;
   }
   if (!isAbsolute(opts.project)) {
     console.error(`--project must be an ABSOLUTE path (relative paths hash to a different bridge port). Got: ${opts.project}`);

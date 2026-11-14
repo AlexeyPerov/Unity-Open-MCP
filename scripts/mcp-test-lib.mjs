@@ -231,6 +231,11 @@ export function classify(step, parsed) {
       if (errCode === "tool_not_found") {
         return { pass: false, detail: "tool_not_found (expected compiled in)" };
       }
+      // A refusal by the MCP server's own schema preflight never reached the
+      // bridge, so it says nothing about the domain being compiled in.
+      if (errCode === "invalid_arguments" && route === "local") {
+        return { pass: false, detail: "invalid_arguments from MCP preflight (never reached the bridge)" };
+      }
       if (!isError) return { pass: true, detail: "ok (compiled in)" };
       return { pass: true, detail: `err=${errCode} (compiled in)` };
     }
@@ -512,8 +517,27 @@ export function runToolOnce(step, ctx, project, defaultTimeout, runEnv) {
   return { ok: pass, ms, detail, result: parsed.result ?? {}, raw: parsed };
 }
 
-/** Step runner with scene_dirty / main_thread_blocked save+retry + optional
- *  pre/post-save guards. saveDirtyBefore/saveDirtyAfter are Sets of step labels. */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Poll editor_status until the Editor answers and is not compiling (true), or
+ *  the budget runs out (false). editor_status itself answers editor_reloading
+ *  while a domain reload is in progress. */
+export function waitForEditorSettled(project, runEnv, timeoutMs = 120_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = invokeTool(project, "unity_open_mcp_editor_status", {}, 15_000, runEnv);
+    const output = status?.result?.mutation?.output ?? status?.result;
+    if (status && status.isError !== true && output?.isCompiling === false) return true;
+    sleepSync(2_000);
+  }
+  return false;
+}
+
+/** Step runner with scene_dirty / main_thread_blocked save+retry,
+ *  editor_reloading wait+retry, and optional pre/post-save guards.
+ *  saveDirtyBefore/saveDirtyAfter are Sets of step labels. */
 export function runTool(step, ctx, project, defaultTimeout, runEnv, opts = {}) {
   const saveBefore = opts.saveDirtyBefore ?? new Set();
   const saveAfter = opts.saveDirtyAfter ?? new Set();
@@ -528,6 +552,17 @@ export function runTool(step, ctx, project, defaultTimeout, runEnv, opts = {}) {
     const retry = runToolOnce(retried, ctx, project, defaultTimeout, runEnv);
     const tag = errCode === "main_thread_blocked" ? "main_thread_blocked save+retry" : "scene_dirty save+retry";
     return { ...retry, detail: `${retry.detail} (after ${tag})`, ms: result.ms + retry.ms };
+  }
+  // A step that lands in the domain reload a previous step started (script
+  // write, asmdef edit, build target, Assets/Refresh) is answered
+  // editor_reloading — "retry after it settles". Do exactly that, once, so one
+  // reload does not fail every step queued behind it.
+  if (errCode === "editor_reloading" && !step._retried) {
+    const t0 = Date.now();
+    const settled = waitForEditorSettled(project, runEnv);
+    const retry = runToolOnce({ ...step, _retried: true }, ctx, project, defaultTimeout, runEnv);
+    const tag = settled ? "editor_reloading wait+retry" : "editor_reloading wait timed out, retried";
+    return { ...retry, detail: `${retry.detail} (after ${tag})`, ms: result.ms + (Date.now() - t0) };
   }
   if (saveAfter.has(step.label) && result.ok) {
     saveAllDirtyScenes(project, runEnv, Math.min(defaultTimeout, 30_000), null, opts);
