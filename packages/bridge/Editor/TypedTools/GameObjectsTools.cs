@@ -150,71 +150,101 @@ namespace UnityOpenMcpBridge.TypedTools
             var rootOf = TypedTargets.PrefabRootContainer(go);
             if (rootOf != null) return PrefabRootRefusal(go, rootOf, "duplicated");
 
-            GameObject clone;
-            // Track whether the clone retained its prefab connection, so the
-            // result can tell the agent exactly what kind of copy it got.
-            string prefabConnection;
+            // The copy is made by the Editor's own Duplicate (Edit > Duplicate),
+            // so it is what Ctrl+D gives: a prefab instance stays connected
+            // with all its overrides (property modifications, added and
+            // removed components, added GameObjects), references inside the
+            // copied hierarchy point into the copy, and the copy lands under
+            // the same parent in the same scene, stage or prefab contents. The
+            // duplicate records its own undo; the rename below joins it, so
+            // the call is one undo step. The group is opened here: bridge calls
+            // made without an input event in between otherwise share Unity's
+            // current group, and one undo would also revert the calls before.
+            // (In batch_execute the batch folds it into its own group.)
+            Undo.IncrementCurrentGroup();
+            var undoGroup = Undo.GetCurrentGroup();
+            GameObject clone = null;
             try
             {
-                // InstantiatePrefab preserves the prefab connection — but it
-                // ONLY accepts the OUTERMOST root of a prefab instance. Passing
-                // a nested part of a prefab instance (e.g. a child Toggle of a
-                // prefab-root Canvas) returns null and broke duplication of any
-                // non-root prefab-instance object. Use it solely for the
-                // outermost root; every other object (plain GO OR a nested part
-                // of a prefab instance) clones via Object.Instantiate, which
-                // produces a plain child — the correct editor-duplicate outcome
-                // for a part-of-prefab-instance object.
-                if (PrefabUtility.IsPartOfPrefabInstance(go)
-                    && PrefabUtility.IsOutermostPrefabInstanceRoot(go))
-                {
-                    clone = PrefabUtility.InstantiatePrefab(go, go.transform.parent) as GameObject;
-                    if (clone == null)
-                        return ToolDispatchResult.Fail("duplicate_failed",
-                            "PrefabUtility.InstantiatePrefab returned null (the target is not a loadable prefab-instance root).");
-                    prefabConnection = "preserved";
-                }
-                else
-                {
-                    // Object.Instantiate on a nested part of a prefab instance
-                    // yields a plain (non-prefab) copy — the only sane result,
-                    // since a nested object has no prefab root of its own to
-                    // reconnect to. A plain GO clones to a plain GO (unchanged).
-                    clone = Object.Instantiate(go, go.transform.parent, false);
-                    prefabConnection = PrefabUtility.IsPartOfPrefabInstance(go)
-                        ? "nested_to_plain"   // source was part of a prefab instance
-                        : "plain";
-                }
-                // Name after Instantiate appends "(Clone)" — match editor
-                // duplicate semantics so the result name is stable.
-                clone.name = go.name;
+                clone = DuplicateAsEditor(go);
+                if (clone == null)
+                    return ToolDispatchResult.Fail("duplicate_failed",
+                        $"Unity could not duplicate '{go.name}' (see logs).");
 
-                // Re-apply the source's local transform so InstantiatePrefab
-                // (which takes no pose) lands the clone at the same local pose.
-                var srcT = go.transform;
-                clone.transform.localPosition = srcT.localPosition;
-                clone.transform.localRotation = srcT.localRotation;
-                clone.transform.localScale = srcT.localScale;
+                // The Editor names the copy "Name (1)"; the tool keeps the
+                // source's name. A prefab instance keeps a scripted rename only
+                // as a recorded override.
+                if (clone.name != go.name)
+                {
+                    clone.name = go.name;
+                    if (PrefabUtility.IsPartOfPrefabInstance(clone))
+                        PrefabUtility.RecordPrefabInstancePropertyModifications(clone);
+                }
 
-                // A root clone lands in the active scene; keep it in the
-                // source's scene, as the Editor's own duplicate does.
+                // The copy sits right after the source, in the source's scene
+                // (the Editor's duplicate already does both; kept as the
+                // tool's contract).
                 if (clone.transform.parent == null && go.scene.IsValid() && clone.scene != go.scene)
                     SceneManager.MoveGameObjectToScene(clone, go.scene);
-
-                // Editor duplicate places the clone immediately after the source
-                // rather than at the parent end.
-                clone.transform.SetSiblingIndex(srcT.GetSiblingIndex() + 1);
+                var index = go.transform.GetSiblingIndex() + 1;
+                if (clone.transform.GetSiblingIndex() != index)
+                    clone.transform.SetSiblingIndex(index);
             }
             catch (System.Exception e)
             {
+                if (clone != null) Object.DestroyImmediate(clone);
                 return ToolDispatchResult.Fail("duplicate_failed", e.Message);
             }
 
-            Undo.RegisterCreatedObjectUndo(clone, "MCP Duplicate GameObject");
+            Undo.SetCurrentGroupName("MCP Duplicate GameObject");
+            Undo.CollapseUndoOperations(undoGroup);
             EditorUtility.SetDirty(clone);
             MarkObjectSceneDirty(clone);
 
-            return ToolDispatchResult.Ok(BuildGameObjectResult(clone, "duplicated", prefabConnection));
+            return ToolDispatchResult.Ok(BuildGameObjectResult(clone, "duplicated", PrefabConnection(go, clone)));
+        }
+
+        // How the copy relates to the source's prefab: "preserved" — the copy
+        // is a connected prefab instance (the source was a prefab instance's
+        // root, outermost or nested; a nested one's copy is added to the outer
+        // instance); "nested_to_plain" — the source was another part of a
+        // prefab instance, so the copy is a plain GameObject added to that
+        // instance, as in the Editor; "plain" — the source was not part of a
+        // prefab instance.
+        private static string PrefabConnection(GameObject source, GameObject clone)
+        {
+            if (PrefabUtility.IsAnyPrefabInstanceRoot(clone)) return "preserved";
+            return PrefabUtility.IsPartOfPrefabInstance(source) ? "nested_to_plain" : "plain";
+        }
+
+        // The Editor's Duplicate command for one GameObject. Unity 2023.1+
+        // exposes it as GameObjectUtility.DuplicateGameObject; 2022.3 only
+        // through the selection.
+        internal static GameObject DuplicateAsEditor(GameObject go)
+        {
+#if UNITY_2023_1_OR_NEWER
+            return GameObjectUtility.DuplicateGameObject(go);
+#else
+            return DuplicateThroughSelection(go);
+#endif
+        }
+
+        // The Hierarchy's Duplicate: duplicates the selection and selects the
+        // copies. Unity keeps the copy buffer; the selection is restored.
+        internal static GameObject DuplicateThroughSelection(GameObject go)
+        {
+            var saved = Selection.objects;
+            try
+            {
+                Selection.objects = new Object[] { go };
+                Unsupported.DuplicateGameObjectsUsingPasteboard();
+                var clone = Selection.activeGameObject;
+                return clone != null && clone != go ? clone : null;
+            }
+            finally
+            {
+                Selection.objects = saved;
+            }
         }
 
         // Find returns a token-bounded list of GameObjects that match the
@@ -1062,10 +1092,7 @@ namespace UnityOpenMcpBridge.TypedTools
             => BuildGameObjectResult(go, action, null);
 
         // `prefabConnection` (Duplicate only) reports how the clone relates to
-        // its source's prefab connection: "preserved" (InstantiatePrefab on the
-        // outermost root), "nested_to_plain" (Object.Instantiate on a nested
-        // part of a prefab instance — a plain copy, since a nested object has
-        // no prefab root of its own), or "plain" (source was a plain GO).
+        // its source's prefab connection (see PrefabConnection).
         private static string BuildGameObjectResult(GameObject go, string action, string prefabConnection)
         {
             var summary = BuildGameObjectSummary(go);

@@ -87,6 +87,10 @@ namespace UnityOpenMcpBridge.Tests
                 System.Threading.Thread.CurrentThread.CurrentCulture = commaCulture;
                 System.Threading.Thread.CurrentThread.CurrentUICulture = commaCulture;
 
+                // Sanity: the culture switch took effect, so a culture-bound
+                // formatter would write "1,5" here.
+                Assert.AreEqual("1,5", 1.5f.ToString(), "the test must run under a comma-decimal culture");
+
                 var json = Tool_ScreenshotCamera.BuildSuccessJson(
                     new Vector3(1.5f, -2.25f, 3.75f),
                     new Vector3(0f, 90f, 0f),
@@ -95,15 +99,20 @@ namespace UnityOpenMcpBridge.Tests
                 // Structural check: JsonUtility.FromJson throws on malformed
                 // JSON. A locale-formatted number would inject a stray comma
                 // (e.g. "fov":60,5 → "fov":60 followed by a bare "5" member)
-                // and FromJson would fail. The wrapper maps position/rotation
-                // arrays onto Vector3 fields so the values round-trip too.
+                // and FromJson would fail; inside an array it would split each
+                // number in two (six elements, not three). JsonUtility reads a
+                // JSON array into a float[] field (not into a Vector3, which it
+                // expects as {"x":…}), so the arrays are checked element by
+                // element.
                 var parsed = JsonUtility.FromJson<CameraSuccessEnvelope>(json);
                 Assert.IsNotNull(parsed.camera, "camera block must parse: " + json);
+                Assert.AreEqual("ok", parsed.status, json);
                 Assert.AreEqual(60.5f, parsed.camera.fov, 0.0001f, "fov must round-trip: " + json);
-                Assert.AreEqual(new Vector3(1.5f, -2.25f, 3.75f), parsed.camera.position,
+                CollectionAssert.AreEqual(new[] { 1.5f, -2.25f, 3.75f }, parsed.camera.position,
                     "position must round-trip as a 3-element array: " + json);
-                Assert.AreEqual(new Vector3(0f, 90f, 0f), parsed.camera.rotation,
+                CollectionAssert.AreEqual(new[] { 0f, 90f, 0f }, parsed.camera.rotation,
                     "rotation must round-trip as a 3-element array: " + json);
+                Assert.AreEqual("1280x720", parsed.resolution, json);
 
                 // Belt-and-braces: the literal invariant decimal form must be
                 // present (a comma-decimal locale would have produced 1,5).
@@ -120,8 +129,8 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         // Envelope mirrors Tool_ScreenshotCamera.BuildSuccessJson's output so
-        // JsonUtility can structurally validate it. JsonUtility maps a JSON
-        // 3-element array onto a Vector3 field.
+        // JsonUtility can structurally validate it. The tool writes position
+        // and rotation as JSON arrays, which JsonUtility maps onto float[].
         [System.Serializable]
         private class CameraSuccessEnvelope
         {
@@ -134,8 +143,8 @@ namespace UnityOpenMcpBridge.Tests
         [System.Serializable]
         private class CameraBlock
         {
-            public Vector3 position;
-            public Vector3 rotation;
+            public float[] position;
+            public float[] rotation;
             public float fov;
         }
 

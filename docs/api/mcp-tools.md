@@ -1399,6 +1399,22 @@ In addition to legacy flat fields, the tool accepts:
 Application order is component JSON patches, descendant path patches, then
 root diffs.
 
+### `gameobject_duplicate`
+
+Duplicates as the Editor's Duplicate (Ctrl+D) does, in a loaded scene, the
+open prefab stage or an `in_prefab` asset: the copy sits right after the source
+under the same parent and keeps the source's name, and the call is one undo
+step. `prefabConnection` in the result says what the copy is:
+
+- `preserved` — the source is a prefab instance's root, outermost or nested in
+  another instance or prefab. The copy is a connected instance of the same
+  prefab carrying all the source's overrides: property values, added and
+  removed components, added children. A nested instance's copy is added to the
+  outer instance (or stored in the `in_prefab` asset).
+- `nested_to_plain` — the source is another part of a prefab instance. The copy
+  is a plain GameObject added to that instance.
+- `plain` — the source is not part of a prefab instance.
+
 ### Unity Hub control
 
 The `unity_open_mcp_hub_*` family is local-routed and does not need a running

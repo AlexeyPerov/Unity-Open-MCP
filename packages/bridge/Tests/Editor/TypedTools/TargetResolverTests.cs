@@ -257,6 +257,18 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void Stage_DuplicateChild_StaysInTheStage()
+        {
+            var stage = OpenStage(CratePath);
+            var result = GameObjectsTools.Duplicate("{\"path\":\"TR_Crate/Lid\",\"paths_hint\":[\"" + CratePath + "\"]}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            StringAssert.Contains("\"container\":{\"kind\":\"prefab_stage\",\"path\":\"" + CratePath + "\"}", result.Output);
+            var root = stage.prefabContentsRoot.transform;
+            Assert.AreEqual(2, root.childCount, "Lid and its copy");
+            Assert.AreEqual("Lid", root.GetChild(1).name);
+        }
+
+        [Test]
         public void Stage_GameObjectCreate_HintNamingTheScene_GoesToTheActiveScene()
         {
             OpenScenes(ScenePathA, active: ScenePathA);

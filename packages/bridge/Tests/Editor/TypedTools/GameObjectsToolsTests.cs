@@ -894,12 +894,11 @@ namespace UnityOpenMcpBridge.Tests
             }
         }
 
-        // Reported defect: gameobject_duplicate used InstantiatePrefab for ANY
-        // part of a prefab instance, but InstantiatePrefab only accepts the
-        // OUTERMOST root — passing a nested child (e.g. a Toggle under a
-        // prefab-root Canvas) returned null and failed with duplicate_failed.
-        // The fix routes nested parts through Object.Instantiate, producing a
-        // plain (non-prefab) clone — the only sane result for a nested object.
+        // Reported defect: duplicating a nested child of a prefab instance
+        // (e.g. a Toggle under a prefab-root Canvas) failed with
+        // duplicate_failed. As with the Editor's Duplicate, the copy of a
+        // part that is not a prefab instance root is a plain GameObject added
+        // to the instance.
         [Test]
         public void Duplicate_NestedPartOfPrefabInstance_ClonesToPlainNotNull()
         {
@@ -964,6 +963,235 @@ namespace UnityOpenMcpBridge.Tests
                 if (AssetDatabase.IsValidFolder(TmpDir))
                     AssetDatabase.DeleteAsset(TmpDir);
             }
+        }
+
+        // ---- duplicate keeps a prefab instance's overrides (Ctrl+D) --------
+
+        private const string DupDir = "Assets/TmpDupTests";
+
+        [Test]
+        public void Duplicate_PrefabInstance_KeepsPropertyOverrides()
+        {
+            const string Name = "__MCPTest_DupOverrides";
+            var instance = NewPrefabInstance(Name);
+            try
+            {
+                instance.transform.localPosition = new Vector3(3f, 4f, 5f);
+                var collider = instance.transform.Find("Child").GetComponent<BoxCollider>();
+                collider.size = new Vector3(2f, 3f, 4f);
+                PrefabUtility.RecordPrefabInstancePropertyModifications(instance.transform);
+                PrefabUtility.RecordPrefabInstancePropertyModifications(collider);
+
+                var result = GameObjectsTools.Duplicate("{\"instance_id\":" + InstanceId.Of(instance) + "}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                StringAssert.Contains("\"prefabConnection\":\"preserved\"", result.Output);
+
+                var copy = CopyAfter(instance);
+                Assert.AreEqual(Name, copy.name, "the copy keeps the source's name");
+                Assert.AreEqual(PrefabInstanceStatus.Connected, PrefabUtility.GetPrefabInstanceStatus(copy));
+                Assert.IsTrue(PrefabUtility.IsOutermostPrefabInstanceRoot(copy));
+                Assert.AreEqual(new Vector3(3f, 4f, 5f), copy.transform.localPosition);
+                Assert.AreEqual(new Vector3(2f, 3f, 4f), copy.transform.Find("Child").GetComponent<BoxCollider>().size);
+                var mods = PrefabUtility.GetPropertyModifications(copy);
+                AssertOverride(mods, "m_LocalPosition.x", "3");
+                AssertOverride(mods, "m_Size.y", "3");
+                // The rename back to the source's name is an override too, so
+                // it survives a scene reload.
+                AssertOverride(mods, "m_Name", Name);
+            }
+            finally
+            {
+                DeleteDupFixtures(Name);
+            }
+        }
+
+        [Test]
+        public void Duplicate_PrefabInstance_KeepsAddedAndRemovedComponentsAndAddedChildren()
+        {
+            const string Name = "__MCPTest_DupAdded";
+            var instance = NewPrefabInstance(Name);
+            try
+            {
+                instance.AddComponent<Rigidbody>();
+                Object.DestroyImmediate(instance.transform.Find("Child").GetComponent<BoxCollider>());
+                new GameObject("Extra").transform.SetParent(instance.transform, false);
+
+                var result = GameObjectsTools.Duplicate("{\"path\":\"" + Name + "\"}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+
+                var copy = CopyAfter(instance);
+                Assert.AreEqual(PrefabInstanceStatus.Connected, PrefabUtility.GetPrefabInstanceStatus(copy));
+                var added = PrefabUtility.GetAddedComponents(copy);
+                Assert.AreEqual(1, added.Count, "the added component is an override on the copy");
+                Assert.IsInstanceOf<Rigidbody>(added[0].instanceComponent);
+                Assert.AreSame(copy, added[0].instanceComponent.gameObject);
+                Assert.AreEqual(1, PrefabUtility.GetRemovedComponents(copy).Count,
+                    "the removed component stays removed on the copy");
+                Assert.IsNull(copy.transform.Find("Child").GetComponent<BoxCollider>());
+                var addedChildren = PrefabUtility.GetAddedGameObjects(copy);
+                Assert.AreEqual(1, addedChildren.Count, "the added child is an override on the copy");
+                Assert.AreEqual("Extra", addedChildren[0].instanceGameObject.name);
+                Assert.AreEqual(copy.transform, addedChildren[0].instanceGameObject.transform.parent);
+            }
+            finally
+            {
+                DeleteDupFixtures(Name);
+            }
+        }
+
+        // As with the Editor's Duplicate, the copy of a nested prefab
+        // instance's root is a new instance of that prefab, added to the
+        // outer instance.
+        [Test]
+        public void Duplicate_NestedPrefabInstanceRoot_StaysAPrefabInstance()
+        {
+            const string Name = "__MCPTest_DupOuter";
+            ResetDupDir();
+            var innerSrc = new GameObject("Inner");
+            var inner = PrefabUtility.SaveAsPrefabAsset(innerSrc, DupDir + "/Inner.prefab");
+            Object.DestroyImmediate(innerSrc);
+            var outerSrc = new GameObject(Name);
+            ((GameObject)PrefabUtility.InstantiatePrefab(inner)).transform.SetParent(outerSrc.transform, false);
+            var outer = PrefabUtility.SaveAsPrefabAsset(outerSrc, DupDir + "/" + Name + ".prefab");
+            Object.DestroyImmediate(outerSrc);
+            var instance = (GameObject)PrefabUtility.InstantiatePrefab(outer);
+            try
+            {
+                var nested = instance.transform.Find("Inner").gameObject;
+                Assert.IsFalse(PrefabUtility.IsOutermostPrefabInstanceRoot(nested), "sanity: nested instance root");
+
+                var result = GameObjectsTools.Duplicate("{\"instance_id\":" + InstanceId.Of(nested) + "}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                StringAssert.Contains("\"prefabConnection\":\"preserved\"", result.Output);
+
+                var copy = CopyAfter(nested);
+                Assert.AreEqual("Inner", copy.name);
+                Assert.IsTrue(PrefabUtility.IsAnyPrefabInstanceRoot(copy));
+                Assert.AreSame(inner, PrefabUtility.GetCorrespondingObjectFromSource(copy));
+                Assert.IsTrue(PrefabUtility.IsAddedGameObjectOverride(copy), "the copy is added to the outer instance");
+            }
+            finally
+            {
+                DeleteDupFixtures(Name);
+            }
+        }
+
+        [Test]
+        public void Duplicate_PrefabInstance_UndoRemovesTheCopyInOneStep()
+        {
+            const string Name = "__MCPTest_DupUndo";
+            var instance = NewPrefabInstance(Name);
+            try
+            {
+                instance.AddComponent<Rigidbody>();
+                var rootsBefore = instance.scene.rootCount;
+                Undo.IncrementCurrentGroup();
+
+                var result = GameObjectsTools.Duplicate("{\"instance_id\":" + InstanceId.Of(instance) + "}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                var copy = CopyAfter(instance);
+
+                Undo.PerformUndo();
+                Assert.IsTrue(copy == null, "one undo removes the copy");
+                Assert.AreEqual(rootsBefore, instance.scene.rootCount);
+                Assert.IsNotNull(instance.GetComponent<Rigidbody>(), "the source is untouched");
+
+                Undo.PerformRedo();
+                var redone = CopyAfter(instance);
+                Assert.AreNotSame(instance, redone);
+                Assert.AreEqual(Name, redone.name);
+                Assert.AreEqual(PrefabInstanceStatus.Connected, PrefabUtility.GetPrefabInstanceStatus(redone));
+                Assert.IsNotNull(redone.GetComponent<Rigidbody>());
+            }
+            finally
+            {
+                DeleteDupFixtures(Name);
+            }
+        }
+
+        // Unity 2022.3 has no GameObjectUtility.DuplicateGameObject; there the
+        // tool duplicates through the selection, which this pins on any version.
+        [Test]
+        public void DuplicateThroughSelection_KeepsTheInstance_AndRestoresTheSelection()
+        {
+            const string Name = "__MCPTest_DupSelection";
+            var instance = NewPrefabInstance(Name);
+            var other = new GameObject("__MCPTest_DupSelection_Other");
+            var saved = Selection.objects;
+            try
+            {
+                instance.AddComponent<Rigidbody>();
+                Selection.objects = new Object[] { other };
+
+                var copy = GameObjectsTools.DuplicateThroughSelection(instance);
+                Assert.IsNotNull(copy);
+                Assert.AreNotSame(instance, copy);
+                Assert.AreEqual(PrefabInstanceStatus.Connected, PrefabUtility.GetPrefabInstanceStatus(copy));
+                Assert.AreEqual(1, PrefabUtility.GetAddedComponents(copy).Count);
+                CollectionAssert.AreEqual(new Object[] { other }, Selection.objects);
+            }
+            finally
+            {
+                Selection.objects = saved;
+                Object.DestroyImmediate(other);
+                foreach (var go in SceneQuery.FindAllOfType<GameObject>(SceneQuery.Inactive.Include))
+                    if (go != null && go.transform.parent == null && go.name.StartsWith(Name, System.StringComparison.Ordinal))
+                        Object.DestroyImmediate(go);
+                DeleteDupFixtures(Name);
+            }
+        }
+
+        private static void ResetDupDir()
+        {
+            if (AssetDatabase.IsValidFolder(DupDir)) AssetDatabase.DeleteAsset(DupDir);
+            AssetDatabase.CreateFolder("Assets", "TmpDupTests");
+        }
+
+        // A throwaway prefab (root + "Child" with a BoxCollider) and a
+        // connected instance of it in the active scene.
+        private static GameObject NewPrefabInstance(string name)
+        {
+            ResetDupDir();
+            var src = new GameObject(name);
+            var child = new GameObject("Child");
+            child.transform.SetParent(src.transform, false);
+            child.AddComponent<BoxCollider>();
+            var asset = PrefabUtility.SaveAsPrefabAsset(src, DupDir + "/" + name + ".prefab");
+            Object.DestroyImmediate(src);
+            var instance = (GameObject)PrefabUtility.InstantiatePrefab(asset);
+            Assert.AreEqual(PrefabInstanceStatus.Connected, PrefabUtility.GetPrefabInstanceStatus(instance));
+            return instance;
+        }
+
+        private static void DeleteDupFixtures(string rootName)
+        {
+            foreach (var go in SceneQuery.FindAllOfType<GameObject>(SceneQuery.Inactive.Include))
+                if (go != null && go.transform.parent == null && go.name == rootName)
+                    Object.DestroyImmediate(go);
+            if (AssetDatabase.IsValidFolder(DupDir)) AssetDatabase.DeleteAsset(DupDir);
+        }
+
+        // The copy is the sibling right after the source.
+        private static GameObject CopyAfter(GameObject source)
+        {
+            var index = source.transform.GetSiblingIndex() + 1;
+            var parent = source.transform.parent;
+            var copy = parent != null
+                ? parent.GetChild(index).gameObject
+                : source.scene.GetRootGameObjects()[index];
+            Assert.AreNotSame(source, copy);
+            return copy;
+        }
+
+        private static void AssertOverride(PropertyModification[] mods, string propertyPath, string value)
+        {
+            foreach (var m in mods)
+            {
+                if (m.propertyPath != propertyPath) continue;
+                Assert.AreEqual(value, m.value, propertyPath);
+                return;
+            }
+            Assert.Fail("no override on " + propertyPath);
         }
 
         [Test]

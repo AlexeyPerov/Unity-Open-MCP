@@ -97,7 +97,7 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_game_view", 1055 },
             { "unity_open_mcp_gameobject_create", 810 },
             { "unity_open_mcp_gameobject_destroy", 543 },
-            { "unity_open_mcp_gameobject_duplicate", 701 },
+            { "unity_open_mcp_gameobject_duplicate", 720 },
             { "unity_open_mcp_gameobject_find", 759 },
             { "unity_open_mcp_gameobject_modify", 1509 },
             { "unity_open_mcp_gameobject_set_parent", 788 },

@@ -244,6 +244,32 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(5f, stem.localPosition.y, 1e-4);
         }
 
+        // The copy of a nested prefab instance is another instance of that
+        // prefab in the asset, with the overrides the source carries.
+        [Test]
+        public void Duplicate_NestedPrefabInstance_KeepsItsPrefabAndOverrides()
+        {
+            var leafBefore = File.ReadAllBytes(LeafPath);
+            var modify = Dispatch("unity_open_mcp_gameobject_modify",
+                "{\"in_prefab\":\"" + CratePath + "\",\"path\":\"PA_Crate/PA_Leaf/Stem\",\"position\":\"0,5,0\",\"local_space\":true}");
+            Assert.IsTrue(modify.Success, modify.ErrorMessage);
+
+            var r = Dispatch("unity_open_mcp_gameobject_duplicate",
+                "{\"in_prefab\":\"" + CratePath + "\",\"path\":\"PA_Crate/PA_Leaf\"}");
+            Assert.IsTrue(r.Success, r.ErrorMessage);
+            StringAssert.Contains("\"prefabConnection\":\"preserved\"", r.Output);
+            StringAssert.Contains("\"saved\":true", r.Output);
+            CollectionAssert.AreEqual(leafBefore, File.ReadAllBytes(LeafPath), "the nested prefab is untouched");
+
+            var crate = AssetDatabase.LoadAssetAtPath<GameObject>(CratePath).transform;
+            Assert.AreEqual(3, crate.childCount, "Lid, PA_Leaf and its copy");
+            var copy = crate.GetChild(2).gameObject;
+            Assert.AreEqual("PA_Leaf", copy.name);
+            Assert.IsTrue(PrefabUtility.IsAnyPrefabInstanceRoot(copy), "the copy is a prefab instance");
+            Assert.AreEqual(LeafPath, PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(copy));
+            Assert.AreEqual(5f, copy.transform.Find("Stem").localPosition.y, 1e-4, "the override is copied");
+        }
+
         // ------------------------------ batch -------------------------------
 
         [Test]
