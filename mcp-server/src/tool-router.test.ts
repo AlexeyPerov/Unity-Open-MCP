@@ -1999,6 +1999,72 @@ test("route: bridge_status returns stopped when bridge is offline", async () => 
   });
 });
 
+/** An Editor.log fixture for the bridge-loss evidence, padded past the "frozen log" size so the resolver reads it. */
+async function writeEvidenceLog(dir: string, body: string): Promise<string> {
+  const path = join(dir, "Editor.log");
+  await writeFile(path, "Unity Editor version:    6000.3.28f1\n" + "Refreshing native plugins compatible for Editor\n".repeat(120) + body);
+  return path;
+}
+const LOG_RELOAD_WITHOUT_BRIDGE =
+  "Begin MonoManager ReloadAssembly\n[Unity Open MCP Bridge] Listening on http://127.0.0.1:1/\n" +
+  "Mono: successfully reloaded assembly\nDomain Reload Profiling: 900ms\n" +
+  "Begin MonoManager ReloadAssembly\nMono: successfully reloaded assembly\nDomain Reload Profiling: 800ms\n";
+const LOG_RELOAD_IN_PROGRESS =
+  "Begin MonoManager ReloadAssembly\n[Unity Open MCP Bridge] Listening on http://127.0.0.1:1/\n" +
+  "Mono: successfully reloaded assembly\nDomain Reload Profiling: 900ms\nBegin MonoManager ReloadAssembly\n";
+const LOG_COLD_SAFE_MODE =
+  "Assets/Broken.cs(3,1): error CS0246: The type or namespace name 'Nope' could not be found\n" +
+  "Safe Mode: Only loading a subset of assemblies\nBegin MonoManager ReloadAssembly\n";
+
+for (const evidence of [true, false]) test(`route: bridge_status — a stale lock is dead_bridge only with Editor.log evidence (evidence: ${evidence})`, async () => {
+  await withTmp("router-bstatus-stale-", async (tmp) => {
+    await setupProject(tmp);
+    const sandboxDir = await mkdtemp(join(tmpdir(), "uomcp-bstatus-"));
+    const prevHome = process.env.HOME;
+    const prevUserProfile = process.env.USERPROFILE;
+    process.env.HOME = sandboxDir;
+    process.env.USERPROFILE = sandboxDir;
+    try {
+      const { projectHash } = await import("./instance-discovery.js");
+      const hash = projectHash(tmp);
+      const instancesDir = join(sandboxDir, ".unity-open-mcp", "instances");
+      await mkdir(instancesDir, { recursive: true });
+      const stale = new Date(Date.now() - 60_000).toISOString();
+      await writeFile(join(instancesDir, `${hash}.json`), JSON.stringify({
+        pid: process.pid, port: 24678, projectPath: tmp, projectHash: hash, startedAt: stale, updatedAt: stale,
+        heartbeatAt: stale, state: "reloading", isPlaying: false, isCompiling: false, bridgeVersion: "0.0.0", unityVersion: "6000.0.0",
+      }));
+      const log = await writeEvidenceLog(sandboxDir, evidence ? LOG_RELOAD_WITHOUT_BRIDGE : LOG_RELOAD_IN_PROGRESS);
+      const live = makePingFakeLive({ pingBody: null, available: false });
+      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, undefined, log);
+
+      const body = parseBody(await router.route("unity_open_mcp_bridge_status", {}));
+      assert.equal(body.classification, "dead_bridge", "classification mirrors the lock verbatim");
+      assert.equal(body.status, evidence ? "dead_bridge" : "unreachable");
+      assert.equal((body.evidence as { kind?: string } | undefined)?.kind, evidence ? "bridge_not_loaded" : undefined);
+      assert.ok(typeof body.heartbeatStalledMs === "number" && body.heartbeatStalledMs >= 60_000);
+
+      const status = await router.route("unity_open_mcp_editor_status", {});
+      const statusBody = parseBody(status);
+      if (evidence) {
+        assert.equal((statusBody.error as { code: string }).code, "bridge_compile_failed");
+        assert.equal((statusBody.evidence as { kind: string }).kind, "bridge_not_loaded");
+      } else {
+        // A long reload: answered from the lock as a transition, not an error.
+        assert.equal(status.isError, false);
+        assert.equal(statusBody.transition, "reloading");
+        assert.equal(statusBody.source, "lock");
+      }
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = prevUserProfile;
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+});
+
 test("route: bridge_status returns dead_bridge when the lock classifies dead", async () => {
   await withTmp("router-bstatus-dead-", async (tmp) => {
     await setupProject(tmp);
@@ -2032,10 +2098,12 @@ test("route: bridge_status returns dead_bridge when the lock classifies dead", a
         unityVersion: "6000.0.0",
       };
       await writeFile(join(instancesDir, `${hash}.json`), JSON.stringify(payload));
+      // Editor.log: the last reload finished without the bridge starting.
+      const log = await writeEvidenceLog(sandboxDir, LOG_RELOAD_WITHOUT_BRIDGE);
 
       // Ping unreachable (the dead bridge never answers).
       const live = makePingFakeLive({ pingBody: null, available: false });
-      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, undefined, log);
 
       const result = await router.route("unity_open_mcp_bridge_status", {});
       const body = parseBody(result);
@@ -2159,13 +2227,16 @@ test("route: bridge_status returns dead_bridge for cold Safe Mode (no lock + liv
       },
     });
     try {
-      // Ping unreachable (the bridge never compiled → no listener).
+      // Ping unreachable (the bridge never compiled → no listener), and
+      // Editor.log shows the startup compile failed into Safe Mode.
+      const log = await writeEvidenceLog(tmp, LOG_COLD_SAFE_MODE);
       const live = makePingFakeLive({ pingBody: null, available: false });
-      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, undefined, log);
 
       const result = await router.route("unity_open_mcp_bridge_status", {});
       const body = parseBody(result);
       assert.equal(result.isError, false, "dead_bridge is not an error");
+      assert.equal((body.evidence as { kind: string }).kind, "safe_mode");
       assert.equal(body.status, "dead_bridge");
       assert.equal(body.ready, false);
       // classification is still "gone" — the lock IS absent. The cold-Safe-
@@ -2215,6 +2286,24 @@ test("route: bridge_status still returns stopped when no lock AND no Unity proce
       };
       assert.equal(instance.classification, "gone");
       assert.equal(instance.unityProcessPid, undefined);
+      assert.equal(body.recoveryHint, null);
+    } finally {
+      restore();
+    }
+  });
+});
+
+test("route: bridge_status — no lock + a live Unity process WITHOUT Editor.log evidence is a starting Editor (unreachable)", async () => {
+  await withTmp("router-bstatus-coldstart-", async (tmp) => {
+    await setupProject(tmp);
+    const restore = setUnityProcessScannerForTest({ scan: () => [{ pid: 4242, projectPath: tmp }] });
+    try {
+      const log = await writeEvidenceLog(tmp, "Begin MonoManager ReloadAssembly\n");
+      const live = makePingFakeLive({ pingBody: null, available: false });
+      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, undefined, log);
+      const body = parseBody(await router.route("unity_open_mcp_bridge_status", {}));
+      assert.equal(body.status, "unreachable");
+      assert.equal(body.evidence, undefined);
       assert.equal(body.recoveryHint, null);
     } finally {
       restore();
@@ -4802,6 +4891,38 @@ test("a call during a reload waits out its budget, then refuses with a stable ed
     assert.match(body.agentNextSteps[0], /unity_open_mcp_editor_status \{"wait_until":"idle"\}/);
     assert.equal(batch.calls.length, 0);
     assert.equal(live.calls.length, 0);
+  } finally { rmSync(path, { force: true }); await rm(root, { recursive: true, force: true }); }
+});
+
+test("a reload that outlives the stale-heartbeat threshold is waited for like any reload — no batch, no bridge_compile_failed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "reload-long-"));
+  const path = lockPath(root);
+  mkdirSync(dirname(path), { recursive: true });
+  // Frozen at "reloading" 60 s ago (a large project's or a play-mode reload).
+  writeFileSync(path, JSON.stringify({ pid: process.pid, projectPath: root, port: 27999,
+    state: "reloading", heartbeatAt: new Date(Date.now() - 60_000).toISOString() }));
+  try {
+    const log = await writeEvidenceLog(root, LOG_RELOAD_IN_PROGRESS);
+    const live = makeFakeLive({ available: false });
+    const batch = makeFakeBatch({ batchTools: new Set(["unity_open_mcp_find_members"]) });
+    const router = withReloadBudget(600, () => new ToolRouter(live, batch, root, makeFakeEventStream(), new ToolSessionState(), undefined, undefined, log));
+    const started = Date.now();
+    const result = await router.route("unity_open_mcp_find_members", { query: "Rigidbody" });
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.ok(Date.now() - started >= 500, "it waited for the reload first");
+    assert.ok(Date.now() - started < 5_000, "and only for its budget");
+    assert.equal(body.error.code, "editor_reloading");
+    assert.equal(body.dispatched, false);
+    assert.equal(body.transition, "reloading");
+    assert.ok(body.heartbeatStalledMs >= 60_000);
+    assert.equal(batch.calls.length, 0, "a live Editor holds the project: never batch");
+
+    // With Editor.log evidence the call is not held: the live route answers it.
+    await writeEvidenceLog(root, LOG_RELOAD_WITHOUT_BRIDGE);
+    const router2 = withReloadBudget(600, () => new ToolRouter(live, batch, root, makeFakeEventStream(), new ToolSessionState(), undefined, undefined, log));
+    const quick = Date.now();
+    await router2.route("unity_open_mcp_find_members", { query: "Rigidbody" });
+    assert.ok(Date.now() - quick < 500, "a bridge that cannot come back is not waited for");
   } finally { rmSync(path, { force: true }); await rm(root, { recursive: true, force: true }); }
 });
 

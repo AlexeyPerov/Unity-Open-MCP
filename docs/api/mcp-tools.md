@@ -951,6 +951,20 @@ snippet calls it is not visible. A `read_only: true` snippet is held to the same
 list (and to scene saves), but a computed member name alone does not override
 the assertion. Nested in `batch_execute`, only a `read_only` snippet is accepted.
 
+A snippet that **requests a domain reload** (`EditorUtility.RequestScriptReload()`)
+is answered before the reload runs: the bridge holds the reload until the
+response is written, so the snippet's return value arrives with
+`reloadRequested: true`, `reloadTiming` and a step naming
+`unity_open_mcp_editor_status {"wait_until":"idle"}`; the next call waits for
+the reload by itself. `reloadTiming` is `after_response`, or `after_play_mode`
+in play mode under *Script Changes While Playing: Recompile After Finished
+Playing*, where Unity runs it only when play mode ends. Under the other two
+settings the reload runs in play mode and play continues. A snippet that
+requests a compile (`CompilationPipeline.RequestScriptCompilation()`) is
+likewise answered at once with its result and `compile.generationAtStart`;
+wait with `{"wait_until":"idle","after_generation":N}` for the compile and its
+reload ([bridge contract](bridge-http.md#compile-handshake-and-reload-answers)).
+
 Guessed names get a lookup instead of a bare diagnostic. For `CS0234` / `CS0246`
 the message appends a "DID YOU MEAN" section listing loaded types whose simple
 name matches, with their full names and assemblies (a qualified guess the
@@ -1106,8 +1120,12 @@ reports `touchedOpenScenes` for the same reason). Every answer adds `state`
 (`live` / `lock`). While the Editor compiles, reloads or changes play mode — when
 the bridge cannot answer — the status is read from the instance lock and
 `/ping` (`source: "lock"`, scene fields absent) with `retryAfterMs` and the wait
-to call, instead of an error. Only a missing Editor (`bridge_offline`) or a
-bridge that did not come back (`bridge_compile_failed`) is an error. The answer
+to call, instead of an error; a reload whose heartbeat stopped for longer than
+the stale threshold adds `heartbeatStalledMs` and is still a transition. Only a
+missing Editor (`bridge_offline`) or a bridge that `Editor.log` shows cannot
+come back (`bridge_compile_failed`, with `evidence` — see
+[lost bridge vs. long reload](routing-lifecycle.md#a-lost-response-or-a-long-reload-is-not-a-dead-bridge))
+is an error. The answer
 is flat (not a gate envelope).
 
 **Wait (`wait_until`: `idle` | `playing` | `edit`).** Blocks until the Editor is
@@ -1130,7 +1148,10 @@ domain reload it waits for.
   `compile.dueButNotStarted`).
 - A mode that does not come (play mode refused because scripts do not compile)
   ends with `wait_not_reached` once the Editor has been settled in the other
-  mode for a few seconds; a dead bridge ends with `bridge_compile_failed`.
+  mode for a few seconds; a dead bridge ends with `bridge_compile_failed`
+  (only with `Editor.log` evidence: Safe Mode, or a reload that finished
+  without the bridge — a long reload is waited through, and a wait that runs
+  out of budget on one says so in `wait_timeout`).
 - `timeout_ms` is the wait's budget (default 120000, up to 600000). Up to 40 s
   is waited inside the call; a longer budget continues as a
   [`jobs`](jobs.md) wait and the call returns `status: "waiting"` with the

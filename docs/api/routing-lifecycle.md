@@ -211,9 +211,9 @@ pointed at a top-level call it cannot make.
 | Code | Meaning | Recovery |
 |---|---|---|
 | `bridge_offline` / `bridge_unavailable` | No reachable live bridge. | Open the project, check path/port, or use supported offline tools. |
-| `bridge_compile_failed` | Unity is alive but the bridge assembly did not reload, often Safe Mode or a compile failure. | Call `read_compile_errors`; restart Unity for editor resource exhaustion. |
+| `bridge_compile_failed` | Unity is alive, the bridge is down, and `Editor.log` shows it cannot come back on its own: Unity is in Safe Mode, the last domain reload finished without the bridge starting, or (no instance lock yet) the startup compile failed. Carries `evidence: { kind, detail, logPath, errors? }`. A stopped heartbeat alone is never reported as this code — see [lost bridge vs. long reload](#a-lost-response-or-a-long-reload-is-not-a-dead-bridge). | Call `read_compile_errors`; restart Unity for editor resource exhaustion. |
+| `response_lost` | The request reached the bridge but its response never arrived (the connection closed, or nothing came back before the call's deadline) while the Editor looked settled, and `Editor.log` shows no compile failure. `dispatched: null`, `cause` (`connection_closed` / `timeout`), `retryAfterMs`. | Wait with `editor_status {"wait_until":"idle"}`, then re-send a read; check a mutation's effect before repeating it. Never replayed automatically. |
 | `main_thread_blocked` | A modal or long editor operation prevented dispatch. | Dismiss the modal, check dirty scenes, then re-probe; do not only raise the timeout. |
-| `compile_timeout` | Compile wait exceeded. | Wait and re-probe; switch to offline compile errors if the bridge is dead. |
 | `editor_instance_locked` | Headless Unity cannot open a project held by the Editor. | Read the message's diagnosis: a fresh instance lock means the live bridge should be reachable (retry the live route); a live process with no listener means a booting Editor — wait and retry; no matching process means a stale `Temp/UnityLockfile`. The error names the invoked tool, and `agentNextSteps` carries the variant-specific remedy. |
 | `unity_not_discovered` | No Unity executable was found. | Install under a standard Hub path or set `UNITY_PATH`. |
 | `unity_version_not_installed` | The exact version in `ProjectVersion.txt` is not installed. No Editor was started. | Install that version or intentionally opt in with `UNITY_OPEN_MCP_ALLOW_VERSION_MISMATCH=1`. |
@@ -226,7 +226,7 @@ pointed at a top-level call it cannot make.
 | `batch_aborted` | Unity exited nonzero before a report with no recognized compiler/package/spawn cause. | Inspect the captured output tail. |
 | `compile_failed` | The child emitted compiler diagnostics before its report. | Fix those diagnostics, then retry. |
 | `project_load_failed` | Headless Unity stopped at package/project resolution before its entry point; no compile ran. | Read the Package Manager notice at the end of the captured output tail (the error also names offending packages), fix `Packages/manifest.json`, then retry. |
-| `editor_reloading` | The Editor was still compiling, reloading or changing play mode after the call's [mid-reload wait](#calls-during-a-compile-reload-or-play-mode-change) (`dispatched: false`, nothing ran), or a reload closed the response of a call that may have run (`dispatched: true` / `null`). | Wait with `editor_status {"wait_until":"idle"}`, then retry a `dispatched: false` call; verify the effect of a `dispatched: true` / `null` mutation before repeating it. Carries `retryAfterMs` and `transition`. Never launches headless Unity. |
+| `editor_reloading` | The Editor was still compiling, reloading or changing play mode when the call's [wait budget](#one-wait-budget-per-call) ran out (`dispatched: false`, nothing ran), or a reload closed the response of a call that may have run (`dispatched: true` / `null`). A reload whose heartbeat stopped longer than the stale threshold without `Editor.log` evidence of a dead bridge is one of these too (`heartbeatStalledMs`). | Wait with `editor_status {"wait_until":"idle"}`, then retry a `dispatched: false` call; verify the effect of a `dispatched: true` / `null` mutation before repeating it. Carries `retryAfterMs` and `transition`. Never launches headless Unity. |
 | `batch_in_progress` | Another headless operation owns the project: one this MCP server is driving, or a `-batchmode` Unity another process (a second MCP server, CI) has open on it. Checked before the Editor-ownership checks, so a headless Unity is never reported as `editor_instance_locked`; the message names the foreign process when there is one. | Wait for it to finish. |
 | `markers_missing` | A non-compile batch operation exited 0 without its report. | Inspect the captured output tail and the operation's post-state before repeating a mutation. |
 | `batch_spawn_failed` | Headless Unity produced no classifiable result (non-zero exit, no markers). | Inspect compile errors, package state, project lock, and path. |
@@ -235,17 +235,37 @@ pointed at a top-level call it cannot make.
 | `bridge_response_unparsable` | A bridge response could not be parsed while the Editor was settled (no reload or play-mode change explains it). | Do not trust partial output; check bridge health before retrying. A response cut off by a reload is `editor_reloading` / `triggered_reload` instead. |
 
 A failed tool POST is replayed only for proven pre-connection failures
-(`ECONNREFUSED`, DNS lookup failures, or a connect timeout). A socket reset,
-response timeout, or changed bridge endpoint cannot establish that a mutation
-did not commit. These outcomes are not replayed automatically: inspect the
-post-state before retrying, even if `/ping` succeeds again. Explicit compiling
-503 responses retain their bounded settle-and-retry behavior.
+(`ECONNREFUSED`, DNS lookup failures, or a connect timeout): the client waits
+for the listener from the call's wait budget and sends it again. A socket
+reset, response timeout, or changed bridge endpoint cannot establish that a
+mutation did not commit. Those are classified at once — no wait — as
+`triggered_reload` (a compile-reload call whose reload is underway),
+`editor_reloading` (`dispatched: null`, a reload is underway),
+`bridge_compile_failed` (only with `Editor.log` evidence) or `response_lost`,
+and are never replayed automatically: inspect the post-state before retrying,
+even if `/ping` succeeds again. Explicit compiling 503 responses retain their
+bounded settle-and-retry behavior.
 
-Retry tunables include `UNITY_OPEN_MCP_COMPILE_WAIT_MS`,
-`UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS`,
-`UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS`,
-`UNITY_OPEN_MCP_TRANSIENT_BACKOFF_MS`, and `UNITY_OPEN_MCP_RELOAD_WAIT_MS` (the
-mid-reload wait budget, default 30000; `0` refuses at once).
+### One wait budget per call
+
+A live call waits for an Editor that is not ready from **one** budget,
+`UNITY_OPEN_MCP_RELOAD_WAIT_MS` (default 30000; `0` refuses at once): the
+router's wait before dispatch, the client's readiness wait, the wait before
+re-sending a call the bridge refused with 503, and the wait for a listener
+that refused the connection all draw from the same deadline, so they cannot
+stack. Past it the call answers `editor_reloading` (`dispatched: false`) or
+`bridge_offline`. The tool's own run time is separate: it is bounded by its
+`timeout_ms` (clamped to 55 s) plus 10 s of transport slack, after which a
+missing answer is `response_lost` (`cause: "timeout"`). A live call therefore
+ends within about `reload wait + timeout_ms + 10 s`; longer work continues as a
+[`jobs`](jobs.md) job where the tool supports it (`editor_status` waits,
+compiles, test runs, play-mode operations).
+
+Other retry tunables: `UNITY_OPEN_MCP_COMPILE_WAIT_MS` (an extra cap on the
+client's readiness wait, default 120000 — the call budget is normally the
+tighter one), `UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS`,
+`UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS` and
+`UNITY_OPEN_MCP_TRANSIENT_BACKOFF_MS`.
 
 ### Calls during a compile, reload or play-mode change
 
@@ -297,6 +317,46 @@ for the whole window — the instance lock (heartbeat `state`, `isPlaying` /
   body while the lock or `/ping` shows a transition maps to `editor_reloading`
   with `dispatched: null`; only an unparsable body from a settled Editor stays
   `bridge_response_unparsable`.
+- **A call that requests a reload is answered first.** When a call's dispatch
+  leaves a domain reload requested (`EditorUtility.RequestScriptReload` from an
+  `execute_csharp` snippet or an invoked method), the bridge holds the reload
+  until the response is written, so the result arrives with
+  `reloadRequested: true` and `reloadTiming`, plus the wait to make. Until the
+  reload starts the lock state and `/ping` `transition` read `reloading` and
+  mutations are refused, so the next call waits for it instead of being cut
+  off. In play mode the reload runs and play continues ("Script Changes While
+  Playing": *Recompile And Continue Playing* or *Stop Playing And Recompile*);
+  under *Recompile After Finished Playing* Unity defers it to the end of play
+  mode (`reloadTiming: "after_play_mode"`), and calls keep running meanwhile.
+  An `execute_csharp` snippet that leaves a compile due is answered without the
+  settle wait too, with `compile.generationAtStart` for
+  `editor_status {"wait_until":"idle","after_generation":N}`.
+
+### A lost response or a long reload is not a dead bridge
+
+The instance lock's heartbeat is written from the Editor's main thread, so it
+stops during every domain reload. A reload that outlives the 10 s stale
+threshold — a large project, a play-mode reload, a reload a test run deferred
+to its end — looks exactly like a bridge assembly that never came back: a live
+Unity process with a frozen heartbeat. The server tells them apart only with
+evidence from the project's `Editor.log`:
+
+- **Safe Mode** (`Safe Mode: …` logged after the bridge last started);
+- **the last reload finished without the bridge** (`Begin MonoManager
+  ReloadAssembly` → reload end, with no `[Unity Open MCP Bridge] Listening on`
+  in between: its assembly failed to compile or load, or was removed); current
+  compiler errors, the bridge's own first, ride along;
+- with no instance lock yet, **the startup compile's current errors**.
+
+With that evidence the answer is `bridge_compile_failed` (and `bridge_status`
+reports `dead_bridge` with an `evidence` block). Without it a frozen heartbeat
+inside a transition is a reload that runs long: calls wait for it from their
+budget, `editor_status` waits through it, and the answers carry
+`heartbeatStalledMs`; outside a transition it is an unreachable listener
+(`bridge_status` `unreachable`, a retryable `bridge_offline`). Compiler errors
+alone are not evidence while a reload runs: Unity does not reload after a
+failed compile, so the old domain — and the bridge — keep running, and a
+reload in progress loads the last good assemblies.
 
 ## Multi-agent scheduling
 
@@ -335,8 +395,12 @@ It combines the instance-lock classifier with one ping probe — the same
 [editor-state reader](#calls-during-a-compile-reload-or-play-mode-change)
 `editor_status` uses — and never errors merely because the bridge is offline. It
 also reports `transition`, `compileGeneration` and `compilePending`.
-`dead_bridge` includes a `recoveryHint` pointing to
-`unity_open_mcp_read_compile_errors`.
+`dead_bridge` needs `Editor.log` evidence that the bridge cannot come back
+([above](#a-lost-response-or-a-long-reload-is-not-a-dead-bridge)) and carries
+it as `evidence`, with a `recoveryHint` pointing to
+`unity_open_mcp_read_compile_errors`. A frozen heartbeat without evidence (a
+long reload, an Editor still starting) is `unreachable`, with
+`heartbeatStalledMs`.
 
 `running` means **the listener answers**, not **the Editor can compile**. Two
 failure modes leave the process, the heartbeat and `/ping` all looking healthy

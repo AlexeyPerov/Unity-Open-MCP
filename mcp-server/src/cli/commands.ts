@@ -851,6 +851,8 @@ function isUnreachableResult(body: unknown, isError: boolean): boolean {
       return (
         code === "bridge_unavailable" ||
         code === "bridge_compile_failed" ||
+        code === "editor_reloading" ||
+        code === "response_lost" ||
         code === "timeout" ||
         code === "request_timeout"
       );

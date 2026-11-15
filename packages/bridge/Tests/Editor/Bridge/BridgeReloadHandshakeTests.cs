@@ -151,6 +151,72 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void ReloadRequest_IsReadableOnThisUnity_AndNotRequestedInASettledEditor()
+        {
+            var requested = BridgeReloadRequest.IsRequested();
+            Assert.IsTrue(requested.HasValue, "InternalEditorUtility.IsScriptReloadRequested must resolve on this Unity version");
+            Assert.IsFalse(requested.Value);
+            Assert.IsFalse(BridgeReloadRequest.Due);
+        }
+
+        [Test]
+        public void ReloadRequest_HeldUntilTheResponse_IsPublishedAsDue_ThenReleased()
+        {
+            try
+            {
+                BridgeSession.SetCompilingForTest(false);
+                BridgeSession.SetPlayingForTest(false);
+                BridgeSession.SetWillChangePlaymodeForTest(false);
+
+                // Edit mode: held until the response is written.
+                Assert.AreEqual(BridgeReloadRequest.TimingAfterResponse, BridgeReloadRequest.Hold());
+                Assert.AreEqual(1, BridgeReloadRequest.HoldsForTest);
+                Assert.IsTrue(BridgeReloadRequest.Due);
+                // The next call waits for it: /ping, and mutations are refused.
+                Assert.AreEqual("reloading", BridgeSession.Transition);
+                StringAssert.Contains("\"transition\":\"reloading\"", BridgeJson.BuildPingJson());
+                Assert.AreEqual("reloading", BridgeHttpServer.DispatchBlockingTransition());
+
+                var step = BridgeReloadRequest.NextStep(BridgeReloadRequest.TimingAfterResponse);
+                StringAssert.Contains("unity_open_mcp_editor_status {\"wait_until\":\"idle\"}", step);
+                StringAssert.Contains("right after this response", step);
+                StringAssert.Contains("Recompile After Finished Playing",
+                    BridgeReloadRequest.NextStep(BridgeReloadRequest.TimingAfterPlayMode));
+
+                // No release yet: the tick keeps the hold.
+                BridgeReloadRequest.TickForTest();
+                Assert.AreEqual(1, BridgeReloadRequest.HoldsForTest);
+
+                // The response is written: the next tick unlocks the reload.
+                BridgeReloadRequest.Release();
+                BridgeReloadRequest.TickForTest();
+                Assert.AreEqual(0, BridgeReloadRequest.HoldsForTest);
+                Assert.IsTrue(BridgeReloadRequest.Due, "due until the reload starts (or its grace runs out)");
+            }
+            finally
+            {
+                BridgeReloadRequest.ResetForTest();
+                BridgeSession.RefreshVolatileState();
+            }
+            Assert.IsFalse(BridgeReloadRequest.Due);
+            Assert.IsNull(BridgeHttpServer.DispatchBlockingTransition());
+        }
+
+        [Test]
+        public void GateEnvelope_CarriesReloadRequested_OnlyWhenTheCallRequestedOne()
+        {
+            var result = new GateDispatchResult { Mutation = ToolDispatchResult.Ok("1"), Outcome = GateOutcome.Skipped };
+            var without = BridgeJson.BuildGateEnvelope(result, "enforce", LifecyclePolicy.RestartThenSettle);
+            StringAssert.DoesNotContain("reloadRequested", without);
+
+            result.ReloadTiming = BridgeReloadRequest.TimingAfterResponse;
+            var with = BridgeJson.BuildGateEnvelope(result, "enforce", LifecyclePolicy.RestartThenSettle);
+            Assert.IsTrue(BridgeJson.IsCompleteJson(with), with);
+            StringAssert.Contains("\"output\":1", with);
+            StringAssert.Contains("\"reloadRequested\":true,\"reloadTiming\":\"after_response\"", with);
+        }
+
+        [Test]
         public void DispatchGuard_IsQuietWhenTheEditorIsSettled()
         {
             // EditMode tests run in a settled Editor: nothing compiling, no

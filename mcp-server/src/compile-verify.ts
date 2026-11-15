@@ -23,8 +23,10 @@
 //
 // The other compile-verify codes are emitted elsewhere:
 //   - editor_instance_locked — batch-spawn.ts (M22 Plan 3)
-//   - bridge_compile_failed  — live-client.ts deadBridgeResult (M20)
-//   - compile_timeout        — live-client.ts waitForCompile (M20)
+//   - bridge_compile_failed  — live-client.ts deadBridgeResult / coldSafeModeResult,
+//                              only with Editor.log evidence (bridge-loss.ts)
+//   - editor_reloading       — live-client.ts waitForCompile, once the call's
+//                              wait budget runs out (it was compile_timeout)
 
 /**
  * A compile-verify snapshot. The `bridgeToolCount` is the size of the bridge's

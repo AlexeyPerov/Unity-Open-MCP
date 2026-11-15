@@ -18,6 +18,31 @@
 // mirroring the readDismissConfig() pattern in dialog-dismiss.ts.
 
 import type { LifecycleClass } from "./capabilities/lifecycle.js";
+import { BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS } from "./constants.js";
+
+// ---------------------------------------------------------------------------
+// The per-call wait budget.
+//
+// A live call that meets an Editor that is not ready (compiling, reloading,
+// changing play mode, a listener that is down, a heartbeat that stopped) waits
+// for it from ONE budget: the router's wait before dispatch, the client's
+// readiness wait, the wait before re-sending a refused call and the wait for a
+// listener that refused the connection all draw from the same deadline. Past
+// it the call answers a retryable `editor_reloading` (or `bridge_offline`)
+// instead of waiting on, so the waits can never stack into minutes. The tool's
+// own run time is separate: it is bounded by its timeout_ms (clamped to the
+// host-safe cap) plus the transport slack.
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_RELOAD_WAIT_MS = 30_000;
+
+/** The per-call wait budget: UNITY_OPEN_MCP_RELOAD_WAIT_MS (0 refuses at once), default 30 s, capped below the host-safe window. */
+export function readReloadWaitMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.UNITY_OPEN_MCP_RELOAD_WAIT_MS);
+  if (env.UNITY_OPEN_MCP_RELOAD_WAIT_MS === undefined || env.UNITY_OPEN_MCP_RELOAD_WAIT_MS.trim() === "" || !Number.isFinite(raw) || raw < 0)
+    return DEFAULT_RELOAD_WAIT_MS;
+  return Math.min(Math.floor(raw), BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS - 10_000);
+}
 
 // ---------------------------------------------------------------------------
 // Settle strategies (one per lifecycle class).

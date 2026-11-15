@@ -65,6 +65,19 @@ live tools time out. Errors mention **`dead_bridge`** or **`main_thread_blocked`
 > `EditorApplication.ExecuteMenuItem` inside `execute_csharp`; prefer the
 > non-interactive API.
 
+> **A long reload is not a dead bridge either.** A domain reload stops the
+> bridge's heartbeat; one that takes longer than 10 s (a large project, entering
+> play mode, a reload Unity deferred to the end of a test run) used to be
+> reported as `bridge_compile_failed`. Now calls wait for it within their budget
+> (`UNITY_OPEN_MCP_RELOAD_WAIT_MS`, default 30 s) and then answer the retryable
+> `editor_reloading` (with `heartbeatStalledMs`); a response a reload or a busy
+> Editor swallowed is `response_lost` (`dispatched: null`: check a mutation's
+> effect before repeating it). Wait with
+> `unity_open_mcp_editor_status {"wait_until":"idle"}`. `bridge_compile_failed`
+> (`bridge_status` `dead_bridge`) is reported only when `Editor.log` shows the
+> bridge cannot come back — Safe Mode, or a reload that finished without the
+> bridge starting — and names that evidence.
+
 ### Common causes
 
 - **Unsaved scene modals** — Unity's "Save scene?" / **"Scene(s) Have Been

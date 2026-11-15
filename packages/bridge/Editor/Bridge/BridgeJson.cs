@@ -499,6 +499,11 @@ namespace UnityOpenMcpBridge
             // due, so the caller can wait past `generationAtStart`.
             if (result.CompileJson != null)
                 sb.Append(",\"compile\":").Append(result.CompileJson);
+            // The call asked Unity for a script domain reload: it runs after
+            // this response (or when play mode ends), so the snippet's result
+            // above is complete and the next call must wait for the reload.
+            if (result.ReloadTiming != null)
+                sb.Append(",\"reloadRequested\":true,\"reloadTiming\":").Append(EscapeString(result.ReloadTiming));
 
             // feedback-fable-04-08 §9 — emitted ONLY when the editor was still
             // compiling after the post-mutation settle wait. The gate's delta

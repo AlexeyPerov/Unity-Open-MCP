@@ -30,6 +30,7 @@ import { BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS, COMPILE_STATE_HEADER } from "./constan
 import { PingCache } from "./ping-cache.js";
 import { LiveClient, shouldRetryPostAfterFailure } from "./live-client.js";
 import { computePort, projectHash } from "./instance-discovery.js";
+import { editorLogPath } from "./unity-log.js";
 import { setUnityProcessScannerForTest } from "./running-unity.js";
 import type { PollAndDismissOptions } from "./dialog-dismiss.js";
 
@@ -311,12 +312,47 @@ function plantLock(
 
 const DEAD_BRIDGE_PROJECT = "/test/DeadBridgeGame";
 
-test("LiveClient: fail-fast bridge_compile_failed when heartbeat is stale + PID alive", async () => {
+/** Plant the global Editor.log under the sandbox HOME (where editorLogPath() resolves). */
+function plantEditorLog(s: Sandbox, content: string): string {
+  process.env.HOME = s.dir;
+  process.env.USERPROFILE = s.dir;
+  const log = editorLogPath();
+  mkdirSync(join(log, ".."), { recursive: true });
+  writeFileSync(log, content);
+  return log;
+}
+
+/** Editor.log tails: evidence a lost bridge cannot come back, and a reload still running. */
+const LOG_BRIDGE_NOT_LOADED =
+  "Begin MonoManager ReloadAssembly\n[Unity Open MCP Bridge] Listening on http://127.0.0.1:1/\n" +
+  "Mono: successfully reloaded assembly\nDomain Reload Profiling: 900ms\n" +
+  "Begin MonoManager ReloadAssembly\nMono: successfully reloaded assembly\nDomain Reload Profiling: 800ms\n";
+const LOG_SAFE_MODE =
+  "Assets/Broken.cs(3,1): error CS0246: The type or namespace name 'Nope' could not be found\n" +
+  "Safe Mode: Only loading a subset of assemblies\nBegin MonoManager ReloadAssembly\n";
+const LOG_RELOAD_RUNNING =
+  "Begin MonoManager ReloadAssembly\n[Unity Open MCP Bridge] Listening on http://127.0.0.1:1/\n" +
+  "Mono: successfully reloaded assembly\nDomain Reload Profiling: 900ms\nBegin MonoManager ReloadAssembly\n";
+
+/** Run `fn` with a small per-call wait budget (UNITY_OPEN_MCP_RELOAD_WAIT_MS) read by new LiveClients. */
+async function withWaitBudget<T>(ms: number, fn: () => Promise<T>): Promise<T> {
+  const prev = process.env.UNITY_OPEN_MCP_RELOAD_WAIT_MS;
+  process.env.UNITY_OPEN_MCP_RELOAD_WAIT_MS = String(ms);
+  try { return await fn(); }
+  finally {
+    if (prev === undefined) delete process.env.UNITY_OPEN_MCP_RELOAD_WAIT_MS;
+    else process.env.UNITY_OPEN_MCP_RELOAD_WAIT_MS = prev;
+  }
+}
+
+test("LiveClient: fail-fast bridge_compile_failed when heartbeat is stale + PID alive + Editor.log evidence", async () => {
   // No bridge stub at all — /ping must ECONNREFUSED. The lock shows our own
-  // PID (alive) with a heartbeat far past the stale threshold → dead_bridge.
+  // PID (alive) with a heartbeat far past the stale threshold → dead_bridge,
+  // and Editor.log shows the last reload finished without the bridge.
   const s = makeSandbox();
   try {
     plantLock(s, DEAD_BRIDGE_PROJECT, process.pid, 60_000, "reloading");
+    plantEditorLog(s, LOG_BRIDGE_NOT_LOADED);
     const client = new LiveClient(1, new PingCache(), undefined, DEAD_BRIDGE_PROJECT);
 
     const result = await client.route("unity_open_mcp_validate_edit", {
@@ -330,6 +366,50 @@ test("LiveClient: fail-fast bridge_compile_failed when heartbeat is stale + PID 
       body.error.message.includes("read_compile_errors"),
       "error must point the agent at read_compile_errors",
     );
+    assert.equal(body.evidence.kind, "bridge_not_loaded");
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient: a stopped heartbeat mid-reload WITHOUT evidence is a reload, answered editor_reloading within the call's budget", async () => {
+  // The 2026-10-28 ledger shape: a domain reload longer than the stale
+  // threshold (large project, play-mode reload). The lock is frozen at
+  // "reloading" 60 s ago, the listener is gone, Editor.log shows the reload
+  // still running → wait from the budget, then a retryable refusal.
+  const s = makeSandbox();
+  try {
+    plantLock(s, DEAD_BRIDGE_PROJECT, process.pid, 60_000, "reloading");
+    plantEditorLog(s, LOG_RELOAD_RUNNING);
+    const started = Date.now();
+    const result = await withWaitBudget(1_500, () =>
+      new LiveClient(1, new PingCache(), undefined, DEAD_BRIDGE_PROJECT).route("unity_open_mcp_find_members", { query: "Rigidbody" }));
+    const elapsed = Date.now() - started;
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(result.isError, true);
+    assert.equal(body.error.code, "editor_reloading");
+    assert.equal(body.dispatched, false);
+    assert.equal(typeof body.retryAfterMs, "number");
+    assert.match(body.agentNextSteps[0], /"wait_until":"idle"/);
+    assert.ok(body.heartbeatStalledMs >= 60_000, `${body.heartbeatStalledMs}`);
+    assert.ok(elapsed < 6_000, `answered within the budget, took ${elapsed} ms`);
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient: a stopped heartbeat outside a transition without evidence is bridge_offline (unreachable), not bridge_compile_failed", async () => {
+  const s = makeSandbox();
+  try {
+    plantLock(s, DEAD_BRIDGE_PROJECT, process.pid, 60_000, "idle");
+    plantEditorLog(s, LOG_RELOAD_RUNNING.replace(/Begin MonoManager ReloadAssembly\n$/, ""));
+    const result = await withWaitBudget(1_500, () =>
+      new LiveClient(1, new PingCache(), undefined, DEAD_BRIDGE_PROJECT).route("unity_open_mcp_find_members", { query: "Rigidbody" }));
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "bridge_offline");
+    assert.equal(body.dispatched, false);
+    assert.equal(body.phase, "unreachable");
+    assert.match(body.error.message, /not a dead bridge/);
   } finally {
     disposeSandbox(s);
   }
@@ -351,15 +431,14 @@ test("LiveClient: does NOT fail-fast bridge_compile_failed when a fresh test-pen
     if (!existsSync(statusDir)) mkdirSync(statusDir, { recursive: true });
     writeFileSync(join(statusDir, "test-pending-run-abc.json"), "{}");
 
-    const client = new LiveClient(1, new PingCache(), undefined, DEAD_BRIDGE_PROJECT);
-    const result = await client.route("unity_open_mcp_validate_edit", {
-      paths: ["Assets"],
-    });
+    const result = await withWaitBudget(1_000, () => new LiveClient(1, new PingCache(), undefined, DEAD_BRIDGE_PROJECT)
+      .route("unity_open_mcp_validate_edit", { paths: ["Assets"] }));
 
     assert.equal(result.isError, true);
     const body = JSON.parse((result.content[0] as { text: string }).text);
     assert.notEqual(body.error.code, "bridge_compile_failed");
-    assert.equal(body.error.code, "bridge_offline");
+    // The run's reload is waited for like any reload, then refused (retryable).
+    assert.equal(body.error.code, "editor_reloading");
   } finally {
     disposeSandbox(s);
   }
@@ -399,8 +478,10 @@ const COLD_SAFE_PROJECT = "/test/ColdSafeGame";
 
 test("LiveClient: tool call with no lock + live Unity process returns bridge_compile_failed (cold Safe Mode)", async () => {
   // No lock planted → classifyInstance returns "gone". The scanner fake
-  // reports a Unity process for this project → coldSafeModeResult kicks in.
+  // reports a Unity process for this project and Editor.log shows Safe Mode
+  // → coldSafeModeResult kicks in.
   const s = makeSandbox();
+  plantEditorLog(s, LOG_SAFE_MODE);
   const restore = setUnityProcessScannerForTest({
     scan() {
       return [{ pid: 7777, projectPath: COLD_SAFE_PROJECT }];
@@ -429,10 +510,24 @@ test("LiveClient: tool call with no lock + live Unity process returns bridge_com
   }
 });
 
+test("LiveClient: no lock + live Unity process WITHOUT Editor.log evidence is a starting Editor: bridge_offline", async () => {
+  const s = makeSandbox();
+  plantEditorLog(s, "Unity Editor version:    6000.3.28f1\nBegin MonoManager ReloadAssembly\n");
+  const restore = setUnityProcessScannerForTest({ scan: () => [{ pid: 7777, projectPath: COLD_SAFE_PROJECT }] });
+  try {
+    const result = await new LiveClient(1, new PingCache(), undefined, COLD_SAFE_PROJECT).route("unity_open_mcp_ping", {});
+    assert.equal(JSON.parse((result.content[0] as { text: string }).text).error.code, "bridge_offline");
+  } finally {
+    restore();
+    disposeSandbox(s);
+  }
+});
+
 test("LiveClient: ping with no lock + live Unity process returns bridge_compile_failed (cold Safe Mode)", async () => {
   // ping is the first probe many agents use. It must surface the same
   // recovery hint as a tool call, not a generic bridge_offline.
   const s = makeSandbox();
+  plantEditorLog(s, LOG_SAFE_MODE);
   const restore = setUnityProcessScannerForTest({
     scan() {
       return [{ pid: 8888, projectPath: COLD_SAFE_PROJECT }];
@@ -538,11 +633,12 @@ test("LiveClient: no lock + no Unity process still returns bridge_offline (genui
   }
 });
 
-test("LiveClient: mid-session dead bridge (lock + stale heartbeat) unchanged by cold Safe Mode scan", async () => {
+test("LiveClient: mid-session dead bridge (lock + stale heartbeat + evidence) unchanged by cold Safe Mode scan", async () => {
   // Regression guard for the mid-session dead-bridge path. A live PID + stale
   // heartbeat classifies as "dead_bridge" (not "gone"), so coldSafeModeResult
   // returns null and the existing deadBridgeResult fast-path still fires.
   const s = makeSandbox();
+  plantEditorLog(s, LOG_BRIDGE_NOT_LOADED);
   const restore = setUnityProcessScannerForTest({
     scan() {
       return [{ pid: 4321, projectPath: DEAD_BRIDGE_PROJECT }];
@@ -612,6 +708,7 @@ test("LiveClient.forPortOverride: default project's cold Safe Mode does not leak
 
 test("LiveClient.forPortOverride: reports the dead bridge of the Editor whose lock claims the override port", async () => {
   const s = makeSandbox();
+  plantEditorLog(s, LOG_BRIDGE_NOT_LOADED);
   const restore = setUnityProcessScannerForTest({ scan: () => [] });
   try {
     plantLock(s, COLD_SAFE_PROJECT, process.pid, 0, "idle", 22028);
@@ -627,6 +724,7 @@ test("LiveClient.forPortOverride: reports the dead bridge of the Editor whose lo
 
 test("LiveClient.forPortOverride: reports cold Safe Mode for the project of a stale lock claiming the port", async () => {
   const s = makeSandbox();
+  plantEditorLog(s, LOG_SAFE_MODE);
   const restore = setUnityProcessScannerForTest({
     scan: () => [{ pid: 7777, projectPath: OVERRIDE_TARGET_PROJECT }],
   });
@@ -751,8 +849,8 @@ test("T-fix-2: transient refusal during a reloading lock window enters the wait 
 
     // Race the call against a 3s guard. waitForCompile caps at the pinned 3s;
     // if the recovery path was entered we are either still waiting at the
-    // guard cutoff or have just timed out with compile_timeout — both prove
-    // the wait path ran.
+    // guard cutoff or have just run out of budget with editor_reloading —
+    // both prove the wait path ran.
     type Outcome =
       | { kind: "result"; result: CallToolResult }
       | { kind: "still-waiting" };
@@ -770,14 +868,12 @@ test("T-fix-2: transient refusal during a reloading lock window enters the wait 
       // Recovery path entered (waitForCompile active) — the bug is fixed.
       return;
     }
-    // If it returned, it must NOT be the instant bridge_offline — only
-    // compile_timeout or bridge_compile_failed prove the wait/recovery path ran.
+    // If it returned, it must NOT be the instant bridge_offline — only the
+    // out-of-budget editor_reloading refusal proves the wait path ran.
     assert.equal(outcome.result.isError, true);
     const body = JSON.parse((outcome.result.content[0] as { text: string }).text);
-    assert.ok(
-      body.error.code === "compile_timeout" || body.error.code === "bridge_compile_failed",
-      `Expected compile_timeout/bridge_compile_failed (recovery path entered), got ${body.error.code}`,
-    );
+    assert.equal(body.error.code, "editor_reloading", `recovery path entered, got ${body.error.code}`);
+    assert.equal(body.dispatched, false);
   } finally {
     if (prevCompileWait === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS;
     else process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = prevCompileWait;
@@ -813,11 +909,13 @@ test("T-fix-2: transient refusal with no reload signal exhausts retries then off
 
 test("T-fix-2: dead-bridge still fails fast despite recovery paths", async () => {
   // Same as the existing fail-fast test but explicit: the recovery paths must
-  // NOT mask a dead bridge. Stale heartbeat + live PID → dead_bridge →
-  // bridge_compile_failed immediately, no waiting.
+  // NOT mask a dead bridge. Stale heartbeat + live PID + Editor.log Safe Mode
+  // → bridge_compile_failed immediately, no waiting.
   const s = makeSandbox();
   try {
     plantLock(s, DEAD_BRIDGE_PROJECT, process.pid, 60_000, "reloading");
+    plantEditorLog(s, LOG_SAFE_MODE);
+    const started = Date.now();
     const client = new LiveClient(1, new PingCache(), undefined, DEAD_BRIDGE_PROJECT);
     const result = await client.route("unity_open_mcp_validate_edit", {
       paths: ["Assets"],
@@ -825,6 +923,8 @@ test("T-fix-2: dead-bridge still fails fast despite recovery paths", async () =>
     assert.equal(result.isError, true);
     const body = JSON.parse((result.content[0] as { text: string }).text);
     assert.equal(body.error.code, "bridge_compile_failed");
+    assert.equal(body.evidence.kind, "safe_mode");
+    assert.ok(Date.now() - started < 3_000, "no waiting on a dead bridge");
   } finally {
     disposeSandbox(s);
   }
@@ -937,7 +1037,14 @@ for (const changeEndpoint of [false, true]) {
       assert.equal(mutations, 1);
       assert.equal(replacementHits, 0);
       assert.equal(result.isError, true);
-      assert.match(JSON.stringify(result), /verify its effect before retrying/);
+      const body = JSON.parse((result.content[0] as { text: string }).text);
+      // A lost response, not a dead bridge and not "offline": retryable, but
+      // the call may have run (dispatched: null) — verify before repeating.
+      assert.equal(body.error.code, "response_lost");
+      assert.equal(body.dispatched, null);
+      assert.equal(body.cause, "connection_closed");
+      assert.match(body.error.message, /may or may not have run/);
+      assert.match(body.agentNextSteps[0], /check its effect/);
     } finally {
       await bridge.close();
       await replacement.close();
@@ -945,6 +1052,81 @@ for (const changeEndpoint of [false, true]) {
     }
   });
 }
+
+test("a response a reload swallows is editor_reloading (dispatched: null), or triggered_reload for a compile-reload call — never bridge_compile_failed, never a wait", async () => {
+  const s = makeSandbox();
+  const ping = { connected: true, projectPath: REFRESH_PROJECT, unityVersion: "6000.0.0f1",
+    bridgeVersion: "1.4.0", mode: "live", compiling: false, isPlaying: false };
+  let listening = true;
+  const bridge = await startBridgeStub((req, res) => {
+    if (!req.url?.startsWith("/tools/")) {
+      if (!listening) { req.socket.destroy(); return; }
+      res.end(JSON.stringify(ping));
+      return;
+    }
+    req.resume();
+    req.on("end", () => {
+      // The reload starts: the lock goes "reloading" (heartbeat frozen long
+      // enough to read stale) and the listener drops the in-flight socket.
+      plantLock(s, REFRESH_PROJECT, process.pid, 30_000, "reloading", bridge.port);
+      listening = false;
+      req.socket.destroy();
+    });
+  });
+  try {
+    plantEditorLog(s, LOG_RELOAD_RUNNING);
+    for (const [tool, args, expected] of [
+      ["unity_open_mcp_find_members", { query: "Rigidbody" }, "editor_reloading"],
+      ["unity_open_mcp_execute_csharp", { code: "UnityEditor.EditorUtility.RequestScriptReload(); return 1;", paths_hint: ["Assets"] }, "triggered_reload"],
+    ] as const) {
+      listening = true;
+      plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+      const started = Date.now();
+      const result = await new LiveClient(bridge.port, new PingCache(), "deadbeef", REFRESH_PROJECT).route(tool, { ...args });
+      const body = JSON.parse((result.content[0] as { text: string }).text);
+      const code = body.error?.code ?? body.status;
+      assert.equal(code, expected, tool);
+      if (expected === "editor_reloading") {
+        assert.equal(body.dispatched, null);
+        assert.equal(typeof body.retryAfterMs, "number");
+      }
+      assert.ok(Date.now() - started < 5_000, `${tool}: classified at once, took ${Date.now() - started} ms`);
+    }
+  } finally {
+    await bridge.close();
+    disposeSandbox(s);
+  }
+});
+
+test("a response that never arrives ends at the fetch deadline as response_lost (cause: timeout) — no recovery wait stacked on it", async () => {
+  const s = makeSandbox();
+  const ping = { connected: true, projectPath: REFRESH_PROJECT, unityVersion: "6000.0.0f1",
+    bridgeVersion: "1.4.0", mode: "live", compiling: false, isPlaying: false };
+  const bridge = await startBridgeStub((req, res) => {
+    if (!req.url?.startsWith("/tools/")) { res.end(JSON.stringify(ping)); return; }
+    req.resume(); // accepted, never answered
+  });
+  try {
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(bridge.port, new PingCache(), "deadbeef", REFRESH_PROJECT);
+    // Shrink the fetch deadline for the test: timeout_ms 1000 → fetch deadline
+    // max(1000 + 10 s, 30 s + 10 s) is the production floor, so stub the
+    // private fetch timeout through a tiny subclass-free override instead.
+    const original = (client as unknown as { fetchWithTimeout: (p: string, i: RequestInit, t?: number) => Promise<Response> }).fetchWithTimeout.bind(client);
+    (client as unknown as { fetchWithTimeout: unknown }).fetchWithTimeout = (path: string, init: RequestInit, t?: number) =>
+      original(path, init, path.startsWith("/tools/") ? 300 : t);
+    const started = Date.now();
+    const result = await client.route("unity_open_mcp_find_members", { query: "Rigidbody" });
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "response_lost");
+    assert.equal(body.cause, "timeout");
+    assert.equal(body.dispatched, null);
+    assert.ok(Date.now() - started < 4_000, `took ${Date.now() - started} ms`);
+  } finally {
+    await bridge.close();
+    disposeSandbox(s);
+  }
+});
 
 test("shouldRetryPostAfterFailure only accepts proven pre-connection failures", () => {
   const failure = (code: string) => Object.assign(new Error(code), { code });

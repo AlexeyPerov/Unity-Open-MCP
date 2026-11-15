@@ -921,6 +921,10 @@ namespace UnityOpenMcpBridge
         internal static string DispatchBlockingTransition()
         {
             if (EditorApplication.isCompiling) return "compiling";
+            // A call before this one requested a domain reload that has not
+            // started yet (BridgeReloadRequest): a mutation now would be cut
+            // off by it.
+            if (BridgeReloadRequest.Due) return "reloading";
             var willPlay = EditorApplication.isPlayingOrWillChangePlaymode;
             if (willPlay && !EditorApplication.isPlaying) return "entering_playmode";
             if (!willPlay && EditorApplication.isPlaying) return "exiting_playmode";
@@ -1164,6 +1168,11 @@ namespace UnityOpenMcpBridge
                 }
             }
 
+            // Set on the main thread when this call's dispatch left a domain
+            // reload requested and the bridge holds it until the response is
+            // written (BridgeReloadRequest); released in the finally below on
+            // every outcome.
+            bool heldReload = false;
             try
             {
                 // M23 Plan 3 — route through the fair round-robin queue instead
@@ -1223,6 +1232,7 @@ namespace UnityOpenMcpBridge
                         inFlight.GenerationAtStart = generationAtStart;
                         inFlight.Dispatched = true;
                     }
+                    var reloadRequestedBefore = BridgeReloadRequest.IsRequested();
                     try
                     {
                         result = DispatchWithGate(toolName, body, effectiveGateMode, pathsHint, contract);
@@ -1231,6 +1241,16 @@ namespace UnityOpenMcpBridge
                     {
                         dispatchError = e;
                         throw;
+                    }
+                    // The call asked for a domain reload (RequestScriptReload):
+                    // Unity starts it on a later tick, which would tear this
+                    // response down. Hold it until the response is written.
+                    if (reloadRequestedBefore == false && BridgeReloadRequest.IsRequested() == true)
+                    {
+                        result.ReloadTiming = BridgeReloadRequest.Hold();
+                        heldReload = true;
+                        result.AgentNextSteps = AppendStep(result.AgentNextSteps, BridgeReloadRequest.NextStep(result.ReloadTiming));
+                        BridgeHeartbeat.WriteNowIfRunning();
                     }
                     BridgeCompileState.NoteDispatchEnd();
                     compileDue = BridgeCompileState.Pending || EditorApplication.isCompiling;
@@ -1286,8 +1306,15 @@ namespace UnityOpenMcpBridge
                 // successful steps wrote. A total failure (Success == false,
                 // PartialCommit == false) committed nothing and skips the wait.
                 var lifecycle = contract.Lifecycle;
+                // A snippet that requested a reload or left a compile due is
+                // answered now, with its result and the wait to make: settling
+                // here would only hold the response until the reload tore it
+                // down (the compile and reload outcome is the wait's answer).
+                var answerBeforeReload = result.ReloadTiming != null
+                    || (compileDue && toolName == "unity_open_mcp_execute_csharp");
                 if (result.Mutation != null
                     && (result.Mutation.Success || result.Mutation.PartialCommit)
+                    && !answerBeforeReload
                     && ToolLifecycle.RequiresSettleWait(lifecycle))
                 {
                     result.SettleMs = EditorSettleWait.Wait(lifecycle);
@@ -1395,6 +1422,12 @@ namespace UnityOpenMcpBridge
                 sw.Stop();
                 BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "execution_error", e.Message, sw.ElapsedMilliseconds);
                 BridgeHttpResponse.SendJson(context, 200, FailureEnvelope(BridgeJson.BuildFaultEnvelope(e, effectiveGateMode), "execution_error", e.Message));
+            }
+            finally
+            {
+                // The response is written (or failed): let the reload this
+                // call requested run.
+                if (heldReload) BridgeReloadRequest.Release();
             }
         }
 

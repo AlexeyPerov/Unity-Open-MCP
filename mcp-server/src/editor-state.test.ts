@@ -10,6 +10,7 @@ import {
   describeWait,
   waitCall,
   reloadingRefusal,
+  lostResponseResult,
   PENDING_COMPILE_GRACE_MS,
   AFTER_GENERATION_GRACE_MS,
   MODE_GRACE_MS,
@@ -18,6 +19,7 @@ import {
   type WaitDeps,
 } from "./editor-state.js";
 import type { InstanceLock, LockCompile } from "./instance-discovery.js";
+import type { BridgeLossEvidence } from "./bridge-loss.js";
 import type { PingProbe } from "./live-client.js";
 
 const NOW = Date.parse("2026-11-14T12:00:00.000Z");
@@ -35,9 +37,12 @@ const ping = (body: Record<string, unknown> | null, httpStatus: number | null = 
   ({ reachable: httpStatus !== null, httpStatus, body: body as PingProbe["body"] });
 const settledPing = (extra: Record<string, unknown> = {}) =>
   ping({ connected: true, compiling: false, isPlaying: false, transition: null, ...extra });
-function signals(l: InstanceLock | null, p: PingProbe, classification: EditorSignals["classification"] = l ? "healthy" : "gone"): EditorSignals {
-  return { at: NOW, lock: l, classification, ping: p };
+function signals(l: InstanceLock | null, p: PingProbe, classification: EditorSignals["classification"] = l ? "healthy" : "gone",
+  bridgeLoss?: BridgeLossEvidence | null): EditorSignals {
+  return { at: NOW, lock: l, classification, ping: p, ...(bridgeLoss !== undefined ? { bridgeLoss } : {}) };
 }
+const SAFE_MODE: BridgeLossEvidence = { kind: "safe_mode", detail: "Editor.log shows Unity in Safe Mode.", logPath: "/l/Editor.log" };
+const staleLock = (state: string) => lock(state, { heartbeatAt: new Date(NOW - 45_000).toISOString() });
 
 // ---------------------------------------------------------------------------
 // viewEditor
@@ -61,10 +66,24 @@ test("viewEditor: /ping transition and 503 count as transitions; unreachable lis
   assert.equal(viewEditor(signals(lock("idle"), settledPing())).phase, "settled");
 });
 
-test("viewEditor: a stale heartbeat is a dead bridge without /ping, a wedged main thread with it, a reload during a test run", () => {
-  assert.equal(viewEditor(signals(lock("reloading"), ping(null), "dead_bridge")).phase, "dead_bridge");
-  assert.equal(viewEditor(signals(lock("idle"), settledPing(), "dead_bridge")).phase, "wedged");
-  assert.equal(viewEditor(signals(lock("reloading"), ping(null), "dead_bridge"), true).phase, "transition");
+test("viewEditor: a stale heartbeat is a dead bridge only with Editor.log evidence", () => {
+  // Evidence (Safe Mode, a reload that finished without the bridge) + no listener: dead.
+  const dead = viewEditor(signals(staleLock("reloading"), ping(null), "dead_bridge", SAFE_MODE));
+  assert.equal(dead.phase, "dead_bridge");
+  assert.deepEqual(dead.bridgeLoss, SAFE_MODE);
+  assert.equal(dead.stalledMs, 45_000);
+  // No evidence: a reload that runs long is a transition, never a dead bridge.
+  const longReload = viewEditor(signals(staleLock("reloading"), ping(null), "dead_bridge", null));
+  assert.equal(longReload.phase, "transition");
+  assert.equal(longReload.transition, "reloading");
+  assert.equal(longReload.bridgeLoss, undefined);
+  assert.equal(viewEditor(signals(staleLock("entering_playmode"), ping(null), "dead_bridge", null)).transition, "entering_playmode");
+  // Outside a transition with no evidence: an unreachable listener (retry), not a compile failure.
+  assert.equal(viewEditor(signals(staleLock("idle"), ping(null), "dead_bridge", null)).phase, "unreachable");
+  // /ping answers: a blocked main thread.
+  assert.equal(viewEditor(signals(staleLock("idle"), settledPing(), "dead_bridge")).phase, "wedged");
+  // A test run's reload.
+  assert.equal(viewEditor(signals(staleLock("idle"), ping(null), "dead_bridge", null), true).phase, "transition");
 });
 
 // ---------------------------------------------------------------------------
@@ -187,8 +206,25 @@ test("wait: entering play mode through its domain reload reaches playing", async
 });
 
 test("wait: dead bridge ends at once; a missing Editor after its grace; the budget ends in wait_timeout", async () => {
-  const dead = scripted([{ s: signals(lock("reloading"), ping(null), "dead_bridge") }]);
-  assert.equal((await waitForEditor({ until: "idle", timeoutMs: 30_000 }, dead.deps)).reason, "dead_bridge");
+  const dead = scripted([{ s: signals(staleLock("reloading"), ping(null), "dead_bridge", SAFE_MODE) }]);
+  const deadOut = await waitForEditor({ until: "idle", timeoutMs: 30_000 }, dead.deps);
+  assert.equal(deadOut.reason, "dead_bridge");
+  const deadBody = describeWait({ until: "idle", timeoutMs: 30_000 }, deadOut).body;
+  assert.equal((deadBody.error as { code: string }).code, "bridge_compile_failed");
+  assert.deepEqual(deadBody.evidence, SAFE_MODE);
+  // A stopped heartbeat without evidence is waited through like any reload.
+  const longReload = scripted([
+    { s: signals(staleLock("reloading"), ping(null), "dead_bridge", null) },
+    { s: signals(staleLock("reloading"), ping(null), "dead_bridge", null) },
+    { s: signals(lock("idle"), settledPing()) },
+  ]);
+  assert.equal((await waitForEditor({ until: "idle", timeoutMs: 30_000 }, longReload.deps)).reason, "reached");
+  const stuck = scripted([{ s: signals(staleLock("reloading"), ping(null), "dead_bridge", null) }]);
+  const stuckOut = await waitForEditor({ until: "idle", timeoutMs: 2_000 }, stuck.deps);
+  assert.equal(stuckOut.reason, "timeout");
+  const stuckBody = describeWait({ until: "idle", timeoutMs: 2_000 }, stuckOut).body;
+  assert.equal((stuckBody.error as { code: string }).code, "wait_timeout");
+  assert.match((stuckBody.error as { message: string }).message, /not a dead bridge/);
   const gone = scripted([{ s: signals(null, ping(null)) }]);
   assert.equal((await waitForEditor({ until: "idle", timeoutMs: 30_000 }, gone.deps)).reason, "gone");
   const busy = scripted([{ s: signals(lock("compiling"), settledPing({ compiling: true })) }]);
@@ -228,4 +264,27 @@ test("reloadingRefusal: a stable editor_reloading with retryAfterMs, the transit
   assert.equal(body.transition, "reloading");
   assert.equal(typeof body.retryAfterMs, "number");
   assert.match(body.agentNextSteps[0], /"wait_until":"idle"/);
+});
+
+test("lostResponseResult: a lost response is retryable, dispatched:null — editor_reloading mid-reload, response_lost otherwise", () => {
+  const parse = (r: ReturnType<typeof lostResponseResult>) => JSON.parse((r.content[0] as { text: string }).text);
+  // Cut by a reload that runs long (heartbeat stopped, no evidence).
+  const reloading = parse(lostResponseResult("unity_open_mcp_find_members",
+    viewEditor(signals(staleLock("reloading"), ping(null), "dead_bridge", null)), "connection_closed"));
+  assert.equal(reloading.error.code, "editor_reloading");
+  assert.equal(reloading.dispatched, null);
+  assert.equal(reloading.cause, "connection_closed");
+  assert.equal(reloading.heartbeatStalledMs, 45_000);
+  assert.equal(typeof reloading.retryAfterMs, "number");
+  assert.match(reloading.agentNextSteps[0], /"wait_until":"idle"/);
+  // No answer in time from a settled Editor.
+  const lost = parse(lostResponseResult("unity_open_mcp_find_members", viewEditor(signals(lock("idle"), settledPing())), "timeout"));
+  assert.equal(lost.error.code, "response_lost");
+  assert.equal(lost.dispatched, null);
+  assert.equal(lost.cause, "timeout");
+  assert.notEqual(lost.error.code, "bridge_compile_failed");
+  // A blocked main thread is named as such.
+  const wedged = parse(lostResponseResult("unity_open_mcp_find_members", viewEditor(signals(staleLock("idle"), settledPing(), "dead_bridge")), "timeout"));
+  assert.equal(wedged.error.code, "response_lost");
+  assert.match(wedged.error.message, /main thread is blocked/);
 });

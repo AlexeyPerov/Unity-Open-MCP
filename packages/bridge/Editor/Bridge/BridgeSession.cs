@@ -91,12 +91,18 @@ namespace UnityOpenMcpBridge
         //       dispatched:true) instead of an empty 200; the gate envelope's
         //       `compile` block; execute_menu Assets/Refresh is a gated
         //       mutation with assets_refresh's lifecycle and default scope.
-        public const int WireContract = 8;
+        //   9 — A call that requests a domain reload (RequestScriptReload) is
+        //       answered before the reload: the envelope's reloadRequested /
+        //       reloadTiming ("after_response" | "after_play_mode"); until the
+        //       reload starts the lock state and /ping transition read
+        //       "reloading" and mutations answer 503 editor_reloading.
+        public const int WireContract = 9;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
 
         // The Editor transition in progress, as /ping reports it: "compiling"
         // (a compile is running or due, or the domain is about to reload),
+        // "reloading" (a call requested a domain reload that has not started),
         // "entering_playmode" (play requested, play mode not reached yet),
         // "exiting_playmode", or null when settled. Thread-safe: built from the
         // volatile flags the main thread refreshes every update and on every
@@ -106,6 +112,9 @@ namespace UnityOpenMcpBridge
             get
             {
                 if (_isCompiling) return "compiling";
+                // A tool call requested a domain reload that has not started
+                // yet (held until its response was written, then due).
+                if (BridgeReloadRequest.Due) return "reloading";
                 var willPlay = _willChangePlaymode;
                 var playing = _isPlaying;
                 if (willPlay && !playing) return "entering_playmode";

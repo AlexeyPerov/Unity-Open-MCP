@@ -181,6 +181,12 @@ namespace UnityOpenMcpBridge
                     _forcedPending = false;
                 }
             }
+            else if (BridgeReloadRequest.Due)
+            {
+                // A call requested a domain reload that has not started yet:
+                // readers must wait for it, not dispatch into it.
+                state = BridgeInstanceLock.StateReloading;
+            }
             else if (isCompiling)
             {
                 state = BridgeInstanceLock.StateCompiling;

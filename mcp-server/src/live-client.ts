@@ -40,6 +40,7 @@ import {
 // transient-retry loops. The policy is keyed by lifecycle class (see
 // retryConfigFor); the tunables are resolved once at construction.
 import {
+  readReloadWaitMs,
   readRetryTunables,
   type RetryTunables,
 } from "./retry-policy.js";
@@ -53,7 +54,17 @@ import {
   type CompileVerifySnapshot,
 } from "./compile-verify.js";
 import { lifecycleForCall } from "./capabilities/lifecycle.js";
-import { waitCall } from "./editor-state.js";
+import {
+  isTransitionState,
+  lostResponseResult,
+  readEditorSignals,
+  reloadingRefusal,
+  viewEditor,
+  waitCall,
+  type EditorView,
+  type LostResponseCause,
+} from "./editor-state.js";
+import { bridgeCompileFailedBody, readBridgeLossEvidence } from "./bridge-loss.js";
 // M23 Plan 3 — per-process agent identity (sent as X-Agent-Id so the bridge's
 // fair round-robin queue can schedule across agents).
 import { PROCESS_AGENT_ID } from "./agent-identity.js";
@@ -188,7 +199,7 @@ export interface PingResponse {
   mode: string;
   compiling: boolean;
   isPlaying: boolean;
-  /** compiling / entering_playmode / exiting_playmode, or null when settled (wire contract 8). */
+  /** compiling / reloading (a requested reload not started yet, wire contract 9) / entering_playmode / exiting_playmode, or null when settled (wire contract 8). */
   transition?: string | null;
 }
 
@@ -285,6 +296,13 @@ export function shouldRetryPostAfterFailure(err: unknown): boolean {
     return ["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT"].includes(String(cause.code));
   };
   return isConnectFailure(err.cause);
+}
+
+/** The fetch's own deadline fired (no response in time), as opposed to a closed connection. */
+function isAbortError(err: unknown): boolean {
+  const name = (e: unknown) => (typeof e === "object" && e !== null && "name" in e ? String((e as { name: unknown }).name) : "");
+  return name(err) === "AbortError" || name(err) === "TimeoutError"
+    || (typeof err === "object" && err !== null && "cause" in err && name((err as { cause: unknown }).cause) === "AbortError");
 }
 
 const OFFLINE_HINT =
@@ -390,6 +408,13 @@ export class LiveClient implements Router {
   private readonly envPort: number | undefined;
   /** Memoized outcome of the bridge-vs-server project-path comparison. */
   private projectMatch: { reported: string; same: boolean } | null = null;
+  /**
+   * How long one call may wait for the Editor in total (readiness, a refused
+   * call's re-send, a refused connection's recovery): the per-call wait budget
+   * shared with the router (UNITY_OPEN_MCP_RELOAD_WAIT_MS, default 30 s). Past
+   * it the call answers a retryable editor_reloading / bridge_offline.
+   */
+  private readonly waitBudgetMs: number;
 
   constructor(
     port: number,
@@ -407,6 +432,7 @@ export class LiveClient implements Router {
     this.authToken = authToken;
     this.projectPath = projectPath;
     this.retry = readRetryTunables();
+    this.waitBudgetMs = readReloadWaitMs();
     this.agentId = agentId;
     // A port of 0 / negative / non-integer is not a real env override. Treating
     // 0 as authoritative would permanently disable the mid-session endpoint
@@ -598,18 +624,26 @@ export class LiveClient implements Router {
     return this.pingCache.get();
   }
 
+  /**
+   * `opts.waitDeadline`: when the call's wait budget ends (ms since epoch). The
+   * router passes what is left of the budget its own pre-dispatch wait used;
+   * without it the call gets a fresh budget. Every wait inside the call draws
+   * from it, so they never stack.
+   */
   async route(
     toolName: string,
     args: Record<string, unknown>,
     commandLifecycle?: string,
+    opts: { waitDeadline?: number } = {},
   ): Promise<CallToolResult> {
     if (toolName === "unity_open_mcp_ping") {
       return this.handlePing();
     }
+    const deadline = opts.waitDeadline ?? Date.now() + this.waitBudgetMs;
     if (toolName === "unity_senses_run_tests") {
-      return this.handleRunTests(args);
+      return this.handleRunTests(args, deadline);
     }
-    return this.handleToolCall(toolName, args, commandLifecycle);
+    return this.handleToolCall(toolName, args, commandLifecycle, deadline);
   }
 
   private async handlePing(): Promise<CallToolResult> {
@@ -725,9 +759,10 @@ export class LiveClient implements Router {
   private async handleToolCall(
     toolName: string,
     args: Record<string, unknown>,
-    commandLifecycle?: string,
+    commandLifecycle: string | undefined,
+    deadline: number,
   ): Promise<CallToolResult> {
-    const readyError = await this.ensureReady();
+    const readyError = await this.ensureReady(toolName, deadline);
     if (readyError) return readyError;
 
     // M23 Plan 3 — compile-verify annotation. For compile-reload tools, capture
@@ -749,7 +784,7 @@ export class LiveClient implements Router {
     const annotate = isCompileReload && shouldAnnotateCompileVerify(toolName);
     const before = annotate ? await this.captureCompileSnapshot() : null;
 
-    const result = await this.postTool(toolName, args, true, 1, commandLifecycle);
+    const result = await this.postTool(toolName, args, true, 1, commandLifecycle, deadline);
 
     if (annotate && !result.isError && before !== null) {
       return this.annotateCompileVerify(toolName, result, before, args);
@@ -790,7 +825,8 @@ export class LiveClient implements Router {
 
   /** Job-owned test start has no transport replay; poll the existing file handoff. */
   async runTestsJob(args: Record<string, unknown>, onStarted: () => void): Promise<CallToolResult> {
-    const readyError = await this.ensureReady();
+    const deadline = Date.now() + this.waitBudgetMs;
+    const readyError = await this.ensureReady("unity_senses_run_tests", deadline);
     if (readyError) return readyError;
     const { timeout_ms: _budget, ...startArgs } = args;
     const start = () => this.fetchWithTimeout("/tools/unity_senses_run_tests", {
@@ -801,7 +837,7 @@ export class LiveClient implements Router {
       // The bridge did not start the run (compiling, reloading or changing
       // play mode — editor_reloading, dispatched:false): wait, then start once more.
       await response.text().catch(() => "");
-      const settleError = await this.waitForCompile(RELOAD_REDISPATCH_WAIT_MS);
+      const settleError = await this.waitForCompile(Math.min(deadline, Date.now() + RELOAD_REDISPATCH_WAIT_MS), "unity_senses_run_tests");
       if (settleError) return settleError;
       response = await start();
     }
@@ -817,8 +853,9 @@ export class LiveClient implements Router {
 
   private async handleRunTests(
     args: Record<string, unknown>,
+    deadline: number,
   ): Promise<CallToolResult> {
-    const readyError = await this.ensureReady();
+    const readyError = await this.ensureReady("unity_senses_run_tests", deadline);
     if (readyError) return readyError;
 
     // feedback N1: the start POST just kicks off the run and returns
@@ -834,6 +871,9 @@ export class LiveClient implements Router {
       "unity_senses_run_tests",
       startArgs,
       true,
+      1,
+      undefined,
+      deadline,
     );
 
     if (startResult.isError) return startResult;
@@ -1105,23 +1145,24 @@ export class LiveClient implements Router {
     toolName: string,
     args: Record<string, unknown>,
     retryOn503: boolean,
-    attempt = 1,
-    commandLifecycle?: string,
+    attempt: number,
+    commandLifecycle: string | undefined,
+    deadline: number,
   ): Promise<CallToolResult> {
     try {
-      const res = await this.postToolFetch(toolName, args, retryOn503, commandLifecycle);
+      const res = await this.postToolFetch(toolName, args, retryOn503, commandLifecycle, deadline);
       // 503 + compile settled cleanly → re-POST once without 503 retry. This is
       // a deliberate single re-dispatch (retryOn503 flips to false, so a second
       // 503 surfaces the error), but it still counts as a POST attempt for the
       // recursion bound.
       if (isCompileRepostSentinel(res)) {
-        return this.postTool(toolName, args, false, attempt + 1, commandLifecycle);
+        return this.postTool(toolName, args, false, attempt + 1, commandLifecycle, deadline);
       }
       return res;
     } catch (err) {
       if (err instanceof Error && err.message.startsWith("bridge_response_request_mismatch"))
         return makeErrorResult({ code: "bridge_response_request_mismatch", message: err.message });
-      return this.handlePostFailure(toolName, args, err, retryOn503, attempt, commandLifecycle);
+      return this.handlePostFailure(toolName, args, err, retryOn503, attempt, commandLifecycle, deadline);
     }
   }
 
@@ -1137,7 +1178,8 @@ export class LiveClient implements Router {
     toolName: string,
     args: Record<string, unknown>,
     retryOn503: boolean,
-    commandLifecycle?: string,
+    commandLifecycle: string | undefined,
+    deadline: number,
   ): Promise<CallToolResult | CompileRepostSentinel> {
     const toolOwnedTimeout = TOOL_OWNED_TIMEOUT_TOOLS.has(toolName);
     const rawTimeout = toolOwnedTimeout ? undefined : args.timeout_ms;
@@ -1187,11 +1229,11 @@ export class LiveClient implements Router {
 
     // 503 on a tool POST: the bridge did not run the call — it is compiling,
     // reloading or changing play mode (editor_reloading, dispatched:false).
-    // Wait for it to settle (bounded so the call stays inside the host-safe
-    // window) and send it once more; nothing ran, so the replay is safe.
+    // Wait for it to settle (from what is left of the call's wait budget) and
+    // send it once more; nothing ran, so the replay is safe.
     if (res.status === 503 && retryOn503) {
       await res.text().catch(() => "");
-      const compileError = await this.waitForCompile(RELOAD_REDISPATCH_WAIT_MS);
+      const compileError = await this.waitForCompile(Math.min(deadline, Date.now() + RELOAD_REDISPATCH_WAIT_MS), toolName);
       if (compileError) return compileError;
       return COMPILE_REPOST_SENTINEL;
     }
@@ -1533,27 +1575,38 @@ export class LiveClient implements Router {
     };
   }
 
-  /** Recover connectivity, but replay only proven pre-connection failures. */
+  /**
+   * A tool POST failed at the transport. Two different situations:
+   *
+   * - The connection was refused (shouldRetryPostAfterFailure): nothing
+   *   reached the bridge, so the call can be sent again. Wait for the listener
+   *   from what is left of the call's wait budget, then send it once more
+   *   (bounded by the transient-retry attempts).
+   * - Anything else (a reset socket, no response before the fetch deadline):
+   *   the request reached the bridge and its response was lost. Whether it ran
+   *   is unknown, so it is never replayed, and nothing is waited for: it is
+   *   classified at once — bridge_compile_failed only with Editor.log evidence,
+   *   otherwise triggered_reload / editor_reloading / response_lost with
+   *   `dispatched: null`.
+   */
   private async handlePostFailure(
     toolName: string,
     args: Record<string, unknown>,
     err: unknown,
     retryOn503: boolean,
     attempt: number,
-    commandLifecycle?: string,
+    commandLifecycle: string | undefined,
+    deadline: number,
   ): Promise<CallToolResult> {
-    const recovered = await this.handleTransientOffline("post");
+    if (!shouldRetryPostAfterFailure(err)) return this.lostResponseResult(toolName, args, err, commandLifecycle);
+    const recovered = await this.handleTransientOffline("post", deadline, toolName);
     if (recovered !== null) return recovered;
     // M10 — bound the postTool → handlePostFailure → postTool recursion. The
     // budget is the initial attempt plus the configured transient retry count.
     const maxAttempts = 1 + this.retry.transientRetryAttempts;
     const attemptsExhausted = attempt >= maxAttempts;
-    if (
-      toolName !== "unity_open_mcp_project_commands" &&
-      !attemptsExhausted &&
-      shouldRetryPostAfterFailure(err)
-    ) {
-      return this.postTool(toolName, args, retryOn503, attempt + 1, commandLifecycle);
+    if (toolName !== "unity_open_mcp_project_commands" && !attemptsExhausted) {
+      return this.postTool(toolName, args, retryOn503, attempt + 1, commandLifecycle, deadline);
     }
     const exhaustedNote = attemptsExhausted
       ? ` The POST retry budget (${maxAttempts} attempt${
@@ -1562,21 +1615,65 @@ export class LiveClient implements Router {
           attempt === 1 ? "" : "s"
         }; the bridge is reachable by /ping but POSTs keep failing.`
       : "";
-    const ambiguity = shouldRetryPostAfterFailure(err)
-      ? `The connection was refused before the request reached the bridge, so it was not applied.`
-      : `A socket failure, timeout, or endpoint change does not prove the original ` +
-        `operation was not applied; verify its effect before retrying.`;
     const message =
       `Tool '${toolName}' did not return a confirmed result. No further POST was sent. ` +
-      `${ambiguity} Endpoint: ${this.baseUrl}.${exhaustedNote}`;
+      `The connection was refused before the request reached the bridge, so it was not applied. ` +
+      `Endpoint: ${this.baseUrl}.${exhaustedNote}`;
     return makeErrorResult({
       code: "bridge_offline",
       message,
-      detail: { error: { code: "bridge_offline", message } },
+      detail: { error: { code: "bridge_offline", message }, dispatched: false },
     });
   }
 
-  private async ensureReady(): Promise<CallToolResult | null> {
+  /**
+   * The answer for a request that reached the bridge and whose response never
+   * came (socket closed, or no answer before the fetch deadline). No wait, no
+   * replay: one look at the lock, /ping and — when the heartbeat stopped —
+   * Editor.log decides what to say.
+   */
+  private async lostResponseResult(
+    toolName: string,
+    args: Record<string, unknown>,
+    err: unknown,
+    commandLifecycle: string | undefined,
+  ): Promise<CallToolResult> {
+    this.refreshEndpointFromLock();
+    this.bridgeToolsCache.invalidate();
+    this.staleAssemblyCache.invalidate();
+    this.editorWedgeCache.invalidate();
+    const cause: LostResponseCause = isAbortError(err) ? "timeout" : "connection_closed";
+    const view = await this.currentView(1_000);
+    if (view.phase === "dead_bridge" && view.bridgeLoss) {
+      return this.bridgeCompileFailedResult(view.bridgeLoss, { dispatched: null, cause });
+    }
+    if (view.phase === "gone") {
+      const cold = this.coldSafeModeResult();
+      if (cold) return cold;
+      const message =
+        `'${toolName}' reached the bridge, but the Editor went away before it answered ` +
+        `(no live instance lock for this project). The call may or may not have run. ${buildOfflineHint(this.projectPath)}`;
+      return makeErrorResult({
+        code: "bridge_offline",
+        message,
+        detail: { error: { code: "bridge_offline", message }, dispatched: null, cause },
+      });
+    }
+    // A compile-reload call whose response a compile or reload swallowed: that
+    // reload is the call's expected end, not a failure.
+    const reloading = view.phase === "transition" || view.transition !== null;
+    if (reloading && reloadIsExpectedEnd(toolName, args, commandLifecycle)) {
+      return triggeredReloadResult(toolName, undefined);
+    }
+    return lostResponseResult(toolName, view, cause);
+  }
+
+  /** What the Editor is doing now, through the shared editor-state reader. */
+  private async currentView(pingTimeoutMs = 2_000): Promise<EditorView> {
+    return viewEditor(await readEditorSignals(this.projectPath, this, pingTimeoutMs), hasRecentPendingTestRun());
+  }
+
+  private async ensureReady(toolName: string, deadline: number): Promise<CallToolResult | null> {
     // M31-optimizations Plan 1 / H1 — short-circuit the pre-flight probe when
     // the PingCache has a fresh-enough ready snapshot (connected && !compiling
     // && within TTL). The cache is updated on every successful /ping, every
@@ -1594,7 +1691,7 @@ export class LiveClient implements Router {
       const res = await this.fetchWithTimeout("/ping", { method: "GET" });
 
       if (res.status === 503) {
-        return this.waitForCompile();
+        return this.waitForCompile(deadline, toolName);
       }
 
       if (!res.ok) {
@@ -1621,22 +1718,20 @@ export class LiveClient implements Router {
       }
 
       if (body.compiling || body.transition) {
-        return this.waitForCompile();
+        return this.waitForCompile(deadline, toolName);
       }
 
       return null;
     } catch {
-      // Bridge is unreachable (ECONNREFUSED / timeout). Before falling back to
-      // the generic offline error, classify the failure via the instance lock:
-      //   - dead_bridge    → bridge assembly failed to recompile (fail fast)
-      //   - reloading/compiling → a normal domain reload is in flight; wait it
-      //     out (the listener socket is torn down for the reload duration) then
-      //     re-probe once before declaring offline (T-fix-2)
-      //   - otherwise      → retry with backoff a few times, then offline
-      // handleTransientOffline refreshes the cached endpoint from the lock
-      // first, so a Unity restart (new PID/port) re-points this client before
-      // the retry probes (specs/feedback.md entry 2).
-      const recovered = await this.handleTransientOffline("ping");
+      // Bridge is unreachable (ECONNREFUSED / timeout). Classify the failure
+      // via the instance lock and Editor.log and either wait for the listener
+      // (a reload, a long reload, a blip — from the call's wait budget) or
+      // answer: bridge_compile_failed only with evidence, else
+      // editor_reloading / bridge_offline. handleTransientOffline refreshes
+      // the cached endpoint from the lock first, so a Unity restart (new
+      // PID/port) re-points this client before the retry probes
+      // (specs/feedback.md entry 2).
+      const recovered = await this.handleTransientOffline("ping", deadline, toolName);
       if (recovered !== null) return recovered;
 
       // Recovery returned null ("recovered" — a /ping probe succeeded during
@@ -1649,11 +1744,11 @@ export class LiveClient implements Router {
       // being back. The single re-probe closes that gap.
       try {
         const retryRes = await this.fetchWithTimeout("/ping", { method: "GET" });
-        if (retryRes.status === 503) return this.waitForCompile();
+        if (retryRes.status === 503) return this.waitForCompile(deadline, toolName);
         if (retryRes.ok) {
           const retryBody = (await retryRes.json()) as PingResponse;
           this.pingCache.record(retryBody);
-          if (retryBody.compiling || retryBody.transition) return this.waitForCompile();
+          if (retryBody.compiling || retryBody.transition) return this.waitForCompile(deadline, toolName);
           if (retryBody.connected) return null; // recovered against the new endpoint
         }
       } catch {
@@ -1661,11 +1756,8 @@ export class LiveClient implements Router {
       }
 
       // M27 Plan 1 — before declaring a generic bridge_offline, check the
-      // cold Safe Mode signature: no lock (bridge never compiled) + a live
-      // Unity process for this project. A match surfaces the same
-      // bridge_compile_failed shape as the mid-session dead-bridge path so
-      // the agent gets the read_compile_errors recovery hint instead of a
-      // generic offline error it would have to guess past.
+      // cold Safe Mode signature (no lock + a live Unity process for this
+      // project + Editor.log evidence).
       const coldSafeMode = this.coldSafeModeResult();
       if (coldSafeMode) return coldSafeMode;
 
@@ -1677,31 +1769,33 @@ export class LiveClient implements Router {
             code: "bridge_offline",
             message: `Cannot connect to bridge at ${this.baseUrl}`,
           },
+          dispatched: false,
         },
       });
     }
   }
 
   /**
-   * M20 Plan 4-5 / T-fix-2 — classify a transient /ping or tool-POST failure
-   * (ECONNREFUSED / timeout / socket reset) via the instance lock and either
-   * recover or surface the right error.
+   * M20 Plan 4-5 / T-fix-2 — a /ping or tool POST was refused at connect
+   * (nothing reached the bridge). Classify it via the instance lock and either
+   * wait for the listener or answer:
    *
-   * Returns:
-   *   - a structured `bridge_compile_failed` result when the lock shows a dead
-   *     bridge assembly (fail fast — preserves the pre-existing fast-path),
-   *   - `null` to signal "recovered — the caller should retry its operation"
-   *     after either waiting out a `reloading`/`compiling` lock window or
-   *     succeeding a bounded backoff retry,
-   *   - a `bridge_offline` result when the bridge is genuinely unreachable after
-   *     the recovery attempts (so the caller's outer `bridge_offline` fallback
-   *     is reached only via this returned result).
+   *   - `bridge_compile_failed` only when the heartbeat stopped AND Editor.log
+   *     shows the bridge cannot come back (deadBridgeResult);
+   *   - a reload in progress — including one whose heartbeat stopped longer
+   *     than the stale threshold, which a long reload does — is waited out from
+   *     the call's wait budget; past it the call gets `editor_reloading`
+   *     (`dispatched: false`, retryable);
+   *   - otherwise a short bounded backoff for socket churn, then
+   *     `bridge_offline`.
    *
-   * `operation` is "ping" | "post" and only affects the log line — both paths
-   * share the same recovery logic.
+   * Returns null when the listener is back ("recovered — retry the
+   * operation"), or the result to answer with.
    */
   private async handleTransientOffline(
     operation: "ping" | "post",
+    deadline: number,
+    toolName: string,
   ): Promise<CallToolResult | null> {
     // Before any classification/retry, re-sync the cached endpoint to the
     // current live bridge. A Unity restart writes a fresh PID/port/authToken
@@ -1722,45 +1816,38 @@ export class LiveClient implements Router {
     this.staleAssemblyCache.invalidate();
     this.editorWedgeCache.invalidate();
 
-    // Dead bridge assembly — not recoverable by waiting. Fail fast so the
-    // agent can fetch compile errors instead of hanging on /ping.
+    // A bridge that cannot come back (Editor.log evidence) is not waited for.
     const deadBridge = this.deadBridgeResult();
     if (deadBridge) return deadBridge;
 
-    const classification = this.classifyLockNow();
-
-    // A normal domain reload in flight: the listener socket is torn down for
-    // the reload duration (BridgeHttpServer.OnBeforeAssemblyReload →
-    // _listener.Stop()). classifyInstance folds both lock states
-    // "reloading" and "compiling" into the "reloading" classification
-    // (instance-discovery.ts) — so a single check covers the whole compile +
-    // reload window. Wait it out, then signal the caller to retry.
-    if (classification === "reloading") {
-      const waitError = await this.waitForCompile();
-      if (waitError) return waitError; // timed out or dead_bridge mid-wait
-      return null; // recovered — caller retries the original operation
+    // A reload in flight: the listener socket is torn down for the reload
+    // (BridgeHttpServer.OnBeforeAssemblyReload). classifyInstance folds the
+    // lock states "reloading" and "compiling" into "reloading"; a reload that
+    // runs past the stale threshold reads "dead_bridge" with a transition state
+    // and no evidence. Wait it out from the budget, then retry.
+    if (this.lockShowsReload()) {
+      return this.waitForCompile(deadline, toolName);
     }
 
-    // No reload signal but a transient refusal/reset/timeout. Retry a bounded
-    // number of times with backoff before declaring offline. Covers brief
-    // socket churn that isn't reflected in the lock yet. The bounds come from
-    // the env-overridable retry tunables (M23 Plan 3 / retry-policy.ts).
+    // No reload signal but a transient refusal. Retry a bounded number of
+    // times with backoff (never past the budget) before declaring offline.
+    // Covers brief socket churn that isn't reflected in the lock yet. The
+    // bounds come from the env-overridable retry tunables (M23 Plan 3 /
+    // retry-policy.ts).
     const maxAttempts = this.retry.transientRetryAttempts;
     const backoffMs = this.retry.transientBackoffMs;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      await sleep(backoffMs * attempt);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await sleep(Math.min(backoffMs * attempt, remaining));
       // Re-classify on each attempt: a reload may have begun between the
       // first failure and now.
-      const reclass = this.classifyLockNow();
-      if (reclass === "dead_bridge") return this.deadBridgeResult();
-      if (reclass === "reloading") {
-        const waitError = await this.waitForCompile();
-        if (waitError) return waitError;
-        return null;
-      }
+      const dead = this.deadBridgeResult();
+      if (dead) return dead;
+      if (this.lockShowsReload()) return this.waitForCompile(deadline, toolName);
       // Probe whether the listener is back up.
       try {
-        const res = await this.fetchWithTimeout("/ping", { method: "GET" });
+        const res = await this.fetchWithTimeout("/ping", { method: "GET" }, Math.max(1, Math.min(PING_TIMEOUT_MS, deadline - Date.now())));
         if (res.ok || res.status === 503) {
           // Listener responded — recovered. Caller re-runs its readiness /
           // POST. (503 still counts: it means compiling, handled on retry.)
@@ -1773,13 +1860,18 @@ export class LiveClient implements Router {
     void operation; // log-only parameter, reserved for future telemetry
     // M27 Plan 1 — before declaring a generic bridge_offline, check the cold
     // Safe Mode signature. handleTransientOffline is the shared recovery
-    // exhaustion point for both the ping and POST paths; surfacing
-    // bridge_compile_failed here covers tool POSTs that never reached the
-    // bridge (no listener, no lock, Unity in Safe Mode) without each caller
-    // having to repeat the scan.
+    // exhaustion point for both the ping and POST paths.
     const coldSafeMode = this.coldSafeModeResult();
     if (coldSafeMode) return coldSafeMode;
-    const retryMsg = `Bridge is not reachable at ${this.baseUrl} after ${maxAttempts} retries. ${buildOfflineHint(this.projectPath)}`;
+    const view = this.projectPath ? await this.currentView(1_000) : null;
+    const unresponsive = view !== null && (view.phase === "unreachable" || view.phase === "wedged");
+    const retryMsg = `Bridge is not reachable at ${this.baseUrl} after ${maxAttempts} retries. ` +
+      (unresponsive
+        ? `Unity is running for this project but its bridge listener does not answer` +
+          (view?.stalledMs != null ? ` and its heartbeat stopped ${Math.round(view.stalledMs / 1000)} s ago` : "") +
+          "; Editor.log shows no compile failure, so this is not a dead bridge — the Editor may be busy or its bridge toggle off. "
+        : "") +
+      buildOfflineHint(this.projectPath);
     return makeErrorResult({
       code: "bridge_offline",
       message: retryMsg,
@@ -1788,6 +1880,8 @@ export class LiveClient implements Router {
           code: "bridge_offline",
           message: retryMsg,
         },
+        dispatched: false,
+        ...(view && unresponsive ? { phase: view.phase, retryAfterMs: 2_000, agentNextSteps: [`Wait for the Editor with ${waitCall("idle")}, then retry.`] } : {}),
       },
     });
   }
@@ -1835,55 +1929,54 @@ export class LiveClient implements Router {
     }
   }
 
-  // Detect the dead-bridge-assembly signature from the on-disk instance lock:
-  // Unity process alive (PID running) but heartbeat stale (the bridge's
-  // [InitializeOnLoad] never re-ran after a compile failure, so the heartbeat
-  // writer is gone). Returns a structured error pointing the agent at
-  // read_compile_errors, or null when the signature is not present (no lock,
-  // dead PID, or a fresh/reloading heartbeat — i.e. the wait is still worth
-  // keeping). Requires projectPath to have been threaded in; without it we
-  // can't read the lock, so we return null and preserve the original behavior.
+  /**
+   * Whether the lock shows a reload the listener will come back from: a
+   * compile / reload / play-mode change in progress, also when its heartbeat
+   * stopped past the stale threshold (a long reload freezes it; deadBridgeResult
+   * has already ruled out a bridge that cannot come back), or a test run whose
+   * reload froze it.
+   */
+  private lockShowsReload(): boolean {
+    if (!this.projectPath) return false;
+    try {
+      const lock = readInstanceLock(this.projectPath);
+      const classification = classifyInstance(lock);
+      if (classification === "reloading") return true;
+      if (classification !== "dead_bridge" || !lock) return false;
+      return isTransitionState(lock.state) || hasRecentPendingTestRun();
+    } catch {
+      return false;
+    }
+  }
+
+  // The dead-bridge answer, only with evidence. The lock's stopped heartbeat
+  // with a live Unity process (dead_bridge classification) says the bridge's
+  // heartbeat writer is not running — which a long domain reload, a test run's
+  // reload or a blocked main thread also produce. Editor.log tells them apart
+  // (bridge-loss.ts): Safe Mode, or a reload that finished without the bridge
+  // starting. Without that evidence this returns null and the caller keeps
+  // treating the stop as a reload / an unreachable listener (a test run's
+  // reload included — lockShowsReload reads its test-pending-*.json signal).
   private deadBridgeResult(): CallToolResult | null {
     if (!this.projectPath) return null;
-    let classification;
+    let lock;
     try {
-      classification = classifyInstance(readInstanceLock(this.projectPath));
+      lock = readInstanceLock(this.projectPath);
     } catch {
       return null;
     }
-    if (classification !== "dead_bridge") return null;
+    if (classifyInstance(lock) !== "dead_bridge") return null;
+    const evidence = readBridgeLossEvidence(this.projectPath, { livePid: lock?.pid });
+    if (!evidence) return null;
+    return this.bridgeCompileFailedResult(evidence);
+  }
 
-    // specs/feedback.md — a Unity test run (any mode) can trigger a domain
-    // reload that freezes the heartbeat writer long enough to trip the stale-
-    // heartbeat threshold, flipping the classification to dead_bridge even
-    // though the run will recover. The bridge writes a test-pending-*.json
-    // signal at the start of every run and clears it on finish; if a fresh one
-    // exists, treat the stale heartbeat as a normal reload (return null = keep
-    // waiting) instead of failing fast with bridge_compile_failed, which would
-    // poison every subsequent tool call for the duration of the run.
-    if (hasRecentPendingTestRun()) {
-      return null;
-    }
-
+  private bridgeCompileFailedResult(
+    evidence: import("./bridge-loss.js").BridgeLossEvidence,
+    extra: Record<string, unknown> = {},
+  ): CallToolResult {
     return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({
-            error: {
-              code: "bridge_compile_failed",
-              message:
-                "The bridge assembly failed to recompile and Unity is likely " +
-                "in a bad state (safe mode / compile errors). The HTTP listener " +
-                "will not return until the C# error is fixed. " +
-                "Call unity_open_mcp_read_compile_errors to retrieve the compiler " +
-                "errors from Unity's Editor.log, fix the cited file/line, then " +
-                "trigger a recompile (e.g. a no-op edit + focus Unity, or " +
-                "unity_open_mcp_compile_check once the source compiles).",
-            },
-          }),
-        },
-      ],
+      content: [{ type: "text", text: JSON.stringify(bridgeCompileFailedBody(evidence, extra)) }],
       isError: true,
     };
   }
@@ -1893,22 +1986,14 @@ export class LiveClient implements Router {
    * {@link deadBridgeResult} for the no-lock case. When Unity launches
    * straight into Safe Mode, the bridge's `[InitializeOnLoad]` never runs, so
    * no instance lock is written and {@link classifyInstance} returns `gone` —
-   * the same classification as "Unity is not running." Without a positive
-   * signal the agent cannot tell that `read_compile_errors` is the right next
-   * step; it gets a generic `bridge_offline` and must guess.
+   * the same classification as "Unity is not running."
    *
-   * This method scans for a live Unity process whose `-projectPath` references
-   * this project. A match is a strong positive signal of cold Safe Mode (the
-   * only other case that produces no lock + a live Unity process is "bridge
-   * toolbar off", which shares the same recovery — check compile errors /
-   * enable the bridge). Returns the SAME `bridge_compile_failed` shape as
-   * {@link deadBridgeResult} so the agent-facing contract is identical to the
-   * mid-session dead-bridge path; returns null when no Unity process matches
-   * (genuine offline — the caller falls back to `bridge_offline`).
-   *
-   * Like {@link deadBridgeResult} this is cheap to call repeatedly: the scan
-   * is the only new cost, and it runs only when classification is `gone`
-   * (lock absent or PID dead) — never on the happy path or during a reload.
+   * A live Unity process whose `-projectPath` references this project is not
+   * enough on its own: an Editor that is still starting (importing, compiling
+   * for minutes on a first open) looks the same. Editor.log decides: Safe
+   * Mode, a finished reload without the bridge, or current compile errors from
+   * the startup compile. Returns the `bridge_compile_failed` shape then; null
+   * otherwise (the caller answers `bridge_offline`).
    */
   private coldSafeModeResult(): CallToolResult | null {
     if (!this.projectPath) return null;
@@ -1919,42 +2004,28 @@ export class LiveClient implements Router {
       return null;
     }
     // Only the no-lock / dead-PID case is a candidate for cold Safe Mode. A
-    // live lock with a stale heartbeat is the mid-session dead-bridge path —
+    // live lock with a stale heartbeat is the mid-session path —
     // handled by deadBridgeResult, not here.
     if (classification !== "gone") return null;
     const proc = findUnityForProject(this.projectPath);
     if (!proc) return null;
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({
-            error: {
-              code: "bridge_compile_failed",
-              message:
-                "Unity is running but the bridge is unreachable and no " +
-                "instance lock was found — Unity likely launched straight " +
-                "into Safe Mode (the bridge assembly failed to compile from " +
-                "a cold start, so [InitializeOnLoad] never wrote a lock). " +
-                "The HTTP listener will not return until the C# error is " +
-                "fixed. Call unity_open_mcp_read_compile_errors to retrieve " +
-                "the compiler errors from Unity's Editor.log, fix the cited " +
-                "file/line, then trigger a recompile (e.g. a no-op edit + " +
-                "focus Unity, or unity_open_mcp_compile_check once the " +
-                "source compiles). If Unity is NOT in safe mode, the bridge " +
-                "toolbar toggle may be off — open the bridge window (Unity " +
-                "menu: Tools/Unity Open MCP Bridge) and confirm it is started.",
-            },
-          }),
-        },
-      ],
-      isError: true,
-    };
+    const evidence = readBridgeLossEvidence(this.projectPath, { livePid: proc.pid, cold: true });
+    if (!evidence) return null;
+    return this.bridgeCompileFailedResult(evidence, { unityProcessPid: proc.pid });
   }
 
-  private async waitForCompile(maxWaitMs?: number): Promise<CallToolResult | null> {
-    const compileWaitMs = maxWaitMs === undefined ? this.retry.compileWaitMs : Math.min(maxWaitMs, this.retry.compileWaitMs);
-    const deadline = Date.now() + compileWaitMs;
+  /**
+   * Wait until the bridge answers /ping settled (connected, not compiling, no
+   * transition), polling every compilePollIntervalMs, until `deadline` — the
+   * call's wait budget — or the UNITY_OPEN_MCP_COMPILE_WAIT_MS cap, whichever
+   * comes first. Returns null when settled, `bridge_compile_failed` when the
+   * heartbeat stopped and Editor.log shows the bridge cannot come back, and
+   * otherwise (out of budget) a retryable `editor_reloading` refusal
+   * (`dispatched: false`: the call was not sent).
+   */
+  private async waitForCompile(deadline: number, toolName: string): Promise<CallToolResult | null> {
+    const started = Date.now();
+    const waitDeadline = Math.min(deadline, started + this.retry.compileWaitMs);
 
     // M13 T4.5 — run the launch-errors / Safe Mode dialog auto-dismiss loop
     // CONCURRENTLY with the compile poll. The dismiss loop ticks on the same
@@ -1969,10 +2040,10 @@ export class LiveClient implements Router {
     // preserving the pre-feature baseline.
     let dismissAbort: AbortController | null = null;
     let dismissDone: Promise<void> | null = null;
-    if (this.dismissEnabled) {
+    if (this.dismissEnabled && waitDeadline > started) {
       dismissAbort = new AbortController();
       const dismissOpts: PollAndDismissOptions = {
-        timeoutMs: this.dismissTimeoutMs,
+        timeoutMs: Math.min(this.dismissTimeoutMs, waitDeadline - started),
         intervalMs: this.dismissIntervalMs,
         policy: this.dialogPolicy,
         allowProjectUpgrade: this.allowProjectUpgrade,
@@ -1984,11 +2055,15 @@ export class LiveClient implements Router {
     }
 
     try {
-      while (Date.now() < deadline) {
-        await sleep(this.retry.compilePollIntervalMs);
+      while (Date.now() < waitDeadline) {
+        await sleep(Math.max(0, Math.min(this.retry.compilePollIntervalMs, waitDeadline - Date.now())));
+        // A domain reload mints a new bearer token (and a restart a new port):
+        // re-sync before each probe, or a 401 would read as "not yet" until
+        // the budget ran out.
+        this.refreshEndpointFromLock();
 
         try {
-          const res = await this.fetchWithTimeout("/ping", { method: "GET" });
+          const res = await this.fetchWithTimeout("/ping", { method: "GET" }, Math.max(1, Math.min(PING_TIMEOUT_MS, waitDeadline - Date.now() + 1_000)));
 
           if (res.status === 503) continue;
 
@@ -2007,38 +2082,28 @@ export class LiveClient implements Router {
             this.bridgeToolsCache.invalidate();
             this.staleAssemblyCache.invalidate();
             this.editorWedgeCache.invalidate();
+            this.pingCache.record(body);
             return null;
           }
         } catch {
           // Network failure during the poll — normal during a domain reload
-          // (the listener is torn down and rebuilt). But if the instance lock
-          // shows a dead bridge assembly (stale heartbeat + live PID), the
-          // reload will never complete: abort the wait immediately with the
-          // structured bridge_compile_failed error instead of spinning to the
-          // 120s deadline.
+          // (the listener is torn down and rebuilt), also when the reload runs
+          // long. Only Editor.log evidence that the bridge cannot come back
+          // ends the wait early.
           const deadBridge = this.deadBridgeResult();
           if (deadBridge) return deadBridge;
           continue;
         }
       }
 
-      // Final check before declaring a timeout: a dead-bridge signature here
-      // is a more useful error than the opaque compile_timeout.
+      // Out of budget. A bridge that cannot come back is a more useful answer
+      // than "still reloading".
       const deadBridge = this.deadBridgeResult();
       if (deadBridge) return deadBridge;
-
-      return makeErrorResult({
-        code: "compile_timeout",
-        message:
-          `Unity is still compiling after ${compileWaitMs / 1000}s. ` +
-          "The compile-wait timeout was exceeded.",
-        detail: {
-          error: {
-            code: "compile_timeout",
-            message: `Compile-wait exceeded ${compileWaitMs / 1000}s`,
-          },
-        },
-      });
+      const view = await this.currentView(1_000);
+      // Settled after all (it settled between the last poll and now): send it.
+      if (view.phase === "settled") return null;
+      return reloadingRefusal(toolName, view, Date.now() - started);
     } finally {
       // Compile wait resolved (idle) OR timed out — either way there is
       // nothing more to dismiss. Aborting unblocks the dismiss loop's sleep.

@@ -39,7 +39,12 @@ clients don't accumulate subscriber state.
   (wire contract 8) a `compile` block — `generation`, `running`, `completed`,
   `failed`, `errorCount`, `pending` (a compile requested and not started yet)
   and `requestedAt`. It stays on disk across a domain reload, so it is what the
-  MCP server reads while the listener is down.
+  MCP server reads while the listener is down. Since the heartbeat is written
+  from the main thread it also stops during every reload; a frozen heartbeat
+  alone does not mean the bridge is dead (see
+  [lost bridge vs. long reload](routing-lifecycle.md#a-lost-response-or-a-long-reload-is-not-a-dead-bridge)).
+  `state` reads `reloading` from the moment a call requests a domain reload
+  until it starts (wire contract 9).
 
 ## Authentication and bind mode
 
@@ -134,7 +139,8 @@ Use `/ping` to confirm:
 - the installed bridge's wire-contract revision
 
 `/ping` also reports `transition` (wire contract 8): `compiling`,
-`entering_playmode`, `exiting_playmode`, or `null` when settled. A reachable,
+`reloading` (wire contract 9: a call requested a domain reload that has not
+started yet), `entering_playmode`, `exiting_playmode`, or `null` when settled. A reachable,
 non-compiling bridge is not settled while play mode is changing. While the
 session initializes after a reload `/ping` answers HTTP 503.
 
@@ -209,6 +215,21 @@ Calls and reloads:
   Before contract 8 such a call saw HTTP 200 with an empty body.
 - `execute_menu "Assets/Refresh"` is a refresh mutation, not a read-only menu:
   `assets_refresh`'s lifecycle and default scope (`Assets`).
+- A call whose dispatch leaves a domain reload requested (wire contract 9:
+  `EditorUtility.RequestScriptReload` in an `execute_csharp` snippet or an
+  invoked method; Unity reports it as requested and not started) is answered
+  before that reload: the bridge holds domain reloads
+  (`EditorApplication.LockReloadAssemblies`) from the end of the dispatch until
+  the response is written, then lets it run. The envelope carries
+  `"reloadRequested": true, "reloadTiming": "after_response" | "after_play_mode"`
+  and a step naming `unity_open_mcp_editor_status {"wait_until":"idle"}`. Until
+  the reload starts the lock `state` and `/ping` `transition` read `reloading`
+  and mutations answer 503 `editor_reloading` (`dispatched: false`).
+  `after_play_mode`: in play mode under *Script Changes While Playing: Recompile
+  After Finished Playing* Unity defers the reload to the end of play mode, and
+  nothing is published meanwhile. An `execute_csharp` snippet that leaves a
+  compile due skips the settle wait the same way: it answers with its result
+  and the `compile` block instead of being cut off by the reload.
 
 ## Dispatch timeouts
 

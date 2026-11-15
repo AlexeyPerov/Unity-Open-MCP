@@ -14,7 +14,7 @@ export interface PingBody {
   unityVersion?: string | null;
   bridgeVersion?: string;
   mode?: string;
-  /** compiling / entering_playmode / exiting_playmode, or null (wire contract 8). */
+  /** compiling / reloading (wire contract 9) / entering_playmode / exiting_playmode, or null (wire contract 8). */
   transition?: string | null;
 }
 

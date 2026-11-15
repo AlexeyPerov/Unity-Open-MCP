@@ -61,7 +61,8 @@ also waits while the instance lock announces a requested compile that has not
 started. `--after-generation N` additionally requires a compile after
 generation N (the `compile.generationAtStart` a call returned); `--until
 idle|playing|edit` picks the mode (default `idle`). The JSON reports `status`
-(`ready`, `timeout`, `not_reached`, `dead_bridge`, `offline`), `transitionsSeen`
+(`ready`, `timeout`, `not_reached`, `dead_bridge` — only when `Editor.log`
+shows the bridge cannot come back, `offline`), `transitionsSeen`
 and `compile: {generation, status, errorCount}`. `run-tool
 unity_open_mcp_editor_status` with `wait_until` waits inline for its whole
 `timeout_ms` (no MCP host timeout applies to the CLI, and a job would end with

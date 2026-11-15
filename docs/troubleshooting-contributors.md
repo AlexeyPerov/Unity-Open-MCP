@@ -32,9 +32,18 @@ one interactive Editor holds the project lock.
 ### Stale heartbeat vs live PID
 
 The instance lock at `~/.unity-open-mcp/instances/<project-hash>.json` may show
-a **stale heartbeat** while the port is still held. The MCP server uses
-stale-heartbeat + live-PID to detect `bridge_compile_failed` (bridge assembly
-failed to reload). See
+a **stale heartbeat** while the port is still held. The heartbeat is written from
+the main thread, so every domain reload freezes it, and a reload longer than the
+10 s threshold (a large project, a play-mode reload, a reload a test run
+deferred to its end) shows stale-heartbeat + live-PID too. That signature alone
+is therefore a reload or a stall; `bridge_compile_failed` / `dead_bridge` need
+`Editor.log` evidence on top (`mcp-server/src/bridge-loss.ts`: Safe Mode, a
+reload that finished without `[Unity Open MCP Bridge] Listening on`, or — with
+no lock — the startup compile's errors). To reproduce a long reload without
+touching the bridge, run an `execute_csharp` snippet that subscribes
+`AssemblyReloadEvents.beforeAssemblyReload += () => Thread.Sleep(20000)` and
+calls `EditorUtility.RequestScriptReload()`: the subscription dies with the
+domain, so it leaves nothing behind. See
 [`packages/bridge/AGENTS.md` — Multi-instance port and discovery](../packages/bridge/AGENTS.md#multi-instance-port-and-discovery)
 and
 `mcp-server/src/instance-discovery.ts` (`classifyInstance`).

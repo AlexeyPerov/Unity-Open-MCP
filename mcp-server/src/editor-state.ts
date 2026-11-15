@@ -21,12 +21,14 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   classifyInstance,
+  heartbeatAgeMs,
   readInstanceLock,
   type InstanceClassification,
   type InstanceLock,
   type LockCompile,
 } from "./instance-discovery.js";
 import type { PingProbe } from "./live-client.js";
+import { bridgeCompileFailedBody, readBridgeLossEvidence, type BridgeLossEvidence } from "./bridge-loss.js";
 
 export const WAIT_TOOL = "unity_open_mcp_editor_status";
 export type WaitUntil = "idle" | "playing" | "edit";
@@ -43,12 +45,24 @@ export function waitCall(until: WaitUntil, afterGeneration?: number | null): str
 export type EditorTransition = "compiling" | "reloading" | "entering_playmode" | "exiting_playmode";
 const TRANSITIONS: ReadonlySet<string> = new Set(["compiling", "reloading", "entering_playmode", "exiting_playmode"]);
 
+/** A heartbeat state that names a transition in progress. */
+export function isTransitionState(state: string | null | undefined): boolean {
+  return typeof state === "string" && TRANSITIONS.has(state);
+}
+
 export interface EditorSignals {
   /** When the signals were read (ms since epoch). */
   at: number;
   lock: InstanceLock | null;
   classification: InstanceClassification;
   ping: PingProbe;
+  /**
+   * Read only when the heartbeat stopped and the listener is gone: the
+   * Editor.log evidence that the bridge cannot come back on its own
+   * (bridge-loss.ts), or null when the log shows none — then the stop is a
+   * long reload or a stall, not a dead bridge.
+   */
+  bridgeLoss?: BridgeLossEvidence | null;
 }
 
 /** The part of a LiveClient the reader needs (tests pass a fake). */
@@ -56,11 +70,12 @@ export interface PingSource {
   pingProbe(fetchTimeoutMs?: number): Promise<PingProbe>;
 }
 
-/** Read the lock and probe /ping once. Never throws. */
+/** Read the lock and probe /ping once. Never throws. `logPathOverride` is a test seam for the global Editor.log. */
 export async function readEditorSignals(
   projectPath: string | undefined,
   live: PingSource,
   pingTimeoutMs = 2_000,
+  logPathOverride?: string,
 ): Promise<EditorSignals> {
   let lock: InstanceLock | null = null;
   if (projectPath) {
@@ -69,7 +84,11 @@ export async function readEditorSignals(
   let ping: PingProbe;
   try { ping = await live.pingProbe(pingTimeoutMs); }
   catch { ping = { reachable: false, httpStatus: null, body: null }; }
-  return { at: Date.now(), lock, classification: classifyInstance(lock), ping };
+  const classification = classifyInstance(lock);
+  const bridgeLoss = classification === "dead_bridge" && !ping.reachable
+    ? readBridgeLossEvidence(projectPath, { livePid: lock?.pid, globalLogPathOverride: logPathOverride })
+    : undefined;
+  return { at: Date.now(), lock, classification, ping, ...(bridgeLoss !== undefined ? { bridgeLoss } : {}) };
 }
 
 /**
@@ -77,12 +96,15 @@ export async function readEditorSignals(
  *   compiling, reloading or changing play mode.
  * - `transition`: a compile, domain reload or play-mode change is in progress
  *   (or the listener is still initializing after one); it ends on its own.
- * - `unreachable`: Unity runs (fresh lock) but the listener does not answer and
- *   nothing says a reload is in progress (toolbar off, or a blip).
+ * - `unreachable`: Unity runs but the listener does not answer and nothing says
+ *   a reload is in progress (toolbar off, a blip, or a heartbeat that stopped
+ *   outside a transition with no evidence of why).
  * - `wedged`: the heartbeat stopped but /ping answers — the main thread is
  *   blocked (a modal dialog, or a long synchronous import).
- * - `dead_bridge`: the heartbeat stopped and the listener is gone: the bridge
- *   assembly did not come back (Safe Mode / compile failure).
+ * - `dead_bridge`: the heartbeat stopped, the listener is gone, and Editor.log
+ *   shows why the bridge cannot come back (Safe Mode, or a reload that
+ *   finished without it — bridge-loss.ts). A stopped heartbeat alone is a
+ *   long transition, never a dead bridge.
  * - `gone`: no live Editor for this project.
  */
 export type EditorPhase = "settled" | "transition" | "unreachable" | "wedged" | "dead_bridge" | "gone";
@@ -97,13 +119,19 @@ export interface EditorView {
   /** The lock's compile block (null on an older bridge or without a lock). */
   compile: LockCompile | null;
   heartbeatAt: string | null;
+  /** How long the heartbeat has been stopped (ms), when it is stale; null when it beats. */
+  stalledMs: number | null;
+  /** Why the bridge is down for good — present only on `dead_bridge`. */
+  bridgeLoss?: BridgeLossEvidence;
 }
 
 /**
  * Fold the signals into one view. Any source that reports a transition wins
  * (the lock lags /ping by up to one 0.5 s heartbeat and vice versa), so the
- * view errs toward "not settled yet". `pendingTestRun`: a test run's reload can
- * freeze the heartbeat past the stale threshold — read that as a reload.
+ * view errs toward "not settled yet". A stopped heartbeat is a dead bridge only
+ * with Editor.log evidence; otherwise it is a transition that runs long (a
+ * large project's reload, a play-mode reload, a test run's reload — the
+ * `pendingTestRun` signal) or, outside a transition, an unreachable listener.
  */
 export function viewEditor(s: EditorSignals, pendingTestRun = false): EditorView {
   const lockLive = s.lock !== null && s.classification !== "gone";
@@ -120,18 +148,22 @@ export function viewEditor(s: EditorSignals, pendingTestRun = false): EditorView
   note(body?.transition ?? null);
   if (compile?.running) note("compiling");
 
+  const stale = s.classification === "dead_bridge";
   const base = {
     state: lock?.state ?? null,
     isPlaying: typeof body?.isPlaying === "boolean" ? body.isPlaying : lock ? lock.isPlaying === true : null,
     isCompiling: body?.compiling === true || lock?.isCompiling === true || transition === "compiling",
     compile,
     heartbeatAt: lock?.heartbeatAt ?? null,
+    stalledMs: stale && lock && Number.isFinite(heartbeatAgeMs(lock, s.at)) ? Math.round(heartbeatAgeMs(lock, s.at)) : null,
   };
   const view = (phase: EditorPhase, t: EditorTransition | null = transition): EditorView => ({ ...base, phase, transition: t });
 
-  if (s.classification === "dead_bridge") {
+  if (stale) {
+    if (!s.ping.reachable && s.bridgeLoss) return { ...view("dead_bridge"), bridgeLoss: s.bridgeLoss };
     if (pendingTestRun) return view("transition", transition ?? "reloading");
-    return view(s.ping.reachable ? "wedged" : "dead_bridge");
+    if (s.ping.reachable) return view("wedged");
+    return view(transition ? "transition" : "unreachable");
   }
   if (!s.ping.reachable) {
     if (!lockLive) return view("gone");
@@ -153,6 +185,9 @@ export function statusFields(v: EditorView): Record<string, unknown> {
     compileGeneration: v.compile?.generation ?? null,
     compilePending: v.compile?.pending ?? null,
     lastCompileFailed: v.compile ? v.compile.failed : null,
+    // The heartbeat stopped this long ago: a long reload, a busy main thread,
+    // or (with `evidence`) a bridge that is not coming back.
+    ...(v.stalledMs !== null ? { heartbeatStalledMs: v.stalledMs } : {}),
   };
 }
 
@@ -428,10 +463,16 @@ export function describeWait(req: WaitRequest, outcome: WaitOutcome): { body: Re
         ? "Check the compile result and the Console (unity_open_mcp_read_console), then call unity_open_mcp_editor_set_state {\"state\":\"play\"} again."
         : "Call unity_open_mcp_editor_set_state with the state you need, then wait again.");
       break;
-    case "dead_bridge":
-      error = { code: "bridge_compile_failed", message: "The bridge did not come back after the reload (Safe Mode / compile failure): the Unity process is alive but its heartbeat stopped and /ping does not answer." };
+    case "dead_bridge": {
+      // Only reached with Editor.log evidence (viewEditor): a stopped heartbeat
+      // alone keeps the wait going as a transition.
+      const failed = v?.bridgeLoss ? bridgeCompileFailedBody(v.bridgeLoss) : null;
+      error = (failed?.error as { code: string; message: string } | undefined)
+        ?? { code: "bridge_compile_failed", message: "The bridge did not come back after the reload." };
       steps.push("Call unity_open_mcp_read_compile_errors (it reads Editor.log without the bridge), fix the errors, then recompile.");
+      if (v?.bridgeLoss) base.evidence = v.bridgeLoss;
       break;
+    }
     case "gone":
       error = { code: "bridge_offline", message: "No live Unity Editor for this project (no instance lock with a running process)." };
       steps.push("Open the project in Unity, then call unity_open_mcp_bridge_status to confirm the bridge is running.");
@@ -440,10 +481,50 @@ export function describeWait(req: WaitRequest, outcome: WaitOutcome): { body: Re
       error = { code: "wait_cancelled", message: "The wait was cancelled." };
       break;
     default:
-      error = { code: "wait_timeout", message: `The Editor was not ${req.until} after ${outcome.waitedMs} ms` + (outcome.holdingFor ? ` (still ${outcome.holdingFor.replace(/_/g, " ")}).` : ".") };
+      error = { code: "wait_timeout", message: `The Editor was not ${req.until} after ${outcome.waitedMs} ms` + (outcome.holdingFor ? ` (still ${outcome.holdingFor.replace(/_/g, " ")}).` : ".") +
+        (v?.stalledMs != null ? ` Its heartbeat stopped ${Math.round(v.stalledMs / 1000)} s ago and Editor.log shows no compile failure: a long reload or a blocked main thread, not a dead bridge.` : "") };
       steps.push(`Wait again: ${waitCall(req.until, req.afterGeneration)} with a larger timeout_ms (up to ${WAIT_MAX_TIMEOUT_MS}; past ~${WAIT_INLINE_LIMIT_MS / 1000} s it continues as a job). If it never settles, check unity_open_mcp_bridge_status.`);
   }
   return { body: { ...base, ...(outcome.holdingFor ? { holdingFor: outcome.holdingFor } : {}), error, agentNextSteps: steps }, isError: true };
+}
+
+export type LostResponseCause = "timeout" | "connection_closed";
+
+/**
+ * A tool call whose response never arrived — the connection closed, or nothing
+ * came back within the call's deadline — and that no Editor.log evidence
+ * explains as a dead bridge. The request reached the bridge; whether it ran is
+ * unknown (`dispatched: null`), so it is never replayed automatically.
+ * `editor_reloading` when the Editor is compiling, reloading or changing play
+ * mode (or its heartbeat stopped inside one), `response_lost` otherwise. Both
+ * are retryable.
+ */
+export function lostResponseResult(toolName: string, v: EditorView | null, cause: LostResponseCause, waitedMs?: number): CallToolResult {
+  const reloading = v !== null && (v.phase === "transition" || v.transition !== null);
+  const what = cause === "timeout" ? "no response arrived before the call's deadline" : "the connection closed before the response arrived";
+  const body = {
+    error: {
+      code: reloading ? "editor_reloading" : "response_lost",
+      message: reloading
+        ? `'${toolName}' reached the bridge, but ${what}: the Editor is ${String(v?.transition ?? "reloading").replace(/_/g, " ")}. ` +
+          "The call may or may not have run."
+        : `'${toolName}' reached the bridge, but ${what}` +
+          (v?.phase === "wedged" ? " (the Editor's main thread is blocked)" : v?.phase === "unreachable" ? " (the listener is not answering now)" : "") +
+          ". The call may or may not have run; Editor.log shows no compile failure, so this is not a dead bridge.",
+    },
+    dispatched: null,
+    cause,
+    transition: v?.transition ?? null,
+    phase: v?.phase ?? null,
+    ...(waitedMs !== undefined ? { waitedMs } : {}),
+    retryAfterMs: v ? retryAfterMsFor(v) : 2_000,
+    ...(v ? statusFields(v) : {}),
+    agentNextSteps: [
+      `Wait for the Editor with ${waitCall("idle")}, then send a read again; for a mutation, check its effect with the matching read tool before repeating it.`,
+    ],
+    _route: { route: "live", outcome: reloading ? "editor_reloading" : "response_lost" },
+  };
+  return { content: [{ type: "text", text: JSON.stringify(body) }], isError: true };
 }
 
 /** A tool result for a call the router did not send because the Editor did not settle in time. */

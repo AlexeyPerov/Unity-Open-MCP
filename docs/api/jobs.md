@@ -158,7 +158,7 @@ the same job when their compile outlasts the inline window (they answer
 The wait polls the instance lock, `/ping` and `/compile-state` from the server, so
 a domain reload is something it waits through, not a lost owner. A wait that is
 not reached fails with the wait's code (`wait_timeout`, `wait_not_reached`,
-`bridge_compile_failed`, `bridge_offline`); `cancel` stops it at once. It is an
+`bridge_compile_failed` — only with `Editor.log` evidence, `bridge_offline`); `cancel` stops it at once. It is an
 **observer**: it changes nothing, needs no `idempotency_key`, and holds no
 project or agent execution slot — it never queues behind a running test job nor
 blocks one. Up to eight observers run at a time.

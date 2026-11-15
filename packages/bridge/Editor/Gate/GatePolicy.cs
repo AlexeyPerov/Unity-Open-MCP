@@ -127,6 +127,11 @@ namespace UnityOpenMcpBridge
         // False (the common case) means the compile settled or was never
         // relevant to this mutation.
         public bool CompilePending;
+        // The call left a script domain reload requested (BridgeReloadRequest):
+        // "after_response" (held until the response is written, then it runs)
+        // or "after_play_mode" (Unity defers it until play mode ends). Emitted
+        // as reloadRequested / reloadTiming; null when no reload was requested.
+        internal string ReloadTiming;
         // feedback.md issue 5 — machine-readable reason the gate was skipped.
         // For "play_mode", the gate short-circuits checkpoint/validate
         // during play mode because the scene graph is animating and the verify
