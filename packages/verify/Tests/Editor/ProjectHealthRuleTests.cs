@@ -92,6 +92,35 @@ namespace UnityOpenMcpVerify.Tests
             }
         }
 
+        [Test]
+        public void Scan_FolderMetaOfFolderNotYetImported_NotOrphan()
+        {
+            // A folder that exists on disk with its meta (e.g. after a git
+            // checkout, before Unity imported it) is not an orphan: the folder
+            // is the meta's companion. No Refresh, and a plain [Test] gives the
+            // Editor no frame to auto-refresh in.
+            var folderMeta = FixtureRoot + "/NotYetImported.meta";
+            var absFolder = AbsPath(FixtureRoot + "/NotYetImported");
+            var absMeta = AbsPath(folderMeta);
+            Directory.CreateDirectory(absFolder);
+            File.WriteAllText(absMeta, "fileFormatVersion: 2\nguid: " + System.Guid.NewGuid().ToString("N") + "\nfolderAsset: yes\n");
+            try
+            {
+                var sink = new List<VerifyIssue>();
+                var scope = new VerifyScope(new[] { FixtureRoot });
+                rule.Scan(scope, VerifyRunMode.Full, sink);
+
+                var orphans = sink.Where(i => i.IssueCode == "orphan_meta").Select(i => i.AssetPath).ToList();
+                CollectionAssert.DoesNotContain(orphans, folderMeta);
+            }
+            finally
+            {
+                if (File.Exists(absMeta)) File.Delete(absMeta);
+                if (Directory.Exists(absFolder)) Directory.Delete(absFolder, true);
+                AssetDatabase.Refresh();
+            }
+        }
+
         [UnityTest]
         public System.Collections.IEnumerator Scan_EmptyFolder_DetectedAsMetaOnly()
         {

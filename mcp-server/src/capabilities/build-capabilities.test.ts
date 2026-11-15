@@ -417,6 +417,8 @@ test("offline_integrity rule is implemented with orphan_meta and duplicate_guid 
   assert.ok(codes.includes("duplicate_guid"));
   assert.ok(codes.includes("missing_reference"));
   assert.ok(codes.includes("missing_script_reference"));
+  assert.ok(codes.includes("unverified_reference"));
+  assert.ok(codes.includes("unverified_script_reference"));
   // All offline_integrity codes are full-scan-only (they need the whole tree).
   for (const issue of rule!.issues) {
     assert.equal(issue.fullScanOnly, true, `${issue.code} must be fullScanOnly`);

@@ -3,9 +3,9 @@ using UnityEditor;
 
 namespace UnityOpenMcpVerify.Fixes
 {
-    // remove_orphan_meta — deletes a .meta file whose companion asset was
-    // deleted. No asset data is lost (the .meta is already detached), so the
-    // fix is Safe and auto-suggestable under enforce.
+    // remove_orphan_meta — deletes a .meta file whose companion asset (file
+    // or folder) was deleted. No asset data is lost (the .meta is already
+    // detached), so the fix is Safe and auto-suggestable under enforce.
     //
     // Producers of the `orphan_meta` code:
     //   - project_health rule (live Editor, full-scan only)
@@ -77,11 +77,13 @@ namespace UnityOpenMcpVerify.Fixes
 
             // Refuse if the companion asset still exists — that means the meta
             // is NOT actually orphaned (the issue is stale or the asset was
-            // recreated). Deleting a meta whose asset exists would force Unity
-            // to re-import and regenerate it, which is noisy and not what this
-            // fix is for.
+            // recreated). A folder's meta has the folder as its companion,
+            // imported or not. Deleting a meta whose asset exists would force
+            // Unity to re-import and regenerate it under a new GUID, which
+            // breaks references and is not what this fix is for.
             var companion = metaPath.Substring(0, metaPath.Length - ".meta".Length);
-            if (File.Exists(companion) || AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(companion) != null)
+            if (File.Exists(companion) || Directory.Exists(companion)
+                || AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(companion) != null)
                 return new FixResult
                 {
                     Success = true,

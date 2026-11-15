@@ -10,7 +10,7 @@
 // import time so the overrides resolver can call back into the hierarchy/
 // reference layers without an import cycle.
 
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type {
   AssetModel,
@@ -52,6 +52,7 @@ import {
   parallelMap,
   resolveGUIDPaths,
   resolveGuids,
+  resolveBeyondAssets,
   BUILTIN_RESOURCE_GUIDS,
   safeReadMetaGUID,
   scriptGUIDs,
@@ -60,6 +61,7 @@ import {
   type MetaTriple,
 } from "./index-builders.js";
 import { toAssetPath, relativeDir } from "./paths.js";
+import { discoverPackageSources, packageAssetDiskPath } from "./package-index.js";
 import { resolveReferences, OVERRIDE_LABEL_HELPERS } from "./references.js";
 import { setLabelHelpers } from "./overrides.js";
 import {
@@ -147,17 +149,17 @@ export async function readAssetOffline(
   // via buildGUIDIndex) followed by another buildGUIDIndex walk — every cold
   // read_asset paid two back-to-back walks of the same tree.
   //
-  // resolveGuids also resolves the built-in resources and, for the component
-  // scripts Assets/ does not own, the project's packages.
+  // resolveGuids also resolves the built-in resources and, for the GUIDs
+  // Assets/ does not own, the project's packages.
   const wantedScripts = scriptGUIDs(parsed);
   const wantedGUIDs = collectFieldGUIDs(parsed);
-  const { guidIndex, scriptIndex, unverifiedScripts, unverifiedReason } = await resolveGuids(
+  const { guidIndex, scriptIndex, unverified, unverifiedReason } = await resolveGuids(
     opts.projectRoot,
     wantedGUIDs,
     wantedScripts,
   );
 
-  const integrity = runYamlIntegrityChecks(parsed, guidIndex, { scripts: unverifiedScripts, reason: unverifiedReason });
+  const integrity = runYamlIntegrityChecks(parsed, guidIndex, { guids: unverified, reason: unverifiedReason });
   return {
     model: { ...buildAssetModel(parsed, scriptIndex, guidIndex, opts.fieldLimit), ...(integrity ? { integrity } : {}) },
     source: "offline",
@@ -496,6 +498,24 @@ export interface FindReferencesOfflineResult {
   truncated: number;
 }
 
+/**
+ * The GUID (lowercased, "" when unknown) and on-disk file of a queried asset
+ * path. A `Packages/<name>/…` path that is not a folder under the project's
+ * Packages/ (a Library/PackageCache, `file:` or built-in package) is found
+ * through the project's package sources.
+ */
+async function locateAsset(
+  projectRoot: string,
+  assetPath: string,
+): Promise<{ guid: string; diskPath: string }> {
+  const direct = join(projectRoot, assetPath);
+  const guid = (await safeReadMetaGUID(direct + ".meta")).toLowerCase();
+  if (guid !== "" || !assetPath.startsWith("Packages/")) return { guid, diskPath: direct };
+  const disk = packageAssetDiskPath((await discoverPackageSources(projectRoot)).sources, assetPath);
+  if (disk === null) return { guid, diskPath: direct };
+  return { guid: (await safeReadMetaGUID(disk + ".meta")).toLowerCase(), diskPath: disk };
+}
+
 export async function findReferencesOffline(
   opts: {
     assetPath?: string;
@@ -527,9 +547,7 @@ export async function findReferencesOffline(
     targetGuid = opts.guid.toLowerCase();
   } else if (opts.assetPath) {
     targetPath = opts.assetPath;
-    targetGuid = (await safeReadMetaGUID(
-      join(opts.projectRoot, opts.assetPath + ".meta"),
-    )).toLowerCase();
+    targetGuid = (await locateAsset(opts.projectRoot, opts.assetPath)).guid;
   }
 
   if (targetGuid === "") {
@@ -545,11 +563,10 @@ export async function findReferencesOffline(
     };
   }
 
-  // If only GUID was given, resolve target path from .meta index (a script
-  // GUID Assets/ does not own may be a package script).
+  // If only GUID was given, resolve target path from .meta index (a GUID
+  // Assets/ does not own may be a package asset).
   if (targetPath === "") {
-    const wanted = new Set([targetGuid]);
-    const { guidIndex } = await resolveGuids(opts.projectRoot, wanted, wanted);
+    const { guidIndex } = await resolveGuids(opts.projectRoot, new Set([targetGuid]));
     targetPath = guidIndex.get(targetGuid) ?? "";
   }
 
@@ -734,8 +751,8 @@ export interface DependenciesOfflineResult {
   forwardCount: number;
   /** Distinct unresolved forward-edge target GUIDs (the broken_dependency set). */
   brokenForwardGuids: string[];
-  /** Script edges that resolve nowhere on disk while a package the project uses
-   * is not on disk here: they may belong to it. Absent when there are none. */
+  /** Edges that resolve nowhere on disk while a package the project uses is
+   * not on disk here: they may belong to it. Absent when there are none. */
   unverifiedForwardGuids?: string[];
   /** Why `unverifiedForwardGuids` could not be verified. */
   unverifiedReason?: string;
@@ -802,18 +819,17 @@ export async function dependenciesOffline(
     targetGuid = opts.guid.toLowerCase();
   } else if (opts.assetPath) {
     targetPath = opts.assetPath;
-    targetGuid = (await safeReadMetaGUID(
-      join(opts.projectRoot, opts.assetPath + ".meta"),
-    )).toLowerCase();
   }
+  let target = targetPath !== "" ? await locateAsset(opts.projectRoot, targetPath) : null;
+  if (target) targetGuid = target.guid;
 
   if (targetGuid === "") {
     return emptyDependencies(targetPath, "", detail);
   }
   if (targetPath === "") {
-    const wanted = new Set([targetGuid]);
-    const { guidIndex: idx } = await resolveGuids(opts.projectRoot, wanted, wanted);
+    const { guidIndex: idx } = await resolveGuids(opts.projectRoot, new Set([targetGuid]));
     targetPath = idx.get(targetGuid) ?? "";
+    if (targetPath !== "") target = await locateAsset(opts.projectRoot, targetPath);
   }
 
   // ---- Forward edges ----
@@ -824,10 +840,9 @@ export async function dependenciesOffline(
   let cycles: string[][] = [];
   let forwardSkipped: string | undefined;
 
-  const absPath = join(opts.projectRoot, targetPath);
   let data: string | undefined;
   try {
-    data = await readFile(absPath, "utf-8");
+    data = await readFile(target?.diskPath ?? join(opts.projectRoot, targetPath), "utf-8");
   } catch {
     forwardSkipped = "queried asset not readable on disk";
   }
@@ -840,11 +855,11 @@ export async function dependenciesOffline(
       const wanted = new Set(forwardEdges.map((e) => e.guid));
       const scripts = new Set(forwardEdges.filter((e) => e.kind === "script").map((e) => e.guid));
       const resolution = await resolveGuids(opts.projectRoot, wanted, scripts);
-      // A script edge that may belong to a package not on disk here is
-      // unverified, not broken (the same verdict read_asset gives it).
+      // An edge that may belong to a package not on disk here is unverified,
+      // not broken (the same verdict read_asset gives it).
       const unresolved = resolveForwardEdges(forwardEdges, resolution.guidIndex);
-      brokenGuids = unresolved.filter((g) => !resolution.unverifiedScripts.has(g));
-      unverifiedGuids = unresolved.filter((g) => resolution.unverifiedScripts.has(g));
+      brokenGuids = unresolved.filter((g) => !resolution.unverified.has(g));
+      unverifiedGuids = unresolved.filter((g) => resolution.unverified.has(g));
       if (unverifiedGuids.length > 0) unverifiedReason = resolution.unverifiedReason;
       if (forwardEdges.length > 0) {
         cycles = await detectCyclesOffline(
@@ -1403,22 +1418,25 @@ export async function scanIntegrityOffline(
     allAssetPaths.add(toAssetPath(opts.projectRoot, absPath));
   }
 
-  // ---- orphan_meta: .meta whose companion asset is gone ----
-  // An orphan is a triple whose companion asset path is NOT in the on-disk
-  // asset file set. (Previously detected via a second walkMeta pass diffing
-  // against allAssetPaths; now derived from the single triples pass + the
-  // one collectFiles walk we already needed for the integrity loop.)
-  for (const t of triples) {
+  // ---- orphan_meta: .meta whose companion file or folder is gone ----
+  // Derived from the single triples pass + the collectFiles walk the
+  // integrity loop needs. collectFiles lists files only, so a meta without a
+  // companion file (a folder's own meta, or a true orphan) is stat'ed once:
+  // a folder's meta is not an orphan while the folder exists.
+  const withoutFile = triples.filter((t) => !allAssetPaths.has(toAssetPath(opts.projectRoot, t.assetPath)));
+  const folderCompanion = await parallelMap(withoutFile, async (t) => {
+    try { return (await stat(t.assetPath)).isDirectory(); } catch { return false; }
+  });
+  withoutFile.forEach((t, i) => {
+    if (folderCompanion[i]) return;
     const assetRel = toAssetPath(opts.projectRoot, t.assetPath);
-    if (!allAssetPaths.has(assetRel)) {
-      issues.push({
-        path: assetRel + ".meta",
-        code: "orphan_meta",
-        severity: "warning",
-        detail: `meta file has no companion asset at ${assetRel}`,
-      });
-    }
-  }
+    issues.push({
+      path: assetRel + ".meta",
+      code: "orphan_meta",
+      severity: "warning",
+      detail: `meta file has no companion asset at ${assetRel}`,
+    });
+  });
 
   // ---- duplicate_guid: GUID shared by 2+ assets ----
   const pathsByGuid = new Map<string, string[]>();
@@ -1451,12 +1469,14 @@ export async function scanIntegrityOffline(
   // scanning (each YAML asset must be parsed to surface its missing refs);
   // this plan only collapsed the meta walks, not the body reads.
   //
-  // An asset whose component scripts Assets/ does not own is checked after
-  // the loop, once those scripts were looked up in the packages in one walk
-  // (the same resolution read_asset uses); its slot keeps the issue order.
+  // An asset with a GUID Assets/ does not own (a package script, a URP
+  // material's shader, …) is checked after the loop, once those GUIDs were
+  // looked up in the packages in one walk (the same resolution read_asset
+  // uses); its slot keeps the issue order.
   for (const [guid, path] of BUILTIN_RESOURCE_GUIDS) fullGuidIndex.set(guid, path);
   const slots: Array<IntegrityScanEntry[] | { assetPath: string; parsed: ParsedAsset }> = [];
-  const packageScripts = new Set<string>();
+  const outsideScripts = new Set<string>();
+  const outsideFields = new Set<string>();
   for (const absPath of assetFiles) {
     const ext = extname(absPath).toLowerCase();
     if (!OFFLINE_PARSEABLE_EXTENSIONS.has(ext)) continue;
@@ -1468,9 +1488,14 @@ export async function scanIntegrityOffline(
     try {
       const parsed = parseAsset(data);
       parsed.path = assetPath;
-      const outside = [...scriptGUIDs(parsed)].filter((g) => !fullGuidIndex.has(g));
-      if (outside.length > 0) {
-        for (const g of outside) packageScripts.add(g);
+      let outside = false;
+      for (const g of scriptGUIDs(parsed)) {
+        if (!fullGuidIndex.has(g)) { outsideScripts.add(g); outside = true; }
+      }
+      for (const g of collectFieldGUIDs(parsed)) {
+        if (!fullGuidIndex.has(g)) { outsideFields.add(g); outside = true; }
+      }
+      if (outside) {
         slots.push({ assetPath, parsed });
         continue;
       }
@@ -1479,15 +1504,17 @@ export async function scanIntegrityOffline(
       // Not parseable as YAML — skip. JSON integrity is per-read only.
     }
   }
-  const scripts = packageScripts.size > 0
-    ? await resolveGuids(opts.projectRoot, new Set(), packageScripts)
-    : null;
-  if (scripts) for (const [guid, path] of scripts.guidIndex) fullGuidIndex.set(guid, path);
+  const resolution = await resolveBeyondAssets(
+    opts.projectRoot,
+    { guidIndex: fullGuidIndex, scriptIndex: new Map() },
+    outsideFields,
+    outsideScripts,
+  );
+  const unverified = { guids: resolution.unverified, reason: resolution.unverifiedReason };
   for (const slot of slots) {
     const entries = Array.isArray(slot)
       ? slot
-      : integrityEntries(slot.assetPath, runYamlIntegrityChecks(slot.parsed, fullGuidIndex,
-          scripts ? { scripts: scripts.unverifiedScripts, reason: scripts.unverifiedReason } : undefined));
+      : integrityEntries(slot.assetPath, runYamlIntegrityChecks(slot.parsed, fullGuidIndex, unverified));
     for (const entry of entries) issues.push(entry);
   }
 

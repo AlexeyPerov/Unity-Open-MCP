@@ -93,30 +93,37 @@ as PNG, WAV, and FBX data still needs the live bridge.
 
 Offline reads can reconstruct GameObject/component trees, prefab variant
 overrides, GUID references, and integrity signals. Project-wide integrity scans
-also detect orphaned meta files, duplicate GUIDs, missing references, and
-missing scripts.
+also detect orphaned meta files (a `.meta` whose companion file or folder is
+gone; a folder's own `.meta` is not an orphan), duplicate GUIDs, missing
+references, and missing scripts.
 
 GUIDs resolve offline the way Unity resolves them: against the metas under
 `Assets/`, Unity's built-in resources (`Library/unity default resources`,
-`Resources/unity_builtin_extra`), and — for a component's script (`m_Script`)
-that `Assets/` does not own — the `.cs` / `.dll` metas of the project's packages:
-embedded folders under `Packages/`, `file:` references in
-`Packages/manifest.json`, `Library/PackageCache`, and built-in packages of the
-project's Unity version when that version is installed. A uGUI `Image` or an
-Input System component is therefore named and resolved, not reported as a
-missing script. A script GUID that resolves nowhere is `missing_script_reference`
-(error) — unless a package the project uses is not on disk where these reads
-look (no `Library/` in a fresh clone, a built-in package of a Unity version not
-installed here, a `file:` path that does not exist): then it is
-`unverified_script_reference` (warning), whose detail names those packages.
-`read_asset`, `dependencies`, `find_references`, `search_assets` (`component`)
-and the offline integrity scan share this resolution.
+`Resources/unity_builtin_extra`), and — for a GUID that `Assets/` does not own —
+the metas of the project's packages: embedded folders under `Packages/`, `file:`
+references in `Packages/manifest.json`, `Library/PackageCache`, and built-in
+packages of the project's Unity version when that version is installed. A
+component's script (`m_Script`) is looked up in the package `.cs` / `.dll`
+metas; a field reference (a URP material's shader, a renderer's default
+texture, a settings asset's compute shaders) in every package meta. The package
+lookup runs only when some GUID is not resolved by `Assets/` and stops once all
+are found. A uGUI `Image` is therefore named and resolved, and a material's URP
+shader resolves to `Packages/com.unity.render-pipelines.universal/…`, instead of
+being reported missing. A GUID that resolves nowhere is `missing_script_reference`
+(error) for a script and `missing_reference` (warning) for a field — unless a
+package the project uses is not on disk where these reads look (no `Library/`
+in a fresh clone, a built-in package of a Unity version not installed here, a
+`file:` path that does not exist): then it is `unverified_script_reference` /
+`unverified_reference` (warning), whose detail names those packages.
+`read_asset`, `dependencies`, `find_references` (also by a `Packages/<name>/…`
+asset path), `search_assets` (`component`) and the offline integrity scan share
+this resolution.
 
 `dependencies` combines forward edges, reverse references, broken GUIDs, and
 cycles. `include_impact=true` computes the transitive reverse closure offline.
 JSON or binary queried assets may skip forward parsing while retaining reverse
-references. Offline, a script edge that cannot be verified (see above) is listed
-in `unverifiedForwardGuids` with `unverifiedReason`, not in `brokenForwardGuids`.
+references. Offline, an edge that cannot be verified (see above) is listed in
+`unverifiedForwardGuids` with `unverifiedReason`, not in `brokenForwardGuids`.
 
 ## Lifecycle policy
 

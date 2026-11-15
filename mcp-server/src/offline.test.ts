@@ -2140,6 +2140,28 @@ test("scanIntegrityOffline detects orphaned .meta files (companion asset deleted
   }
 });
 
+test("scanIntegrityOffline: a folder's .meta is not an orphan; one whose folder is gone is", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-scan-folder-meta-"));
+  try {
+    // Assets/Prefabs (with an asset), Assets/Prefabs/Empty (an empty folder,
+    // still a Unity asset with its own meta) and Assets/Gone.meta (its folder
+    // was deleted).
+    await mkdir(join(tmp, "Assets", "Prefabs", "Empty"), { recursive: true });
+    await writeFile(join(tmp, "Assets", "Prefabs.meta"), "guid: f01d0000000000000000000000000001\nfolderAsset: yes\n");
+    await writeFile(join(tmp, "Assets", "Prefabs", "Empty.meta"), "guid: f01d0000000000000000000000000002\nfolderAsset: yes\n");
+    await writeFile(join(tmp, "Assets", "Prefabs", "Real.prefab"), `%YAML 1.1\n--- !u!1 &100\nGameObject:\n  m_Name: Real\n`);
+    await writeFile(join(tmp, "Assets", "Prefabs", "Real.prefab.meta"), "guid: 600d000000000000000000000000060d\n");
+    await writeFile(join(tmp, "Assets", "Gone.meta"), "guid: f01d0000000000000000000000000003\nfolderAsset: yes\n");
+
+    const result = await scanIntegrityOffline({ projectRoot: tmp });
+    const orphans = result.issues.filter((i) => i.code === "orphan_meta").map((i) => i.path);
+    assert.deepEqual(orphans, ["Assets/Gone.meta"]);
+    assert.equal(result.totalIssues, 1, JSON.stringify(result.issues));
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("scanIntegrityOffline detects duplicate GUIDs across two assets", async () => {
   const tmp = await mkdtemp(join(tmpdir(), "offline-scan-dupe-"));
   try {

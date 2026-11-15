@@ -169,27 +169,29 @@ export function buildJsonAssetModel(
 // ===========================================================================
 
 /**
- * Script GUIDs a resolution could not verify, and why (a package the project
- * uses is not on disk where offline reads look). See resolveGuids.
+ * GUIDs a resolution could not verify, and why (a package the project uses is
+ * not on disk where offline reads look). See resolveGuids.
  */
-export interface UnverifiedScripts {
-  scripts: ReadonlySet<string>;
+export interface UnverifiedGuids {
+  guids: ReadonlySet<string>;
   reason?: string;
 }
 
 export function runYamlIntegrityChecks(
   parsed: ParsedAsset,
   guidIndex: GUIDIndex,
-  unverified?: UnverifiedScripts,
+  unverified?: UnverifiedGuids,
 ): AssetIntegrityIssue[] {
   const issues: AssetIntegrityIssue[] = [];
 
   // Orphaned PrefabInstance: a PrefabInstance whose m_SourcePrefab GUID is
   // missing from the project (the base prefab was deleted or never imported).
+  // A source that may be in a package not on disk here is reported once,
+  // below, as an unverified reference.
   for (const obj of parsed.objects) {
     if (obj.type !== "PrefabInstance") continue;
     const sourceGuid = readGUIDField(obj.lines, "m_SourcePrefab");
-    if (sourceGuid !== "" && !guidIndex.has(sourceGuid)) {
+    if (sourceGuid !== "" && !guidIndex.has(sourceGuid) && !unverified?.guids.has(sourceGuid)) {
       issues.push({
         code: "orphaned_prefab_instance",
         detail: `m_SourcePrefab guid ${sourceGuid} not found in project`,
@@ -214,20 +216,22 @@ export function runYamlIntegrityChecks(
       }
     }
   }
+  // Not in Assets/ nor in any package on disk. When a package the project
+  // uses is not on disk here, the asset may be in it: unverified, not missing.
+  const unverifiedDetail = (what: string, g: string) =>
+    `${what} guid ${g} is not in Assets/ or the packages on disk; ${unverified?.reason ?? "a package the project uses is not on disk"} — open the project in Unity (or read it live) to verify`;
   for (const g of missingScripts) {
-    // Not in Assets/ nor in any package on disk. When a package the project
-    // uses is not on disk here, the script may be in it: unverified, not missing.
-    if (unverified?.scripts.has(g)) {
-      issues.push({
-        code: "unverified_script_reference",
-        detail: `script guid ${g} is not in Assets/ or the packages on disk; ${unverified.reason ?? "a package the project uses is not on disk"} — open the project in Unity (or read it live) to verify`,
-        severity: "warning",
-      });
+    if (unverified?.guids.has(g)) {
+      issues.push({ code: "unverified_script_reference", detail: unverifiedDetail("script", g), severity: "warning" });
       continue;
     }
     issues.push({ code: "missing_script_reference", detail: `script guid ${g} unresolved`, severity: "error" });
   }
   for (const g of missingRefs) {
+    if (unverified?.guids.has(g)) {
+      issues.push({ code: "unverified_reference", detail: unverifiedDetail("asset", g), severity: "warning" });
+      continue;
+    }
     issues.push({ code: "missing_reference", detail: `asset guid ${g} unresolved`, severity: "warning" });
   }
 

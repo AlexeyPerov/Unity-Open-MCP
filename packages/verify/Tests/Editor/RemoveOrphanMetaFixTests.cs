@@ -223,6 +223,37 @@ namespace UnityOpenMcpVerify.Tests
             AssetDatabase.Refresh();
         }
 
+        [Test]
+        public void Apply_FolderMetaWhoseFolderExists_NoChange()
+        {
+            // A folder's meta is not orphaned while the folder exists, even
+            // before the AssetDatabase imported it (no Refresh here, and a
+            // plain [Test] gives the Editor no frame to auto-refresh in).
+            var folder = FixtureRoot + "/NotYetImported";
+            var metaPath = folder + ".meta";
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(metaPath,
+                "fileFormatVersion: 2\nguid: " + System.Guid.NewGuid().ToString("N") + "\nfolderAsset: yes\n");
+            try
+            {
+                var issueId = IssueKey.Build(
+                    "offline_integrity", VerifySeverity.Warning,
+                    metaPath, "orphan_meta");
+
+                var result = fix.Apply(issueId);
+
+                Assert.IsTrue(result.Success, result.Description);
+                Assert.IsNull(result.TouchedPaths, "no change when the companion folder exists");
+                Assert.IsTrue(File.Exists(metaPath), "a folder's meta must remain while the folder exists");
+            }
+            finally
+            {
+                if (File.Exists(metaPath)) File.Delete(metaPath);
+                if (Directory.Exists(folder)) Directory.Delete(folder, true);
+                AssetDatabase.Refresh();
+            }
+        }
+
         // -------------------------------------------------------------------
         // Fixture helpers
         // -------------------------------------------------------------------

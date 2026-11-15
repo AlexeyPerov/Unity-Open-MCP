@@ -254,8 +254,8 @@ const DEPENDENCIES_ISSUES: RuleIssueDescriptor[] = [
 // offline seed for the M25 verify engine. These are the first codes to fill
 // the remove_orphan_meta / fix_duplicate_guid fix placeholders (flipped to
 // implemented below). The per-read offline integrity codes
-// (missing_reference / missing_script_reference / unverified_script_reference /
-// orphaned_prefab_instance /
+// (missing_reference / unverified_reference / missing_script_reference /
+// unverified_script_reference / orphaned_prefab_instance /
 // malformed_json / asmdef_missing_name / shadergraph_root_missing) surface on
 // every read_asset call; this rule family is the project-wide aggregator.
 const OFFLINE_INTEGRITY_ISSUES: RuleIssueDescriptor[] = [
@@ -266,7 +266,7 @@ const OFFLINE_INTEGRITY_ISSUES: RuleIssueDescriptor[] = [
     fullScanOnly: true,
     rootCause: "orphaned_meta",
     remediation:
-      "A .meta file has no companion asset on disk. Remove the orphaned .meta via apply_fix (remove_orphan_meta), or restore the missing asset.",
+      "A .meta file has no companion asset (file or folder) on disk. Remove the orphaned .meta via apply_fix (remove_orphan_meta), or restore the missing asset.",
   },
   {
     code: "duplicate_guid",
@@ -284,7 +284,16 @@ const OFFLINE_INTEGRITY_ISSUES: RuleIssueDescriptor[] = [
     fullScanOnly: true,
     rootCause: "missing_guid_reference",
     remediation:
-      "A serialized reference resolves to a GUID no asset owns. Relink to the correct target, or remove the reference.",
+      "A serialized reference resolves to a GUID no asset owns — not in Assets/, Unity's built-in resources, or the packages on disk. Relink to the correct target, or remove the reference.",
+  },
+  {
+    code: "unverified_reference",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+    rootCause: "missing_dependency",
+    remediation:
+      "A serialized reference's GUID is not in Assets/ or in the packages on disk, but a package the project uses is not on disk where offline reads look (Library/PackageCache is created when Unity resolves the packages; a built-in package needs the project's Unity version installed). Open the project in Unity or read the asset live to verify; only if it still does not resolve is it a missing reference.",
   },
   {
     code: "missing_script_reference",
@@ -405,7 +414,7 @@ const PROJECT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     fullScanOnly: true,
     rootCause: "orphaned_meta",
     remediation:
-      "A .meta file has no companion asset on disk — the asset was deleted while its .meta remained. Remove the orphaned .meta via apply_fix (remove_orphan_meta), or restore the missing asset.",
+      "A .meta file has no companion asset (file or folder) on disk — the asset was deleted while its .meta remained. Remove the orphaned .meta via apply_fix (remove_orphan_meta), or restore the missing asset.",
   },
   {
     code: "duplicate_guid",

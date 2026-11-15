@@ -110,7 +110,9 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
                     var companion = metaNorm.Substring(0, metaNorm.Length - 5);
                     var absCompanion = ToAbsolutePath(companion);
                     if (File.Exists(absCompanion)) continue;
-                    if (AssetDatabase.IsValidFolder(companion)) continue;
+                    // A folder's meta: the folder is its companion (on disk
+                    // even before the AssetDatabase has imported it).
+                    if (AssetDatabase.IsValidFolder(companion) || Directory.Exists(absCompanion)) continue;
 
                     if (!companion.StartsWith("Assets/", StringComparison.Ordinal) &&
                         !IsUnderAny(companion, scopedPaths)) continue;

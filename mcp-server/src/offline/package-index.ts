@@ -1,20 +1,22 @@
-// Package sources for offline script-GUID resolution.
+// Package sources for offline GUID resolution.
 //
-// Unity resolves a component's script GUID (m_Script) wherever the script
-// lives: under Assets/, or in a package — embedded (a folder under
-// Packages/), local (a `file:` reference in Packages/manifest.json), fetched
-// into Library/PackageCache (registry and git packages and, from Unity 6,
-// built-in ones), or a built-in package read from the Editor install
-// (Data/Resources/PackageManager/BuiltInPackages). The offline readers walk
-// Assets/ for every GUID; a script GUID Assets/ does not own is looked up
-// here, in the package `.cs` / `.dll` metas only (a component's script is
-// one or the other), and the walk stops once every wanted GUID is found.
+// Unity resolves a GUID wherever the asset lives: under Assets/, or in a
+// package — embedded (a folder under Packages/), local (a `file:` reference in
+// Packages/manifest.json), fetched into Library/PackageCache (registry and git
+// packages and, from Unity 6, built-in ones), or a built-in package read from
+// the Editor install (Data/Resources/PackageManager/BuiltInPackages). The
+// offline readers walk Assets/ for every GUID; a GUID Assets/ does not own is
+// looked up here. A component's script (m_Script) is a `.cs` or a `.dll`, so
+// for scripts alone only those metas are read; a field reference (a URP
+// material's shader, a renderer's default texture, …) can be any asset, so
+// then every meta is read. Either walk stops once every wanted GUID is found,
+// and it only runs when some GUID is not resolved by Assets/.
 //
 // A package the project uses whose files are not on disk where these reads
 // look (no Library/ in a fresh clone, a built-in package of a Unity version
-// not installed here, a `file:` path that does not exist) makes a script
-// GUID that resolves nowhere unverifiable: the readers report it as
-// unverified with that reason, not as a missing script.
+// not installed here, a `file:` path that does not exist) makes a GUID that
+// resolves nowhere unverifiable: the readers report it as unverified with
+// that reason, not as missing.
 //
 // Nothing here is cached: each call reads the manifest and lists the package
 // folders again (the same no-cache contract as the Assets/ walk).
@@ -39,10 +41,10 @@ export interface PackageSources {
   missing: Array<{ name: string; why: string }>;
 }
 
-export interface PackageScriptHit {
-  /** `Packages/<name>/<path inside the package>` of the `.cs` / `.dll` the GUID belongs to. */
+export interface PackageAssetHit {
+  /** `Packages/<name>/<path inside the package>` of the asset the GUID belongs to. */
   path: string;
-  /** Lowercased file name without extension (the component query matches it). */
+  /** Lowercased file name without extension (the component query matches it on scripts). */
   name: string;
 }
 
@@ -229,18 +231,20 @@ async function readMetaHeadGUID(metaPath: string): Promise<string> {
 const WALK_PERMITS = 64;
 
 /**
- * Find script GUIDs in the given packages: reads only `.cs.meta` and
- * `.dll.meta` files. `wanted` (lowercased GUIDs) stops the walk once all are
- * found; `componentQuery` (a lowercased name substring) additionally collects
- * every `.cs` whose file name contains it, and then walks every package.
+ * Find GUIDs in the given packages. Reads only `.cs.meta` and `.dll.meta`
+ * files unless `allMetas` (then every meta: a field reference can point at
+ * any asset). `wanted` (lowercased GUIDs) stops the walk once all are found;
+ * `componentQuery` (a lowercased name substring) additionally collects every
+ * `.cs` whose file name contains it, and then walks every package.
  */
-export async function findPackageScripts(
+export async function findPackageAssets(
   sources: readonly PackageSource[],
-  opts: { wanted?: ReadonlySet<string>; componentQuery?: string },
-): Promise<Map<string, PackageScriptHit>> {
-  const hits = new Map<string, PackageScriptHit>();
+  opts: { wanted?: ReadonlySet<string>; allMetas?: boolean; componentQuery?: string },
+): Promise<Map<string, PackageAssetHit>> {
+  const hits = new Map<string, PackageAssetHit>();
   const pending = new Set(opts.wanted ?? []);
   const query = opts.componentQuery;
+  const allMetas = opts.allMetas === true;
   if (sources.length === 0 || (pending.size === 0 && query === undefined)) return hits;
   const done = () => pending.size === 0 && query === undefined;
 
@@ -265,10 +269,12 @@ export async function findPackageScripts(
         if (!skipDirs.has(entry.name)) await visit(full, `${prefix}/${entry.name}`);
         return;
       }
+      if (!entry.name.endsWith(".meta")) return;
       const isCs = entry.name.endsWith(".cs.meta");
-      if (!isCs && !entry.name.endsWith(".dll.meta")) return;
+      if (!allMetas && !isCs && !entry.name.endsWith(".dll.meta")) return;
       const fileName = entry.name.slice(0, -".meta".length);
-      const name = fileName.slice(0, fileName.lastIndexOf(".")).toLowerCase();
+      const dot = fileName.lastIndexOf(".");
+      const name = (dot > 0 ? fileName.slice(0, dot) : fileName).toLowerCase();
       const byName = isCs && query !== undefined && name.includes(query);
       if (pending.size === 0 && !byName) return;
       const guid = await withPermit(() => readMetaHeadGUID(full));
@@ -285,6 +291,34 @@ export async function findPackageScripts(
 }
 
 /**
+ * The absolute file a `Packages/<name>/<rel>` asset path names, or null when
+ * no package source on disk has that name (or the path is malformed).
+ */
+export function packageAssetDiskPath(
+  sources: readonly PackageSource[],
+  assetPath: string,
+): string | null {
+  if (!assetPath.startsWith("Packages/")) return null;
+  const rest = assetPath.slice("Packages/".length);
+  for (const source of sources) {
+    if (!rest.startsWith(source.name + "/")) continue;
+    const rel = rest.slice(source.name.length + 1);
+    if (rel.split("/").some((part) => part === ".." || part === "" || part === ".")) return null;
+    return join(source.dir, ...rel.split("/"));
+  }
+  return null;
+}
+
+/** The GUID of a package asset (`Packages/<name>/<rel>`) from its meta, or "". */
+export async function packageAssetGuid(
+  sources: readonly PackageSource[],
+  assetPath: string,
+): Promise<string> {
+  const disk = packageAssetDiskPath(sources, assetPath);
+  return disk === null ? "" : readMetaHeadGUID(disk + ".meta");
+}
+
+/**
  * Confirm that `Packages/<name>/<rel>` still holds the given GUID by reading
  * that one meta, without a walk. Used to revalidate a resolution made earlier.
  */
@@ -293,13 +327,5 @@ export async function packagePathHasGuid(
   assetPath: string,
   guid: string,
 ): Promise<boolean> {
-  if (!assetPath.startsWith("Packages/")) return false;
-  const rest = assetPath.slice("Packages/".length);
-  for (const source of sources) {
-    if (!rest.startsWith(source.name + "/")) continue;
-    const rel = rest.slice(source.name.length + 1);
-    if (rel.split("/").some((part) => part === ".." || part === "")) return false;
-    return (await readMetaHeadGUID(join(source.dir, ...rel.split("/")) + ".meta")) === guid;
-  }
-  return false;
+  return (await packageAssetGuid(sources, assetPath)) === guid;
 }
