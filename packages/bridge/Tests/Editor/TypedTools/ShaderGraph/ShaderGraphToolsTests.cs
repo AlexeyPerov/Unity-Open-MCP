@@ -11,15 +11,11 @@
 //   - registry discovery (all 4 ids) + group membership + lifecycle/gate hints
 //   - deterministic error-envelope paths (always assert): paths_hint_required,
 //     missing_parameter, invalid_parameter, already_exists
-//   - happy-path round-trip (create → open → node_add → node_connect). The
-//     create path routes through Shader Graph's menu creation flow, which is
-//     environment-dependent (it needs the Editor's Assets/Create menu wired and
-//     a writable Assets folder); when the installed package/version exposes a
-//     different creation surface the tool returns a structured
-//     shadergraph_* error instead of throwing. The round-trip therefore asserts
-//     success when creation works, and otherwise documents the structured
-//     failure rather than failing the suite — same degrade-gracefully contract
-//     the tool advertises to agents.
+//   - happy-path round-trip (create → open → node_add). Creation builds the
+//     graph through the package's GraphData and serializer (no Assets/Create
+//     menu), so it must succeed wherever the package compiles in. The core
+//     test assembly's ExtensionDomainRoundTripTests covers node_connect and
+//     the open summary by tool name.
 //
 // NOTE on the error-envelope contract: the registry's TryDispatch wraps every
 // successful invocation in ToolDispatchResult.Ok(output). A tool that refuses
@@ -226,22 +222,11 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ShaderGraphExt
         }
 
         // -----------------------------------------------------------------
-        // Happy-path round-trip: create → open → node_add → node_connect.
-        //
-        // The create path routes through Shader Graph's menu/GraphUtil creation
-        // flow, which depends on the host Editor's Assets/Create menu being
-        // wired and a writable Assets folder. When the installed package
-        // version exposes a different surface, create returns a structured
-        // shadergraph_* error instead of throwing — the round-trip then records
-        // the structured failure (so the gate/model surface is still exercised)
-        // rather than failing the suite. This mirrors the Cinemachine
-        // version-gated happy-path contract: deterministic refusal paths above
-        // cover the reflection surface regardless; the round-trip runs only
-        // when the host environment supports it.
+        // Happy-path round-trip: create → open → node_add.
         // -----------------------------------------------------------------
 
         [Test]
-        public void RoundTrip_Create_Open_NodeAdd_NodeConnect()
+        public void RoundTrip_Create_Open_NodeAdd()
         {
             // create
             var create = BridgeToolRegistry.TryDispatch(
@@ -250,35 +235,11 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ShaderGraphExt
                 "\"shader_type\":\"Unlit\"," +
                 "\"paths_hint\":[\"" + tempAssetPath + "\"]}");
             Assert.IsNotNull(create);
-
-            // The create surface is environment-dependent. When it cannot reach
-            // the package creation API, it refuses with a structured
-            // shadergraph_* code (not a throw). Assert that either the asset was
-            // created OR the refusal is a documented structured error — never a
-            // silent crash.
-            var created = AssetDatabase.LoadAssetAtPath<Object>(tempAssetPath) != null;
-            if (!created)
-            {
-                Assert.IsFalse(create.Success, create.Output);
-                StringAssert.StartsWith("shadergraph_", create.ErrorCode,
-                    $"Unexpected non-structured create failure: {create.ErrorMessage}");
-                // The create surface is environment-dependent (menu/GraphUtil
-                // creation needs the Editor's Assets/Create menu wired and a
-                // writable Assets folder). When it cannot reach the package
-                // creation API it returns a structured shadergraph_* error —
-                // skip the rest of the round-trip rather than fail, mirroring
-                // the Cinemachine version-gated happy-path contract. The
-                // deterministic refusal paths above still pin the model
-                // surface regardless of the host environment.
-                Assert.Ignore(
-                    "Shader Graph create surface unavailable in this environment " +
-                    $"({create.ErrorCode}) — round-trip halted at create. " +
-                    "Refusal-path coverage above still pins the model surface.");
-            }
             Assert.IsTrue(create.Success, create.ErrorMessage ?? create.Output);
+            Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<Object>(tempAssetPath));
 
-            // open (read-only) — returns a structured summary parsed from the
-            // .shadergraph JSON. The asset exists now, so this must succeed.
+            // open (read-only) — returns a structured summary of the loaded
+            // graph. The asset exists now, so this must succeed.
             var open = BridgeToolRegistry.TryDispatch(
                 "unity_open_mcp_shader_graph_open",
                 "{\"asset_path\":\"" + tempAssetPath + "\"}");
@@ -288,10 +249,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ShaderGraphExt
             StringAssert.Contains("\"shaderGraph\":", open.Output);
             StringAssert.Contains("\"nodeCount\":", open.Output);
 
-            // node_add — mutating. The node-creation API is reflection-gated;
-            // when the installed version differs it returns a structured
-            // shadergraph_* error (e.g. unknown_node_type / node_add_failed),
-            // never a throw. Assert success OR structured refusal.
+            // node_add — mutating; returns the node id and its slots.
             var nodeAdd = BridgeToolRegistry.TryDispatch(
                 "unity_open_mcp_shader_graph_node_add",
                 "{\"asset_path\":\"" + tempAssetPath + "\"," +
@@ -299,12 +257,9 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ShaderGraphExt
                 "\"position\":\"100,100\"," +
                 "\"paths_hint\":[\"" + tempAssetPath + "\"]}");
             Assert.IsNotNull(nodeAdd);
-            if (nodeAdd.Success)
-                StringAssert.Contains("\"status\":\"ok\"", nodeAdd.Output);
-            else
-                Assert.IsTrue(
-                    nodeAdd.ErrorCode.StartsWith("shadergraph_") || nodeAdd.ErrorCode == "unknown_node_type",
-                    $"Unexpected node_add refusal: {nodeAdd.ErrorCode}: {nodeAdd.ErrorMessage}");
+            Assert.IsTrue(nodeAdd.Success, nodeAdd.ErrorMessage ?? nodeAdd.Output);
+            StringAssert.Contains("\"nodeId\":\"", nodeAdd.Output);
+            StringAssert.Contains("\"direction\":\"output\"", nodeAdd.Output);
         }
 
         // -----------------------------------------------------------------

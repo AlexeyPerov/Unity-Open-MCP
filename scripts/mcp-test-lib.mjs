@@ -165,6 +165,13 @@ export { REPO_ROOT, CLI_BIN, DISMISS_MOD };
 //   ok_or_timeout → ok OR parsed._ft_timeout OR errCode==="test_results_timeout"
 //                  (CLI timeout OR run_tests poll timeout tolerated)
 //   tolerate      → ok OR error.code in step.tolerate[]  (known bugs; route exercised)
+//
+// Two optional step hooks tighten a pass:
+//   check(result, ctx)      → a string fails the step with that detail (e.g. an
+//                             id the chain needs is missing from the output)
+//   retryWhile(result, ctx) → true re-runs the call (up to `retries`, default 3,
+//                             `retryDelayMs` apart, default 500) — for answers
+//                             that say "not yet", like profiler warming_up
 // ---------------------------------------------------------------------------
 
 export const REFUSED_CODES = new Set(["build_confirmation_required", "denied_by_policy", "menu_blocked"]);
@@ -189,9 +196,12 @@ export const TIMEOUT_CODE = "timeout";
 export const TEST_TIMEOUT_CODE = "test_results_timeout";
 
 export function classify(step, parsed) {
-  const isError = parsed.isError === true;
+  // The CLI answers a call it refuses before routing (e.g.
+  // missing_required_argument, exit 2) with a top-level `error` and no
+  // `isError` / `result`: that is a failed call too, not a success.
+  const isError = parsed.isError === true || (parsed.result === undefined && parsed.error != null);
   const result = parsed.result ?? {};
-  const errCode = result.error?.code ?? result.mutation?.error?.code;
+  const errCode = result.error?.code ?? result.mutation?.error?.code ?? parsed.error?.code;
   const route = result._route?.route;
 
   switch (step.expect) {
@@ -279,6 +289,29 @@ export function pluck(obj, path) {
   return path.split(".").reduce((acc, k) => (acc && typeof acc === "object" ? acc[k] : undefined), obj);
 }
 
+/** A tool's own output: registry tools answer under mutation.output, legacy
+ *  direct-response tools answer with the body itself. */
+export function toolOutput(result) {
+  if (!result || typeof result !== "object") return undefined;
+  if (result.mutation && typeof result.mutation === "object") return result.mutation.output ?? undefined;
+  return result;
+}
+
+/** step.check for assets_refresh: a refresh that imported nothing to compile
+ *  answers with the gate envelope; one that started a compile answers with the
+ *  compile it waited for (`status: "compiled"`, no `mutation` when the domain
+ *  reload closed the bridge response). Both are a clean refresh. A failed
+ *  compile is already a failed call. */
+export function checkRefreshResult(result) {
+  if (result?.mutation) {
+    const newErrors = result.gate?.delta?.newErrors;
+    return result.mutation.success === true && (typeof newErrors !== "number" || newErrors === 0)
+      ? null
+      : `mutation.success=${result.mutation.success} gate.newErrors=${newErrors ?? "n/a"}`;
+  }
+  return result?.status === "compiled" ? null : `no gate envelope and status=${result?.status ?? "none"}`;
+}
+
 /** Extract a JSON envelope from CLI stdout (brace-matched fallback). */
 export function parseEnvelope(stdout) {
   try {
@@ -361,7 +394,10 @@ export function parseCommonArgs(argv, { extra, help, defaults = {} } = {}) {
 // the args.
 // ---------------------------------------------------------------------------
 
-export const STEP_META_KEYS = new Set(["resolveArgs", "after", "gate", "expect", "timeoutMs", "tolerate", "_retried"]);
+export const STEP_META_KEYS = new Set([
+  "resolveArgs", "after", "gate", "expect", "timeoutMs", "tolerate", "_retried",
+  "check", "retryWhile", "retries", "retryDelayMs", "domain",
+]);
 
 export function makeStepBuilder() {
   const steps = [];
@@ -498,7 +534,7 @@ export function runToolOnce(step, ctx, project, defaultTimeout, runEnv) {
       const parsed = parseEnvelope(maybeStdout);
       if (parsed) {
         if (isTimeout) parsed._ft_timeout = true;
-        const { pass, detail } = classify(step, parsed);
+        const { pass, detail } = applyCheck(step, ctx, parsed, classify(step, parsed));
         return { ok: pass, ms, detail, result: parsed.result ?? {}, raw: parsed };
       }
     }
@@ -513,8 +549,24 @@ export function runToolOnce(step, ctx, project, defaultTimeout, runEnv) {
   if (!parsed) {
     return { ok: false, ms, error: "no JSON envelope in CLI stdout", raw: stdout.slice(-400) };
   }
-  const { pass, detail } = classify(step, parsed);
+  const { pass, detail } = applyCheck(step, ctx, parsed, classify(step, parsed));
   return { ok: pass, ms, detail, result: parsed.result ?? {}, raw: parsed };
+}
+
+/** Run step.check on a classified pass; a returned string fails the step. */
+export function applyCheck(step, ctx, parsed, verdict) {
+  if (!verdict.pass || typeof step.check !== "function") return verdict;
+  let problem;
+  try {
+    problem = step.check(parsed.result ?? {}, ctx);
+  } catch (error) {
+    problem = `check threw: ${error.message}`;
+  }
+  return problem ? { pass: false, detail: `${verdict.detail}, but ${problem}` } : verdict;
+}
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 /** Wait until the Editor is settled — no compile, domain reload or play-mode
@@ -535,7 +587,19 @@ export function runTool(step, ctx, project, defaultTimeout, runEnv, opts = {}) {
   if (saveBefore.has(step.label)) {
     saveAllDirtyScenes(project, runEnv, Math.min(defaultTimeout, 30_000), null, opts);
   }
-  const result = runToolOnce(step, ctx, project, defaultTimeout, runEnv);
+  let result = runToolOnce(step, ctx, project, defaultTimeout, runEnv);
+  if (typeof step.retryWhile === "function") {
+    const retries = step.retries ?? 3;
+    let attempts = 0;
+    let ms = result.ms;
+    while (attempts < retries && step.retryWhile(result.result ?? {}, ctx)) {
+      attempts++;
+      sleepSync(step.retryDelayMs ?? 500);
+      result = runToolOnce(step, ctx, project, defaultTimeout, runEnv);
+      ms += result.ms;
+    }
+    if (attempts > 0) result = { ...result, ms, detail: `${result.detail ?? result.error} (after ${attempts} retr${attempts === 1 ? "y" : "ies"})` };
+  }
   const errCode = result.result?.error?.code ?? result.result?.mutation?.error?.code;
   if ((errCode === "scene_dirty" || errCode === "main_thread_blocked") && !step._retried) {
     const retried = { ...step, _retried: true };
@@ -730,7 +794,7 @@ export function cleanupViaBridge(project, runEnv, opts = {}) {
     {
       label: "scene_unload fixture (safety)",
       tool: "unity_open_mcp_scene_unload",
-      args: { name: "FT_Scene", paths_hint: sceneHint },
+      args: { name: fixtureScene.split("/").pop().replace(/\.unity$/, ""), paths_hint: sceneHint },
     },
   ];
   for (const op of ops) {
@@ -745,6 +809,47 @@ export function cleanupViaBridge(project, runEnv, opts = {}) {
     }
   }
   cleanupTempFolder(project, { fixtureRoot });
+}
+
+// ---------------------------------------------------------------------------
+// --check-args: every step's arguments must pass the same preflight the MCP
+// server runs (schema defaults, then validateSchema). A step that fails it
+// only ever measures the script, not the tool — the drift this guards against
+// (renamed keys, enum changes, string-vs-array) used to show up as
+// "invalid_arguments (tolerated)" in live runs. Steps built by resolveArgs get
+// placeholder ctx values: 1 for ids and numbers, a string for *Name / *Path /
+// *NodeId keys.
+// ---------------------------------------------------------------------------
+
+/** Stand-in for the ctx a chain fills as it runs: a string for *Name / *Path /
+ *  *NodeId keys, 1 for every other id or number. Builds schema-valid
+ *  arguments for a step whose earlier steps did not run. */
+export const PLACEHOLDER_CTX = new Proxy({}, {
+  get: (_target, key) => (typeof key !== "string" ? undefined : /(name|path|nodeid)$/i.test(key) ? "FT_Placeholder" : 1),
+});
+
+export async function checkStepArgs(steps) {
+  const dist = resolve(REPO_ROOT, "mcp-server", "dist");
+  const load = (rel) => import(pathToFileURL(resolve(dist, rel)).href);
+  const { ALL_TOOLS } = await load("tools/index.js");
+  const { validateSchema } = await load("tool-contract.js");
+  const { withSchemaDefaults } = await load("schema-defaults.js");
+  const placeholder = PLACEHOLDER_CTX;
+  const problems = [];
+  for (const step of steps) {
+    const tool = ALL_TOOLS.find((t) => t.name === step.tool);
+    if (!tool) { problems.push(`${step.label}: unknown tool ${step.tool}`); continue; }
+    let args;
+    try {
+      args = step.resolveArgs ? step.resolveArgs(placeholder) : (step.args ?? {});
+    } catch (error) {
+      problems.push(`${step.label}: resolveArgs threw with placeholder ctx (${error.message})`);
+      continue;
+    }
+    const errors = validateSchema(withSchemaDefaults(tool, args ?? {}), tool.inputSchema);
+    if (errors.length) problems.push(`${step.label} (${step.tool}): ${errors.join("; ")}`);
+  }
+  return problems;
 }
 
 // ---------------------------------------------------------------------------

@@ -34,15 +34,22 @@ hide the tools.
 ## Reflection over the editing API
 
 Shader Graph's editing API (`UnityEditor.ShaderGraph`: `GraphData`,
-`AbstractMaterialNode`, `MaterialSlot`) is partially internal and the exact
-surface shifts across `com.unity.shadergraph` versions. The mutating tools
-(`create` / `node_add` / `node_connect`) wrap the public-ish surface behind a
-single reflection helper, `ShaderGraphApi`, so a version change is fixed in one
-place. When reflection cannot reach a needed member (version mismatch /
-internal rename), the tool returns a structured `shadergraph_api_unavailable`
-error envelope rather than throwing — the agent can fall back to manual editing
-in the graph window. The read path (`open`) parses the serialized `.shadergraph`
-JSON directly and is the most version-stable surface.
+`AbstractMaterialNode`, `MaterialSlot`, `MultiJson`, `FileUtilities`) is
+internal to the package. Every tool goes through a single reflection helper,
+`ShaderGraphApi`, so a version change is fixed in one place. The helper works
+on the graph the way the package does: it loads a `.shadergraph` like
+`ShaderGraphImporter` (`GraphData` + `MultiJson.Deserialize` + `OnEnable` +
+`ValidateGraph`), edits it through `GraphData` (`AddNode`, `Connect`) and
+writes it with `FileUtilities.WriteShaderGraphToDisk` before importing.
+`create` builds the graph like the package's `NewGraphAction` (contexts, the
+active pipeline's target and sub-target for the template, the target's active
+blocks, the default category) instead of running the `Assets/Create` menu items,
+which need an interactive rename and may raise a modal preference dialog.
+`open` summarizes the loaded graph. When reflection cannot reach a needed
+member (version mismatch / internal rename), the tool returns a structured
+error envelope (`shadergraph_api_unavailable`, `graph_load_failed`) rather than
+throwing — the agent can fall back to manual editing in the graph window.
+Verified on `com.unity.shadergraph` 17.3 (Unity 6000.3, URP).
 
 ## Tool group
 

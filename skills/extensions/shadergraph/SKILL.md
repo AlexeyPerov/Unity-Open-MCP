@@ -46,42 +46,54 @@ are integers; an `open` summary lists each node's slots with `{ id, name }`.
 ## Version-stability note
 
 Shader Graph's editing API (`UnityEditor.ShaderGraph`: `GraphData`,
-`AbstractMaterialNode`, slots) is partially internal and shifts across
-`com.unity.shadergraph` versions. The mutating tools (`create`, `node_add`,
-`node_connect`) wrap it behind a reflection helper:
+`AbstractMaterialNode`, slots) is internal to the package. The tools reach it
+by reflection and work on the graph the way the package does: they load it as
+the importer does, edit it through `GraphData`, and write it with the
+package's own serializer (verified on Shader Graph 17 / Unity 6). `create`
+never runs the `Assets/Create` menu items (those need an interactive rename
+and can raise a modal preference dialog).
 
-- `shader_graph_open` parses the `.shadergraph` JSON directly — **always
-  works**, stable across versions.
-- `create` / `node_add` / `node_connect` use reflection; when the installed
-  version exposes a different surface, they return a structured
-  `shadergraph_api_unavailable` error rather than throwing. In that case, do
-  the edit manually in the graph window, then call `shader_graph_open` to read
-  the result.
+- When the installed version exposes a different surface, a tool returns a
+  structured `shadergraph_api_unavailable` (or `graph_load_failed`) error
+  rather than throwing. Do the edit manually in the graph window, then call
+  `shader_graph_open` to read the result.
 
 ## Canonical workflow: build a graph
 
 1. **Create the asset** — `unity_open_mcp_shader_graph_create` writes a new
    `.shadergraph` at `asset_path` (an `Assets/.../*.shadergraph` path; parent
    folder must exist). `shader_type` selects the template: `Unlit` (default),
-   `Lit`, `Decal`, `Fullscreen`, `Blank`. Returns the created asset path.
+   `Lit`, `Decal`, `Fullscreen`, `Blank`. The graph gets the active render
+   pipeline's target for the template (the response's `target`, e.g.
+   `UniversalTarget/UniversalUnlitSubTarget`; `null` for Blank) and the
+   target's master-stack blocks. A template the pipeline has no target for
+   answers `shader_type_unsupported`; an unknown name answers
+   `unknown_shader_type`.
 
 2. **Open + inspect** — `unity_open_mcp_shader_graph_open` brings up the
    Shader Graph editor window and returns a structured summary: node count,
-   each node's `{ id, name, type, position, slots }`, edge count, each edge's
-   `{ outputNodeId, outputSlot, inputNodeId, inputSlot }`. Read-only, no
-   `paths_hint`. **Always call this first** to learn the existing node/slot
-   ids and the output node's input slots.
+   each node's `{ id, name, type, position, slots }` (slots are
+   `{ id, name, direction }`), edge count, each edge's
+   `{ outputNodeId, outputSlot, inputNodeId, inputSlot }`. The master stack's
+   block nodes are listed too (`type: "BlockNode"`, names like
+   `SurfaceDescription.BaseColor`) — connect into their input slot to feed the
+   output. Read-only, no `paths_hint`. **Always call this first** to learn the
+   existing node/slot ids.
 
 3. **Add nodes** — `unity_open_mcp_shader_graph_node_add` per node. `node_type`
    is a friendly name (`UV`, `Multiply`, `Sample Texture 2D`, `Add`, `Time`,
    `Color`, `Vector3`, …) or a full `UnityEditor.ShaderGraph` class name.
    `position` is `x,y` in graph space. `properties_json` optionally seeds
-   initial field values. Returns the new node's id + its slot ids.
+   public node properties of a simple type (number, bool, string, enum);
+   keys that match none come back in `ignoredProperties`. Returns the new
+   node's `nodeId` + its `slots` (`{ id, name, direction }`).
 
 4. **Connect nodes** — `unity_open_mcp_shader_graph_node_connect` wires an
    output slot to an input slot. Pass `source_node_id` + `source_slot`
    (output) and `destination_node_id` + `destination_slot` (input). Idempotent
-   (re-connecting an existing edge is a no-op success).
+   (re-connecting an existing edge is a no-op success). An unknown id answers
+   `node_not_found` / `slot_not_found`; two outputs, two inputs or a cycle
+   answer `connection_rejected`.
 
 5. **Verify** — call `shader_graph_open` again to confirm the graph structure;
    `unity_open_mcp_shader_get_data` on the asset path inspects the compiled
@@ -94,15 +106,15 @@ Shader Graph's editing API (`UnityEditor.ShaderGraph`: `GraphData`,
 
 1. `shader_graph_create` → `Assets/Shaders/Tinted.shadergraph` (`shader_type:
    "Unlit"`).
-2. `shader_graph_open` to read the output node's id + the Fragment input slot
-   id.
+2. `shader_graph_open` to read the `SurfaceDescription.BaseColor` block
+   node's id (its input slot is `0`).
 3. `shader_graph_node_add` `node_type: "Sample Texture 2D"` → note node id +
    its output slot.
 4. `shader_graph_node_add` `node_type: "Color"` → note node id + output slot.
 5. `shader_graph_node_add` `node_type: "Multiply"` → note id + its two input
    slots.
 6. `shader_graph_node_connect`: SampleTexture2D.out → Multiply.in0,
-   Color.out → Multiply.in1, Multiply.out → Fragment.input.
+   Color.out → Multiply.in1, Multiply.out → BaseColor block.in.
 
 ### Sub-graph reuse
 

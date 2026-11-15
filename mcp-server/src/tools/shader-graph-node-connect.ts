@@ -12,7 +12,9 @@ export const shaderGraphNodeConnect = makeTool(
     "destination_node_id + destination_slot identify the input. Node ids come " +
     "from shader_graph_open or a prior node_add; slot ids are integers (see a " +
     "node's 'slots' in the open summary). Mutating: runs the full gate path; " +
-    "paths_hint is the graph asset path. Idempotent. Requires " +
+    "paths_hint is the graph asset path. Idempotent. An unknown node or slot " +
+    "id answers node_not_found / slot_not_found; output→output, input→input or " +
+    "a cycle answers connection_rejected. Requires " +
     "com.unity.shadergraph. When the installed package version exposes a " +
     "different connect surface, the tool returns a structured " +
     "shadergraph_api_unavailable error — connect the nodes manually in the " +

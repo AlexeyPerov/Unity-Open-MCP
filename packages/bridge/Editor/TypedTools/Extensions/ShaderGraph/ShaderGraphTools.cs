@@ -46,10 +46,10 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
         // =====================================================================
 
         // Create a new Shader Graph asset at the given asset path. The
-        // template selects the graph kind (Unlit / Lit / Decal / Fullscreen;
-        // blank when omitted). Implemented via reflection over
-        // UnityEditor.ShaderGraph so it tracks the installed package version
-        // without a hard compile-time dependency on a specific API shape.
+        // template selects the graph kind (Unlit when omitted / Lit / Decal /
+        // Fullscreen / Blank). Implemented via reflection over
+        // UnityEditor.ShaderGraph (see ShaderGraphApi) without the editor's
+        // interactive Assets/Create flow.
         [BridgeTool("unity_open_mcp_shader_graph_create",
             Title = "ShaderGraph: Create",
             IsMutating = true,
@@ -60,7 +60,8 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
             "Create a new Shader Graph asset at the given asset_path " +
             "('Assets/.../*.shadergraph'; the parent folder must exist). " +
             "shader_type selects the template: Unlit (default) / Lit / Decal " +
-            "/ Fullscreen / Blank. Mutating: runs the gate path; paths_hint " +
+            "/ Fullscreen / Blank, using the active render pipeline's target. " +
+            "Mutating: runs the gate path; paths_hint " +
             "includes the new asset path. Requires the com.unity.shadergraph " +
             "package installed in the project.")]
         public static string Create(
@@ -88,24 +89,27 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
 
             var shaderType = string.IsNullOrEmpty(shader_type) ? "Unlit" : shader_type;
             if (!ShaderGraphApi.TryCreateShaderGraph(asset_path, shaderType,
-                    out var createError, out var createdPath))
+                    out var createError, out var createdPath, out var targetName))
             {
+                if (createError == "unknown_shader_type")
+                    return ShaderGraphJson.Error(createError,
+                        $"Unknown shader_type '{shader_type}'. Use Unlit, Lit, Decal, Fullscreen or Blank.");
+                if (createError == "shader_type_unsupported")
+                    return ShaderGraphJson.Error(createError,
+                        $"No Shader Graph target in the active render pipeline supports '{shaderType}'. " +
+                        "Use shader_type Blank (no target) or a template the pipeline provides.");
                 return ShaderGraphJson.Error(createError ?? "shadergraph_api_unavailable",
                     "Could not create the Shader Graph via the installed " +
-                    "com.unity.shadergraph API. The package version may expose " +
-                    "a different creation surface; open the graph manually via " +
+                    "com.unity.shadergraph API. Create it manually via " +
                     "Assets/Create > Shader Graph, then use shader_graph_open " +
                     "to inspect it.");
             }
-
-            AssetDatabase.SaveAssets();
-            EditorUtility.SetDirty(
-                AssetDatabase.LoadAssetAtPath<Object>(createdPath ?? asset_path));
 
             var sb = new StringBuilder(160);
             sb.Append("\"shaderGraph\":{");
             sb.Append("\"assetPath\":").Append(ShaderGraphJson.Esc(createdPath ?? asset_path)).Append(',');
             sb.Append("\"shaderType\":").Append(ShaderGraphJson.Esc(shaderType)).Append(',');
+            sb.Append("\"target\":").Append(targetName == null ? "null" : ShaderGraphJson.Esc(targetName)).Append(',');
             sb.Append("\"created\":true");
             sb.Append('}');
             return ShaderGraphJson.Ok(sb.ToString());
@@ -130,8 +134,9 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
             "structured summary (node count, node ids/types/positions, edge " +
             "count, edges). Read-only window bring-up — Gate is Off. Address " +
             "the graph by asset_path ('Assets/.../*.shadergraph'). The summary " +
-            "is parsed from the asset; use it to learn node ids / slot ids " +
-            "before node_add / node_connect. Requires com.unity.shadergraph.")]
+            "is read from the graph as the Shader Graph importer loads it; use " +
+            "it to learn node ids / slot ids before node_add / node_connect. " +
+            "Requires com.unity.shadergraph.")]
         public static string Open(string asset_path = null)
         {
             if (string.IsNullOrEmpty(asset_path))
@@ -188,8 +193,9 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
             "Multiply, Sample Texture 2D, Add, Time, Color, Vector3, ...) or a " +
             "full class name in UnityEditor.ShaderGraph. position is 'x,y'. " +
             "properties_json is an optional JSON object of initial " +
-            "{ field: value } patches applied after creation. Returns the new " +
-            "node's id + its input/output slot ids. Mutating: runs the gate " +
+            "{ property: value } patches (public node properties of a simple " +
+            "type) applied after creation; unmatched keys come back in " +
+            "ignoredProperties. Returns the new node's id + its slots. Mutating: runs the gate " +
             "path; paths_hint is the graph asset path. Requires " +
             "com.unity.shadergraph.")]
         public static string NodeAdd(
@@ -216,8 +222,16 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
 
             if (!ShaderGraphApi.TryAddNode(asset_path, node_type,
                     position, properties_json,
-                    out var addError, out var nodeId, out var slotsJson))
+                    out var addError, out var nodeId, out var slotsJson, out var ignoredProperties))
             {
+                if (addError == "asset_not_found")
+                    return ShaderGraphJson.Error(addError,
+                        $"No Shader Graph asset found at '{asset_path}'.");
+                if (addError == "unknown_node_type")
+                    return ShaderGraphJson.Error(addError,
+                        $"No Shader Graph node type matches '{node_type}'. Use a node " +
+                        "name as shown in the graph (UV, Multiply, Color, Sample " +
+                        "Texture 2D, ...) or a full UnityEditor.ShaderGraph class name.");
                 return ShaderGraphJson.Error(addError ?? "shadergraph_api_unavailable",
                     $"Could not add node '{node_type}' to '{asset_path}'. The " +
                     "installed com.unity.shadergraph API may differ; open the " +
@@ -231,6 +245,16 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
             sb.Append("\"nodeId\":").Append(ShaderGraphJson.Esc(nodeId ?? "")).Append(',');
             sb.Append("\"nodeType\":").Append(ShaderGraphJson.Esc(node_type)).Append(',');
             sb.Append("\"slots\":").Append(slotsJson ?? "[]");
+            if (ignoredProperties != null && ignoredProperties.Count > 0)
+            {
+                sb.Append(",\"ignoredProperties\":[");
+                for (int i = 0; i < ignoredProperties.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append(ShaderGraphJson.Esc(ignoredProperties[i]));
+                }
+                sb.Append(']');
+            }
             sb.Append('}');
             return ShaderGraphJson.Ok(sb.ToString());
         }
@@ -282,6 +306,18 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
                     destination_node_id, destination_slot,
                     out var connectError))
             {
+                if (connectError == "asset_not_found")
+                    return ShaderGraphJson.Error(connectError,
+                        $"No Shader Graph asset found at '{asset_path}'.");
+                if (connectError == "node_not_found" || connectError == "slot_not_found")
+                    return ShaderGraphJson.Error(connectError,
+                        "A node id or slot id does not exist in the graph. Read the " +
+                        "ids from shader_graph_node_add (nodeId, slots[].id) or " +
+                        "shader_graph_open.");
+                if (connectError == "connection_rejected")
+                    return ShaderGraphJson.Error(connectError,
+                        "The graph refused the connection: connect an output slot " +
+                        "to an input slot, and do not create a cycle.");
                 return ShaderGraphJson.Error(connectError ?? "shadergraph_api_unavailable",
                     "Could not connect the nodes. Verify the node ids + slot " +
                     "ids with shader_graph_open; the installed " +

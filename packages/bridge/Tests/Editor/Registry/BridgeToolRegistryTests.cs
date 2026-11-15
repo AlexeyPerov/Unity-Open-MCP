@@ -228,6 +228,35 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(true, result);
         }
 
+        // timeline_clip_add takes double start_time / duration; before this
+        // conversion existed every call that passed them failed with
+        // "String cannot be converted to Double".
+        [Test]
+        public static void ConvertValue_Double_ParsesInvariant()
+        {
+            Assert.AreEqual(1.5d, BridgeToolRegistry.ConvertValue("1.5", typeof(double)));
+            Assert.AreEqual(2d, BridgeToolRegistry.ConvertValue("2", typeof(double)));
+            Assert.AreEqual(0.25d, BridgeToolRegistry.ConvertValue("\"0.25\"", typeof(double)));
+        }
+
+        // probuilder_extrude / delete_faces / set_face_material take int[]
+        // face_indices; the raw JSON array used to reach Invoke as a string.
+        [Test]
+        public static void ConvertValue_IntArray_ParsesEachElement()
+        {
+            var result = BridgeToolRegistry.ConvertValue("[0, 2,\"5\"]", typeof(int[]));
+            CollectionAssert.AreEqual(new[] { 0, 2, 5 }, (int[])result);
+            CollectionAssert.IsEmpty((int[])BridgeToolRegistry.ConvertValue("[]", typeof(int[])));
+            CollectionAssert.AreEqual(new[] { 1.5f, -2f },
+                (float[])BridgeToolRegistry.ConvertValue("[1.5,-2]", typeof(float[])));
+        }
+
+        [Test]
+        public static void ConvertValue_IntArray_NonArrayBindsNull()
+        {
+            Assert.IsNull(BridgeToolRegistry.ConvertValue("3", typeof(int[])));
+        }
+
         enum TestColor
         {
             Red,

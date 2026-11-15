@@ -1,5 +1,10 @@
+using System.Collections;
 using NUnit.Framework;
+using UnityEditor;
+using UnityEditorInternal;
+using UnityEngine.TestTools;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ProfilerExt;
 
 namespace UnityOpenMcpBridge.Tests
 {
@@ -166,6 +171,108 @@ namespace UnityOpenMcpBridge.Tests
             {
                 Assert.AreNotEqual("execution_error", result.ErrorCode, result.ErrorMessage);
                 Assert.IsNotNull(result.RefusalBody, "a refusal keeps the tool's own error body");
+            }
+            // A warming_up answer leaves a warm-up pending; do not leak it.
+            Tool_ProfilerCaptureFrame.RestoreWarmUp();
+        }
+
+        // -----------------------------------------------------------------
+        // Cold capture in Edit Mode: the warm-up must make frames arrive (the
+        // Editor target), the retry must capture one and put back exactly the
+        // settings the warm-up changed. Before, the warm-up enabled recording
+        // only; in Edit Mode with the default Play Mode target no frame ever
+        // arrived and every later call answered profiler_empty.
+        // -----------------------------------------------------------------
+
+        private const string CaptureFrameArgs = "{\"frame_count\":1,\"max_depth\":2,\"max_items\":8}";
+
+        [UnityTest]
+        public IEnumerator ProfilerCaptureFrame_ColdCapture_WarmsUpThenCapturesAndRestores()
+        {
+            return ColdCaptureRoundTrip(driverEnabledBefore: false);
+        }
+
+        [UnityTest]
+        public IEnumerator ProfilerCaptureFrame_RecordingWithPlayModeTarget_WarmsUpInsteadOfEmpty()
+        {
+            return ColdCaptureRoundTrip(driverEnabledBefore: true);
+        }
+
+        private static IEnumerator ColdCaptureRoundTrip(bool driverEnabledBefore)
+        {
+            if (EditorApplication.isPlaying)
+                Assert.Ignore("Edit Mode only.");
+            bool wasEnabled = ProfilerDriver.enabled;
+            bool wasProfileEditor = ProfilerDriver.profileEditor;
+            Tool_ProfilerCaptureFrame.RestoreWarmUp();
+            ProfilerDriver.enabled = driverEnabledBefore;
+            ProfilerDriver.profileEditor = false;
+            ProfilerDriver.ClearAllFrames();
+            try
+            {
+                var first = BridgeToolRegistry.TryDispatch("unity_senses_profiler_capture_frame", CaptureFrameArgs);
+                Assert.IsTrue(first.Success, first.ErrorMessage ?? first.Output);
+                StringAssert.Contains("\"status\":\"warming_up\"", first.Output);
+                StringAssert.Contains("\"profilerWasEnabled\":" + (driverEnabledBefore ? "true" : "false"), first.Output);
+                Assert.IsTrue(ProfilerDriver.enabled, "the warm-up starts recording");
+                Assert.IsTrue(ProfilerDriver.profileEditor, "Edit Mode frames need the Editor target");
+
+                for (int i = 0; i < 300 && ProfilerDriver.lastFrameIndex < 0; i++)
+                    yield return null;
+                Assert.GreaterOrEqual(ProfilerDriver.lastFrameIndex, 0, "the warm-up records Edit Mode frames");
+
+                var second = BridgeToolRegistry.TryDispatch("unity_senses_profiler_capture_frame", CaptureFrameArgs);
+                Assert.IsTrue(second.Success, second.ErrorMessage ?? second.Output);
+                StringAssert.Contains("\"status\":\"ok\"", second.Output);
+                StringAssert.Contains("\"frames\":[{", second.Output);
+                StringAssert.Contains("\"profilerWasEnabled\":" + (driverEnabledBefore ? "true" : "false"), second.Output);
+                Assert.AreEqual(driverEnabledBefore, ProfilerDriver.enabled, "recording state restored");
+                Assert.IsFalse(ProfilerDriver.profileEditor, "Play Mode target restored");
+                Assert.IsFalse(Tool_ProfilerCaptureFrame.TryGetWarmUp(out _), "no warm-up left pending");
+            }
+            finally
+            {
+                Tool_ProfilerCaptureFrame.RestoreWarmUp();
+                ProfilerDriver.profileEditor = wasProfileEditor;
+                ProfilerDriver.enabled = wasEnabled;
+            }
+        }
+
+        [Test]
+        public static void ProfilerCaptureFrame_WarmUpWithoutFrames_GivesUpAfterTimeoutAndRestores()
+        {
+            bool wasEnabled = ProfilerDriver.enabled;
+            bool wasProfileEditor = ProfilerDriver.profileEditor;
+            Tool_ProfilerCaptureFrame.RestoreWarmUp();
+            ProfilerDriver.enabled = false;
+            ProfilerDriver.profileEditor = false;
+            ProfilerDriver.ClearAllFrames();
+            try
+            {
+                var first = BridgeToolRegistry.TryDispatch("unity_senses_profiler_capture_frame", CaptureFrameArgs);
+                StringAssert.Contains("\"status\":\"warming_up\"", first.Output);
+                Assert.IsTrue(Tool_ProfilerCaptureFrame.TryGetWarmUp(out var state));
+
+                // Same editor frame, so still no frame recorded: while the
+                // warm-up is young the answer stays warming_up ...
+                var again = BridgeToolRegistry.TryDispatch("unity_senses_profiler_capture_frame", CaptureFrameArgs);
+                StringAssert.Contains("\"status\":\"warming_up\"", again.Output);
+
+                // ... and once it is older than the timeout the tool gives up.
+                Tool_ProfilerCaptureFrame.SetWarmUpForTests(state.DriverWasEnabled, state.ProfileEditorWas,
+                    System.DateTime.UtcNow - Tool_ProfilerCaptureFrame.WarmUpTimeout - System.TimeSpan.FromSeconds(1));
+                var late = BridgeToolRegistry.TryDispatch("unity_senses_profiler_capture_frame", CaptureFrameArgs);
+                Assert.IsFalse(late.Success);
+                Assert.AreEqual("profiler_empty", late.ErrorCode);
+                Assert.IsFalse(ProfilerDriver.enabled);
+                Assert.IsFalse(ProfilerDriver.profileEditor);
+                Assert.IsFalse(Tool_ProfilerCaptureFrame.TryGetWarmUp(out _));
+            }
+            finally
+            {
+                Tool_ProfilerCaptureFrame.RestoreWarmUp();
+                ProfilerDriver.profileEditor = wasProfileEditor;
+                ProfilerDriver.enabled = wasEnabled;
             }
         }
     }

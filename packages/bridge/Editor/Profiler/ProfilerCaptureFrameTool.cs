@@ -28,9 +28,9 @@ namespace UnityOpenMcpBridge.ProfilerExt
     //   - max_depth / max_items — bounds to protect the token budget
     //
     // Read-only: no editor state is changed beyond what the profiler was
-    // already doing. If the profiler is disabled, the tool temporarily enables
-    // it for one frame and reports that it did so in the response so agents
-    // know they left a state change.
+    // already doing. When no frame is recorded yet the tool starts recording
+    // (a warm-up), answers warming_up, and the retry that captures the frame
+    // restores the Profiler settings the warm-up changed.
     [BridgeToolType]
     public class Tool_ProfilerCaptureFrame
     {
@@ -44,14 +44,14 @@ namespace UnityOpenMcpBridge.ProfilerExt
             "returns the full sample hierarchy for one frame so an agent can " +
             "inspect a specific frame's call tree (e.g. a spike). The cost grows " +
             "with frame_count, max_depth, and max_items — defaults (frame_count " +
-            "= 1, max_depth = 8, max_items = 200) bound the token budget. If the " +
-            "Profiler is disabled, the tool enables it for the capture, then " +
-            "restores it to disabled; profilerWasEnabled in the response reports " +
-            "the PRIOR state so the agent knows whether Editor state was touched. " +
-            "On a cold capture (Profiler was off and no frame is recorded yet) " +
-            "the tool returns status:\"warming_up\" instead of blocking, leaves " +
-            "the Profiler enabled, and the agent should retry shortly to receive " +
-            "the frame data. Requires a live Unity Editor connection.")]
+            "= 1, max_depth = 8, max_items = 200) bound the token budget. When " +
+            "the Profiler has recorded no frame yet, the tool starts recording " +
+            "(in Edit Mode it also targets the Editor, since Edit Mode frames are " +
+            "recorded only with that target) and returns status:\"warming_up\" " +
+            "instead of blocking; retry shortly to receive the frame data. The " +
+            "retry restores the Profiler settings the warm-up changed. " +
+            "profilerWasEnabled reports the Profiler's recording state before " +
+            "the tool touched it. Requires a live Unity Editor connection.")]
         public string ProfilerCaptureFrame(
             int frame_count = 1,
             string modules = null,
@@ -73,71 +73,45 @@ namespace UnityOpenMcpBridge.ProfilerExt
                 // the tool walks the whole hierarchy.
                 var moduleFilter = ParseModuleFilter(modules);
 
-                // Ensure the profiler is on so at least one frame exists. The
-                // response reports profilerWasEnabled (the PRIOR state) so the
-                // agent knows whether this call changed Editor state.
-                //
-                // A1 / B-N2 — the previous "pump" (QueuePlayerLoopUpdate +
-                // Thread.Sleep inside WaitForFirstFrame) cannot work: tool
-                // dispatch runs synchronously ON EditorApplication.update
-                // (BridgeRequestQueue.ProcessQueue → Work()), so Thread.Sleep
-                // blocks the very thread that would service the queued update.
-                // No frame can land, the full 1000 ms budget was burnt, and the
-                // old finally then disabled the profiler — so every cold call
-                // failed identically and a retry started cold again (B-N2).
-                //
-                // The correct behaviour for a cold capture (profiler was off,
-                // no frame recorded yet) is to NOT block: enable the profiler,
-                // return a profiler_warming_up status immediately, and LEAVE it
-                // enabled so the next editor frame is recorded before the
-                // agent's retry. The retry then sees lastFrameIndex >= 0 and
-                // returns real data. When WE enabled the profiler we restore
-                // enabled=false on every exit EXCEPT the warming-up return
-                // (which would undo the warm-up) — including the exception
-                // path, so a throw inside the capture cannot leave a profiler
-                // we enabled recording forever (B-R8).
-                //
-                // Residual: a successful capture on the retry sees
-                // weEnabledProfiler == false (the profiler is already on), so
-                // the profiler is left enabled after the warming_up → retry
-                // sequence. That is benign (a recording flag the user can
-                // toggle) and strictly better than the B-N2 freeze; closing it
-                // fully would need cross-call ownership tracking, out of scope.
-                bool profilerWasEnabled = ProfilerDriver.enabled;
-                bool weEnabledProfiler = !profilerWasEnabled;
-                if (weEnabledProfiler)
-                    ProfilerDriver.enabled = true;
+                // Tool dispatch runs synchronously on EditorApplication.update,
+                // so the tool cannot wait in-band for a frame to be recorded
+                // (that blocks the very loop that would record it). A cold
+                // capture therefore starts recording and answers warming_up;
+                // the retry captures. In Edit Mode the Profiler records frames
+                // only while it targets the Editor (ProfilerDriver.profileEditor),
+                // so the warm-up sets that too — enabling recording alone left
+                // the Profiler "on" with no frame ever arriving. What the
+                // warm-up changed is kept in SessionState (it survives a domain
+                // reload between the two calls) and restored by the next call
+                // that does not answer warming_up.
+                bool pending = TryGetWarmUp(out var warmUp);
+                bool profilerWasEnabled = pending ? warmUp.DriverWasEnabled : ProfilerDriver.enabled;
 
-                // B-R8 — whether the finally must SKIP restoring the profiler.
-                // True only on the warming-up return, so the profiler stays
-                // warm for the agent's retry. Every other exit — success OR an
-                // exception thrown mid-capture — restores enabled=false when we
-                // turned it on (the old `capturedData` flag skipped the restore
-                // on the exception path, leaving the profiler recording forever).
-                bool leaveEnabledForWarmup = false;
+                int lastFrame = ProfilerDriver.lastFrameIndex;
+                int firstFrame = ProfilerDriver.firstFrameIndex;
+                if (lastFrame < 0 || firstFrame < 0)
+                {
+                    if (!pending)
+                    {
+                        StartWarmUp();
+                        return WarmingUpJson(profilerWasEnabled);
+                    }
+                    if (DateTime.UtcNow.Ticks - warmUp.StartedUtcTicks < WarmUpTimeout.Ticks)
+                        return WarmingUpJson(profilerWasEnabled);
+                    RestoreWarmUp();
+                    return ErrorJson("profiler_empty",
+                        "The Profiler recorded no frame within " + (int)WarmUpTimeout.TotalSeconds +
+                        " s of starting to record; its previous settings were restored. Check " +
+                        "Window > Analysis > Profiler (target and Record) and retry.");
+                }
+
+                // Frames are buffered. A Profiler that is off (with no warm-up of
+                // ours pending) is turned on for the read only, as before.
+                bool enabledForRead = !pending && !ProfilerDriver.enabled;
+                if (enabledForRead)
+                    ProfilerDriver.enabled = true;
                 try
                 {
-                    int lastFrame = ProfilerDriver.lastFrameIndex;
-                    int firstFrame = ProfilerDriver.firstFrameIndex;
-                    if (lastFrame < 0 || firstFrame < 0)
-                    {
-                        // Cold capture: the profiler has no frame yet. If we
-                        // just enabled it, the first frame is one editor tick
-                        // away — return warming_up and leave it enabled so the
-                        // agent's retry succeeds. If the user had it on but it
-                        // still has no frame (e.g. just enabled manually and no
-                        // tick has fired), the same retry guidance applies.
-                        if (weEnabledProfiler)
-                        {
-                            leaveEnabledForWarmup = true;
-                            return WarmingUpJson(profilerWasEnabled);
-                        }
-                        return ErrorJson("profiler_empty",
-                            "Profiler captured no frames yet. Enable the Profiler in " +
-                            "Unity (Window > Analysis > Profiler > Record) and let it " +
-                            "capture at least one frame before retrying.");
-                    }
-
                     // Clamp the requested range to what the profiler actually has.
                     int fromFrame = Math.Max(firstFrame, lastFrame - frame_count + 1);
                     int toFrame = lastFrame;
@@ -160,14 +134,12 @@ namespace UnityOpenMcpBridge.ProfilerExt
                 }
                 finally
                 {
-                    // B30 / B-N2 / B-R8 — never leave a profiler WE enabled
-                    // recording, whether the capture succeeded or threw. The
-                    // only exception is the warming-up return, which
-                    // deliberately leaves it enabled so the agent's retry sees
-                    // a recorded frame. If the user had it on, leave it on
-                    // regardless.
-                    if (weEnabledProfiler && !leaveEnabledForWarmup)
+                    // Success or a throw mid-capture: never leave behind a
+                    // recording state this tool started.
+                    if (enabledForRead)
                         ProfilerDriver.enabled = false;
+                    if (pending)
+                        RestoreWarmUp();
                 }
             }
             catch (Exception e)
@@ -349,13 +321,67 @@ namespace UnityOpenMcpBridge.ProfilerExt
             return set.Count == 0 ? null : set;
         }
 
-        // A1 — cold-capture response. Returned when the profiler was just
-        // enabled and no frame has been recorded yet. The profiler is LEFT
-        // ENABLED (the finally skips the restore on this path) so the next
-        // editor tick records a frame; the agent retries and gets real data.
-        // No blocking wait: tool dispatch runs on EditorApplication.update, so
-        // any in-band wait would freeze the editor loop and never let the frame
-        // land (the bug the old WaitForFirstFrame pump had).
+        // ============================ warm-up ============================
+
+        // A warm-up that has not produced a frame after this long is given up:
+        // the next call restores the settings and answers profiler_empty.
+        internal static readonly TimeSpan WarmUpTimeout = TimeSpan.FromSeconds(10);
+
+        private const string WarmUpSessionKey = "UnityOpenMcp.ProfilerCaptureFrame.WarmUp";
+
+        internal struct WarmUpState
+        {
+            public bool DriverWasEnabled;
+            public bool ProfileEditorWas;
+            public long StartedUtcTicks;
+        }
+
+        internal static bool TryGetWarmUp(out WarmUpState state)
+        {
+            state = default;
+            var raw = UnityEditor.SessionState.GetString(WarmUpSessionKey, "");
+            var parts = raw.Split('|');
+            if (parts.Length != 3 ||
+                !long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var ticks))
+                return false;
+            state = new WarmUpState
+            {
+                DriverWasEnabled = parts[0] == "1",
+                ProfileEditorWas = parts[1] == "1",
+                StartedUtcTicks = ticks,
+            };
+            return true;
+        }
+
+        private static void StartWarmUp()
+        {
+            SetWarmUp(ProfilerDriver.enabled, ProfilerDriver.profileEditor, DateTime.UtcNow);
+            ProfilerDriver.enabled = true;
+            if (!UnityEditor.EditorApplication.isPlaying)
+                ProfilerDriver.profileEditor = true;
+        }
+
+        private static void SetWarmUp(bool driverWasEnabled, bool profileEditorWas, DateTime startedUtc)
+            => UnityEditor.SessionState.SetString(WarmUpSessionKey,
+                (driverWasEnabled ? "1" : "0") + "|" + (profileEditorWas ? "1" : "0") + "|" +
+                startedUtc.Ticks.ToString(CultureInfo.InvariantCulture));
+
+        internal static void SetWarmUpForTests(bool driverWasEnabled, bool profileEditorWas, DateTime startedUtc)
+            => SetWarmUp(driverWasEnabled, profileEditorWas, startedUtc);
+
+        // Put back what a pending warm-up changed. Returns false when none was
+        // pending.
+        internal static bool RestoreWarmUp()
+        {
+            if (!TryGetWarmUp(out var state)) return false;
+            UnityEditor.SessionState.EraseString(WarmUpSessionKey);
+            ProfilerDriver.profileEditor = state.ProfileEditorWas;
+            ProfilerDriver.enabled = state.DriverWasEnabled;
+            return true;
+        }
+
+        // Cold-capture response: recording was started (or is still starting)
+        // and no frame is recorded yet. No blocking wait — see the method body.
         private static string WarmingUpJson(bool profilerWasEnabled)
         {
             var sb = new StringBuilder(256);
@@ -363,9 +389,10 @@ namespace UnityOpenMcpBridge.ProfilerExt
             sb.Append("\"status\":\"warming_up\",");
             sb.Append("\"profilerWasEnabled\":").Append(profilerWasEnabled ? "true" : "false").Append(',');
             sb.Append("\"message\":");
-            sb.Append(Esc("Profiler was disabled and has no recorded frame yet. " +
-                "It has been enabled; one editor frame will be captured before " +
-                "your retry. Re-issue this call shortly to receive the frame data."));
+            sb.Append(Esc("The Profiler had no recorded frame. Recording has started" +
+                (UnityEditor.EditorApplication.isPlaying ? "" : " (targeting the Editor, as Edit Mode requires)") +
+                "; re-issue this call shortly to receive the frame data. That call " +
+                "restores the Profiler settings this one changed."));
             sb.Append('}');
             return sb.ToString();
         }

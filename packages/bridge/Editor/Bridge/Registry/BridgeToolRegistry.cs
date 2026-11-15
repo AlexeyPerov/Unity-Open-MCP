@@ -370,6 +370,13 @@ namespace UnityOpenMcpBridge
                 return 0f;
             }
 
+            if (targetType == typeof(double))
+            {
+                var s = StripJsonQuotes(raw);
+                if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v)) return v;
+                return 0d;
+            }
+
             if (targetType == typeof(bool))
             {
                 // Strip surrounding JSON quotes first: GetRawValue returns the
@@ -388,6 +395,20 @@ namespace UnityOpenMcpBridge
                 return JsonBody.GetStringArray("{\"v\":" + raw + "}", "v") ?? Array.Empty<string>();
             }
 
+            // Numeric arrays (e.g. ProBuilder face_indices): parse each element
+            // with the scalar rules above. Anything that is not a JSON array
+            // binds as null, like a missing argument.
+            if (targetType.IsArray && targetType != typeof(string[]))
+            {
+                var element = targetType.GetElementType();
+                var items = SplitJsonArray(raw);
+                if (items == null) return null;
+                var array = Array.CreateInstance(element, items.Count);
+                for (int i = 0; i < items.Count; i++)
+                    array.SetValue(ConvertValue(items[i], element), i);
+                return array;
+            }
+
             if (targetType.IsEnum)
             {
                 var cleaned = StripJsonQuotes(raw);
@@ -402,6 +423,37 @@ namespace UnityOpenMcpBridge
                 return raw.Substring(1, raw.Length - 2);
 
             return raw;
+        }
+
+        // Top-level elements of a flat JSON array of scalars ("[1, 2, \"3\"]").
+        // Returns null when raw is not an array.
+        private static List<string> SplitJsonArray(string raw)
+        {
+            raw = raw?.Trim();
+            if (string.IsNullOrEmpty(raw) || raw[0] != '[' || raw[raw.Length - 1] != ']') return null;
+            var items = new List<string>();
+            var body = raw.Substring(1, raw.Length - 2);
+            int start = 0;
+            bool inString = false;
+            for (int i = 0; i <= body.Length; i++)
+            {
+                if (i < body.Length)
+                {
+                    var c = body[i];
+                    if (inString)
+                    {
+                        if (c == '\\') i++;
+                        else if (c == '"') inString = false;
+                        continue;
+                    }
+                    if (c == '"') { inString = true; continue; }
+                    if (c != ',') continue;
+                }
+                var item = body.Substring(start, i - start).Trim();
+                if (item.Length > 0) items.Add(item);
+                start = i + 1;
+            }
+            return items;
         }
 
         private static string StripJsonQuotes(string raw)

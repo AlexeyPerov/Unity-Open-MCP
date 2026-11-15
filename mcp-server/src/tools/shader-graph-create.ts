@@ -13,9 +13,12 @@ export const shaderGraphCreate = makeTool(
     "exist). shader_type selects the template: Unlit (default) / Lit / Decal / " +
     "Fullscreen / Blank. Mutating: runs the full gate path; paths_hint includes " +
     "the new asset path. Requires the com.unity.shadergraph package installed. " +
-    "When the installed package version exposes a different creation surface, " +
-    "the tool returns a structured shadergraph_api_unavailable error — create " +
-    "the graph manually via Assets/Create > Shader Graph instead.",
+    "The graph is built and written without the editor UI, with the target of " +
+    "the active render pipeline for the template (the response names it; Blank " +
+    "has none). A template the pipeline has no target for answers " +
+    "shader_type_unsupported; when the installed package version exposes a " +
+    "different editing surface the tool answers shadergraph_api_unavailable — " +
+    "create the graph manually via Assets/Create > Shader Graph instead.",
   {
     required: ["asset_path", "paths_hint"],
         properties: {
@@ -29,7 +32,7 @@ export const shaderGraphCreate = makeTool(
             type: "string",
             description:
               "Template kind: 'Unlit' (default), 'Lit', 'Decal', 'Fullscreen', or " +
-              "'Blank'. Falls back to Unlit when omitted or unrecognized.",
+              "'Blank'. Unlit when omitted; any other value answers unknown_shader_type.",
           },
           paths_hint: { ...PATHS_HINT_TYPE, description: "Mutation scope — must include the new .shadergraph asset path." },
           gate: { ...GATE_PROP },

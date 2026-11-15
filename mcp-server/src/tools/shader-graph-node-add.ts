@@ -10,9 +10,9 @@ export const shaderGraphNodeAdd = makeTool(
   "Add a node to a Shader Graph. node_type is a friendly name (UV, Multiply, " +
     "Sample Texture 2D, Add, Time, Color, Vector3, ...) or a full class name in " +
     "UnityEditor.ShaderGraph. position is 'x,y' in graph space. properties_json " +
-    "is an optional JSON object of initial { field: value } patches applied " +
-    "after creation. Returns the new node's id (when the API assigns one) + its " +
-    "input/output slot ids. Mutating: runs the full gate path; paths_hint is the " +
+    "is an optional JSON object of initial { property: value } patches applied " +
+    "after creation. Returns the new node's id and its slots ({ id, name, " +
+    "direction: input | output }). Mutating: runs the full gate path; paths_hint is the " +
     "graph asset path. Requires com.unity.shadergraph. When the installed " +
     "package version exposes a different node-add surface, the tool returns a " +
     "structured shadergraph_api_unavailable error — add the node manually in the " +
@@ -37,9 +37,10 @@ export const shaderGraphNodeAdd = makeTool(
           properties_json: {
             type: "string",
             description:
-              "Optional JSON object of initial { field: value } patches applied to " +
-              "the node after creation (serialized-field patch — same vocabulary as " +
-              "object_modify / timeline_modify).",
+              "Optional JSON object of initial { property: value } patches applied to " +
+              "the node after creation: public node properties of a simple type " +
+              "(number, bool, string, enum) by name. Keys that match none come back " +
+              "in the response's ignoredProperties.",
           },
           paths_hint: { ...PATHS_HINT_TYPE, description: "Mutation scope — must include the .shadergraph asset path." },
           gate: { ...GATE_PROP },

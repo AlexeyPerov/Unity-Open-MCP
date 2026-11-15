@@ -65,15 +65,24 @@ These drive tools through `unity-open-mcp run-tool` (one fresh process per call)
 | [`mcp-behavior.mjs`](mcp-behavior.mjs) | **S1** — behavioral | Strict happy-path tests for tools S0 only reaches via `tolerate` / `reachable`, plus tools absent from S0. |
 | [`mcp-headless.mjs`](mcp-headless.mjs) | **S2** — headless | Batch/offline paths with the Editor **closed** on the target project. |
 | [`mcp-protocol.mjs`](mcp-protocol.mjs) | **S3** — protocol | Stdio MCP transport: `initialize`, `tools/list`, `tools/call`. Local portion runs without Unity; use `--skip-live` to skip bridge calls. |
-| [`mcp-extensions.mjs`](mcp-extensions.mjs) | **S4** — embedded domains | End-to-end chains per compiled embedded domain (NavMesh, Input System, ProBuilder, …). Uncompiled groups skip; compiled groups must pass. |
+| [`mcp-extensions.mjs`](mcp-extensions.mjs) | **S4** — embedded domains | Create → mutate → read-back chain per embedded domain (NavMesh, Input System, ProBuilder, …) in its own fixture scene under `Assets/MCP_ExtTest/`. A domain the bridge compiled in must pass with checks; one whose Unity package is not installed must answer `tool_not_found`; one whose package is installed but did not compile fails. |
 | [`mcp-sandbox.mjs`](mcp-sandbox.mjs) | **S5** — sandbox | Destructive lifecycle (packages, Hub mutators, builds) on a disposable clone of `demo/`. Editor must not be open on the sandbox. |
 
 S1 gate explanations compare the captured `checkpoint_id` against current state;
 `mutation_explain` does not accept a nested mutation `args` payload.
 
-`node scripts/mcp-full-test.mjs --check-args` validates every S0 step's arguments
-against the built tool schemas without Unity (exit 1 on any mismatch); the
-`mcp-server` tests run it, so update the step in the same change as a schema.
+`node scripts/mcp-full-test.mjs --check-args` (S0) and
+`node scripts/mcp-extensions.mjs --check-args` (S4) validate every step's
+arguments against the built tool schemas without Unity (exit 1 on any
+mismatch); the `mcp-server` tests run both, so update the step in the same
+change as a schema.
+
+A step can tighten its pass with two hooks from the shared lib: `check(result,
+ctx)` fails the step when it returns a message (an id the chain needs is
+missing, a read-back does not show the mutation), and `retryWhile(result,
+ctx)` re-runs a call that answered "not yet" (e.g. `profiler_capture_frame`
+→ `warming_up`). A CLI refusal before routing (`missing_required_argument`,
+exit 2) counts as a failed call.
 
 Shared helpers for S0–S5 live in [`mcp-test-lib.mjs`](mcp-test-lib.mjs) (not run directly). Every CLI invocation runs in its own process group and the whole group is killed when the call completes — a timed-out step takes its headless Unity child with it instead of orphaning an Editor that holds the project lock until its own 10-minute timeout.
 
@@ -94,7 +103,9 @@ node scripts/<suite>.mjs --json-out report.json
 ### Suggested order
 
 1. **Smoke** — quick sanity check with the Editor open.
-2. **S0 → S1 → S4** — full live coverage with the Editor open.
+2. **S0 → S1 → S4** — full live coverage with the Editor open. S1 ends with a
+   PlayMode test run; S4 waits for an idle Editor first, but exits if the
+   bridge is still down after it.
 3. **S3** — protocol layer (`--skip-live` if Unity is down).
 4. **S2** — quit the Editor first.
 5. **S5** — last; clones the project and runs destructive steps.

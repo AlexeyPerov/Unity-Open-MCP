@@ -68,6 +68,9 @@ import {
   cleanupTempFolder,
   cleanupViaBridge,
   applyFindObjectsToCtx,
+  checkStepArgs,
+  checkRefreshResult,
+  toolOutput,
 } from "./mcp-test-lib.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -319,7 +322,12 @@ function buildSuite() {
 
   // --- diagnostics reads ---
   s("profiler_get_status", "B", "unity_open_mcp_profiler_get_status");
-  s("profiler_get_config", "B", "unity_open_mcp_profiler_get_config");
+  s("profiler_get_config", "B", "unity_open_mcp_profiler_get_config", {}, {
+    after: (r, ctx) => {
+      const o = toolOutput(r);
+      if (o) ctx.profilerBefore = { driverEnabled: o.driverEnabled, profileEditor: o.profileEditor };
+    },
+  });
   s("profiler_list_modules", "B", "unity_open_mcp_profiler_list_modules");
   s("profiler_get_script_stats", "B", "unity_open_mcp_profiler_get_script_stats");
 
@@ -389,7 +397,30 @@ function buildSuite() {
   s("screenshot_window", "B", "unity_senses_screenshot_window", { window_title: "Scene", width: 64, height: 64 }, { expect: "tolerate", tolerate: ["bridge_response_unparsable", "missing_parameter", "not_supported"] });
   // list without an enabled capture answers no_captured_frame — the read path is reached.
   s("frame_debugger", "B", "unity_senses_frame_debugger", { action: "list", max_draw_calls: 5 }, { expect: "tolerate", tolerate: ["no_captured_frame", "frame_debugger_unavailable"] });
-  s("profiler_capture_frame", "B", "unity_senses_profiler_capture_frame", {});
+  // A Profiler with no recorded frame (a fresh Editor) answers warming_up and
+  // starts recording — targeting the Editor in Edit Mode; the retry captures a
+  // frame and puts back what the warm-up changed, which the next step checks
+  // against profiler_get_config above.
+  s("profiler_capture_frame", "B", "unity_senses_profiler_capture_frame", { max_depth: 2, max_items: 16 }, {
+    retryWhile: (r) => toolOutput(r)?.status === "warming_up",
+    retries: 10,
+    retryDelayMs: 500,
+    check: (r) => {
+      const o = toolOutput(r);
+      return o?.status === "ok" && o.frames?.length > 0 ? null : `status=${o?.status ?? "none"} with ${o?.frames?.length ?? 0} frame(s)`;
+    },
+  });
+  s("profiler_capture_frame_restored", "B", "unity_open_mcp_profiler_get_config", {}, {
+    check: (r, ctx) => {
+      const o = toolOutput(r);
+      const before = ctx.profilerBefore;
+      if (!before) return "profiler_get_config recorded no state to compare";
+      const after = { driverEnabled: o?.driverEnabled, profileEditor: o?.profileEditor };
+      return after.driverEnabled === before.driverEnabled && after.profileEditor === before.profileEditor
+        ? null
+        : `Profiler state not restored: before ${JSON.stringify(before)}, after ${JSON.stringify(after)}`;
+    },
+  });
   // profiler_capture reads captured profiler frames; with no prior capture it
   // returns no_frame_data. Tolerate — profiler_capture_frame above exercises
   // the capture path; this exercises the read path.
@@ -448,7 +479,9 @@ function buildSuite() {
   // If the folder "already exists" in Unity's cache (stale), assets_create_folder
   // reports success with created:[] and nothing lands on disk — the refresh
   // prevents that desync.
-  s("assets_refresh_preflight", "C", "unity_open_mcp_assets_refresh", { whole_project: true }, { gate: true, expect: "gate" });
+  // A refresh that imports scripts answers with the compile it started instead
+  // of the gate envelope (checkRefreshResult accepts either).
+  s("assets_refresh_preflight", "C", "unity_open_mcp_assets_refresh", { whole_project: true }, { gate: true, check: checkRefreshResult });
   s("assets_create_folder", "C", "unity_open_mcp_assets_create_folder", {
     folders: [{ parent_folder_path: "Assets", new_folder_name: "MCP_FullTest" }],
     paths_hint: [FT_FOLDER],
@@ -616,7 +649,7 @@ function buildSuite() {
     paths_hint: [`${FT}/FT_Mat_Copy.mat`, `${FT}/FT_Mat_Moved.mat`],
   }, { gate: true, expect: "gate" });
 
-  s("assets_refresh", "C", "unity_open_mcp_assets_refresh", { whole_project: false, paths_hint: [FT_FOLDER] }, { gate: true, expect: "gate" });
+  s("assets_refresh", "C", "unity_open_mcp_assets_refresh", { whole_project: false, paths_hint: [FT_FOLDER] }, { gate: true, check: checkRefreshResult });
 
   // --- prefab lifecycle (instantiate existing → create from scene GO → open → status → close) ---
   s("prefab_instantiate", "C", "unity_open_mcp_prefab_instantiate", {
@@ -1104,41 +1137,6 @@ const SAVE_DIRTY_AFTER = new Set(["gameobject_find_query"]);
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// --check-args: every step's arguments must pass the same preflight the MCP
-// server runs (schema defaults, then validateSchema). A step that fails it
-// only ever measures the script, not the tool — the drift this guards against
-// (renamed keys, enum changes, string-vs-array) used to show up as
-// "invalid_arguments (tolerated)" in live runs. Steps built by resolveArgs get
-// placeholder ctx values: 1 for ids and numbers, a string for *Name / *Path keys.
-// ---------------------------------------------------------------------------
-
-export async function checkStepArgs(steps) {
-  const dist = resolve(REPO_ROOT, "mcp-server", "dist");
-  const load = (rel) => import(pathToFileURL(resolve(dist, rel)).href);
-  const { ALL_TOOLS } = await load("tools/index.js");
-  const { validateSchema } = await load("tool-contract.js");
-  const { withSchemaDefaults } = await load("schema-defaults.js");
-  const placeholder = new Proxy({}, {
-    get: (_target, key) => (typeof key !== "string" ? undefined : /(name|path)$/i.test(key) ? "FT_Placeholder" : 1),
-  });
-  const problems = [];
-  for (const step of steps) {
-    const tool = ALL_TOOLS.find((t) => t.name === step.tool);
-    if (!tool) { problems.push(`${step.label}: unknown tool ${step.tool}`); continue; }
-    let args;
-    try {
-      args = step.resolveArgs ? step.resolveArgs(placeholder) : (step.args ?? {});
-    } catch (error) {
-      problems.push(`${step.label}: resolveArgs threw with placeholder ctx (${error.message})`);
-      continue;
-    }
-    const errors = validateSchema(withSchemaDefaults(tool, args ?? {}), tool.inputSchema);
-    if (errors.length) problems.push(`${step.label} (${step.tool}): ${errors.join("; ")}`);
-  }
-  return problems;
-}
 
 function main() {
   const opts = parseArgs(process.argv.slice(2));

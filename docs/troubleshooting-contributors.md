@@ -190,7 +190,7 @@ when tools ship).
 | **S1** | `scripts/mcp-behavior.mjs` | Live Editor + bridge; `Assets/MCP_BehaviorTest/` | Strict success paths, gate semantics, checkpoint/fix chains |
 | **S2** | `scripts/mcp-headless.mjs` | Editor **closed** on target project | Batch spawn, offline reads, batch meta-tools |
 | **S3** | `scripts/mcp-protocol.mjs` | MCP stdio server process | `tools/list`, `list_changed` notification, route spot-checks |
-| **S4** | `scripts/mcp-extensions.mjs` | Live Editor + bridge | Embedded-domain success chains when groups compile in |
+| **S4** | `scripts/mcp-extensions.mjs` | Live Editor + bridge; `Assets/MCP_ExtTest/` | Embedded-domain create → mutate → read-back chains; a domain whose package is absent must answer `tool_not_found` |
 | **S5** | `scripts/mcp-sandbox.mjs` | Temp project clone (never mutates `demo/`) | Package lifecycle, Hub mutators, destructive build |
 
 All `scripts/mcp-*.mjs` suites share `scripts/mcp-test-lib.mjs` (arg parsing,

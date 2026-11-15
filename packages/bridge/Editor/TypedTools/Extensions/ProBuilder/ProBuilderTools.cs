@@ -208,7 +208,7 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
             // Face-direction summary — which indices face each axis.
             sb.Append(",\"faceDirections\":{");
             AppendFaceDirectionSummary(sb, mesh);
-            sb.Append("}}");
+            sb.Append("}}}"); // faceDirections, mesh, envelope
             return sb.ToString();
         }
 

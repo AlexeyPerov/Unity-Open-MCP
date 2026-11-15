@@ -1815,7 +1815,7 @@
     }
   },
   "unity_senses_profiler_capture_frame": {
-    "description": "Capture a single frame's deep profiler sample tree for the requested modules. Deeper than profiler_get_script_stats / profiler_get_status (those report aggregate / rolling stats); this returns the full sample hierarchy for one frame so an agent can inspect a specific frame's call tree (e.g. a spike). The output size grows with frame_count, max_depth, and max_items — defaults (frame_count = 1, max_depth = 8, max_items = 200) bound the token budget. If the Profiler is disabled, the tool enables it for the capture, then restores it to disabled; profilerWasEnabled in the response reports the PRIOR state so the agent knows whether Editor state was touched. Requires a live Unity Editor connection.",
+    "description": "Capture a single frame's deep profiler sample tree for the requested modules. Deeper than profiler_get_script_stats / profiler_get_status (those report aggregate / rolling stats); this returns the full sample hierarchy for one frame so an agent can inspect a specific frame's call tree (e.g. a spike). The output size grows with frame_count, max_depth, and max_items — defaults (frame_count = 1, max_depth = 8, max_items = 200) bound the token budget. When the Profiler has recorded no frame yet, the tool starts recording (in Edit Mode it also targets the Editor, since Edit Mode frames are recorded only with that target) and returns status:\"warming_up\" instead of blocking; retry shortly to receive the frame data. The retry restores the Profiler settings the warm-up changed. profilerWasEnabled reports the Profiler's recording state before the tool touched it. Requires a live Unity Editor connection.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -12195,7 +12195,7 @@
     }
   },
   "unity_open_mcp_shader_graph_create": {
-    "description": "Create a new Shader Graph asset at the given asset_path. The asset_path is required ('Assets/.../MyShader.shadergraph'; the parent folder must exist). shader_type selects the template: Unlit (default) / Lit / Decal / Fullscreen / Blank. Mutating: runs the full gate path; paths_hint includes the new asset path. Requires the com.unity.shadergraph package installed. When the installed package version exposes a different creation surface, the tool returns a structured shadergraph_api_unavailable error — create the graph manually via Assets/Create > Shader Graph instead.",
+    "description": "Create a new Shader Graph asset at the given asset_path. The asset_path is required ('Assets/.../MyShader.shadergraph'; the parent folder must exist). shader_type selects the template: Unlit (default) / Lit / Decal / Fullscreen / Blank. Mutating: runs the full gate path; paths_hint includes the new asset path. Requires the com.unity.shadergraph package installed. The graph is built and written without the editor UI, with the target of the active render pipeline for the template (the response names it; Blank has none). A template the pipeline has no target for answers shader_type_unsupported; when the installed package version exposes a different editing surface the tool answers shadergraph_api_unavailable — create the graph manually via Assets/Create > Shader Graph instead.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -12219,7 +12219,7 @@
           "type": "array"
         },
         "shader_type": {
-          "description": "Template kind: 'Unlit' (default), 'Lit', 'Decal', 'Fullscreen', or 'Blank'. Falls back to Unlit when omitted or unrecognized.",
+          "description": "Template kind: 'Unlit' (default), 'Lit', 'Decal', 'Fullscreen', or 'Blank'. Unlit when omitted; any other value answers unknown_shader_type.",
           "type": "string"
         }
       },
@@ -12231,7 +12231,7 @@
     }
   },
   "unity_open_mcp_shader_graph_open": {
-    "description": "Open a Shader Graph asset in the graph editor window and return a structured summary (node count, each node's id / name / type / position / slots, edge count, each edge's output→input node+slot). Read-only window bring-up — Gate is Off, no paths_hint. The summary is parsed from the .shadergraph JSON, so it is stable across package versions. Use it to discover node ids and slot ids before node_add / node_connect. Requires com.unity.shadergraph.",
+    "description": "Open a Shader Graph asset in the graph editor window and return a structured summary (node count, each node's id / name / type / position / slots, edge count, each edge's output→input node+slot). Read-only window bring-up — Gate is Off, no paths_hint. The summary is read from the graph as the Shader Graph importer loads it; nodes include the master stack's block nodes, and each slot is { id, name, direction: input | output }. Use it to discover node ids and slot ids before node_add / node_connect. Requires com.unity.shadergraph.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -12247,7 +12247,7 @@
     }
   },
   "unity_open_mcp_shader_graph_node_add": {
-    "description": "Add a node to a Shader Graph. node_type is a friendly name (UV, Multiply, Sample Texture 2D, Add, Time, Color, Vector3, ...) or a full class name in UnityEditor.ShaderGraph. position is 'x,y' in graph space. properties_json is an optional JSON object of initial { field: value } patches applied after creation. Returns the new node's id (when the API assigns one) + its input/output slot ids. Mutating: runs the full gate path; paths_hint is the graph asset path. Requires com.unity.shadergraph. When the installed package version exposes a different node-add surface, the tool returns a structured shadergraph_api_unavailable error — add the node manually in the graph window, then re-open to read its id.",
+    "description": "Add a node to a Shader Graph. node_type is a friendly name (UV, Multiply, Sample Texture 2D, Add, Time, Color, Vector3, ...) or a full class name in UnityEditor.ShaderGraph. position is 'x,y' in graph space. properties_json is an optional JSON object of initial { property: value } patches applied after creation. Returns the new node's id and its slots ({ id, name, direction: input | output }). Mutating: runs the full gate path; paths_hint is the graph asset path. Requires com.unity.shadergraph. When the installed package version exposes a different node-add surface, the tool returns a structured shadergraph_api_unavailable error — add the node manually in the graph window, then re-open to read its id.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -12279,7 +12279,7 @@
           "type": "string"
         },
         "properties_json": {
-          "description": "Optional JSON object of initial { field: value } patches applied to the node after creation (serialized-field patch — same vocabulary as object_modify / timeline_modify).",
+          "description": "Optional JSON object of initial { property: value } patches applied to the node after creation: public node properties of a simple type (number, bool, string, enum) by name. Keys that match none come back in the response's ignoredProperties.",
           "type": "string"
         }
       },
@@ -12292,7 +12292,7 @@
     }
   },
   "unity_open_mcp_shader_graph_node_connect": {
-    "description": "Connect an output slot of one node to an input slot of another in a Shader Graph. source_node_id + source_slot identify the output; destination_node_id + destination_slot identify the input. Node ids come from shader_graph_open or a prior node_add; slot ids are integers (see a node's 'slots' in the open summary). Mutating: runs the full gate path; paths_hint is the graph asset path. Idempotent. Requires com.unity.shadergraph. When the installed package version exposes a different connect surface, the tool returns a structured shadergraph_api_unavailable error — connect the nodes manually in the graph window.",
+    "description": "Connect an output slot of one node to an input slot of another in a Shader Graph. source_node_id + source_slot identify the output; destination_node_id + destination_slot identify the input. Node ids come from shader_graph_open or a prior node_add; slot ids are integers (see a node's 'slots' in the open summary). Mutating: runs the full gate path; paths_hint is the graph asset path. Idempotent. An unknown node or slot id answers node_not_found / slot_not_found; output→output, input→input or a cycle answers connection_rejected. Requires com.unity.shadergraph. When the installed package version exposes a different connect surface, the tool returns a structured shadergraph_api_unavailable error — connect the nodes manually in the graph window.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

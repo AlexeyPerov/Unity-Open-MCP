@@ -10,9 +10,9 @@ import { makeTool } from "./schema-fragments.js";
 // The cost grows with frame_count, max_depth, and max_items — defaults (1, 8,
 // 200) bound the token budget.
 //
-// If the Profiler is disabled the bridge enables it for the capture, then
-// restores it to disabled; profilerWasEnabled reports the PRIOR state so the
-// agent knows whether Editor state was touched. Read-only (gate off).
+// With no recorded frame the bridge starts recording (Editor target in Edit
+// Mode) and answers warming_up; the retry captures and restores the Profiler
+// settings the warm-up changed. Read-only (gate off).
 export const profilerCaptureFrame = makeTool(
   "unity_senses_profiler_capture_frame",
   "Capture a single frame's deep profiler sample tree for the requested " +
@@ -21,11 +21,13 @@ export const profilerCaptureFrame = makeTool(
     "hierarchy for one frame so an agent can inspect a specific frame's call " +
     "tree (e.g. a spike). The output size grows with frame_count, max_depth, " +
     "and max_items — defaults (frame_count = 1, max_depth = 8, max_items = " +
-    "200) bound the token budget. If the Profiler is disabled, the tool " +
-    "enables it for the capture, then restores it to disabled; " +
-    "profilerWasEnabled in the response reports the PRIOR state so the agent " +
-    "knows whether Editor state was touched. Requires a live Unity Editor " +
-    "connection.",
+    "200) bound the token budget. When the Profiler has recorded no frame yet, " +
+    "the tool starts recording (in Edit Mode it also targets the Editor, since " +
+    "Edit Mode frames are recorded only with that target) and returns " +
+    "status:\"warming_up\" instead of blocking; retry shortly to receive the " +
+    "frame data. The retry restores the Profiler settings the warm-up changed. " +
+    "profilerWasEnabled reports the Profiler's recording state before the tool " +
+    "touched it. Requires a live Unity Editor connection.",
   {
     properties: {
           frame_count: {
