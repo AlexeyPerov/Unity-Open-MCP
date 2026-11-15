@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { testRunOperation, projectCommandOperation, playmodeOperation, pollPlaymodeOperation, playmodeResult, toolOutput, toolResultBody, PLAYMODE_OPERATION_TOOLS, playmodeEstimateMs, playmodeFailureCode, editorWaitOperation } from "./jobs/adapters.js";
+import { testRunOperation, projectCommandOperation, playmodeOperation, pollPlaymodeOperation, playmodeResult, toolOutput, toolResultBody, PLAYMODE_OPERATION_TOOLS, playmodeEstimateMs, playmodeFailure, playmodeTailMs, playmodeShouldHandOver, PlaymodeProgress, PLAYMODE_STILL_MS, type PlaymodeEstimate, editorWaitOperation } from "./jobs/adapters.js";
 import {
   WAIT_TOOL, WAIT_DEFAULT_TIMEOUT_MS, WAIT_INLINE_LIMIT_MS, WAIT_MAX_TIMEOUT_MS, PENDING_COMPILE_GRACE_MS,
   readEditorSignals, viewEditor, statusFields, retryAfterMsFor, waitForEditor, describeWait, reloadingRefusal, waitCall, isTransitionState,
@@ -8,7 +8,7 @@ import {
 import { bridgeCompileFailedBody, readBridgeLossEvidence, type BridgeLossEvidence } from "./bridge-loss.js";
 import { COMPILE_RESULT_FIRST_ERRORS, compileToAwait, foldCompileResult, foldCompileJob } from "./compile-result.js";
 import { lifecycleForCall } from "./capabilities/lifecycle.js";
-import { PLAYMODE_ROUTES } from "./playmode-routes.js";
+import { PLAYMODE_ROUTES, PLAYMODE_INLINE_GRACE_MS } from "./playmode-routes.js";
 import { routeGameView as settleGameView } from "./game-view-settle.js";
 import { JobManager, JobManagerError, type JobOwner } from "./jobs/job-manager.js";
 import { handleJobs } from "./jobs/handler.js";
@@ -870,21 +870,35 @@ export class ToolRouter implements Router {
   get jobs(): JobManager { return this.jobManager ??= new JobManager(); }
   closeJobs(): void { this.jobManager?.close(); }
 
+  /** The jobs owner of a request: this project, the request's agent and its port override. */
+  private jobOwner(identity: RequestIdentity): JobOwner {
+    return { project: this.projectPath || "default", agent: identity.agent,
+      ...(identity.port === undefined ? {} : { port: identity.port }) };
+  }
+
+  /**
+   * The live client a job of `jobOwner` talks to. A port override names a
+   * bridge, not a project: bind the job client to the Editor whose lock claims
+   * that port (its bearer token and its lock diagnostics), exactly like a
+   * direct override call. resolveAuthToken yields no token for an explicit
+   * port, and the default project's lock would describe the wrong Editor.
+   */
+  private readonly jobClient = (jobOwner: JobOwner): LiveClient => jobOwner.port === undefined
+    ? jobOwner.agent === PROCESS_AGENT_ID ? this.live : this.live.forAgent(jobOwner.agent)
+    : LiveClient.forPortOverride(jobOwner.port, this.projectPath, jobOwner.agent);
+
+  /** One generic jobs adapter for every tool on the bridge's shared play-mode scheduler. */
+  private ensurePlaymodeJobs(name: string): void {
+    if (!this.jobs.hasOperation(name)) this.jobs.register(name, playmodeOperation(name, PLAYMODE_OPERATION_TOOLS.get(name)!, this.jobClient));
+  }
+
   async routeJobs(args: Record<string, unknown>, identity: RequestIdentity = PROCESS_IDENTITY): Promise<CallToolResult> {
     const definition = ALL_TOOLS.find(t => t.name === "unity_open_mcp_jobs")!;
     const errors = validateSchema(args, definition.inputSchema);
     if (errors.length) return localError("invalid_arguments", errors.join("; "));
-    const owner: JobOwner = { project: this.projectPath || "default", agent: identity.agent,
-      ...(identity.port === undefined ? {} : { port: identity.port }) };
+    const owner = this.jobOwner(identity);
     try {
-      // A port override names a bridge, not a project: bind the job client to
-      // the Editor whose lock claims that port (its bearer token and its lock
-      // diagnostics), exactly like a direct override call. resolveAuthToken
-      // yields no token for an explicit port, and the default project's lock
-      // would describe the wrong Editor.
-      const clientFor = (jobOwner: JobOwner) => jobOwner.port === undefined
-        ? jobOwner.agent === PROCESS_AGENT_ID ? this.live : this.live.forAgent(jobOwner.agent)
-        : LiveClient.forPortOverride(jobOwner.port, this.projectPath, jobOwner.agent);
+      const clientFor = this.jobClient;
       if (args.action === "start" && typeof args.tool_or_command === "string") {
         const name = args.tool_or_command, key = args.idempotency_key;
         if (name === "unity_senses_run_tests") {
@@ -897,8 +911,7 @@ export class ToolRouter implements Router {
             return this.waitDeps(client, projectPath);
           }));
         } else if (PLAYMODE_OPERATION_TOOLS.has(name)) {
-          // One generic adapter for every tool on the bridge's shared play-mode scheduler.
-          if (!this.jobs.hasOperation(name)) this.jobs.register(name, playmodeOperation(name, PLAYMODE_OPERATION_TOOLS.get(name)!, clientFor));
+          this.ensurePlaymodeJobs(name);
         } else if (name.startsWith("project.") && !(typeof key === "string" && this.jobs.hasKey(owner, key))) {
           // A retry whose key already names a job gets that job (or
           // idempotency_conflict) from start() without the catalog, which may
@@ -932,18 +945,25 @@ export class ToolRouter implements Router {
    * Play-mode operations (`inputsim_gesture`, `playtest_wait`,
    * `capture_series`): the bridge starts the operation on its shared play-mode
    * scheduler and answers at once; this route polls POST /playmode-operations
-   * until the terminal result, inside the host-safe window. An operation whose
-   * worst case (`playmodeEstimateMs`: last keyframe / capture, the wait's
-   * timeout, a series' start_on wait + schedule + encoding) exceeds the inline
-   * budget is started as a `jobs` play-mode operation instead and the call
-   * returns that job id. One that outlives the inline poll anyway (gameplay
-   * time, a paused Editor) is cancelled — which releases held input and
-   * restores a wait's time scale — and the error points at the jobs route.
+   * until the terminal result. An operation whose worst case
+   * (`playmodeEstimateMs`: last keyframe / capture, the wait's timeout, a
+   * series' start_on wait + schedule + encoding) exceeds the inline window is
+   * started as a `jobs` play-mode operation instead and the call returns that
+   * job id. One that turns out slower than its schedule (gameplay time at a
+   * low Time.timeScale, a slow frame rate) is never cancelled: as soon as its
+   * observed rate says it will not end inside the inline limit — or at that
+   * limit — it continues as a job under its own operation id, which observes
+   * the running operation (nothing restarts), and the call answers
+   * `status: "running"` with the job id, the progress so far and an estimate.
+   * Only the bridge ends an operation that stopped moving (stalled).
    */
   private async routePlaymodeOperation(name: string, args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity): Promise<CallToolResult> {
     const spec = PLAYMODE_ROUTES[name];
+    const startedAt = Date.now();
     const estimateMs = playmodeEstimateMs(name, args);
-    if (estimateMs > spec.inlineLimitMs) {
+    // The CLI (no host timeout; a job would end with its process) waits inline throughout.
+    const windowMs = Math.max(spec.inlineLimitMs, this.waitInlineLimitMs);
+    if (estimateMs > windowMs) {
       // The job owns the bridge operation id; a caller's operation_id keeps
       // its retry meaning as the job's idempotency key.
       const { operation_id: retryKey, ...jobArgs } = args;
@@ -951,40 +971,92 @@ export class ToolRouter implements Router {
         ...(typeof retryKey === "string" ? { idempotency_key: retryKey } : {}) }, identity);
       const body = toolResultBody(started);
       if (started.isError || typeof body.job_id !== "string") return started;
-      return sourceResult({ ...body, note: `${spec.label} can take ${Math.round(estimateMs)} ms (> ${spec.inlineLimitMs} ms inline budget); it runs as a job.`,
+      return sourceResult({ ...body, note: `${spec.label} can take ${Math.round(estimateMs)} ms (> ${windowMs} ms inline budget); it runs as a job.`,
         agentNextSteps: [`Call unity_open_mcp_jobs {"action":"wait","job_id":"${body.job_id}","timeout_ms":30000} until the state is terminal; the result holds ${spec.resultHint}.`] }, "local");
     }
     const operationId = typeof args.operation_id === "string" ? args.operation_id : randomUUID();
     const start = await live.route(name, { ...args, operation_id: operationId });
     const started = toolOutput(start);
     if (start.isError || started.error || !started.operation) return injectRouteMeta(start, { route: "live" });
+    // Inline up to the host-safe limit; past it (or once the rate says so) the job takes over.
+    const limitMs = Number.isFinite(windowMs) ? Math.min(windowMs + PLAYMODE_INLINE_GRACE_MS, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS - 5_000) : Infinity;
+    const progress = new PlaymodeProgress(playmodeTailMs(name, args));
     const outcome = await pollPlaymodeOperation(live, operationId, {
-      deadlineMs: Math.min(estimateMs + 15_000, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS - 5_000),
+      deadlineMs: Infinity,
       pollIntervalMs: estimateMs < 2_000 ? 50 : 100,
       unreachableMs: 10_000,
+      detach: snapshot => playmodeShouldHandOver(progress.observe(snapshot), Date.now() - startedAt, limitMs),
     });
     const meta = spec.startMeta(started);
-    // The poll's own deadline cancel, acknowledged: the operation stalled (a
-    // paused Editor never ticks it), it did not end by itself.
-    const stalled = outcome.kind === "deadline" || (outcome.kind === "terminal" && outcome.cancelSent && outcome.snapshot.state === "cancelled");
-    if (stalled) {
-      return sourceResult({ error: { code: spec.stalledCode, message: `The ${spec.noun} did not finish inside the inline window (a paused Editor, gameplay time, or a slow frame rate); it was cancelled and its cleanup ${spec.cleanup}.` },
-        operationId, last: outcome.snapshot, agentNextSteps: [`Check that play mode is running (not paused) and the Game view renders, then retry — or run it as a job: unity_open_mcp_jobs {"action":"start","tool_or_command":"${name}","args":{…}}, then wait on the job id.`] }, "live", true);
-    }
     switch (outcome.kind) {
+      case "detached":
+        return await this.continuePlaymodeAsJob(name, args, operationId, outcome.snapshot, progress.last, identity);
       case "lost":
         return sourceResult({ error: { code: "operation_lost", message: `The bridge lost the ${spec.noun} (domain reload or Editor restart); its cleanup ${spec.cleanup}.` }, operationId }, "live", true);
       case "unreachable":
         return sourceResult({ error: { code: "job_status_unavailable", message: outcome.error }, operationId }, "live", true);
+      case "deadline":
+        throw new Error("unreachable play-mode poll outcome: the inline poll has no deadline");
     }
-    if (outcome.kind !== "terminal") throw new Error("unreachable play-mode poll outcome");
     const snapshot = outcome.snapshot;
     const result = { ...meta, ...playmodeResult(snapshot) };
     if (snapshot.state === "succeeded") return sourceResult({ status: "ok", ...result }, "live");
-    const code = playmodeFailureCode(snapshot, spec.failedCode);
+    const error = playmodeFailure(snapshot, spec.failedCode, spec.noun);
+    const steps = spec.failureNextSteps(error.code, error.reason);
     // The operation's own `error` (a message string) becomes error.message.
-    return sourceResult({ ...result, error: { code, message: String(snapshot.result?.error ?? `${spec.label} ended ${snapshot.reason ?? snapshot.state}; its cleanup ${spec.cleanup}.`) },
-      ...(spec.failureNextSteps(code) ? { agentNextSteps: spec.failureNextSteps(code) } : {}) }, "live", true);
+    return sourceResult({ ...result, error, ...(steps ? { agentNextSteps: steps } : {}) }, "live", true);
+  }
+
+  /**
+   * Hand a running play-mode operation to a job: the job takes the operation id
+   * as its job id and observes the operation (it holds no execution slot and
+   * starts nothing). The answer carries the progress so far — for a series the
+   * frames captured — and when to expect the result.
+   */
+  private async continuePlaymodeAsJob(name: string, args: Record<string, unknown>, operationId: string, snapshot: Record<string, any>,
+    estimate: PlaymodeEstimate | null, identity: RequestIdentity): Promise<CallToolResult> {
+    const spec = PLAYMODE_ROUTES[name];
+    const { operation_id: _ownedByTheJob, ...jobArgs } = args;
+    let job: Record<string, unknown>;
+    try {
+      this.ensurePlaymodeJobs(name);
+      const owner = this.jobOwner(identity);
+      const started = this.jobs.start(owner, name, jobArgs, undefined, { continueId: operationId });
+      // A continuation holds no slot: it is running by the next turn of the loop.
+      await new Promise<void>(resolve => setImmediate(resolve));
+      job = this.jobs.status(owner, started.job_id) as unknown as Record<string, unknown>;
+    } catch (error) {
+      // No job to continue in: the operation keeps running on the bridge; say how to observe it.
+      return sourceResult({ error: { code: error instanceof JobManagerError ? error.code : "job_start_failed",
+        message: `The ${spec.noun} is still running but could not continue as a job: ${error instanceof Error ? error.message : String(error)}` },
+        operationId, operation: snapshot }, "local", true);
+    }
+    const series = snapshot.progress?.series as Record<string, unknown> | undefined;
+    const eta = estimate?.etaMs ?? null;
+    const still = estimate !== null && estimate.stalledMs >= PLAYMODE_STILL_MS;
+    const pace = still ? ` but has not moved for ${Math.round(estimate!.stalledMs / 1000)} s (the bridge ends it as stalled after 15 s without progress)`
+      : estimate?.rate != null && estimate.clock === "gameplay" ? ` at ${estimate.rate}× real time` : "";
+    const done = estimate ? `${estimate.clock ? `${estimate.clock} ` : ""}${Math.round(estimate.elapsedMs)} of ${Math.round(estimate.expectedMs)} ms` : "";
+    const captured = series ? `${done ? ", " : ""}${series.captured} of ${series.requested} frames captured` : "";
+    return sourceResult({
+      status: "running",
+      job_id: job.job_id,
+      operationId,
+      job: { state: job.state, operation: job.operation },
+      progress: {
+        phase: snapshot.phase,
+        ...(estimate ? { clock: estimate.clock, elapsed_ms: estimate.elapsedMs, expected_ms: estimate.expectedMs, rate: estimate.rate, stalled_ms: estimate.stalledMs } : {}),
+        eta_ms: eta,
+      },
+      ...(series ? { series } : {}),
+      operation: snapshot,
+      note: `The ${spec.noun} is ${still ? "running" : "progressing"}${pace} (${done}${captured}); it continues as job ${job.job_id}` +
+        (eta !== null && !still ? ` and should end in about ${Math.max(1, Math.round(eta / 1000))} s.` : "."),
+      agentNextSteps: [
+        `Call unity_open_mcp_jobs {"action":"wait","job_id":"${job.job_id}","timeout_ms":30000} until the state is terminal; the result holds ${spec.resultHint}. ` +
+        `Do not start the ${spec.noun} again: it is running, and the job is its result.`,
+      ],
+    }, "local");
   }
 
   /**

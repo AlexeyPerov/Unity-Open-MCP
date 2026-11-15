@@ -66,7 +66,8 @@ shows the bridge cannot come back, `offline`), `transitionsSeen`
 and `compile: {generation, status, errorCount}`. `run-tool
 unity_open_mcp_editor_status` with `wait_until` waits inline for its whole
 `timeout_ms` (no MCP host timeout applies to the CLI, and a job would end with
-the process).
+the process); so do the play-mode operations (`playtest_wait`,
+`capture_series`, `inputsim_gesture`), however long or slow they run.
 
 ```bash
 npx -y unity-open-mcp@1.6.0 run-tool unity_open_mcp_assets_refresh \

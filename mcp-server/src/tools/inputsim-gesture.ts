@@ -64,7 +64,7 @@ export const inputsimGesture = makeTool(
     "composed game frame at those offsets from the gesture start inside the same operation (the " +
     "capture_series recorder: native size, files + per-frame frame / play_time under `captures`), so a tap " +
     "and its follow-up frames come back from one call. Gestures longer than " +
-    `${INPUTSIM_GESTURE_INLINE_LIMIT_MS / 1000}s return a job_id instead — wait on it with ` +
+    `${INPUTSIM_GESTURE_INLINE_LIMIT_MS / 1000}s (or slower than their schedule) return a job_id instead — wait on it with ` +
     "unity_open_mcp_jobs (you can also start one there directly). Cancel, exiting play " +
     "mode and a domain reload release every held finger. One input gesture at a time " +
     "(playmode_operation_busy). Play-mode only; gate-free. Not allowed inside batch_execute.",
@@ -118,8 +118,8 @@ export const inputsimGesture = makeTool(
           "Capture the composed game frame at these offsets (ms, the gesture's `time` base) from the gesture " +
           "start — the call returns when the gesture and the last capture are done. Result `captures.frames[]`: " +
           "frame, play_time, elapsed_ms, file, `unchanged`. Needs a rendering Game view / Simulator (Unity 6). " +
-          "In gameplay time a paused game (timeScale 0) ends the gesture after a wall-clock limit (error_code " +
-          "timed_out); captured frames are kept.",
+          "No progress for 15 s (Editor paused; gameplay time at timeScale 0) ends the gesture as gesture_stalled: " +
+          "fingers released, captured frames kept.",
       },
       operation_id: {
         type: "string",

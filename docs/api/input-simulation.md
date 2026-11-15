@@ -181,8 +181,12 @@ and `unchanged`. Needs a rendering Game view / Simulator
 
 Gestures longer than 40 s (by their last keyframe or capture) return a `job_id` instead; wait
 on it with [`unity_open_mcp_jobs`](jobs.md#play-mode-operations), which can also
-start one directly. A gesture that outlives the inline window (for example
-`time: "gameplay"` at a low time scale) is cancelled and returns `gesture_timeout`.
+start one directly. A gesture slower than its schedule (for example
+`time: "gameplay"` at a low time scale) is not cancelled: it continues as a job
+under its operation id and the call answers `status: "running"` with that
+`job_id` and `eta_ms`. One with no progress for 15 s (a paused Editor, `gameplay`
+time at `Time.timeScale` 0) ends as `gesture_stalled` (`error.reason` says which)
+with every finger released.
 `operation_id` is an optional idempotency handle: a retried call with the same id
 returns the same operation (for a gesture that runs as a job, the same job). One input gesture runs at a time
 (`playmode_operation_busy`); `inputsim_touch` and `raycast_real` are refused

@@ -372,11 +372,42 @@ Series estimated over 40 s (start_on wait + schedule + encoding) run as a
 [`jobs` play-mode operation](jobs.md#play-mode-operations). Cancelling or exiting
 play mode keeps the frames already captured: cleanup writes them for at most 1 s,
 and a frame it could not write is listed with `file: null` and
-`dropped: "flush_budget"`. A domain reload drops them. A `gameplay` `at_ms` /
-`every_ms` schedule that stops advancing (the game sets `Time.timeScale` to 0)
-ends after twice its length plus 30 s of wall-clock time as `timed_out` (outcome
-`capture_timed_out`): the frames captured so far are written, the rest are
-`dropped: "timed_out"`.
+`dropped: "flush_budget"`. A domain reload drops them. Exiting play mode
+mid-series fails the call with `play_mode_exited`; the message says how many
+frames were kept, and `series.frames` lists them (the rest `captured: false`).
+
+**Slow is not stalled.** A series slower than its schedule — `gameplay` time at a
+low `Time.timeScale`, a slow frame rate — is never cancelled. The call measures
+the series' pace (schedule offset reached against wall time) and, as soon as it
+says the series cannot end inside the inline limit (40 s plus 10 s of grace) or
+at that limit, the series continues as a job under its own operation id: the job
+observes the running series, nothing restarts. The call answers
+`status: "running"` with `job_id` (= `operationId`), `progress` (`clock`,
+`elapsed_ms` / `expected_ms` on the schedule, `rate` = schedule ms per wall ms,
+`eta_ms`), `series` with the frames captured so far (no files yet — encoding
+runs after the last capture) and the running `operation` snapshot; wait on the
+job for the full result (frames, files, contact sheet). A series that ends
+inside the limit (for example 8 s of gameplay at `timeScale` 0.25 = 32 s) is
+answered inline as usual.
+
+```json
+{
+  "status": "running", "job_id": "8442db58-…", "operationId": "8442db58-…",
+  "job": { "state": "running", "operation": "unity_senses_capture_series" },
+  "progress": { "phase": "capturing", "clock": "gameplay", "elapsed_ms": 114, "expected_ms": 8000, "rate": 0.1, "eta_ms": 79034 },
+  "series": { "schedule": "at_ms", "time": "gameplay", "requested": 1, "captured": 0, "frames": [] },
+  "note": "The capture series is progressing at 0.1× real time (…); it continues as job 8442db58-… and should end in about 79 s."
+}
+```
+
+**Stalled is zero progress.** The bridge ends a series that made no progress for
+15 s of wall-clock time — the Editor is paused, or a `gameplay` `at_ms` /
+`every_ms` schedule while `Time.timeScale` is 0 — as `capture_series_stalled`
+with `error.reason` `editor_paused` / `time_scale_zero` (or `no_frames` when the
+player loop does not run) and `operation.stall`. The frames captured so far are
+written, the rest are `dropped: "stalled"`. A pause shorter than 15 s only
+delays the series. Waiting for `start_on`, an `at_frames` schedule and encoding
+move on every frame, so they never stall on `Time.timeScale` 0.
 
 ### Tap and capture what follows
 
@@ -385,9 +416,10 @@ composed frame at those offsets from the gesture start (the gesture's `time` bas
 inside the same scheduled operation, so a tap and the frames after it come back
 from one call under `captures` (same frame fields as a series, native size, at most
 30). The call returns when both the gesture and the last capture are done; the
-gesture's input resource is held until then. In `gameplay` time the pair is
-bounded the same way (twice its length plus 30 s of wall-clock time): `timed_out`,
-fingers released, the frames captured so far kept.
+gesture's input resource is held until then. A slow pair continues as a job like
+a slow series; one with no progress for 15 s (a paused Editor, `gameplay` time at
+`Time.timeScale` 0) ends as `gesture_stalled`: fingers released, the frames
+captured so far kept.
 
 ### Recipes
 
@@ -755,8 +787,9 @@ is full are dropped, and the report says how many.
 Each of these is a failed call: `isError: true`, `mutation.success: false`, and
 the code, message and any detail named below in `mutation.error` (see
 [tool refusals](mcp-tools.md#mutation-and-gate-contract)). Errors the MCP server
-raises itself (`not_settled`, a stalled wait, session errors) are a flat
-top-level `error`.
+raises itself (`not_settled`, session errors) and the end of a play-mode
+operation (`timed_out`, a stall, `play_mode_exited`) are a flat top-level
+`error`.
 
 | Code | When |
 |---|---|
@@ -773,7 +806,7 @@ top-level `error`.
 | `editor_internals_unavailable` | `game_view`: an internal Game view / Simulator member this Editor lacks (`detected.missing`) |
 | `batch_step_requires_server_poll` | `game_view` set_*, `playtest_wait` or `capture_series` inside `batch_execute` |
 | `play_mode_required` | `playtest_wait` / `capture_series` in edit mode |
-| `timed_out` | `playtest_wait`: the condition did not hold within `timeout_ms` (carries `condition` with every leaf's last state); `capture_series`: `start_on` did not hold within `start_timeout_ms` (outcome `start_on_timed_out`), or a `gameplay` schedule stopped advancing (outcome `capture_timed_out`, frames kept); `inputsim_gesture` with `capture_at_ms` in `gameplay` time: the same wall-clock bound |
+| `timed_out` | `playtest_wait`: the condition did not hold within `timeout_ms` (carries `condition` with every leaf's last state); `capture_series`: `start_on` did not hold within `start_timeout_ms` (outcome `start_on_timed_out`) |
 | `exception_thrown` / `error_logged` | `playtest_wait` with `fail_on`: the game logged an exception / error (carries `exception`) |
 | `condition_error` | A leaf cannot be evaluated (a project command threw) |
 | `command_unavailable` / `command_not_allowed` | `project_command`: unknown or disabled id / a mutating or async command |
@@ -781,7 +814,8 @@ top-level `error`.
 | `render_target_unavailable` | `capture_series` / gesture `capture_at_ms`: the play-mode view has not rendered (no Game view / Simulator open, or its tab is hidden) |
 | `capture_failed` | `capture_series`: the first capture could not be read |
 | `playmode_operation_busy` | A second time-scaled wait, or a second capture series, while one runs |
-| `wait_stalled` / `capture_series_stalled` | The operation did not finish inside the call's inline window (a paused Editor); it was cancelled — run it as a job |
+| `wait_stalled` / `capture_series_stalled` / `gesture_stalled` | The operation made no progress for 15 s and the bridge ended it; `error.reason`: `editor_paused`, `time_scale_zero` (a `gameplay` clock), `no_frames` (the player loop did not run) or `no_progress`. What it had is kept (a series' frames); a slow operation never ends this way — it continues as a job |
+| `play_mode_exited` | Play mode ended while the operation ran: input released, time scale restored, a series' frames so far kept |
 | `edit_mode_required` | `player_state` `restore` (dry run included) while the Editor is playing |
 | `snapshot_exists` | `player_state` `snapshot` to a name that exists, without `overwrite` |
 | `snapshot_not_found` / `snapshot_unreadable` | `player_state`: no such snapshot in the addressed store (`available` lists the names) / its `snapshot.json` cannot be read |

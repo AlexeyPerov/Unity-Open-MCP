@@ -226,3 +226,29 @@ test("an observer (an Editor wait) holds no project slot: it runs beside a runni
   for (const p of pending.slice(1)) p.finish({ state: "succeeded", result: null });
   worker.pending[1].finish({ state: "succeeded", result: null }); await tick();
 });
+
+test("a continuation takes the given id, holds no slot, starts once, and refuses a different operation on the id", async t => {
+  const m = manager(t), f = fixture(), observed = fixture();
+  m.register("busy", f.operation);
+  m.register("series", { ...observed.operation, mutating: false });
+  const busy = m.start(owner, "busy", {}, "k");
+  await tick(); assert.equal(f.pending.length, 1, "the slot is taken");
+  const job = m.start(owner, "series", { at_ms: [8000] }, undefined, { continueId: "op-1234-abcd" });
+  assert.equal(job.job_id, "op-1234-abcd");
+  await tick();
+  assert.equal(observed.pending.length, 1, "a continuation runs while another job holds the slot");
+  assert.equal(observed.pending[0].context.continuation, true);
+  assert.equal(f.pending[0].context.continuation, false);
+  assert.equal(m.start(owner, "series", { at_ms: [8000] }, undefined, { continueId: "op-1234-abcd" }).job_id, job.job_id);
+  assert.throws(() => m.start(owner, "busy", {}, "k2", { continueId: "op-1234-abcd" }), { code: "idempotency_conflict" });
+  observed.pending[0].context.report({ phase: "capturing", fraction: 0.25, detail: { captured: 0, requested: 1, eta_ms: 24000 } });
+  const status = m.status(owner, job.job_id);
+  assert.deepEqual(status.progress, { phase: "capturing", fraction: 0.25, detail: { captured: 0, requested: 1, eta_ms: 24000 } });
+  observed.pending[0].context.report({ phase: "capturing", fraction: 0.5, detail: { captured: 0, requested: 1, eta_ms: 12000 } });
+  assert.equal(m.status(owner, job.job_id).events.filter(e => e.kind === "progress").length, 1, "moving numbers do not flood the event log");
+  observed.pending[0].finish({ state: "succeeded", result: { series: { captured: 1 } } });
+  f.pending[0].finish({ state: "succeeded", result: null });
+  await tick();
+  assert.equal(m.status(owner, busy.job_id).state, "succeeded");
+  assert.equal(m.status(owner, job.job_id).state, "succeeded");
+});

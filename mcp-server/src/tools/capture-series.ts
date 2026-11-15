@@ -4,7 +4,8 @@
 // returns an operation id; this server polls POST /playmode-operations to the
 // terminal result (tool-router `routePlaymodeOperation`), or starts a `jobs`
 // play-mode operation when the series (plus its start_on wait and encoding)
-// can outlast the inline budget. Live-only like every unity_senses_* tool.
+// can outlast the inline budget, or hands the running series to one when it
+// proves slower than its schedule. Live-only like every unity_senses_* tool.
 import { makeTool } from "./schema-fragments.js";
 import { conditionSchema } from "./playtest-conditions.js";
 
@@ -38,8 +39,10 @@ export const captureSeries = makeTool(
     "capture} inside metric_region — a breathing artifact shows as numbers. region crops every frame; " +
     "scale shrinks them; contact_sheet:true adds one tiled PNG labelled '#index F<frame> +<ms>MS' for cheap " +
     "review. Files go to ~/.unity-open-mcp/screenshots/series-<stamp>-<id>/. The call waits for the " +
-    "terminal result; series estimated over " +
-    `${CAPTURE_SERIES_INLINE_LIMIT_MS / 1000}s return a job_id (unity_open_mcp_jobs wait / cancel). For a tap and the ` +
+    "terminal result; a series estimated over " +
+    `${CAPTURE_SERIES_INLINE_LIMIT_MS / 1000}s, or running slower than its schedule (gameplay time at a low Time.timeScale), ` +
+    "continues as a job: the call returns a job_id (status running, frames so far, eta_ms) — wait on it with " +
+    "unity_open_mcp_jobs; do not start it again. For a tap and the " +
     "frames after it use inputsim_gesture capture_at_ms. Play-mode only; needs a rendering Game view / " +
     "Simulator (render_target_unavailable otherwise); Unity 6 (unsupported_editor_version elsewhere). " +
     "Not allowed inside batch_execute.",
@@ -87,8 +90,8 @@ export const captureSeries = makeTool(
         default: "gameplay",
         description:
           "Clock for at_ms / every_ms: gameplay (scaled by Time.timeScale, what animations see) or realtime (wall clock). " +
-          "A gameplay schedule that stops advancing (Time.timeScale 0) ends as timed_out after twice its length + 30 s " +
-          "of wall-clock time, keeping the frames already captured.",
+          "A series with no progress for 15 s (Editor paused, or gameplay time at Time.timeScale 0) ends as " +
+          "capture_series_stalled (error.reason says which), keeping the frames already captured.",
       },
       scale: {
         type: "number",

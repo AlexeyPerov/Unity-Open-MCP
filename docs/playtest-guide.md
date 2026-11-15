@@ -176,8 +176,13 @@ text are redacted. See [the report contract](api/playtest.md#report).
 - **A domain reload in play mode** (a script change, `RequestScriptReload`)
   can reset game statics; the session and its log survive (the report shows the
   reload under Editor events). Check the game state after it.
-- **Long waits become jobs.** A wait or series over 40 s returns a `job_id`;
-  `jobs wait` it — the recorder logs the job's result when it is terminal.
+- **Long waits become jobs.** A wait or series over 40 s — or one that runs
+  slower than its schedule, such as a `gameplay` series at a low
+  `Time.timeScale` — returns a `job_id` (`status: "running"`, with the frames so
+  far); `jobs wait` it, do not start it again — the recorder logs the job's result
+  when it is terminal. Only zero progress for 15 s (a paused Editor,
+  `Time.timeScale` 0) ends it as `capture_series_stalled` / `wait_stalled`, with
+  `error.reason` and the frames captured so far.
 - **The MCP server restarted.** The session is on disk: `playtest_session
   status` lists it under `orphaned`; `end` (or `resume`) with `session: "<id>"`
   takes it over, and the report names the call that was in flight.

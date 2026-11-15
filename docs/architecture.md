@@ -94,7 +94,10 @@ bridge-side play-mode scheduler (`packages/bridge/Editor/PlayMode/`): a
 player-loop system at the start of `EarlyUpdate` that owns per-frame timing,
 cancellation, and cleanup on exit-play / domain reload. Tools start an operation
 and return; the MCP server polls `POST /playmode-operations` inline for short
-operations or through the generic `playmode_operation` jobs adapter for long ones.
+operations or through the generic `playmode_operation` jobs adapter for long ones
+— and for ones that prove slower than their schedule, which continue as a job
+that observes them. The scheduler alone ends an operation that stopped making
+progress (a paused Editor, a gameplay clock at `Time.timeScale` 0).
 Device input injection is routed per call to the project's backends (legacy Input
 Manager, Input System) from the bridge root assembly, so it compiles in projects
 without the Input System package; see [Input simulation](api/input-simulation.md).

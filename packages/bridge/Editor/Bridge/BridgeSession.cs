@@ -100,7 +100,16 @@ namespace UnityOpenMcpBridge
         //       issues its source already had as inherited, not new:
         //       inheritedErrors / inheritedWarnings / inheritedIssues
         //       (+Truncated, ByRule) / inheritedFrom.
-        public const int WireContract = 10;
+        //  11 — Play-mode operations end on zero progress, never on slow
+        //       progress: reason `stalled` (state failed) with `stall.reason`
+        //       (editor_paused / time_scale_zero / no_frames / no_progress) and
+        //       the tool's error_code (capture_series_stalled / wait_stalled /
+        //       gesture_stalled); the capture series' and gesture captures'
+        //       fixed wall-clock bound (outcome capture_timed_out) is gone.
+        //       Snapshot progress adds realtimeMs, stalledMs and, for a
+        //       capture series, the schedule offset as elapsedMs and
+        //       progress.series (requested / captured / frames so far).
+        public const int WireContract = 11;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
 

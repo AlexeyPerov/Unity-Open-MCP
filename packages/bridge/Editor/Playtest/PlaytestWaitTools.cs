@@ -174,6 +174,10 @@ namespace UnityOpenMcpBridge.Playtest
 
         public override string Kind => PlaytestWaitTools.ToolName;
         public override string ExclusiveResource => requestedScale.HasValue ? TimeScaleResource : null;
+        // Its clock is realtime: only a paused Editor (no frames) stalls a wait.
+        public override string StalledCode => "wait_stalled";
+        protected internal override string StallNote =>
+            (requestedScale.HasValue ? "The time scale was restored; u" : "U") + "npause the Editor and wait again.";
         internal ConditionWatcher Watcher => watcher;
         internal string Outcome => outcome;
         private double WallMs => WallClockOverride?.Invoke() ?? wall.Elapsed.TotalMilliseconds;
@@ -281,7 +285,7 @@ namespace UnityOpenMcpBridge.Playtest
             sb.Append("{\"kind\":").Append(BridgeJson.EscapeString(Kind));
             sb.Append(",\"reason\":").Append(BridgeJson.EscapeString(PlayModeScheduler.ReasonName(reason)));
             sb.Append(",\"outcome\":").Append(BridgeJson.EscapeString(outcome ?? PlayModeScheduler.ReasonName(reason)));
-            if (FailureCode != null && reason == PlayModeEndReason.Failed)
+            if (FailureCode != null && PlayModeScheduler.CarriesFailureCode(reason))
                 sb.Append(",\"error_code\":").Append(BridgeJson.EscapeString(FailureCode));
             if (error != null) sb.Append(",\"error\":").Append(BridgeJson.EscapeString(error));
             sb.Append(",\"fired\":");

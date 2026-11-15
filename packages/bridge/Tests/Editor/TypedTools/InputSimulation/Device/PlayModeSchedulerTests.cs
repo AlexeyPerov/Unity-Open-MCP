@@ -1,5 +1,7 @@
 // Shared play-mode scheduler: start / tick / complete, cancel, exit-play and
-// reload cleanup, exclusive resources, the /playmode-operations handler, and a
+// reload cleanup, exclusive resources, the /playmode-operations handler, the
+// zero-progress stall end (slow progress never stalls; a pause shorter than the
+// window continues; a hitch counts one clamped step), and a
 // gesture driven through it against a recording Input System backend (so
 // "abort leaves no pressed finger" is proven without play mode). Ticks are fed
 // synthetically; the player loop is never touched.
@@ -74,6 +76,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             PlayModeScheduler.EndAll(PlayModeEndReason.Cancelled);
             PlayModeScheduler.ResetForTests();
             PlayModeScheduler.IsPlayingOverride = null;
+            PlayModeScheduler.IsPausedOverride = null;
+            PlayModeScheduler.ClockOverride = null;
             PlayModeScheduler.SuppressPlayerLoop = false;
             InputBackends.InputSystem = savedBackend;
         }
@@ -207,12 +211,106 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             StringAssert.Contains("invalid_arguments", error);
         }
 
+        // --- stalls: zero progress ends an operation, slow progress never ---------
+
+        private double clockMs;
+
+        private void UseClock()
+        {
+            clockMs = 0;
+            PlayModeScheduler.ClockOverride = () => clockMs;
+        }
+
+        [Test]
+        public void ClassifyStall_NamesWhyNothingMoved()
+        {
+            Assert.AreEqual("editor_paused", PlayModeScheduler.ClassifyStall(true, 0, 1f));
+            Assert.AreEqual("time_scale_zero", PlayModeScheduler.ClassifyStall(false, 10, 0f));
+            Assert.AreEqual("no_progress", PlayModeScheduler.ClassifyStall(false, 10, 1f));
+            Assert.AreEqual("no_frames", PlayModeScheduler.ClassifyStall(false, PlayModeScheduler.NoFramesAfterMs + 1, 1f));
+            Assert.AreEqual("no_frames", PlayModeScheduler.ClassifyStall(false, double.NaN, 1f));
+        }
+
+        [Test]
+        public void GameplayClockAtTimeScaleZero_StallsAfterTheWindow()
+        {
+            UseClock();
+            var op = new FakeOperation { TimeBase = PlayModeTimeBase.Gameplay };
+            PlayModeScheduler.Start(op, Id, out _);
+            Tick(1);
+            int frame = 2;
+            for (double t = 1000; t < PlayModeScheduler.StallWindowMs; t += 1000) { clockMs = t; Tick(frame++, 0.1f, 0f); }
+            StringAssert.Contains("\"state\":\"running\"", PlayModeScheduler.Status(Id));
+            clockMs += 1000;
+            Tick(frame, 0.1f, 0f);
+            var status = PlayModeScheduler.Status(Id);
+            StringAssert.Contains("\"state\":\"failed\"", status);
+            StringAssert.Contains("\"reason\":\"stalled\",\"stall\":{\"reason\":\"time_scale_zero\",\"stalledMs\":15000}", status);
+            Assert.AreEqual(PlayModeEndReason.Stalled, op.CleanupReason);
+            Assert.AreEqual("operation_stalled", op.FailureCode);
+            StringAssert.Contains("Time.timeScale is 0", op.FailureMessage);
+        }
+
+        [Test]
+        public void SlowGameplayClock_NeverStalls()
+        {
+            UseClock();
+            var op = new FakeOperation { TimeBase = PlayModeTimeBase.Gameplay };
+            PlayModeScheduler.Start(op, Id, out _);
+            // 0.1 % of real time for a simulated minute: slow, never stalled.
+            for (int frame = 1; frame <= 60; frame++) { clockMs = frame * 1000; Tick(frame, 1f, 0.001f); }
+            var status = PlayModeScheduler.Status(Id);
+            StringAssert.Contains("\"state\":\"running\"", status);
+            StringAssert.Contains("\"stalledMs\":0", status);
+        }
+
+        [Test]
+        public void PausedEditor_StallsFromTheUpdateCheck_AndAShortPauseContinues()
+        {
+            UseClock();
+            var op = new FakeOperation();
+            PlayModeScheduler.Start(op, Id, out _);
+            Tick(1);
+            PlayModeScheduler.IsPausedOverride = () => true;
+            // Paused for 10 s: no frame runs, only the Editor update checks.
+            for (int i = 0; i < 10; i++) { clockMs += 1000; PlayModeScheduler.CheckStalls(); }
+            StringAssert.Contains("\"stalledMs\":10000", PlayModeScheduler.Status(Id));
+            // Resumed: the next frame is progress and the stall clock restarts.
+            PlayModeScheduler.IsPausedOverride = () => false;
+            clockMs += 100;
+            Tick(2);
+            StringAssert.Contains("\"stalledMs\":0", PlayModeScheduler.Status(Id));
+            PlayModeScheduler.IsPausedOverride = () => true;
+            for (int i = 0; i < 14; i++) { clockMs += 1000; PlayModeScheduler.CheckStalls(); }
+            StringAssert.Contains("\"state\":\"running\"", PlayModeScheduler.Status(Id));
+            clockMs += 1000;
+            PlayModeScheduler.CheckStalls();
+            var status = PlayModeScheduler.Status(Id);
+            StringAssert.Contains("\"stall\":{\"reason\":\"editor_paused\"", status);
+            Assert.AreEqual(1, op.Cleanups);
+            Assert.IsFalse(PlayModeScheduler.AnyRunning);
+        }
+
+        [Test]
+        public void AHitchCountsOneClampedStep_AndNoFramesIsNamed()
+        {
+            UseClock();
+            var op = new FakeOperation();
+            PlayModeScheduler.Start(op, Id, out _);
+            Tick(1);
+            clockMs += 60_000;      // the main thread was blocked for a minute
+            PlayModeScheduler.CheckStalls();
+            StringAssert.Contains("\"stalledMs\":" + PlayModeScheduler.MaxStallStepMs, PlayModeScheduler.Status(Id));
+            for (int i = 0; i < 14; i++) { clockMs += 1000; PlayModeScheduler.CheckStalls(); }
+            StringAssert.Contains("\"stall\":{\"reason\":\"no_frames\"", PlayModeScheduler.Status(Id));
+        }
+
         // --- gesture operation over the scheduler --------------------------------
 
-        private static GestureOperation NewGesture(RecordingBackend backend, string fingers)
+        private static GestureOperation NewGesture(RecordingBackend backend, string fingers, string time = "realtime")
         {
             InputBackends.InputSystem = backend;
-            var plan = GesturePlan.Parse(fingers, "screen", "realtime", out var code, out var message);
+            var plan = GesturePlan.Parse(fingers, "screen", time, out var code, out var message);
             Assert.IsNotNull(plan, message);
             plan.ResolvePoints(new Vector2(1000, 800), null, out _, out _);
             var route = new RouteDecision { Environment = new InputEnvironment() };
@@ -281,6 +379,24 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             Assert.AreEqual(DeviceTouchPhase.Canceled, backend.Queued[backend.Queued.Count - 1].Phase);
             PlayModeScheduler.EndAll(PlayModeEndReason.DomainReload);
             Assert.AreEqual(1, backend.Queued.FindAll(q => q.Phase == DeviceTouchPhase.Canceled).Count, "released exactly once");
+        }
+
+        [Test]
+        public void GameplayGestureAtTimeScaleZero_StallsAndReleasesTheHeldFinger()
+        {
+            UseClock();
+            var backend = new RecordingBackend();
+            var op = NewGesture(backend, "[{\"path\":[{\"at_ms\":0,\"x\":10,\"y\":10},{\"at_ms\":500,\"x\":20,\"y\":20}]}]", "gameplay");
+            PlayModeScheduler.Start(op, Id, out _);
+            Tick(1);
+            Assert.AreEqual(DeviceTouchPhase.Began, backend.Queued[0].Phase);
+            int frame = 2;
+            for (int i = 0; i < 15; i++) { clockMs += 1000; Tick(frame++, 0.1f, 0f); }
+            var status = PlayModeScheduler.Status(Id);
+            StringAssert.Contains("\"reason\":\"stalled\",\"stall\":{\"reason\":\"time_scale_zero\"", status);
+            StringAssert.Contains("\"error_code\":\"gesture_stalled\"", status);
+            StringAssert.Contains("Every held finger was released", status);
+            Assert.AreEqual(DeviceTouchPhase.Canceled, backend.Queued[backend.Queued.Count - 1].Phase);
         }
 
         [Test]

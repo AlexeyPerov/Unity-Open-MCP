@@ -13,7 +13,7 @@
 // Cost. A capture is a GPU blit + synchronous read-back of the native frame
 // (optionally scaled / cropped) into managed memory; PNG encoding happens after
 // the last capture, spread over later ticks (so encoding never delays a
-// scheduled capture). A cut-short series (cancel, exit play, failure) encodes
+// scheduled capture). A cut-short series (cancel, exit play, stall, failure) encodes
 // what it holds for at most FlushBudgetMs on the main thread; frames not
 // written by then are reported `dropped: "flush_budget"`. Bounded: at most
 // MaxFrames captures and MaxRawBytes of pixels held at once; files go to the
@@ -667,6 +667,32 @@ namespace UnityOpenMcpBridge.Screenshot
         }
 
         // ---- result ---------------------------------------------------------
+
+        // While the series runs: the counts and the frames captured so far
+        // (frame / play_time / elapsed_ms; files come with the terminal result).
+        internal void AppendProgressJson(StringBuilder sb, string timeBase)
+        {
+            sb.Append("{\"schedule\":").Append(BridgeJson.EscapeString(Schedule.Mode));
+            sb.Append(",\"time\":").Append(BridgeJson.EscapeString(timeBase));
+            sb.Append(",\"requested\":").Append(Schedule.Slots.Count);
+            sb.Append(",\"captured\":").Append(Taken);
+            sb.Append(",\"frames\":[");
+            bool any = false;
+            foreach (var s in Schedule.Slots)
+            {
+                if (!s.Taken) continue;
+                if (any) sb.Append(',');
+                any = true;
+                sb.Append("{\"index\":").Append(s.Index);
+                if (s.AtMs >= 0) sb.Append(",\"at_ms\":").Append(PlaytestJson.Num(s.AtMs));
+                else sb.Append(",\"at_frame\":").Append(s.AtFrame);
+                sb.Append(",\"frame\":").Append(s.Frame);
+                sb.Append(",\"play_time\":").Append(PlaytestJson.Num(s.PlayTime, 4));
+                sb.Append(",\"elapsed_ms\":").Append(PlaytestJson.Num(s.ElapsedMs));
+                sb.Append('}');
+            }
+            sb.Append("]}");
+        }
 
         internal void AppendJson(StringBuilder sb, string timeBase)
         {

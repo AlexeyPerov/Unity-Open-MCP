@@ -359,12 +359,24 @@ of `EarlyUpdate`; it owns per-frame timing (`realtime` or `gameplay`),
 cancellation, and cleanup. `POST /playmode-operations` takes
 `{"action":"status"|"cancel","operation_id":"…"}` and answers the same snapshot;
 terminal snapshots (`succeeded`, `failed`, `cancelled`, `orphaned`) carry the
-tool's `result` and a `reason` (`completed`, `failed`, `cancelled`,
+tool's `result` and a `reason` (`completed`, `failed`, `stalled`, `cancelled`,
 `play_mode_exited`, `domain_reload`, `editor_quit`). An operation that ends on its
 own terms without success (a wait that timed out, a game exception under
 `fail_on`) is `failed` with reason `failed` and a stable `result.error_code`
 (`timed_out`, `exception_thrown`, `error_logged`, `condition_error`,
-`capture_failed`). Every terminal path runs the operation's cleanup exactly once,
+`capture_failed`). `progress` carries `clock`, `elapsedMs` / `expectedMs` (for a
+capture series the schedule offset reached, 0 while `start_on` waits),
+`realtimeMs`, `stalledMs`, `ticks`, `startFrame`, `lastFrame` and, while a
+capture series runs, `series` (`requested`, `captured`, the frames captured so
+far). An operation that makes no progress for 15 s of wall-clock time — no
+frame runs (a paused Editor; also checked from the Editor update loop), or its
+`gameplay` clock stands still at `Time.timeScale` 0 — is `failed` with reason
+`stalled` (wire contract 11), `stall: {reason, stalledMs}` (`editor_paused`, `time_scale_zero`,
+`no_frames`, `no_progress`) and the tool's `result.error_code`
+(`capture_series_stalled`, `wait_stalled`, `gesture_stalled`); slow progress
+never ends one, and a main-thread hitch counts at most 1 s. Waiting for
+`start_on`, an `at_frames` schedule and encoding always count as progress.
+Every terminal path runs the operation's cleanup exactly once,
 which releases held input, restores a wait's `Time.timeScale` and encodes the
 frames a series captured so far (not on reload / quit). The caller supplies
 `operation_id` (8–64 letters, digits, dashes) to make a retried start idempotent;

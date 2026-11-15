@@ -5,8 +5,10 @@
 // diff metrics inside a metric region, the memory budget, the cleanup flush
 // budget, PNG + contact-sheet output (upright, labelled with frame and time),
 // argument validation, a start_on trigger arming the schedule at the frame that
-// made it true (and reported as it fired), the wall-clock bound of a gameplay
-// schedule that stops advancing, registration and the batch refusal.
+// made it true (and reported as it fired), the stall end of a gameplay
+// schedule that stops advancing (a slow one never stalls; an at_frames one
+// moves at timeScale 0), progress (schedule offset, frames captured so far),
+// registration and the batch refusal.
 // Grabbing the real play-mode view is covered by the manual checklist.
 using System;
 using System.Collections.Generic;
@@ -40,6 +42,8 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             PlayModeScheduler.EndAll(PlayModeEndReason.Cancelled);
             PlayModeScheduler.ResetForTests();
             PlayModeScheduler.IsPlayingOverride = null;
+            PlayModeScheduler.IsPausedOverride = null;
+            PlayModeScheduler.ClockOverride = null;
             PlayModeScheduler.SuppressPlayerLoop = false;
             if (Directory.Exists(folder)) Directory.Delete(folder, true);
         }
@@ -381,29 +385,91 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             finally { Object.DestroyImmediate(go); }
         }
 
-        [Test]
-        public void GameplaySchedule_ThatStopsAdvancing_TimesOutKeepingItsFrames()
+        private CaptureSeriesOperation StartSeries(string atMs, string atFrames, string id, out double[] clock)
         {
-            var op = CaptureSeriesTool.Create("[0, 1000]", null, null, null, null, null, "gameplay", null, null, null, null,
+            var op = CaptureSeriesTool.Create(atMs, null, null, atFrames, null, null, "gameplay", null, null, null, null,
                 false, 1, 0, 0, out var refusal);
             Assert.IsNotNull(op, refusal);
-            double wall = 0;
-            op.WallClockOverride = () => wall;
             op.Recorder.GrabOverride = _ => (Solid(4, 4, 7), 4, 4);
             op.Recorder.FolderOverride = folder;
-            Assert.AreEqual(CaptureSeriesTool.CaptureWallLimitMs(1000), op.CaptureLimitMs);
-            Assert.IsNotNull(PlayModeScheduler.Start(op, "series-0000-0004", out var error), error);
-            // Time.timeScale 0: game time never reaches the 1000 ms slot.
-            for (int f = 1; f <= 3; f++) PlayModeScheduler.TickAll(f, 0f, 0.1f, 0f, 4, 4, 0);
+            var c = new double[1];
+            clock = c;
+            PlayModeScheduler.ClockOverride = () => c[0];
+            Assert.IsNotNull(PlayModeScheduler.Start(op, id, out var error), error);
+            return op;
+        }
+
+        [Test]
+        public void GameplaySchedule_AtTimeScaleZero_StallsAfterTheWindowKeepingItsFrames()
+        {
+            StartSeries("[0, 1000]", null, "series-0000-0004", out var clock);
+            PlayModeScheduler.TickAll(1, 0.1f, 0.1f, 1f, 4, 4, 0.1);
+            PlayModeScheduler.TickAll(2, 0.1f, 0.1f, 1f, 4, 4, 0.2);    // slot 0 captured
+            // Time.timeScale 0: frames run, game time never reaches the 1000 ms slot.
+            int f = 3;
+            for (int i = 0; i < 14; i++) { clock[0] += 1000; PlayModeScheduler.TickAll(f++, 0f, 0.1f, 0f, 4, 4, 0.2); }
             StringAssert.Contains("\"state\":\"running\"", PlayModeScheduler.Status("series-0000-0004"));
-            wall = op.CaptureLimitMs + 1;
-            PlayModeScheduler.TickAll(4, 0f, 0.1f, 0f, 4, 4, 0);
+            clock[0] += 1000;
+            PlayModeScheduler.TickAll(f, 0f, 0.1f, 0f, 4, 4, 0.2);
             var status = PlayModeScheduler.Status("series-0000-0004");
             StringAssert.Contains("\"state\":\"failed\"", status);
-            StringAssert.Contains("\"outcome\":\"capture_timed_out\",\"error_code\":\"timed_out\"", status);
+            StringAssert.Contains("\"stall\":{\"reason\":\"time_scale_zero\"", status);
+            StringAssert.Contains("\"outcome\":\"stalled\",\"error_code\":\"capture_series_stalled\"", status);
             StringAssert.Contains("\"captured\":1", status);
-            StringAssert.Contains("\"index\":1,\"at_ms\":1000,\"captured\":false,\"dropped\":\"timed_out\"", status);
+            StringAssert.Contains("\"index\":1,\"at_ms\":1000,\"captured\":false,\"dropped\":\"stalled\"", status);
+            StringAssert.Contains("frame-000", status, "the frame captured before the stall is written");
             Assert.IsNull(PlayModeScheduler.RunningWithResource(CaptureSeriesOperation.Resource), "the series lock is released");
+        }
+
+        [Test]
+        public void SlowGameplaySchedule_IsNeverStalled_AndReportsItsProgress()
+        {
+            StartSeries("[0, 50]", null, "series-0000-0005", out var clock);
+            // 0.1 % of real time: 1 ms of game time per wall-clock second.
+            int f = 1;
+            PlayModeScheduler.TickAll(f++, 0.001f, 1f, 0.001f, 4, 4, 0);
+            for (int i = 0; i < 30; i++) { clock[0] += 1000; PlayModeScheduler.TickAll(f++, 0.001f, 1f, 0.001f, 4, 4, 0); }
+            var running = PlayModeScheduler.Status("series-0000-0005");
+            StringAssert.Contains("\"state\":\"running\"", running);
+            StringAssert.Contains("\"stalledMs\":0", running);
+            StringAssert.Contains("\"elapsedMs\":30,\"expectedMs\":50", running);
+            StringAssert.Contains("\"series\":{\"schedule\":\"at_ms\",\"time\":\"gameplay\",\"requested\":2,\"captured\":1,\"frames\":[{\"index\":0,\"at_ms\":0,\"frame\":1,", running);
+            for (int i = 0; i < 25; i++) { clock[0] += 1000; PlayModeScheduler.TickAll(f++, 0.001f, 1f, 0.001f, 4, 4, 0); }
+            var status = PlayModeScheduler.Status("series-0000-0005");
+            StringAssert.Contains("\"state\":\"succeeded\"", status);
+            StringAssert.Contains("\"captured\":2", status);
+        }
+
+        [Test]
+        public void AtFramesSchedule_MovesAtTimeScaleZero()
+        {
+            StartSeries(null, "[0, 20]", "series-0000-0006", out var clock);
+            for (int f = 1; f <= 23; f++) { clock[0] += 1000; PlayModeScheduler.TickAll(f, 0f, 0.1f, 0f, 4, 4, 0); }
+            var status = PlayModeScheduler.Status("series-0000-0006");
+            StringAssert.Contains("\"state\":\"succeeded\"", status);
+            StringAssert.Contains("\"captured\":2", status);
+        }
+
+        [Test]
+        public void PausedEditor_StallsTheSeries_WhileStartOnWaitsNever()
+        {
+            var op = CaptureSeriesTool.Create("[0]", null, null, null, "{\"frames\":1000}", 600000, "gameplay", null, null, null, null,
+                false, 1, 0, 0, out var refusal);
+            Assert.IsNotNull(op, refusal);
+            double clock = 0;
+            PlayModeScheduler.ClockOverride = () => clock;
+            PlayModeScheduler.Start(op, "series-0000-0007", out _);
+            // Waiting for start_on at timeScale 0 is progress: the trigger is evaluated every frame.
+            for (int f = 1; f <= 20; f++) { clock += 1000; PlayModeScheduler.TickAll(f, 0f, 0.1f, 0f, 4, 4, 0); }
+            var waiting = PlayModeScheduler.Status("series-0000-0007");
+            StringAssert.Contains("\"state\":\"running\"", waiting);
+            StringAssert.Contains("\"elapsedMs\":0,", waiting);
+            PlayModeScheduler.IsPausedOverride = () => true;
+            for (int i = 0; i < 15; i++) { clock += 1000; PlayModeScheduler.CheckStalls(); }
+            var status = PlayModeScheduler.Status("series-0000-0007");
+            StringAssert.Contains("\"stall\":{\"reason\":\"editor_paused\"", status);
+            StringAssert.Contains("\"error_code\":\"capture_series_stalled\"", status);
+            StringAssert.Contains("The Editor is paused", status);
         }
 
         [Test]

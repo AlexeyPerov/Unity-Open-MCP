@@ -185,7 +185,7 @@ probe (edit mode OK) → click by object_id → step → screenshot
 // → waits for the end: { "status":"ok", "backend":["legacy_touch"], "frames":{...},
 //     "trace":[{ "keyframe":0, "frame":1838, "point":[540,1200], "uiTopHit":null }, ...],
 //     "errors":[], "released":true }
-// Longer than 40 s → returns a job_id: wait with unity_open_mcp_jobs. Cancel releases the finger.
+// Longer than 40 s, or slower than its schedule → returns a job_id: wait with unity_open_mcp_jobs. Cancel releases the finger.
 ```
 
 Read state at the trace's `frame`s (e.g. the controlled object's position) to
@@ -275,7 +275,7 @@ review image). Needs a rendering Game view / Simulator; Unity 6.
 | `legacy_multitouch_unsupported` | Finger ≠ 0 or several fingers on `legacy_touch` | One finger (id 0), or `backend: "input_system"` with a `Touchscreen` |
 | `unsupported_editor_version` | Legacy injection not enabled for this Editor version | Use `routing: "dispatch"` / `invoke_method` |
 | `playmode_operation_busy` | A gesture is still driving input | Wait for it or cancel its job |
-| `gesture_timeout` / `play_mode_exited` | Gesture did not finish inline / play mode ended mid-gesture | Fingers were released; rerun (long ones via `jobs`) |
+| `gesture_stalled` / `play_mode_exited` | No progress for 15 s (paused Editor, `gameplay` time at timeScale 0; see `error.reason`) / play mode ended mid-gesture | Fingers were released; fix the cause, then rerun. A slow gesture is not an error: it answers `status: "running"` + `job_id` → `jobs wait` |
 | `invalid_key` / `invalid_action` | Bad enum value | See the tool's enum |
 
 ## Limits

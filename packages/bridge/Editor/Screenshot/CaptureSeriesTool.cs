@@ -25,12 +25,6 @@ namespace UnityOpenMcpBridge.Screenshot
         internal const int DefaultStartTimeoutMs = 30_000;
         internal const int MaxStartTimeoutMs = 600_000;
         internal const double EncodeBudgetMsPerTick = 40;
-        internal const double CaptureWallMarginMs = 30_000;
-
-        // Wall-clock bound for a started gameplay-time schedule (its offsets
-        // stop advancing while Time.timeScale is 0): twice its length plus a
-        // margin. Shared with inputsim_gesture capture_at_ms.
-        internal static double CaptureWallLimitMs(double scheduleMs) => 2 * scheduleMs + CaptureWallMarginMs;
 
         [BridgeTool(ToolName,
             Title = "Senses: Capture Series",
@@ -172,12 +166,9 @@ namespace UnityOpenMcpBridge.Screenshot
         private ConditionTick? previous;
         private int startFrame = -1, lastFrame = -1, ticks;
         private string outcome;
-        private double startWallMs, armedWallMs;
+        private double startWallMs;
         private string firedJson;           // start_on.fired, frozen when the schedule started
-        private bool captureTimedOut;
-        // Only a gameplay-time at_ms / every_ms schedule can stop advancing; at_frames
-        // and realtime always progress while frames run.
-        internal readonly double CaptureLimitMs;
+        private double reachedMs;           // schedule offset reached since the series started (progress)
 
         // Test seam: wall-clock ms since the call.
         internal Func<double> WallClockOverride;
@@ -191,13 +182,35 @@ namespace UnityOpenMcpBridge.Screenshot
             this.startTimeoutMs = startTimeoutMs;
             TimeBase = timeBase;
             ExpectedDurationMs = schedule.LastMs;
-            CaptureLimitMs = timeBase == PlayModeTimeBase.Gameplay && schedule.Mode != "at_frames"
-                ? CaptureSeriesTool.CaptureWallLimitMs(schedule.LastMs) : double.PositiveInfinity;
             Phase = hasTrigger ? "waiting for start_on" : "capturing";
         }
 
         public override string Kind => CaptureSeriesTool.ToolName;
         public override string ExclusiveResource => Resource;
+        public override string StalledCode => "capture_series_stalled";
+        protected internal override string StallNote =>
+            "The frames captured so far are kept and the rest dropped (\"stalled\"). Unpause the Editor or restore Time.timeScale, " +
+            "or capture a frozen game with time \"realtime\" or at_frames.";
+
+        // Waiting for start_on (bounded by its own wall-clock start_timeout_ms),
+        // an at_frames schedule and encoding move on every frame; an at_ms /
+        // every_ms schedule moves with its clock (gameplay: while Time.timeScale > 0).
+        protected internal override bool Progressed(PlayModeFrame frame, double clockStepMs) =>
+            !Recorder.Armed || Recorder.CapturesDone || Recorder.Schedule.Mode == "at_frames" || clockStepMs > 0;
+
+        // progress.elapsedMs is the schedule offset reached (0 while start_on
+        // waits; at_frames in frames at 30 fps, the unit of ExpectedDurationMs).
+        protected internal override double ProgressMs(double clockElapsedMs) =>
+            !Recorder.Armed ? 0 : Recorder.CapturesDone ? ExpectedDurationMs : Math.Min(reachedMs, ExpectedDurationMs);
+
+        // progress.series: requested / captured and the frames captured so far
+        // (no files yet: encoding runs after the last capture).
+        protected internal override void AppendProgress(StringBuilder sb)
+        {
+            sb.Append(",\"series\":");
+            Recorder.AppendProgressJson(sb, TimeBase == PlayModeTimeBase.Gameplay ? "gameplay" : "realtime");
+        }
+
         internal ConditionWatcher Watcher => watcher;
         internal string Outcome => outcome;
         private double WallMs => WallClockOverride?.Invoke() ?? wall.Elapsed.TotalMilliseconds;
@@ -230,7 +243,6 @@ namespace UnityOpenMcpBridge.Screenshot
                 if (!hasTrigger)
                 {
                     Recorder.Arm(now);
-                    armedWallMs = WallMs;
                 }
                 else
                 {
@@ -250,7 +262,6 @@ namespace UnityOpenMcpBridge.Screenshot
                         var fire = watcher.FiredNode()?.Fire ?? watcher.Root.Fire;
                         var at = watcher.TickAt(fire.Frame);
                         Recorder.Arm(at ?? new ConditionTick { Frame = fire.Frame, ElapsedMs = fire.ElapsedMs, RealtimeMs = fire.RealtimeMs, PlayTime = fire.PlayTime });
-                        armedWallMs = WallMs;
                         // The trigger is settled: report it as it fired and stop
                         // evaluating it (a state that later turns false, or a
                         // predicate polled during the captures, would rewrite it).
@@ -273,12 +284,10 @@ namespace UnityOpenMcpBridge.Screenshot
             if (Recorder.Armed && !Recorder.CapturesDone)
             {
                 Recorder.Observe(now, previous, frame.ScreenWidth, frame.ScreenHeight);
-                if (!Recorder.CapturesDone && WallMs - armedWallMs >= CaptureLimitMs)
-                {
-                    // Gameplay time stopped advancing: keep and encode what was captured.
-                    Recorder.StopCaptures("timed_out");
-                    captureTimedOut = true;
-                }
+                var start = Recorder.BaseTick;
+                reachedMs = Math.Max(0, Recorder.Schedule.Mode == "at_frames"
+                    ? (now.Frame - start.Frame) * 1000.0 / 30.0
+                    : now.ElapsedMs - start.ElapsedMs);
             }
             previous = now;
 
@@ -292,15 +301,7 @@ namespace UnityOpenMcpBridge.Screenshot
             if (!Recorder.CapturesDone) return false;
             Phase = "encoding";
             if (!Recorder.EncodeStep(CaptureSeriesTool.EncodeBudgetMsPerTick)) return false;
-            if (captureTimedOut)
-            {
-                outcome = "capture_timed_out";
-                FailureCode = "timed_out";
-                FailureMessage = "The gameplay-time schedule did not reach its last offset within " +
-                                 PlaytestJson.Num(CaptureLimitMs, 0) + " ms of wall-clock time (Time.timeScale 0?); " +
-                                 "the frames captured so far are kept, the rest are dropped: timed_out. Use time: realtime for a paused game.";
-            }
-            else outcome = Recorder.CaptureError != null ? "partial" : "completed";
+            outcome = Recorder.CaptureError != null ? "partial" : "completed";
             return true;
         }
 
@@ -308,11 +309,13 @@ namespace UnityOpenMcpBridge.Screenshot
         {
             watcher.Detach();
             if (outcome == null) outcome = PlayModeScheduler.ReasonName(reason);
+            // Slots not yet due when the series stood still are reported dropped.
+            if (reason == PlayModeEndReason.Stalled) Recorder.StopCaptures("stalled");
             // Keep the evidence captured so far when the series was cut short
             // in a live Editor, within the recorder's flush budget (this runs
-            // inside a cancel request or the exit-play callback); a reload /
-            // quit drops it.
-            if (reason == PlayModeEndReason.Cancelled || reason == PlayModeEndReason.PlayModeExited || reason == PlayModeEndReason.Failed)
+            // inside a cancel request, a stall check or the exit-play
+            // callback); a reload / quit drops it.
+            if (PlayModeScheduler.IsCutShort(reason))
             {
                 try { Recorder.FlushPending(); } catch (Exception) { /* best effort */ }
             }
@@ -325,7 +328,7 @@ namespace UnityOpenMcpBridge.Screenshot
             sb.Append("{\"kind\":").Append(BridgeJson.EscapeString(Kind));
             sb.Append(",\"reason\":").Append(BridgeJson.EscapeString(PlayModeScheduler.ReasonName(reason)));
             sb.Append(",\"outcome\":").Append(BridgeJson.EscapeString(outcome ?? PlayModeScheduler.ReasonName(reason)));
-            if (FailureCode != null && reason == PlayModeEndReason.Failed)
+            if (FailureCode != null && PlayModeScheduler.CarriesFailureCode(reason))
                 sb.Append(",\"error_code\":").Append(BridgeJson.EscapeString(FailureCode));
             if (error != null) sb.Append(",\"error\":").Append(BridgeJson.EscapeString(error));
             sb.Append(",\"series\":");

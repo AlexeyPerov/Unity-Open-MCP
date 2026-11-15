@@ -1,8 +1,9 @@
 // playtest_wait / capture_series / gesture capture_at_ms: schema contract,
 // group placement, the worst-case estimate that decides inline vs job, the
-// inline route (terminal result, the operation's own failure code, stalled
-// cancel), the job route for long runs, the jobs adapter's failure code and
-// the live client's unclamped tool-owned timeout_ms.
+// inline route (terminal result, the operation's own failure code), the job
+// route for long runs, the hand-over of a slow operation to a job that observes
+// it (never a cancel), the bridge's stall end, the jobs adapter's failure code
+// and the live client's unclamped tool-owned timeout_ms.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -16,7 +17,7 @@ import type { BridgeEventStream } from "./event-stream.js";
 import { groupFor } from "./capabilities/tool-groups.js";
 import { recommendGroups } from "./capabilities/intent-groups.js";
 import { JobManager } from "./jobs/job-manager.js";
-import { playmodeEstimateMs, playmodeFailureCode, playmodeOperation, PLAYMODE_OPERATION_TOOLS } from "./jobs/adapters.js";
+import { playmodeEstimateMs, playmodeFailureCode, playmodeOperation, playmodeShouldHandOver, PlaymodeProgress, PLAYMODE_OPERATION_TOOLS } from "./jobs/adapters.js";
 import { CONDITION_LEAVES, OBJECT_STATES } from "./tools/playtest-conditions.js";
 import { PLAYTEST_WAIT_INLINE_LIMIT_MS } from "./tools/playtest-wait.js";
 
@@ -272,5 +273,145 @@ test("a series job lost to a domain reload is orphaned, never restarted", async 
   manager.register(SERIES, playmodeOperation(SERIES, PLAYMODE_OPERATION_TOOLS.get(SERIES)!, () => live, { pollIntervalMs: 1 }));
   const done = await manager.wait(owner, manager.start(owner, SERIES, { every_ms: 500, duration_ms: 60_000 }).job_id, 2000);
   assert.equal(done.state, "orphaned");
+  assert.equal(calls.starts.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Slow is not stalled: the remaining-time estimate, the hand-over to a job that
+// observes the running operation, and the bridge's stall end
+// ---------------------------------------------------------------------------
+
+test("progress estimate: the operation clock's rate against the wall clock, measured from when it began moving", () => {
+  let now = 0;
+  const progress = new PlaymodeProgress(250, () => now);
+  const snap = (elapsedMs: number, phase = "capturing") => ({ phase, progress: { clock: "gameplay", elapsedMs, expectedMs: 8000, stalledMs: 0 } });
+  // A start_on wait: nothing moves, so there is no rate yet.
+  assert.equal(progress.observe(snap(0, "waiting for start_on")).etaMs, null);
+  now = 5_000;
+  assert.equal(progress.observe(snap(0, "waiting for start_on")).rate, null);
+  now = 6_000;
+  const first = progress.observe(snap(250));
+  assert.equal(first.rate, 0.25, "measured from the last still sample");
+  now = 8_000;
+  const e = progress.observe(snap(750));
+  assert.equal(e.rate, 0.25);
+  assert.equal(e.spanMs, 3_000);
+  assert.equal(e.etaMs, (8000 - 750) / 0.25 + 250);
+  // Encoding: the schedule is done, only the tail remains.
+  assert.equal(progress.observe(snap(8000, "encoding")).etaMs, 250);
+});
+
+test("hand-over decision: a slow operation goes to a job early, a fast one stays inline, the limit always hands over", () => {
+  const est = (rate: number | null, etaMs: number | null, spanMs: number) =>
+    ({ clock: "gameplay", phase: "capturing", elapsedMs: 100, expectedMs: 8000, rate, etaMs, stalledMs: 0, spanMs });
+  assert.equal(playmodeShouldHandOver(est(0.25, 31_600, 1_200), 1_500, 50_000), false, "fits inside the limit");
+  assert.equal(playmodeShouldHandOver(est(0.1, 79_000, 1_200), 1_500, 50_000), true, "slow: decided early");
+  assert.equal(playmodeShouldHandOver(est(0.1, 79_000, 400), 600, 50_000), false, "the rate is not trusted yet");
+  assert.equal(playmodeShouldHandOver(est(null, null, 0), 10_000, 50_000), false, "no progress: the bridge decides");
+  assert.equal(playmodeShouldHandOver(est(null, null, 0), 50_000, 50_000), true, "the inline limit always hands over");
+  assert.equal(playmodeShouldHandOver(est(0.1, 79_000, 5_000), 5_000, Infinity), false, "the CLI waits inline throughout");
+  const still = { ...est(0.05, 160_000, 12_000), stalledMs: 9_000 };
+  assert.equal(playmodeShouldHandOver(still, 12_000, 50_000), false, "standing still (paused): the bridge's stall window decides, not a decaying rate");
+  assert.equal(playmodeShouldHandOver(still, 50_000, 50_000), true);
+});
+
+/** Fake bridge whose running series advances at `rate` × wall time until `finish()` makes it terminal. */
+function slowSeries(rate: number, expectedMs: number) {
+  const calls = { starts: [] as Array<Record<string, unknown>>, status: 0, cancel: 0 };
+  const startedAt = Date.now();
+  let terminal: Record<string, unknown> | null = null;
+  const live = {
+    route: async (name: string, args: Record<string, unknown>) => {
+      calls.starts.push(args);
+      return text({ status: "ok", operation: { operation_id: args.operation_id, kind: name, state: "running" } });
+    },
+    playmodeOperation: async (args: { action: string; operation_id: string }) => {
+      if (args.action === "cancel") { calls.cancel++; return { operation_id: args.operation_id, state: "cancelled", reason: "cancelled" }; }
+      calls.status++;
+      if (terminal) return { operation_id: args.operation_id, ...terminal };
+      const elapsedMs = Math.min(expectedMs, (Date.now() - startedAt) * rate);
+      return { operation_id: args.operation_id, state: "running", phase: "capturing",
+        progress: { clock: "gameplay", elapsedMs, expectedMs, stalledMs: 0, ticks: calls.status,
+          series: { schedule: "at_ms", time: "gameplay", requested: 1, captured: 0, frames: [] } } };
+    },
+  } as unknown as LiveClient;
+  return { live, calls, finish: (state: Record<string, unknown>) => { terminal = state; } };
+}
+
+test("a series slower than its schedule continues as a job under its operation id: never cancelled, never restarted", async t => {
+  const fake = slowSeries(0.01, 8000);
+  const r = router(fake.live); t.after(() => r.jobs.close());
+  const began = Date.now();
+  const result = await r.route(SERIES, { at_ms: [8000], time: "gameplay" });
+  const out = body(result);
+  assert.notEqual(result.isError, true);
+  assert.ok(Date.now() - began < 5_000, "decided early from the observed rate, not at the inline limit");
+  assert.equal(out.status, "running");
+  assert.equal(out.job_id, out.operationId, "the job continues the operation under its id");
+  assert.equal(out.job.operation, SERIES);
+  assert.equal(out.series.requested, 1);
+  assert.equal(out.progress.clock, "gameplay");
+  assert.ok(out.progress.eta_ms > 50_000, "the answer says when to expect the result");
+  assert.match(out.note, /continues as job/);
+  assert.match(out.agentNextSteps[0], /Do not start the capture series again/);
+  assert.equal(fake.calls.cancel, 0, "a progressing series is never cancelled");
+  // The job observes the running operation; finishing it completes the job with the series payload.
+  fake.finish({ state: "succeeded", reason: "completed", phase: "succeeded",
+    result: { outcome: "completed", series: { requested: 1, captured: 1, time: "gameplay", frames: [{ index: 0, file: "/tmp/f.png" }] } } });
+  const done = body(await r.routeJobs({ action: "wait", job_id: out.job_id, timeout_ms: 5000 }));
+  assert.equal(done.state, "succeeded");
+  assert.equal(done.result.series.captured, 1);
+  assert.equal(done.result.series.time, "gameplay");
+  assert.equal(fake.calls.starts.length, 1, "the job started nothing");
+  assert.equal(fake.calls.cancel, 0);
+});
+
+test("a stalled series fails with capture_series_stalled, why it stood still, and the frames it kept", async t => {
+  const stalled = { state: "failed", reason: "stalled", stall: { reason: "time_scale_zero", stalledMs: 15000 },
+    result: { outcome: "stalled", error_code: "capture_series_stalled", error: "Time.timeScale is 0: gameplay time did not advance for 15000 ms while frames ran.",
+      series: { requested: 2, captured: 1, frames: [{ index: 0, file: "/f0.png" }, { index: 1, captured: false, dropped: "stalled" }] } } };
+  const { live, calls } = fakeLive([{ state: "running", phase: "capturing" }, stalled]);
+  const r = router(live); t.after(() => r.jobs.close());
+  const result = await r.route(SERIES, { at_ms: [0, 1000] });
+  const out = body(result);
+  assert.equal(result.isError, true);
+  assert.equal(out.error.code, "capture_series_stalled");
+  assert.equal(out.error.reason, "time_scale_zero");
+  assert.match(out.error.message, /Time\.timeScale is 0/);
+  assert.equal(out.series.captured, 1);
+  assert.match(out.agentNextSteps[0], /Time\.timeScale is 0/);
+  assert.equal(calls.cancel, 0, "the bridge ended it; the route never cancels");
+});
+
+test("a series cut short by leaving play mode keeps its frames with play_mode_exited", async t => {
+  const { live } = fakeLive([{ state: "cancelled", reason: "play_mode_exited",
+    result: { outcome: "play_mode_exited", series: { requested: 4, captured: 2, frames: [] } } }]);
+  const r = router(live); t.after(() => r.jobs.close());
+  const out = body(await r.route(SERIES, { at_ms: [0, 100, 200, 300] }));
+  assert.equal(out.error.code, "play_mode_exited");
+  assert.match(out.error.message, /2 of 4 frames were captured and are kept/);
+  assert.equal(out.series.captured, 2);
+  assert.match(out.agentNextSteps[0], /Play mode ended mid-series/);
+});
+
+test("a stalled series job fails with the bridge's code; its result names the stall", async t => {
+  const manager = new JobManager(); t.after(() => manager.close());
+  const { live } = fakeLive([{ state: "failed", reason: "stalled", stall: { reason: "editor_paused", stalledMs: 15000 },
+    result: { outcome: "stalled", error_code: "capture_series_stalled", error: "The Editor is paused: no play-mode frame ran for 15000 ms." } }]);
+  manager.register(SERIES, playmodeOperation(SERIES, PLAYMODE_OPERATION_TOOLS.get(SERIES)!, () => live, { pollIntervalMs: 1 }));
+  const done = await manager.wait(owner, manager.start(owner, SERIES, { at_ms: [60_000] }).job_id, 2000);
+  assert.equal(done.state, "failed");
+  assert.equal(done.error?.code, "capture_series_stalled");
+  assert.match(done.error!.message, /Editor is paused/);
+  assert.equal((done.result as Record<string, any>).operation.stall.reason, "editor_paused");
+});
+
+test("the CLI (no host timeout) runs a long play-mode operation inline instead of as a job", async t => {
+  const { live, calls } = fakeLive([{ state: "succeeded", reason: "completed", result: { outcome: "completed", series: { captured: 61 } } }]);
+  const r = router(live); t.after(() => r.jobs.close());
+  r.waitInlineLimitMs = Number.POSITIVE_INFINITY;
+  const out = body(await r.route(SERIES, { every_ms: 500, duration_ms: 30_000 }));
+  assert.equal(out.status, "ok");
+  assert.equal(out.series.captured, 61);
   assert.equal(calls.starts.length, 1);
 });

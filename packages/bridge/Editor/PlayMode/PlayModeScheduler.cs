@@ -17,6 +17,16 @@
 // Records are domain-local. A reload drops them (after Cleanup); MCP then sees
 // `operation_not_found` and reports the job as lost, never restarts it.
 //
+// Zero progress ends an operation; slow progress never does. Every tick asks the
+// operation whether it moved forward (by default: its clock advanced, so a
+// gameplay-clock operation stands still while Time.timeScale is 0). Wall-clock
+// time without progress accumulates in steps clamped to MaxStallStepMs (a
+// main-thread hitch does not count in full), also from EditorApplication.update,
+// which keeps running while the Editor is paused and the player loop is not.
+// After StallWindowMs the operation ends `failed` with reason `stalled`, its own
+// StalledCode and `stall.reason` (editor_paused | time_scale_zero | no_frames |
+// no_progress); its cleanup keeps what it has (frames already captured).
+//
 // fd hygiene (packages/bridge/AGENTS.md): this scheduler owns no OS handles —
 // no Timer, WaitHandle, socket or stream. The player-loop system is removed in
 // beforeAssemblyReload so the native loop never calls into an unloaded domain.
@@ -33,7 +43,7 @@ namespace UnityOpenMcpBridge
 {
     internal enum PlayModeTimeBase { Realtime, Gameplay }
 
-    internal enum PlayModeEndReason { Completed, Failed, Cancelled, PlayModeExited, DomainReload, EditorQuit }
+    internal enum PlayModeEndReason { Completed, Failed, Cancelled, PlayModeExited, DomainReload, EditorQuit, Stalled }
 
     // One scheduler tick as seen by an operation.
     internal struct PlayModeFrame
@@ -65,8 +75,22 @@ namespace UnityOpenMcpBridge
         public string FailureCode;
         public string FailureMessage;
 
+        // Error code of a `stalled` end (no progress for StallWindowMs).
+        public virtual string StalledCode => "operation_stalled";
+        // What the stalled end kept / released, appended to its message.
+        protected internal virtual string StallNote => "";
+
         // Called on every player-loop frame while running. Return true when done.
         protected internal abstract bool Tick(PlayModeFrame frame);
+        // Whether the tick that just ran moved the operation forward;
+        // `clockStepMs` is this tick's step of the operation's own clock.
+        // Default: the clock advanced (a gameplay clock does not at timeScale 0).
+        protected internal virtual bool Progressed(PlayModeFrame frame, double clockStepMs) => clockStepMs > 0;
+        // progress.elapsedMs of a status snapshot, in the unit of
+        // ExpectedDurationMs (default: the scheduler clock since the first tick).
+        protected internal virtual double ProgressMs(double clockElapsedMs) => clockElapsedMs;
+        // Extra members inside the snapshot's `progress` object, each with a leading comma.
+        protected internal virtual void AppendProgress(StringBuilder sb) { }
         // Called exactly once on every terminal path. Must release held input and
         // restore any temporarily changed Editor/runtime state.
         protected internal abstract void Cleanup(PlayModeEndReason reason);
@@ -80,6 +104,12 @@ namespace UnityOpenMcpBridge
         internal const int MaxRecords = 64;
         internal static readonly TimeSpan Retention = TimeSpan.FromMinutes(30);
         internal const double MaxFrameStepMs = 250;
+        // Wall-clock time without progress that ends an operation as stalled.
+        internal const double StallWindowMs = 15_000;
+        // Largest step one stall check adds (a hitch between two checks is not a stall).
+        internal const double MaxStallStepMs = 1_000;
+        // No tick for this long while not paused: the player loop is not running.
+        internal const double NoFramesAfterMs = 2_000;
 
         private sealed class Entry
         {
@@ -96,6 +126,12 @@ namespace UnityOpenMcpBridge
             internal int LastFrame = -1;
             internal double ElapsedMs;
             internal double RealtimeMs;
+            // Stall accounting on the scheduler clock (NowMs).
+            internal double StalledMs;
+            internal double LastCheckMs = double.NaN;
+            internal double LastTickMs = double.NaN;
+            internal float LastTimeScale = 1f;
+            internal string StallReason;
             internal bool Terminal => State != "running" && State != "cancel_requested";
         }
 
@@ -107,16 +143,26 @@ namespace UnityOpenMcpBridge
 
         // Test seams. Production leaves them null/false.
         internal static Func<bool> IsPlayingOverride;
+        internal static Func<bool> IsPausedOverride;
+        // Scheduler wall clock in ms (stall accounting).
+        internal static Func<double> ClockOverride;
         internal static bool SuppressPlayerLoop;
+
+        // A Stopwatch owns no OS handle (fd hygiene).
+        private static readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 
         static PlayModeScheduler()
         {
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
             EditorApplication.quitting += OnQuitting;
+            // Runs while the Editor is paused (the player loop does not).
+            EditorApplication.update += CheckStalls;
         }
 
         private static bool IsPlaying => IsPlayingOverride?.Invoke() ?? EditorApplication.isPlaying;
+        private static bool IsPaused => IsPausedOverride?.Invoke() ?? EditorApplication.isPaused;
+        internal static double NowMs => ClockOverride?.Invoke() ?? clock.Elapsed.TotalMilliseconds;
 
         internal static bool AnyRunning => entries.Values.Any(e => !e.Terminal);
 
@@ -172,7 +218,7 @@ namespace UnityOpenMcpBridge
                 return null;
             }
             op.Id = id;
-            var entry = new Entry { Op = op };
+            var entry = new Entry { Op = op, LastCheckMs = NowMs };
             entries[id] = entry;
             Install();
             return Snapshot(entry);
@@ -236,11 +282,13 @@ namespace UnityOpenMcpBridge
             {
                 if (entry.Terminal) continue;
                 var op = entry.Op;
-                double realStep = entry.FirstTick ? 0 : Math.Min(Math.Max(unscaledDeltaTime, 0f) * 1000.0, MaxFrameStepMs);
-                double gameStep = entry.FirstTick ? 0 : Math.Min(Math.Max(deltaTime, 0f) * 1000.0, MaxFrameStepMs * Math.Max(1f, timeScale));
+                bool first = entry.FirstTick;
+                double realStep = first ? 0 : Math.Min(Math.Max(unscaledDeltaTime, 0f) * 1000.0, MaxFrameStepMs);
+                double gameStep = first ? 0 : Math.Min(Math.Max(deltaTime, 0f) * 1000.0, MaxFrameStepMs * Math.Max(1f, timeScale));
+                double clockStep = op.TimeBase == PlayModeTimeBase.Gameplay ? gameStep : realStep;
                 entry.RealtimeMs += realStep;
-                entry.ElapsedMs += op.TimeBase == PlayModeTimeBase.Gameplay ? gameStep : realStep;
-                if (entry.FirstTick) entry.StartFrame = frameCount;
+                entry.ElapsedMs += clockStep;
+                if (first) entry.StartFrame = frameCount;
                 entry.FirstTick = false;
                 entry.LastFrame = frameCount;
                 var frame = new PlayModeFrame
@@ -261,7 +309,18 @@ namespace UnityOpenMcpBridge
                     Finish(entry, PlayModeEndReason.Failed, ex.GetType().Name + ": " + ex.Message);
                     continue;
                 }
-                if (!done) continue;
+                if (!done)
+                {
+                    var now = NowMs;
+                    entry.LastTickMs = now;
+                    entry.LastTimeScale = timeScale;
+                    bool progressed;
+                    try { progressed = first || op.Progressed(frame, clockStep); }
+                    catch (Exception) { progressed = true; }
+                    Account(entry, progressed, now);
+                    if (entry.StalledMs >= StallWindowMs) Stall(entry, now);
+                    continue;
+                }
                 if (op.FailureCode == null) Finish(entry, PlayModeEndReason.Completed, null);
                 else Finish(entry, PlayModeEndReason.Failed, op.FailureMessage ?? op.FailureCode);
             }
@@ -272,13 +331,84 @@ namespace UnityOpenMcpBridge
             }
         }
 
+        // ------------------------------------------------------------------
+        // Stalls
+        // ------------------------------------------------------------------
+
+        // Add the wall-clock time since the entry's last check (clamped) to its
+        // time without progress, or reset it when the operation progressed.
+        private static void Account(Entry entry, bool progressed, double now)
+        {
+            double step = double.IsNaN(entry.LastCheckMs) ? 0 : Math.Min(Math.Max(now - entry.LastCheckMs, 0), MaxStallStepMs);
+            entry.LastCheckMs = now;
+            entry.StalledMs = progressed ? 0 : entry.StalledMs + step;
+        }
+
+        // EditorApplication.update: time passes for running operations even when
+        // no player-loop frame runs (a paused Editor). Internal for tests.
+        internal static void CheckStalls()
+        {
+            if (entries.Count == 0 || !IsPlaying) return;
+            var now = NowMs;
+            bool ended = false;
+            foreach (var entry in entries.Values)
+            {
+                if (entry.Terminal) continue;
+                Account(entry, false, now);
+                if (entry.StalledMs < StallWindowMs) continue;
+                Stall(entry, now);
+                ended = true;
+            }
+            if (ended && !AnyRunning && installed) Uninstall();
+        }
+
+        // Why an operation stood still (unit-tested).
+        internal static string ClassifyStall(bool paused, double sinceLastTickMs, float timeScale)
+        {
+            if (paused) return "editor_paused";
+            if (double.IsNaN(sinceLastTickMs) || sinceLastTickMs > NoFramesAfterMs) return "no_frames";
+            return timeScale <= 0f ? "time_scale_zero" : "no_progress";
+        }
+
+        internal static string StallMessage(string reason, double stalledMs)
+        {
+            var ms = Num(Math.Round(stalledMs));
+            switch (reason)
+            {
+                case "editor_paused": return "The Editor is paused: no play-mode frame ran for " + ms + " ms.";
+                case "time_scale_zero": return "Time.timeScale is 0: gameplay time did not advance for " + ms + " ms while frames ran.";
+                case "no_frames": return "No play-mode frame ran for " + ms + " ms (the player loop is not running).";
+                default: return "The operation made no progress for " + ms + " ms while frames ran.";
+            }
+        }
+
+        private static void Stall(Entry entry, double now)
+        {
+            var reason = ClassifyStall(IsPaused, now - entry.LastTickMs, entry.LastTimeScale);
+            entry.StallReason = reason;
+            var op = entry.Op;
+            op.FailureCode = op.StalledCode;
+            var note = op.StallNote;
+            op.FailureMessage = StallMessage(reason, entry.StalledMs) + (string.IsNullOrEmpty(note) ? "" : " " + note);
+            Finish(entry, PlayModeEndReason.Stalled, op.FailureMessage);
+        }
+
+        // Cut short in a live Editor: cleanup keeps the evidence gathered so far.
+        internal static bool IsCutShort(PlayModeEndReason reason) =>
+            reason == PlayModeEndReason.Cancelled || reason == PlayModeEndReason.PlayModeExited ||
+            reason == PlayModeEndReason.Failed || reason == PlayModeEndReason.Stalled;
+
+        // Ended on its own terms without success: the result carries error_code.
+        internal static bool CarriesFailureCode(PlayModeEndReason reason) =>
+            reason == PlayModeEndReason.Failed || reason == PlayModeEndReason.Stalled;
+
         private static void Finish(Entry entry, PlayModeEndReason reason, string error)
         {
             if (entry.Terminal) return;
             entry.Reason = ReasonName(reason);
             entry.Error = error;
             entry.State = reason == PlayModeEndReason.Completed ? "succeeded"
-                : reason == PlayModeEndReason.Failed ? "failed"
+                : reason == PlayModeEndReason.Failed || reason == PlayModeEndReason.Stalled ? "failed"
                 : reason == PlayModeEndReason.DomainReload || reason == PlayModeEndReason.EditorQuit ? "orphaned"
                 : "cancelled";
             try { entry.Op.Cleanup(reason); }
@@ -297,6 +427,7 @@ namespace UnityOpenMcpBridge
                 case PlayModeEndReason.Cancelled: return "cancelled";
                 case PlayModeEndReason.PlayModeExited: return "play_mode_exited";
                 case PlayModeEndReason.DomainReload: return "domain_reload";
+                case PlayModeEndReason.Stalled: return "stalled";
                 default: return "editor_quit";
             }
         }
@@ -403,19 +534,38 @@ namespace UnityOpenMcpBridge
             sb.Append(",\"state\":").Append(BridgeJson.EscapeString(entry.State));
             sb.Append(",\"phase\":").Append(BridgeJson.EscapeString(entry.Terminal ? entry.State : entry.Op.Phase));
             sb.Append(",\"reason\":").Append(entry.Reason == null ? "null" : BridgeJson.EscapeString(entry.Reason));
+            if (entry.StallReason != null)
+                sb.Append(",\"stall\":{\"reason\":").Append(BridgeJson.EscapeString(entry.StallReason))
+                  .Append(",\"stalledMs\":").Append(Num(entry.StalledMs)).Append('}');
             // The scheduler clock belongs to progress.elapsedMs, so it is named
             // there (progress.clock). A top-level `time` here clashed with the
             // tool result's own `time` — playtest_wait reported "realtime" (its
             // wall-clock timeout) and "gameplay" (its ms conditions) side by side.
             sb.Append(",\"progress\":{\"clock\":").Append(BridgeJson.EscapeString(entry.Op.TimeBase == PlayModeTimeBase.Gameplay ? "gameplay" : "realtime"));
-            sb.Append(",\"elapsedMs\":").Append(Num(entry.ElapsedMs));
+            sb.Append(",\"elapsedMs\":").Append(Num(SafeProgressMs(entry)));
             sb.Append(",\"expectedMs\":").Append(Num(entry.Op.ExpectedDurationMs));
+            sb.Append(",\"realtimeMs\":").Append(Num(entry.RealtimeMs));
+            sb.Append(",\"stalledMs\":").Append(Num(entry.StalledMs));
             sb.Append(",\"ticks\":").Append(entry.Ticks);
             sb.Append(",\"startFrame\":").Append(entry.StartFrame);
-            sb.Append(",\"lastFrame\":").Append(entry.LastFrame).Append('}');
+            sb.Append(",\"lastFrame\":").Append(entry.LastFrame);
+            // Operation detail while it runs (a terminal result carries its own).
+            if (!entry.Terminal)
+            {
+                var detail = new StringBuilder();
+                try { entry.Op.AppendProgress(detail); sb.Append(detail); }
+                catch (Exception) { /* progress detail is best effort; never a broken snapshot */ }
+            }
+            sb.Append('}');
             sb.Append(",\"result\":").Append(entry.Result ?? "null");
             sb.Append('}');
             return sb.ToString();
+        }
+
+        private static double SafeProgressMs(Entry entry)
+        {
+            try { return entry.Op.ProgressMs(entry.ElapsedMs); }
+            catch (Exception) { return entry.ElapsedMs; }
         }
 
         internal static string Num(double v) => Math.Round(v, 2).ToString("0.##", CultureInfo.InvariantCulture);

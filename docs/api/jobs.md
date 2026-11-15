@@ -108,13 +108,30 @@ keyframe or capture, a wait's `timeout_ms`, a capture series' `start_on` wait pl
 its schedule plus encoding — and returns that job snapshot; an `operation_id`
 passed to that direct call becomes the job's `idempotency_key`.
 
+A direct call whose operation turns out slower than its schedule (`gameplay` time
+at a low `Time.timeScale`, a slow frame rate) is never cancelled: once the
+observed pace (`progress.elapsedMs` against wall time) says it cannot end inside
+the inline limit (40 s plus 10 s of grace), or at that limit, the call hands the
+running operation to a job and answers `status: "running"` with the `job_id`
+(the operation id itself), `progress` (`clock`, `elapsed_ms`, `expected_ms`,
+`rate`, `eta_ms`), what it has so far (a series: `series` with the frames
+captured) and the `operation` snapshot. That job is a continuation: it observes
+the running operation and starts nothing (a record lost to a reload fails it as
+`operation_lost`, never a restart), and it holds no execution slot. The CLI has
+no host timeout and its jobs end with the process, so there these operations run
+inline for their whole duration.
+
 The adapter starts the operation through the tool (the bridge validates, routes
 input and refuses as usual — a refusal is a `failed` job: `error` carries the
 bridge's code and message, `result.error` the full refusal object with its detail
 such as `detected`, and `result.agentNextSteps` the tool's recovery steps), then
 polls `POST /playmode-operations`.
-Progress reports the scheduler phase and `elapsedMs / expectedMs` as a fraction;
-the operation snapshot names the clock of `progress.elapsedMs` as
+Progress reports the scheduler phase, `elapsedMs / expectedMs` as a fraction and
+`progress.detail`: `clock`, `elapsed_ms`, `expected_ms`, `rate` (operation-clock
+ms per wall ms), `eta_ms` (remaining wall time, encoding included), `stalled_ms`
+and, for a capture series, `captured` / `requested` (for a series `elapsed_ms`
+is the schedule offset reached, 0 while `start_on` waits). The operation
+snapshot names the clock of `progress.elapsedMs` as
 `progress.clock` (`realtime` for a wait, whose `timeout_ms` is wall-clock). The
 tool result's own `time` is the clock of its `ms` conditions / keyframes and of
 its `elapsed_ms`; `realtime_ms` is always wall time.
@@ -127,14 +144,20 @@ restored a wait's time scale. Terminal results keep the operation snapshot under
 its own terms without success fails with the operation's `error_code` — a wait
 that `timed_out` or stopped on `exception_thrown` / `error_logged`, a series whose
 `start_on` timed out — and keeps the full result (every leaf's last observed
-state). Exiting play mode ends a running operation; the job then fails with code
-`play_mode_exited` (cleanup has run: input released, time scale restored, frames
-captured so far written). Records are domain-local: after a domain reload the
+state). An operation that made no progress for 15 s (a paused Editor, a
+`gameplay` clock at `Time.timeScale` 0) is ended by the bridge and the job fails
+with the tool's stalled code (`capture_series_stalled`, `wait_stalled`,
+`gesture_stalled`); `result.operation.stall.reason` says why (`editor_paused`,
+`time_scale_zero`, `no_frames`, `no_progress`). Exiting play mode ends a running
+operation; the job then fails with code `play_mode_exited` (cleanup has run:
+input released, time scale restored, frames captured so far written; the message
+says how many). Records are domain-local: after a domain reload the
 bridge answers `operation_not_found` (its cleanup already ran) and the job becomes
 `orphaned` — never restarted. A status poll that cannot reach the bridge is retried
 with backoff (lifecycle `disconnected` until it answers); after 2 minutes without
 an answer, or without a terminal state by the deadline — 10 minutes, or the
-operation's worst case plus 2 minutes when longer (a 10-minute wait) — the job is
+operation's worst case plus 2 minutes when longer (a 10-minute wait), counted
+from the last progress, so a slow operation is never cut off — the job is
 `orphaned` (a cancel is sent first).
 
 ## Editor waits

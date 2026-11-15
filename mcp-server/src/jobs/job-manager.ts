@@ -5,11 +5,18 @@ export type JobState = typeof JOB_STATES[number];
 export interface JobOwner { project: string; agent: string; port?: number }
 export interface JobError { code: string; message: string }
 export type JobOutcome = { state: "succeeded"; result: unknown } | { state: "failed"; error: JobError; result?: unknown } | { state: "cancelled"; result?: unknown };
+/** Progress a job reports: a phase, an optional fraction in [0,1] and adapter-specific numbers. */
+export interface JobProgress { phase: string; fraction?: number; detail?: Record<string, unknown> }
 export interface JobContext {
   jobId: string;
   owner: JobOwner;
   signal: AbortSignal;
-  report(progress: { phase: string; fraction?: number }): void;
+  /**
+   * True when the job continues work a call already started under the job's
+   * id (`start` with `continueId`): the adapter observes it and starts nothing.
+   */
+  continuation: boolean;
+  report(progress: JobProgress): void;
   /** Call on disconnect/reload. Only operation-specific ownership evidence permits continuation. */
   lifecycle(state: "connected" | "reloading" | "disconnected", evidence: string, ownershipProven: boolean): void;
 }
@@ -36,7 +43,7 @@ export interface JobSnapshot {
   updated_at: number;
   started_at: number | null;
   finished_at: number | null;
-  progress: { phase: string; fraction?: number } | null;
+  progress: JobProgress | null;
   cancellable: boolean;
   lifecycle: { state: "not_started" | "connected" | "reloading" | "disconnected"; evidence: string | null };
   events: Array<{ at: number; kind: string; detail: string }>;
@@ -52,6 +59,9 @@ interface Entry {
   operation: JobOperation;
   controller: AbortController;
   executing: boolean;
+  /** Holds no execution slot: an observer operation, or a continuation of work already running. */
+  observer: boolean;
+  continuation: boolean;
   waiters: Set<() => void>;
 }
 export class JobManagerError extends Error {
@@ -144,10 +154,27 @@ export class JobManager {
     if (!entry || !sameOwner(owner, entry.view.owner)) throw new JobManagerError("job_not_found", "Job is unknown, expired, or belongs to another project/agent.");
     return entry;
   }
-  start(owner: JobOwner, name: string, args: Record<string, unknown>, key?: string): JobSnapshot {
+  /**
+   * `options.continueId` continues work a call already started under that id
+   * (a play-mode operation that outlived its inline window): the job takes the
+   * id as its own job_id, its adapter observes the work instead of starting it,
+   * and it holds no execution slot (the work is running whatever the queue).
+   * A repeated continuation of the same id returns the existing job.
+   */
+  start(owner: JobOwner, name: string, args: Record<string, unknown>, key?: string, options: { continueId?: string } = {}): JobSnapshot {
     if (this.closed) throw new JobManagerError("jobs_closed", "Job manager is closed.");
     if (!owner.project || !owner.agent) throw new JobManagerError("invalid_job_owner", "Project and agent identity are required.");
     this.cleanup();
+    const continueId = options.continueId;
+    if (continueId !== undefined) {
+      if (!continueId.trim() || continueId.length > 256) throw new JobManagerError("invalid_arguments", "continueId must be a nonempty id of at most 256 characters.");
+      const held = this.entries.get(continueId);
+      if (held) {
+        if (!sameOwner(owner, held.view.owner) || held.view.operation !== name)
+          throw new JobManagerError("idempotency_conflict", "The id already names a different job.");
+        return this.snapshot(held);
+      }
+    }
     const safeArgs = this.copy(args);
     const fingerprint = canonical({ name, args: safeArgs });
     const scopedKey = key === undefined ? undefined : this.scopedKey(owner, key);
@@ -165,12 +192,14 @@ export class JobManager {
     // Never evict unexpired idempotency records to make room for new starts.
     if (this.entries.size >= this.options.maxJobs) throw new JobManagerError("job_capacity", "Job retention capacity reached; retry after terminal records expire.");
     const at = this.now();
+    const continuation = continueId !== undefined;
     const entry: Entry = {
-      view: { job_id: randomUUID(), operation: name, owner: { ...owner }, state: "queued", created_at: at, updated_at: at,
+      view: { job_id: continueId ?? randomUUID(), operation: name, owner: { ...owner }, state: "queued", created_at: at, updated_at: at,
         started_at: null, finished_at: null, progress: null, cancellable: operation.cancellable,
         lifecycle: { state: "not_started", evidence: null }, events: [] },
       sequence: ++this.sequence, key: scopedKey, fingerprint, args: safeArgs, operation,
-      controller: new AbortController(), executing: false, waiters: new Set(),
+      controller: new AbortController(), executing: false,
+      observer: operation.observer === true || continuation, continuation, waiters: new Set(),
     };
     this.entries.set(entry.view.job_id, entry);
     if (scopedKey !== undefined) this.keys.set(scopedKey, entry.view.job_id);
@@ -242,8 +271,8 @@ export class JobManager {
     if (this.closed) return;
     for (const entry of this.entries.values()) {
       if (entry.view.state !== "queued") continue;
-      const observer = entry.operation.observer === true;
-      const active = [...this.entries.values()].filter(e => e.executing && (e.operation.observer === true) === observer);
+      const observer = entry.observer;
+      const active = [...this.entries.values()].filter(e => e.executing && e.observer === observer);
       if (observer) {
         if (active.length >= this.options.maxObservers) continue;
       } else {
@@ -259,14 +288,18 @@ export class JobManager {
   }
   private async execute(entry: Entry): Promise<void> {
     const context: JobContext = {
-      jobId: entry.view.job_id, owner: { ...entry.view.owner }, signal: entry.controller.signal,
+      jobId: entry.view.job_id, owner: { ...entry.view.owner }, signal: entry.controller.signal, continuation: entry.continuation,
       report: progress => {
         if (terminal(entry.view.state)) return;
         if (typeof progress.phase !== "string" || (progress.fraction !== undefined && (!Number.isFinite(progress.fraction) || progress.fraction < 0 || progress.fraction > 1)))
           throw new JobManagerError("invalid_progress", "Progress requires a phase and optional fraction in [0,1].");
+        const phaseChanged = entry.view.progress?.phase !== progress.phase.slice(0, 1024);
         entry.view.progress = { phase: progress.phase.slice(0, 1024),
-          ...(progress.fraction === undefined ? {} : { fraction: progress.fraction }) };
-        this.event(entry, "progress", progress.phase);
+          ...(progress.fraction === undefined ? {} : { fraction: progress.fraction }),
+          ...(progress.detail === undefined ? {} : { detail: this.copy(progress.detail) }) };
+        // Numbers move on every poll; the event log records phases.
+        if (phaseChanged || progress.detail === undefined) this.event(entry, "progress", progress.phase);
+        else entry.view.updated_at = this.now();
       },
       lifecycle: (state, evidence, ownershipProven) => {
         if (terminal(entry.view.state)) return;
