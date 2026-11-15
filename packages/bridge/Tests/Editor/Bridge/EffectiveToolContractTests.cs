@@ -353,6 +353,23 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("\"skippedReason\":\"mutation_failed\"", json);
         }
 
+        // The project-wide operations with a declared default scope; every
+        // other mutating tool without paths_hint is refused paths_hint_required.
+        [Test]
+        public void DefaultScope_OnlyForTheDeclaredProjectWideOperations()
+        {
+            CollectionAssert.AreEqual(new[] { "Assets" }, EffectiveToolContract.DefaultScope("unity_open_mcp_recompile_scripts", "{}"));
+            CollectionAssert.AreEqual(new[] { "Assets" }, EffectiveToolContract.DefaultScope("unity_open_mcp_assets_refresh", "{}"));
+            Assert.IsNull(EffectiveToolContract.DefaultScope("unity_open_mcp_assets_refresh", "{\"whole_project\":false}"));
+            CollectionAssert.AreEqual(new[] { "Assets" }, EffectiveToolContract.DefaultScope("unity_open_mcp_execute_menu", "{\"menu_path\":\"Assets/Refresh\"}"));
+            Assert.IsNull(EffectiveToolContract.DefaultScope("unity_open_mcp_execute_menu", "{\"menu_path\":\"Edit/Play\"}"));
+            CollectionAssert.AreEqual(new[] { "Packages/com.example.pkg" },
+                EffectiveToolContract.DefaultScope("unity_open_mcp_reimport_package", "{\"package_id\":\"com.example.pkg@1.2.3\"}"));
+            Assert.IsNull(EffectiveToolContract.DefaultScope("unity_open_mcp_reimport_package", "{}"));
+            Assert.IsNull(EffectiveToolContract.DefaultScope("unity_open_mcp_execute_csharp", "{\"code\":\"return 1;\"}"));
+            Assert.IsNull(EffectiveToolContract.DefaultScope("unity_open_mcp_gameobject_create", "{\"name\":\"X\"}"));
+        }
+
         private static string UpgradeBatch(string args) =>
             "{\"commands\":[{\"tool\":\"unity_open_mcp_upgrade\",\"params\":" + args + "}]}";
 

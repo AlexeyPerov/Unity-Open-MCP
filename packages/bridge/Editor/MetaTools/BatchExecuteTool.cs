@@ -93,33 +93,32 @@ namespace UnityOpenMcpBridge.MetaTools
         // advice, EXCEPT for the client shape the field report hit: a client that
         // does not re-issue tools/list on `tools/list_changed` cannot see a tool
         // that manage_tools just activated, so the top-level call it is pointed at
-        // does not exist for it, and the refusal is a dead end. Where a concrete
-        // meta-tool equivalent exists, name it — an agent can always reach
-        // execute_csharp / invoke_method (they are in the always-visible `core`
-        // group). Returns null when there is no honest one-liner, in which case
-        // the caller gets the top-level advice alone rather than a made-up
-        // workaround.
-        private static string NestedAlternativeHint(string tool)
+        // does not exist for it, and the refusal is a dead end. Where a tool has a
+        // call worth spelling out, name it — the always-visible
+        // manage_tools {"action":"invoke"} reaches an activated tool through its
+        // normal route (compile wait, results-file poll and all). Returns null
+        // when there is no honest one-liner, in which case the caller gets the
+        // top-level advice alone rather than a made-up workaround.
+        //
+        // Every call a hint names must be one the bridge accepts as written:
+        // BatchExecuteToolTests runs the hint of every known tool through
+        // EffectiveToolContract (scope, read_only, snippet classification), so
+        // a hint cannot again recommend a call that answers paths_hint_required.
+        internal static string NestedAlternativeHint(string tool)
         {
             switch (tool)
             {
                 case "unity_open_mcp_recompile_scripts":
-                    return "If your client cannot see the top-level tool (a manage_tools activation " +
-                           "whose tools/list_changed it ignored), the equivalent is one " +
-                           "execute_csharp call with read_only:true — " +
-                           "`UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation(); " +
-                           "return \"requested\";` — then wait with unity_open_mcp_editor_status " +
-                           "{\"wait_until\":\"idle\"}, which reports the compile status and error count. " +
-                           "Scripts written outside Unity that it has not imported yet need " +
-                           "unity_open_mcp_assets_refresh first; the top-level tool does that import itself " +
-                           "and waits for the compile.";
+                    return "After the batch, call unity_open_mcp_recompile_scripts {} on its own: it needs no " +
+                           "paths_hint, imports scripts written outside Unity, waits for the compile and answers " +
+                           "with its result. If your client cannot see that tool (a manage_tools activation whose " +
+                           "tools/list_changed it ignored), make the same call through " +
+                           "unity_open_mcp_manage_tools {\"action\":\"invoke\",\"tool_name\":\"unity_open_mcp_recompile_scripts\",\"arguments\":{}}.";
                 case "unity_senses_run_tests":
-                    return "If your client cannot see the top-level tool (a manage_tools activation " +
-                           "whose tools/list_changed it ignored), invoke the test class or method " +
-                           "directly with invoke_method — NUnit assertion failures come back verbatim " +
-                           "in the error — or drive UnityEditor.TestTools.TestRunner.Api.TestRunnerApi " +
-                           "from an execute_csharp snippet. Neither gets the results-file poll, so " +
-                           "keep each call inside the transport timeout.";
+                    return "If your client cannot see that tool (a manage_tools activation whose " +
+                           "tools/list_changed it ignored), make the same call through " +
+                           "unity_open_mcp_manage_tools {\"action\":\"invoke\",\"tool_name\":\"unity_senses_run_tests\",\"arguments\":{\"test_class\":\"<Namespace.TestClass>\"}} " +
+                           "— that route polls the run to its result like the top-level call.";
                 default:
                     return null;
             }

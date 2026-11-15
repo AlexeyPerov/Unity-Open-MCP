@@ -46,12 +46,13 @@ import {
   buildGUIDIndex,
   buildScriptIndex,
   buildScriptIndexForQuery,
-  buildGuidAndScriptIndex,
   buildGuidScriptAndNameIndex,
   collectFiles,
   collectMetaTriples,
   parallelMap,
   resolveGUIDPaths,
+  resolveGuids,
+  BUILTIN_RESOURCE_GUIDS,
   safeReadMetaGUID,
   scriptGUIDs,
   walkFiles,
@@ -106,6 +107,8 @@ export interface OfflineReadResult {
   source: "offline";
   /** GUID resolutions used to construct the model, including missing references. */
   dependencies: Array<[string, string | null]>;
+  /** The dependencies that are component scripts (m_Script): resolved in packages too. */
+  scriptGuids: string[];
 }
 
 // ===========================================================================
@@ -128,9 +131,9 @@ export async function readAssetOffline(
   // refs still parse via the YAML path (binary blobs are skipped).
   if (parseKind === "json") {
     const wanted = new Set(findGUIDs(data));
-    const guidIndex = await buildGUIDIndex(opts.projectRoot, wanted);
+    const { guidIndex } = await resolveGuids(opts.projectRoot, wanted);
     const model = buildJsonAssetModel(data, assetPath, kind, guid, guidIndex, opts.fieldLimit);
-    return { model, source: "offline", dependencies: [...wanted].map(g => [g, guidIndex.get(g) ?? null]) };
+    return { model, source: "offline", dependencies: [...wanted].map(g => [g, guidIndex.get(g) ?? null]), scriptGuids: [] };
   }
 
   const parsed = parseAsset(data);
@@ -143,19 +146,23 @@ export async function readAssetOffline(
   // Previously this was buildScriptIndex (which itself walks the meta tree
   // via buildGUIDIndex) followed by another buildGUIDIndex walk — every cold
   // read_asset paid two back-to-back walks of the same tree.
+  //
+  // resolveGuids also resolves the built-in resources and, for the component
+  // scripts Assets/ does not own, the project's packages.
   const wantedScripts = scriptGUIDs(parsed);
   const wantedGUIDs = collectFieldGUIDs(parsed);
-  const { guidIndex, scriptIndex } = await buildGuidAndScriptIndex(
+  const { guidIndex, scriptIndex, unverifiedScripts, unverifiedReason } = await resolveGuids(
     opts.projectRoot,
     wantedGUIDs,
     wantedScripts,
   );
 
-  const integrity = runYamlIntegrityChecks(parsed, guidIndex);
+  const integrity = runYamlIntegrityChecks(parsed, guidIndex, { scripts: unverifiedScripts, reason: unverifiedReason });
   return {
     model: { ...buildAssetModel(parsed, scriptIndex, guidIndex, opts.fieldLimit), ...(integrity ? { integrity } : {}) },
     source: "offline",
     dependencies: [...new Set([...wantedScripts, ...wantedGUIDs])].map(g => [g, guidIndex.get(g) ?? null]),
+    scriptGuids: [...wantedScripts],
   };
 }
 
@@ -538,11 +545,11 @@ export async function findReferencesOffline(
     };
   }
 
-  // If only GUID was given, resolve target path from .meta index.
+  // If only GUID was given, resolve target path from .meta index (a script
+  // GUID Assets/ does not own may be a package script).
   if (targetPath === "") {
-    const guidIndex = await buildGUIDIndex(
-      opts.projectRoot, new Set([targetGuid]),
-    );
+    const wanted = new Set([targetGuid]);
+    const { guidIndex } = await resolveGuids(opts.projectRoot, wanted, wanted);
     targetPath = guidIndex.get(targetGuid) ?? "";
   }
 
@@ -727,6 +734,11 @@ export interface DependenciesOfflineResult {
   forwardCount: number;
   /** Distinct unresolved forward-edge target GUIDs (the broken_dependency set). */
   brokenForwardGuids: string[];
+  /** Script edges that resolve nowhere on disk while a package the project uses
+   * is not on disk here: they may belong to it. Absent when there are none. */
+  unverifiedForwardGuids?: string[];
+  /** Why `unverifiedForwardGuids` could not be verified. */
+  unverifiedReason?: string;
   /** Dependency cycles passing through the queried asset (each a path list). */
   cycles: string[][];
   reverseDependencies: ReverseEdge[];
@@ -799,13 +811,16 @@ export async function dependenciesOffline(
     return emptyDependencies(targetPath, "", detail);
   }
   if (targetPath === "") {
-    const idx = await buildGUIDIndex(opts.projectRoot, new Set([targetGuid]));
+    const wanted = new Set([targetGuid]);
+    const { guidIndex: idx } = await resolveGuids(opts.projectRoot, wanted, wanted);
     targetPath = idx.get(targetGuid) ?? "";
   }
 
   // ---- Forward edges ----
   let forwardEdges: ForwardEdge[] = [];
   let brokenGuids: string[] = [];
+  let unverifiedGuids: string[] = [];
+  let unverifiedReason: string | undefined;
   let cycles: string[][] = [];
   let forwardSkipped: string | undefined;
 
@@ -823,8 +838,14 @@ export async function dependenciesOffline(
       parsed.path = targetPath;
       forwardEdges = collectForwardEdges(parsed);
       const wanted = new Set(forwardEdges.map((e) => e.guid));
-      const guidIndex = await buildGUIDIndex(opts.projectRoot, wanted);
-      brokenGuids = resolveForwardEdges(forwardEdges, guidIndex);
+      const scripts = new Set(forwardEdges.filter((e) => e.kind === "script").map((e) => e.guid));
+      const resolution = await resolveGuids(opts.projectRoot, wanted, scripts);
+      // A script edge that may belong to a package not on disk here is
+      // unverified, not broken (the same verdict read_asset gives it).
+      const unresolved = resolveForwardEdges(forwardEdges, resolution.guidIndex);
+      brokenGuids = unresolved.filter((g) => !resolution.unverifiedScripts.has(g));
+      unverifiedGuids = unresolved.filter((g) => resolution.unverifiedScripts.has(g));
+      if (unverifiedGuids.length > 0) unverifiedReason = resolution.unverifiedReason;
       if (forwardEdges.length > 0) {
         cycles = await detectCyclesOffline(
           targetPath,
@@ -936,6 +957,7 @@ export async function dependenciesOffline(
     forwardDependencies: displayForward,
     forwardCount: forwardEdges.length,
     brokenForwardGuids: brokenGuids,
+    ...(unverifiedGuids.length > 0 ? { unverifiedForwardGuids: unverifiedGuids, unverifiedReason } : {}),
     cycles,
     reverseDependencies: displayReverse,
     reverseCount: totalCount,
@@ -1311,6 +1333,18 @@ async function computeTransitiveImpactFromGraph(
 // scanIntegrityOffline — project-wide offline integrity scan (T24.2 item 3).
 // ===========================================================================
 
+function integrityEntries(
+  assetPath: string,
+  perAsset: ReturnType<typeof runYamlIntegrityChecks>,
+): IntegrityScanEntry[] {
+  return perAsset.map((issue) => ({
+    path: assetPath,
+    code: issue.code,
+    severity: issue.severity,
+    detail: issue.detail,
+  }));
+}
+
 export interface IntegrityScanEntry {
   /** The asset/.meta path the issue is reported on. */
   path: string;
@@ -1416,6 +1450,13 @@ export async function scanIntegrityOffline(
   // separate buildGUIDIndex walk. The asset-body reads below are inherent to
   // scanning (each YAML asset must be parsed to surface its missing refs);
   // this plan only collapsed the meta walks, not the body reads.
+  //
+  // An asset whose component scripts Assets/ does not own is checked after
+  // the loop, once those scripts were looked up in the packages in one walk
+  // (the same resolution read_asset uses); its slot keeps the issue order.
+  for (const [guid, path] of BUILTIN_RESOURCE_GUIDS) fullGuidIndex.set(guid, path);
+  const slots: Array<IntegrityScanEntry[] | { assetPath: string; parsed: ParsedAsset }> = [];
+  const packageScripts = new Set<string>();
   for (const absPath of assetFiles) {
     const ext = extname(absPath).toLowerCase();
     if (!OFFLINE_PARSEABLE_EXTENSIONS.has(ext)) continue;
@@ -1427,18 +1468,27 @@ export async function scanIntegrityOffline(
     try {
       const parsed = parseAsset(data);
       parsed.path = assetPath;
-      const perAsset = runYamlIntegrityChecks(parsed, fullGuidIndex);
-      for (const issue of perAsset) {
-        issues.push({
-          path: assetPath,
-          code: issue.code,
-          severity: issue.severity,
-          detail: issue.detail,
-        });
+      const outside = [...scriptGUIDs(parsed)].filter((g) => !fullGuidIndex.has(g));
+      if (outside.length > 0) {
+        for (const g of outside) packageScripts.add(g);
+        slots.push({ assetPath, parsed });
+        continue;
       }
+      slots.push(integrityEntries(assetPath, runYamlIntegrityChecks(parsed, fullGuidIndex)));
     } catch {
       // Not parseable as YAML — skip. JSON integrity is per-read only.
     }
+  }
+  const scripts = packageScripts.size > 0
+    ? await resolveGuids(opts.projectRoot, new Set(), packageScripts)
+    : null;
+  if (scripts) for (const [guid, path] of scripts.guidIndex) fullGuidIndex.set(guid, path);
+  for (const slot of slots) {
+    const entries = Array.isArray(slot)
+      ? slot
+      : integrityEntries(slot.assetPath, runYamlIntegrityChecks(slot.parsed, fullGuidIndex,
+          scripts ? { scripts: scripts.unverifiedScripts, reason: scripts.unverifiedReason } : undefined));
+    for (const entry of entries) issues.push(entry);
   }
 
   // ---- group by code ----

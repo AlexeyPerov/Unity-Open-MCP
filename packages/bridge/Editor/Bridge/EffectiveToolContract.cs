@@ -95,6 +95,41 @@ namespace UnityOpenMcpBridge
         private static readonly Regex AssetPathLiteral = new Regex(
             "\"((?:Assets|Packages)/[^\"\\\\]+)\"", RegexOptions.CultureInvariant);
 
+        /// <summary>
+        /// The scope a mutating call gets when it names no <c>paths_hint</c>: only the
+        /// project-wide operations declare one (a whole-project refresh and its menu
+        /// form, a recompile → <c>Assets</c>; <c>reimport_package</c> →
+        /// <c>Packages/&lt;id&gt;</c>). Null for every other tool: without a hint the
+        /// call is refused with <c>paths_hint_required</c>.
+        /// </summary>
+        internal static string[] DefaultScope(string tool, string body)
+        {
+            switch (tool)
+            {
+                case "unity_open_mcp_assets_refresh":
+                    // A scoped refresh (whole_project: false) must enumerate its paths.
+                    return JsonBody.GetBool(body, "whole_project", true) ? new[] { "Assets" } : null;
+                case "unity_open_mcp_execute_menu":
+                    return ExecuteMenuTool.IsRefreshMenu(JsonBody.GetString(JsonBody.TopLevelField(body, "menu_path"), "menu_path"))
+                        ? new[] { "Assets" } : null;
+                case "unity_open_mcp_recompile_scripts":
+                    // Project-wide with no natural asset scope: the gate validates
+                    // the Assets tree, like a whole-project refresh.
+                    return new[] { "Assets" };
+                case "unity_open_mcp_reimport_package":
+                {
+                    // The scope IS the named local package (its source lives outside
+                    // Assets/). A trailing @version is stripped.
+                    var pid = JsonBody.GetString(body, "package_id");
+                    if (string.IsNullOrWhiteSpace(pid)) return null;
+                    var at = pid.IndexOf('@');
+                    return new[] { "Packages/" + (at >= 0 ? pid.Substring(0, at) : pid) };
+                }
+                default:
+                    return null;
+            }
+        }
+
         internal static string SuggestedScope(string body)
         {
             var match = AssetPathLiteral.Match(JsonBody.GetString(JsonBody.TopLevelField(body ?? "{}", "code"), "code") ?? "");

@@ -517,18 +517,57 @@ namespace UnityOpenMcpBridge
                     if (delta.NewErrors > 0)
                         AddIssueHints(steps, delta.NewIssueKeys, delta.NewErrors, delta.NewWarnings, isFailed: false);
                     else
-                        steps.Add($"Gate detected {delta.NewWarnings} new warning(s). Consider reviewing with unity_open_mcp_validate_edit before proceeding.");
+                        steps.Add($"Gate detected {delta.NewWarnings} new warning(s) (warn mode)." +
+                                  FirstIssueClause(delta.NewIssueKeys, "WARN") +
+                                  " Consider reviewing with unity_open_mcp_validate_edit before proceeding.");
                     break;
                 case GateOutcome.Passed:
-                    if (delta.ResolvedErrors > 0)
-                        steps.Add($"Gate passed — {delta.ResolvedErrors} previously reported error(s) resolved.");
-                    else
-                        steps.Add("Gate passed — no new issues detected.");
+                    steps.Add(PassedLine(delta));
                     break;
             }
 
             AddInheritedNotes(steps, delta);
             return steps.ToArray();
+        }
+
+        // The passed line says what the delta says. Enforce fails on new
+        // errors only, so a pass can still carry new warnings: name their
+        // count and the first one rather than claiming nothing was found.
+        private static string PassedLine(DeltaData delta)
+        {
+            if (delta.NewWarnings <= 0)
+                return delta.ResolvedErrors > 0
+                    ? $"Gate passed — {delta.ResolvedErrors} previously reported error(s) resolved."
+                    : "Gate passed — no new issues detected.";
+
+            var resolved = delta.ResolvedErrors > 0
+                ? $", {delta.ResolvedErrors} previously reported error(s) resolved"
+                : "";
+            return $"Gate passed — no new errors{resolved}; {delta.NewWarnings} new warning(s) " +
+                   "(enforce fails on errors only, see delta.newIssues)." +
+                   FirstIssueClause(delta.NewIssueKeys, "WARN");
+        }
+
+        // " First: <code on path>." for the first key of the given severity, or
+        // "" when the delta carries no keys (a counts-only delta).
+        private static string FirstIssueClause(string[] issueKeys, string severity)
+        {
+            var key = FirstKey(issueKeys, severity);
+            return key == null ? "" : $" First: {FormatIssue(ParseIssueKey(key), key)}.";
+        }
+
+        // The first key of the given severity; the first key of any severity
+        // when none parses with it (malformed keys); null when there are none.
+        private static string FirstKey(string[] issueKeys, string severity)
+        {
+            if (issueKeys == null || issueKeys.Length == 0) return null;
+            foreach (var key in issueKeys)
+            {
+                var parsed = ParseIssueKey(key);
+                if (parsed != null && string.Equals(parsed.Value.Severity, severity, System.StringComparison.OrdinalIgnoreCase))
+                    return key;
+            }
+            return issueKeys[0];
         }
 
         // One neutral line per derivation that carried issues over: what was
@@ -551,11 +590,14 @@ namespace UnityOpenMcpBridge
 
         private static void AddIssueHints(List<string> steps, string[] issueKeys, int newErrors, int newWarnings, bool isFailed)
         {
-            var firstKey = issueKeys != null && issueKeys.Length > 0 ? issueKeys[0] : null;
+            // The first ERROR key: the delta's keys mix severities, and the line
+            // names the error that failed (or would fail) the gate.
+            var firstKey = FirstKey(issueKeys, "ERROR");
             var parsed = ParseIssueKey(firstKey);
 
             var modeLabel = isFailed ? "" : " (warn mode)";
-            steps.Add($"Gate detected {newErrors} new error(s){modeLabel}. First: {FormatIssue(parsed, firstKey)}");
+            var warnings = newWarnings > 0 ? $" and {newWarnings} new warning(s)" : "";
+            steps.Add($"Gate detected {newErrors} new error(s){warnings}{modeLabel}. First: {FormatIssue(parsed, firstKey)}");
 
             if (parsed != null)
             {

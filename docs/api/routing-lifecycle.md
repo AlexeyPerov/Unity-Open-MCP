@@ -96,10 +96,27 @@ overrides, GUID references, and integrity signals. Project-wide integrity scans
 also detect orphaned meta files, duplicate GUIDs, missing references, and
 missing scripts.
 
+GUIDs resolve offline the way Unity resolves them: against the metas under
+`Assets/`, Unity's built-in resources (`Library/unity default resources`,
+`Resources/unity_builtin_extra`), and — for a component's script (`m_Script`)
+that `Assets/` does not own — the `.cs` / `.dll` metas of the project's packages:
+embedded folders under `Packages/`, `file:` references in
+`Packages/manifest.json`, `Library/PackageCache`, and built-in packages of the
+project's Unity version when that version is installed. A uGUI `Image` or an
+Input System component is therefore named and resolved, not reported as a
+missing script. A script GUID that resolves nowhere is `missing_script_reference`
+(error) — unless a package the project uses is not on disk where these reads
+look (no `Library/` in a fresh clone, a built-in package of a Unity version not
+installed here, a `file:` path that does not exist): then it is
+`unverified_script_reference` (warning), whose detail names those packages.
+`read_asset`, `dependencies`, `find_references`, `search_assets` (`component`)
+and the offline integrity scan share this resolution.
+
 `dependencies` combines forward edges, reverse references, broken GUIDs, and
 cycles. `include_impact=true` computes the transitive reverse closure offline.
 JSON or binary queried assets may skip forward parsing while retaining reverse
-references.
+references. Offline, a script edge that cannot be verified (see above) is listed
+in `unverifiedForwardGuids` with `unverifiedReason`, not in `brokenForwardGuids`.
 
 ## Lifecycle policy
 

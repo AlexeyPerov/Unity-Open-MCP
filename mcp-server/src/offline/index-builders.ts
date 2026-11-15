@@ -3,13 +3,21 @@
 // Extracted from the former monolithic offline.ts (M28-refactoring Plan 3,
 // T3.1). Builds the GUID→path and script-GUID→path indexes by walking .meta
 // files under Assets/, plus the recursive file/directory walkers the public
-// entry points use. Depends on types + primitives only.
+// entry points use, and resolveGuids, which adds Unity's built-in resources
+// and package scripts (package-index.ts). Depends on types, primitives and
+// package-index.
 
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { GUIDIndex, ParsedAsset, ScriptIndex } from "./types.js";
 import { shouldSkipDir, toAssetPath, extractExtension } from "./paths.js";
 import { readMetaGUID } from "./primitives.js";
+import {
+  describeMissingPackages,
+  discoverPackageSources,
+  findPackageScripts,
+  packagePathHasGuid,
+} from "./package-index.js";
 
 // ===========================================================================
 // Bounded-parallel map helper (M31-optimizations Plan 2 / M4).
@@ -198,7 +206,88 @@ export async function buildScriptIndexForQuery(
   });
   const index: ScriptIndex = new Map();
   for (const [guid, entry] of scriptNameIndex) index.set(guid, entry.path);
+  // Package scripts (uGUI Image, Input System components, …) answer the same
+  // query: their file names are read from the package folders, and only the
+  // matching metas are opened.
+  const { sources } = await discoverPackageSources(projectRoot);
+  for (const [guid, hit] of await findPackageScripts(sources, { componentQuery: q })) {
+    if (!index.has(guid)) index.set(guid, hit.path);
+  }
   return index;
+}
+
+// ===========================================================================
+// GUID resolution beyond Assets/ — Unity's built-in resources and package
+// scripts. Every offline reader that decides whether a GUID resolves goes
+// through resolveGuids, so read_asset, dependencies, find_references, the
+// offline integrity scan and the read_asset cache revalidation agree.
+// ===========================================================================
+
+/**
+ * Unity's built-in resource files. They have no .meta, but serialized
+ * references (the default UI sprite, the legacy font, built-in materials and
+ * meshes) point at them by these GUIDs; Unity reports these asset paths.
+ */
+export const BUILTIN_RESOURCE_GUIDS: ReadonlyMap<string, string> = new Map([
+  ["0000000000000000e000000000000000", "Library/unity default resources"],
+  ["0000000000000000f000000000000000", "Resources/unity_builtin_extra"],
+]);
+
+export interface GuidResolution extends CombinedGuidScriptIndex {
+  /**
+   * Script GUIDs (m_Script) that neither Assets/ nor the packages on disk own
+   * while a package the project uses is not on disk where offline reads look:
+   * they may belong to it, so they are unverified rather than missing.
+   */
+  unverifiedScripts: Set<string>;
+  /** Why those could not be verified (which packages are not on disk). */
+  unverifiedReason?: string;
+}
+
+/**
+ * Resolve GUIDs the way Unity would, offline: `wantedGuids` against Assets/
+ * metas and the built-in resources; `wantedScripts` (component m_Script GUIDs)
+ * additionally against the `.cs` / `.dll` metas of the project's packages,
+ * looked up only for the scripts Assets/ does not own.
+ *
+ * `previous` (guid → path from an earlier resolution) lets a revalidation
+ * confirm a package path with one meta read instead of a package walk.
+ */
+export async function resolveGuids(
+  projectRoot: string,
+  wantedGuids: Set<string>,
+  wantedScripts: Set<string> = new Set(),
+  previous?: ReadonlyMap<string, string | null>,
+): Promise<GuidResolution> {
+  const { guidIndex, scriptIndex } = await buildGuidAndScriptIndex(projectRoot, wantedGuids, wantedScripts);
+  for (const [guid, path] of BUILTIN_RESOURCE_GUIDS) {
+    if (wantedGuids.has(guid) || wantedScripts.has(guid)) guidIndex.set(guid, path);
+  }
+  const unverifiedScripts = new Set<string>();
+  const pending = new Set<string>();
+  for (const guid of wantedScripts) if (!guidIndex.has(guid)) pending.add(guid);
+  if (pending.size === 0) return { guidIndex, scriptIndex, unverifiedScripts };
+
+  const packages = await discoverPackageSources(projectRoot);
+  const record = (guid: string, path: string) => {
+    guidIndex.set(guid, path);
+    if (path.endsWith(".cs")) scriptIndex.set(guid, path);
+    pending.delete(guid);
+  };
+  if (previous) {
+    for (const guid of [...pending]) {
+      const path = previous.get(guid);
+      if (path && await packagePathHasGuid(packages.sources, path, guid)) record(guid, path);
+    }
+  }
+  if (pending.size > 0) {
+    for (const [guid, hit] of await findPackageScripts(packages.sources, { wanted: pending })) record(guid, hit.path);
+  }
+  if (pending.size > 0 && packages.missing.length > 0) {
+    for (const guid of pending) unverifiedScripts.add(guid);
+    return { guidIndex, scriptIndex, unverifiedScripts, unverifiedReason: describeMissingPackages(packages.missing) };
+  }
+  return { guidIndex, scriptIndex, unverifiedScripts };
 }
 
 // ===========================================================================

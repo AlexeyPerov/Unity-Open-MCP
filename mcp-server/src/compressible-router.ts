@@ -36,7 +36,7 @@ import {
   attachPagination,
   isOutputProfile,
 } from "./output-profile.js";
-import { buildGUIDIndex, safeReadMetaGUID } from "./offline/index-builders.js";
+import { resolveGuids, safeReadMetaGUID } from "./offline/index-builders.js";
 import { normalizeAssetPath } from "./offline/paths.js";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -62,6 +62,8 @@ interface CacheEntry {
    */
   mtimeMs: number | null;
   dependencies?: Array<[string, string | null]>;
+  /** The dependencies that are component scripts (resolved in packages too). */
+  scriptGuids?: string[];
 }
 
 /** Session-scoped LRU for the last few AssetModels read by `read_asset`. */
@@ -96,9 +98,11 @@ export class AssetModelCache {
     const model = this.get(key, mtimeMs);
     const entry = this.entries.get(key);
     if (!model || !entry || entry.dependencies === undefined) return model;
+    // The same resolution the read used (Assets/, built-in resources, package
+    // scripts); a package path resolved before is confirmed with one meta read.
     const wanted = new Set(entry.dependencies.map(([guid]) => guid));
-    const [index, guid] = await Promise.all([
-      buildGUIDIndex(projectRoot, wanted),
+    const [{ guidIndex: index }, guid] = await Promise.all([
+      resolveGuids(projectRoot, wanted, new Set(entry.scriptGuids ?? []), new Map(entry.dependencies)),
       safeReadMetaGUID(join(projectRoot, assetPath) + ".meta"),
     ]);
     if ((model.guid ?? "") !== guid || entry.dependencies.some(([id, path]) => (index.get(id) ?? null) !== path)) {
@@ -108,9 +112,15 @@ export class AssetModelCache {
     return model;
   }
 
-  set(key: string, model: AssetModel, mtimeMs: number | null, dependencies?: Array<[string, string | null]>): void {
+  set(
+    key: string,
+    model: AssetModel,
+    mtimeMs: number | null,
+    dependencies?: Array<[string, string | null]>,
+    scriptGuids?: string[],
+  ): void {
     if (this.entries.has(key)) this.entries.delete(key);
-    this.entries.set(key, { model, mtimeMs, dependencies });
+    this.entries.set(key, { model, mtimeMs, dependencies, scriptGuids });
     while (this.entries.size > CACHE_LIMIT) {
       const oldest = this.entries.keys().next().value;
       if (oldest === undefined) break;
@@ -233,7 +243,7 @@ async function routeReadAsset(
         const result = await readAssetOffline(normalizedPath, { fieldLimit, projectRoot: projectPath });
         model = result.model;
         source = "offline";
-        cache.set(cacheKey, model, mtimeMs, result.dependencies);
+        cache.set(cacheKey, model, mtimeMs, result.dependencies, result.scriptGuids);
       } catch {
         // Offline parse failed — fall through to live bridge.
         model = null;

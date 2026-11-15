@@ -201,6 +201,90 @@ namespace UnityOpenMcpBridge.Tests
             Assert.That(Join(steps), Does.Contain("no new issues detected"));
         }
 
+        // A pass under enforce can carry new warnings (only errors fail): the
+        // passed line names them instead of claiming nothing was found.
+        [Test]
+        public void NextSteps_Passed_WithNewWarnings_NamesCountAndFirstWarning()
+        {
+            var delta = Delta(warnings: 2, issueKeys: new[]
+            {
+                "empty_local_ref|WARN|Assets/S1.unity|empty_local_ref:Fx:m_Mesh",
+                "empty_local_ref|WARN|Assets/S1.unity|empty_local_ref:Fx:",
+            });
+            var steps = GatePolicy.GenerateAgentNextSteps(delta, GateOutcome.Passed);
+
+            Assert.That(steps[0], Does.StartWith("Gate passed — no new errors; 2 new warning(s)"));
+            Assert.That(steps[0], Does.Contain("enforce fails on errors only"));
+            Assert.That(steps[0], Does.Contain("First: empty_local_ref:Fx:m_Mesh on Assets/S1.unity"));
+            Assert.That(Join(steps), Does.Not.Contain("no new issues"));
+        }
+
+        [Test]
+        public void NextSteps_Passed_WithNewWarningsAndResolvedErrors_SaysBoth()
+        {
+            var delta = Delta(warnings: 1, resolvedErrors: 3,
+                issueKeys: new[] { "empty_local_ref|WARN|Assets/A.prefab|empty_local_ref:Root:m_Mesh" });
+            var steps = GatePolicy.GenerateAgentNextSteps(delta, GateOutcome.Passed);
+
+            Assert.That(steps[0], Does.Contain("3 previously reported error(s) resolved"));
+            Assert.That(steps[0], Does.Contain("1 new warning(s)"));
+            Assert.That(Join(steps), Does.Not.Contain("no new issues"));
+        }
+
+        [Test]
+        public void NextSteps_Passed_WarningsWithoutKeys_OmitsFirstClause()
+        {
+            // A counts-only delta (mutation_explain's run-record path) has no keys.
+            var steps = GatePolicy.GenerateAgentNextSteps(Delta(warnings: 4), GateOutcome.Passed);
+
+            Assert.That(steps[0], Does.Contain("4 new warning(s)"));
+            Assert.That(steps[0], Does.Not.Contain("First:"));
+            Assert.That(Join(steps), Does.Not.Contain("no new issues"));
+        }
+
+        [Test]
+        public void NextSteps_Failed_NamesFirstError_NotAnEarlierWarning()
+        {
+            // The delta's keys mix severities; the "First:" of an error line is an error.
+            var delta = Delta(errors: 1, warnings: 1, issueKeys: new[]
+            {
+                "empty_local_ref|WARN|Assets/A.prefab|empty_local_ref:Root:m_Mesh",
+                "missing_references|ERROR|Assets/A.prefab|missing_script",
+            });
+            var steps = GatePolicy.GenerateAgentNextSteps(delta, GateOutcome.Failed);
+
+            Assert.That(steps[0], Does.Contain("1 new error(s) and 1 new warning(s)"));
+            Assert.That(steps[0], Does.Contain("First: missing_script on Assets/A.prefab"));
+            Assert.That(Join(steps), Does.Contain("remove_missing_script"));
+        }
+
+        [Test]
+        public void NextSteps_Warned_WarningsOnly_NamesFirstWarning()
+        {
+            var delta = Delta(warnings: 1,
+                issueKeys: new[] { "empty_local_ref|WARN|Assets/A.prefab|empty_local_ref:Root:m_Mesh" });
+            var steps = GatePolicy.GenerateAgentNextSteps(delta, GateOutcome.Warned);
+
+            Assert.That(steps[0], Does.Contain("1 new warning(s)"));
+            Assert.That(steps[0], Does.Contain("First: empty_local_ref:Root:m_Mesh on Assets/A.prefab"));
+        }
+
+        [Test]
+        public void NextSteps_Passed_InheritedOnly_KeepsNoNewIssuesAndInheritedNote()
+        {
+            var delta = Delta();
+            delta.InheritedErrors = 1;
+            delta.Derivations = new[]
+            {
+                new DerivationSummary { Source = "Assets/A.prefab", Destination = "Assets/B.prefab",
+                    Operation = AssetDerivation.Copy, InheritedErrors = 1 }
+            };
+            var steps = GatePolicy.GenerateAgentNextSteps(delta, GateOutcome.Passed);
+
+            Assert.AreEqual("Gate passed — no new issues detected.", steps[0]);
+            Assert.That(steps[1], Does.StartWith("Copied 'Assets/A.prefab' to 'Assets/B.prefab'; 1 issue(s) inherited"));
+        }
+
         [Test]
         public void NextSteps_Failed_MalformedIssueKey_DoesNotCrash()
         {

@@ -1099,46 +1099,11 @@ namespace UnityOpenMcpBridge
                             reserializeRaw != null && reserializeRaw.Length > 0
                             && (pathsHint == null || pathsHint.Length == 0);
                     }
-                    else if (toolName == "unity_open_mcp_assets_refresh")
+                    else
                     {
-                        // Refresh is whole-project by nature: when whole_project
-                        // is true (default), paths_hint may be empty. Otherwise
-                        // (scoped refresh) the caller must enumerate paths.
-                        if (JsonBody.GetBool(body, "whole_project", true))
-                        {
-                            pathsHint = new[] { "Assets" };
-                        }
-                    }
-                    else if (toolName == "unity_open_mcp_execute_menu"
-                        && ExecuteMenuTool.IsRefreshMenu(JsonBody.GetString(JsonBody.TopLevelField(body, "menu_path"), "menu_path")))
-                    {
-                        // The menu form of assets_refresh: same whole-project
-                        // default scope.
-                        pathsHint = new[] { "Assets" };
-                    }
-                    else if (toolName == "unity_open_mcp_recompile_scripts")
-                    {
-                        // A recompile is project-wide and has no natural asset
-                        // scope; without an explicit hint the gate validates
-                        // the Assets tree, like a whole-project refresh.
-                        pathsHint = new[] { "Assets" };
-                    }
-                    else if (toolName == "unity_open_mcp_reimport_package")
-                    {
-                        // reimport_package's scope IS the named local package;
-                        // there is no Assets/ path for the gate to validate
-                        // (the source lives outside Assets/). Default the hint
-                        // to Packages/<package_id> so the gate still has a
-                        // non-empty scope without forcing the caller to pass
-                        // one. A trailing @version is stripped.
-                        var pid = JsonBody.GetString(body, "package_id");
-                        if (!string.IsNullOrWhiteSpace(pid))
-                        {
-                            var bare = pid.Contains("@")
-                                ? pid.Substring(0, pid.IndexOf('@'))
-                                : pid;
-                            pathsHint = new[] { "Packages/" + bare };
-                        }
+                        // The project-wide operations with a declared default
+                        // scope (refresh, recompile, reimport_package).
+                        pathsHint = EffectiveToolContract.DefaultScope(toolName, body);
                     }
 
                     if (pathsHint == null || pathsHint.Length == 0)

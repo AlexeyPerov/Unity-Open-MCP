@@ -168,7 +168,20 @@ export function buildJsonAssetModel(
 // M24 — offline integrity checks.
 // ===========================================================================
 
-export function runYamlIntegrityChecks(parsed: ParsedAsset, guidIndex: GUIDIndex): AssetIntegrityIssue[] {
+/**
+ * Script GUIDs a resolution could not verify, and why (a package the project
+ * uses is not on disk where offline reads look). See resolveGuids.
+ */
+export interface UnverifiedScripts {
+  scripts: ReadonlySet<string>;
+  reason?: string;
+}
+
+export function runYamlIntegrityChecks(
+  parsed: ParsedAsset,
+  guidIndex: GUIDIndex,
+  unverified?: UnverifiedScripts,
+): AssetIntegrityIssue[] {
   const issues: AssetIntegrityIssue[] = [];
 
   // Orphaned PrefabInstance: a PrefabInstance whose m_SourcePrefab GUID is
@@ -202,6 +215,16 @@ export function runYamlIntegrityChecks(parsed: ParsedAsset, guidIndex: GUIDIndex
     }
   }
   for (const g of missingScripts) {
+    // Not in Assets/ nor in any package on disk. When a package the project
+    // uses is not on disk here, the script may be in it: unverified, not missing.
+    if (unverified?.scripts.has(g)) {
+      issues.push({
+        code: "unverified_script_reference",
+        detail: `script guid ${g} is not in Assets/ or the packages on disk; ${unverified.reason ?? "a package the project uses is not on disk"} — open the project in Unity (or read it live) to verify`,
+        severity: "warning",
+      });
+      continue;
+    }
     issues.push({ code: "missing_script_reference", detail: `script guid ${g} unresolved`, severity: "error" });
   }
   for (const g of missingRefs) {

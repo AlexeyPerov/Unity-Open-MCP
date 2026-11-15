@@ -254,7 +254,8 @@ const DEPENDENCIES_ISSUES: RuleIssueDescriptor[] = [
 // offline seed for the M25 verify engine. These are the first codes to fill
 // the remove_orphan_meta / fix_duplicate_guid fix placeholders (flipped to
 // implemented below). The per-read offline integrity codes
-// (missing_reference / missing_script_reference / orphaned_prefab_instance /
+// (missing_reference / missing_script_reference / unverified_script_reference /
+// orphaned_prefab_instance /
 // malformed_json / asmdef_missing_name / shadergraph_root_missing) surface on
 // every read_asset call; this rule family is the project-wide aggregator.
 const OFFLINE_INTEGRITY_ISSUES: RuleIssueDescriptor[] = [
@@ -293,6 +294,15 @@ const OFFLINE_INTEGRITY_ISSUES: RuleIssueDescriptor[] = [
     rootCause: "missing_script_class",
     remediation:
       "A MonoBehaviour script GUID does not resolve to a compiled script. Remove the missing script component via apply_fix (remove_missing_script), or re-add the correct script.",
+  },
+  {
+    code: "unverified_script_reference",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+    rootCause: "missing_dependency",
+    remediation:
+      "A MonoBehaviour script GUID is not in Assets/ or in the packages on disk, but a package the project uses is not on disk where offline reads look (Library/PackageCache is created when Unity resolves the packages; a built-in package needs the project's Unity version installed). Open the project in Unity or read the asset live to verify; only if it still does not resolve is it a missing script.",
   },
 ];
 

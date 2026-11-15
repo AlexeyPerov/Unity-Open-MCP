@@ -181,6 +181,11 @@ reports success. Gate modes are:
 - `warn` — report issues without blocking;
 - `off` — skip the gate when explicitly supported.
 
+`enforce` fails on new errors only, so a passed gate can still carry new
+warnings. The first `agentNextSteps` line says so ("Gate passed — no new
+errors; N new warning(s) … First: …"); "no new issues detected" means the delta
+had no new errors and no new warnings.
+
 `gate.delta` carries the counts (`newErrors`, `newWarnings`, `resolvedErrors`,
 `resolvedWarnings`) plus **bounded** issue-key arrays: `newIssues` /
 `resolvedIssues` are capped at the first 25 keys each, with a companion
@@ -410,14 +415,16 @@ Pre-flight refusals (`batch_tool_not_invokable`, `batch_nested_reload_unsafe`,
 `batch_step_requires_server_poll`, `batch_too_many_commands`,
 `batch_invalid_step`, `missing_parameter`) all happen **before** the dispatch
 loop: no per-step result exists and nothing was committed. Read the aggregated
-`mutation.error.message`; there is nothing to undo. Where a
-concrete meta-tool equivalent exists, the refusal message also names it — a
-client that ignores `tools/list_changed` cannot see a tool `manage_tools` just
-activated, so "use it as a single top-level call" alone would be a dead end for
-it. `recompile_scripts` points at the `CompilationPipeline.RequestScriptCompilation()`
-`execute_csharp` one-liner plus the `editor_status` wait (scripts Unity has not
-imported yet need an `assets_refresh` first — the top-level tool imports them
-itself); `run_tests` points at `invoke_method` / a `TestRunnerApi` snippet.
+`mutation.error.message`; there is nothing to undo. Where a call is worth
+spelling out, the refusal message also names it — a client that ignores
+`tools/list_changed` cannot see a tool `manage_tools` just activated, so "use it
+as a single top-level call" alone would be a dead end for it.
+`recompile_scripts` names `unity_open_mcp_recompile_scripts {}` (no `paths_hint`
+needed; it imports new scripts, waits for the compile and answers with its
+result) and the same call through
+`manage_tools {"action":"invoke","tool_name":"unity_open_mcp_recompile_scripts","arguments":{}}`;
+`run_tests` names the `manage_tools` invoke route, which keeps the results-file
+poll. Every call a hint names is one the bridge accepts as written.
 
 Nestability is a separate axis from the capability surface's `batchCapable` flag,
 which is about the headless batch-spawn fallback. Read the refusals above, not

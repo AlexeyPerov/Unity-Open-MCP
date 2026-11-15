@@ -370,8 +370,7 @@ namespace UnityOpenMcpBridge.Tests
             var body = "{\"commands\":[{\"tool\":\"unity_senses_run_tests\",\"params\":{}}]}";
             var result = BatchExecuteTool.Execute(body);
             Assert.AreEqual("batch_step_requires_server_poll", result.ErrorCode);
-            StringAssert.Contains("invoke_method", result.ErrorMessage);
-            StringAssert.Contains("execute_csharp", result.ErrorMessage);
+            StringAssert.Contains("unity_open_mcp_manage_tools {\"action\":\"invoke\",\"tool_name\":\"unity_senses_run_tests\"", result.ErrorMessage);
         }
 
         [Test]
@@ -392,18 +391,117 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
-        public void Execute_RecompileScripts_RefusalNamesTheExecuteCsharpEquivalent()
+        public void Execute_RecompileScripts_RefusalNamesTheTopLevelCallAndItsInvokeRoute()
         {
             // recompile_scripts is RestartThenSettle, so it is refused by the
-            // lifecycle guard — but the refusal used to point only at a
-            // top-level call the reporting client could not make. It must now
-            // also carry the concrete execute_csharp equivalent.
+            // lifecycle guard. It needs no paths_hint and waits for the compile
+            // itself, so the refusal names that call, and the manage_tools
+            // invoke route for a client that cannot see it. It used to name an
+            // execute_csharp read_only:true snippet the bridge refuses
+            // (RequestScriptCompilation overrides read_only → paths_hint_required).
             var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_recompile_scripts\",\"params\":{}}]}";
             var result = BatchExecuteTool.Execute(body);
             Assert.IsFalse(result.Success);
             Assert.AreEqual("batch_nested_reload_unsafe", result.ErrorCode);
-            StringAssert.Contains("RequestScriptCompilation", result.ErrorMessage);
-            StringAssert.Contains("editor_status", result.ErrorMessage);
+            StringAssert.Contains("unity_open_mcp_recompile_scripts {}", result.ErrorMessage);
+            StringAssert.Contains("unity_open_mcp_manage_tools {\"action\":\"invoke\",\"tool_name\":\"unity_open_mcp_recompile_scripts\"", result.ErrorMessage);
+            Assert.IsFalse(result.ErrorMessage.Contains("read_only"), result.ErrorMessage);
+        }
+
+        // Every call a refusal hint names is one the bridge accepts as written:
+        // each is run through the request handler's own pre-dispatch checks
+        // (EffectiveToolContract: refusal, mutating, read_only override via
+        // SnippetClassifier, declared default scope).
+        [Test]
+        public void NestedAlternativeHints_NameOnlyCallsTheBridgeAccepts()
+        {
+            if (BridgeToolRegistry.Count == 0) BridgeToolRegistry.Scan();
+            var tools = new HashSet<string>(BridgeToolClassification.KnownTools);
+            foreach (var entry in BridgeToolRegistry.All()) tools.Add(entry.Name);
+            var hinted = new List<string>();
+            foreach (var tool in tools)
+            {
+                var hint = BatchExecuteTool.NestedAlternativeHint(tool);
+                if (hint == null) continue;
+                hinted.Add(tool);
+                var calls = HintedCalls(hint);
+                CollectionAssert.IsNotEmpty(calls, "a hint names at least one concrete call: " + hint);
+                foreach (var (name, callBody) in calls)
+                    Assert.IsNull(TopLevelRefusal(name, callBody),
+                        $"the {tool} hint recommends {name} {callBody}, which the bridge refuses");
+            }
+            CollectionAssert.IsSubsetOf(new[] { "unity_open_mcp_recompile_scripts", "unity_senses_run_tests" }, hinted);
+        }
+
+        [Test]
+        public void TopLevelRefusal_CatchesTheHintThisReplaced()
+        {
+            // The old recompile hint: RequestScriptCompilation overrides read_only.
+            const string code = "\"code\":\"UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation(); return \\\"requested\\\";\"";
+            StringAssert.StartsWith("paths_hint_required",
+                TopLevelRefusal("unity_open_mcp_execute_csharp", "{\"read_only\":true," + code + "}"));
+            Assert.IsNull(TopLevelRefusal("unity_open_mcp_execute_csharp", "{\"paths_hint\":[\"Assets\"]," + code + "}"));
+            Assert.IsNull(TopLevelRefusal("unity_open_mcp_recompile_scripts", "{}"));
+            StringAssert.StartsWith("paths_hint_required", TopLevelRefusal("unity_open_mcp_gameobject_create", "{\"name\":\"X\"}"));
+            Assert.AreEqual("tool_not_found", TopLevelRefusal("unity_open_mcp_no_such_tool", "{}"));
+        }
+
+        // "unity_… {json}" calls a hint names; a manage_tools invoke is
+        // unwrapped to the call it makes (its tool_name and arguments).
+        private static List<(string tool, string body)> HintedCalls(string hint)
+        {
+            var calls = new List<(string, string)>();
+            foreach (Match m in Regex.Matches(hint, @"\b(unity_(?:open_mcp|senses)_[a-z_]+) \{"))
+            {
+                var body = BalancedObject(hint, m.Index + m.Length - 1);
+                Assert.IsTrue(BridgeJson.IsCompleteJson(body), "a hinted body is one JSON object: " + body);
+                var tool = m.Groups[1].Value;
+                if (tool == "unity_open_mcp_manage_tools")
+                {
+                    Assert.AreEqual("invoke", JsonBody.GetString(body, "action"), body);
+                    tool = JsonBody.GetString(body, "tool_name");
+                    body = JsonBody.GetTopLevelRawValue(body, "arguments") ?? "{}";
+                }
+                calls.Add((tool, body));
+            }
+            return calls;
+        }
+
+        private static string BalancedObject(string text, int open)
+        {
+            int depth = 0;
+            bool inString = false;
+            for (int i = open; i < text.Length; i++)
+            {
+                var c = text[i];
+                if (inString)
+                {
+                    if (c == '\\') i++;
+                    else if (c == '"') inString = false;
+                    continue;
+                }
+                if (c == '"') inString = true;
+                else if (c == '{') depth++;
+                else if (c == '}' && --depth == 0) return text.Substring(open, i - open + 1);
+            }
+            return text.Substring(open);
+        }
+
+        // What the bridge's request handler answers before dispatching a
+        // top-level call (BridgeHttpServer): null when it would dispatch.
+        private static string TopLevelRefusal(string tool, string body)
+        {
+            if (!BridgeToolClassification.KnownTools.Contains(tool) && !BridgeToolRegistry.TryGet(tool, out _))
+                return "tool_not_found";
+            var contract = EffectiveToolContract.Resolve(tool, body);
+            if (contract.Refusal != null) return contract.Refusal.ErrorCode;
+            if (!contract.IsMutating) return null;
+            var scope = contract.ScopedPaths
+                ?? JsonBody.GetStringArray(JsonBody.TopLevelField(body, "paths_hint"), "paths_hint");
+            if (scope != null && scope.Length > 0) return null;
+            if (EffectiveToolContract.DefaultScope(tool, body) != null) return null;
+            var overridden = EffectiveToolContract.ReadOnlyOverrideReason(tool, body);
+            return "paths_hint_required" + (overridden != null ? " (read_only ignored: " + overridden + ")" : "");
         }
 
         [Test]
