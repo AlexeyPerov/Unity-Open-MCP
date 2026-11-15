@@ -16,6 +16,9 @@ namespace UnityOpenMcpBridge
         /// <summary>Calls an API that can compile, reload the domain, import, switch the scene or stage,
         /// change play mode, run a menu item, build, or raise a native prompt.</summary>
         Disruptive,
+        /// <summary>An expression that assigns, increments, holds a statement, or calls a known
+        /// object / state write. Only <see cref="SnippetClassifier.ClassifyExpression"/> reports it.</summary>
+        Writes,
     }
 
     internal readonly struct SnippetVerdict
@@ -162,6 +165,195 @@ namespace UnityOpenMcpBridge
                 return new SnippetVerdict(SnippetEffect.SavesScenes, "the snippet calls " + save.Value + " (scene save)");
 
             return new SnippetVerdict(SnippetEffect.Plain, null);
+        }
+
+        // ------------------------------------------------------------------
+        // Expressions (playtest_probe): a value read every N frames. On top of
+        // Classify, an expression must not write: no assignment outside an
+        // object / anonymous-type initializer, no ++ / --, no statement (a `;`
+        // or a block-bodied lambda), and no call of a well-known write (object
+        // lifecycle, transform / physics / animator / prefs setters, messages,
+        // coroutines, collection mutators). Same nature as Classify: a deny-list
+        // over the text that errs towards refusal; what a project method does
+        // when the expression calls it stays invisible.
+        // ------------------------------------------------------------------
+
+        private static readonly Regex WriteCall = new Regex(
+            @"\b(?:Destroy\w*|DontDestroyOnLoad|Instantiate\w*|Add(?:[A-Z]\w*)?|Remove\w*|Delete\w*|Clear\w*|Insert\w*|" +
+            @"Set[A-Z]\w*|Reset[A-Z]?\w*|Save\w*|Write\w*|Translate|Rotate|RotateAround|LookAt|MovePosition|MoveRotation|" +
+            @"Sleep|WakeUp|Simulate|SendMessage\w*|BroadcastMessage|Invoke\w*|CancelInvoke|StartCoroutine|Stop\w*|" +
+            @"Play\w*|Pause|UnPause|Emit|Push|Pop|Enqueue|Dequeue|Sort|Unload\w*|Quit|Apply\w*|Dispose|Register\w*|" +
+            @"Unregister\w*|Record\w*|Revert\w*)\s*(?:<[^()]*>)?\s*\(",
+            RegexOptions.CultureInvariant);
+
+        internal static SnippetVerdict ClassifyExpression(string expression)
+        {
+            var verdict = Classify(expression);
+            if (verdict.Effect != SnippetEffect.Plain)
+                return verdict.Reason != null && verdict.Reason.StartsWith("the snippet ", System.StringComparison.Ordinal)
+                    ? new SnippetVerdict(verdict.Effect, "the expression " + verdict.Reason.Substring("the snippet ".Length))
+                    : verdict;
+
+            var code = CodeOnly(expression);
+            int braces = 0;
+            for (int i = 0; i < code.Length; i++)
+            {
+                char c = code[i];
+                char next = i + 1 < code.Length ? code[i + 1] : '\0';
+                char prev = i > 0 ? code[i - 1] : '\0';
+                switch (c)
+                {
+                    case ';':
+                        return Writes("holds a statement (;): a probe samples one expression");
+                    case '{':
+                        if (PreviousToken(code, i) == "=>")
+                            return Writes("has a block-bodied lambda (=> { … }): a probe samples one expression");
+                        braces++;
+                        break;
+                    case '}':
+                        if (braces > 0) braces--;
+                        break;
+                    case '+':
+                    case '-':
+                        if (next == c) return Writes("increments or decrements (" + c + c + ")");
+                        break;
+                    case '=':
+                        if (next == '=' || next == '>') { i++; break; }
+                        if (prev == '=' || prev == '!' || (prev == '<' && !(i > 1 && code[i - 2] == '<')) ||
+                            (prev == '>' && !(i > 1 && code[i - 2] == '>')))
+                            break;
+                        // `a = b` inside new { … } / new T { … } initialises the new object.
+                        bool compound = "+-*/%&|^<>?".IndexOf(prev) >= 0;
+                        if (!compound && braces > 0) break;
+                        bool doubled = prev == '<' || prev == '>' || (prev == '?' && i > 1 && code[i - 2] == '?');
+                        return Writes("assigns (" + (compound ? (doubled ? prev.ToString() + prev : prev.ToString()) + "=" : "=") + ")");
+                }
+            }
+            var call = WriteCall.Match(code);
+            if (call.Success)
+            {
+                var name = Regex.Match(call.Value, @"\w+").Value;
+                return Writes("calls " + name + " (a write)");
+            }
+            if (Regex.IsMatch(code, @"\bdelegate\b"))
+                return Writes("declares an anonymous method (delegate): a probe samples one expression");
+            return new SnippetVerdict(SnippetEffect.Plain, null);
+        }
+
+        private static SnippetVerdict Writes(string what) =>
+            new SnippetVerdict(SnippetEffect.Writes, "the expression " + what);
+
+        // The token before position `at` (two-char operators and words), or "".
+        private static string PreviousToken(string code, int at)
+        {
+            int i = at - 1;
+            while (i >= 0 && char.IsWhiteSpace(code[i])) i--;
+            if (i < 0) return "";
+            if (i >= 1 && code[i] == '>' && code[i - 1] == '=') return "=>";
+            return code[i].ToString();
+        }
+
+        // The expression with comments and the contents of string / char
+        // literals blanked out (an interpolated string keeps its {holes}, which
+        // are code), so operators inside text never count.
+        internal static string CodeOnly(string text)
+        {
+            var sb = new System.Text.StringBuilder(text.Length);
+            int i = 0;
+            while (i < text.Length)
+            {
+                char c = text[i];
+                char next = i + 1 < text.Length ? text[i + 1] : '\0';
+                if (c == '/' && next == '/')
+                {
+                    while (i < text.Length && text[i] != '\n') { sb.Append(' '); i++; }
+                    continue;
+                }
+                if (c == '/' && next == '*')
+                {
+                    int end = text.IndexOf("*/", i + 2, System.StringComparison.Ordinal);
+                    int stop = end < 0 ? text.Length : end + 2;
+                    sb.Append(' ', stop - i);
+                    i = stop;
+                    continue;
+                }
+                if (c == '\'')
+                {
+                    sb.Append('\'');
+                    i++;
+                    while (i < text.Length && text[i] != '\'')
+                    {
+                        if (text[i] == '\\' && i + 1 < text.Length) { sb.Append(' '); i++; }
+                        sb.Append(' ');
+                        i++;
+                    }
+                    if (i < text.Length) { sb.Append('\''); i++; }
+                    continue;
+                }
+                // String prefixes: @"…", $"…", $@"…", @$"…".
+                int p = i;
+                bool verbatim = false, interpolated = false;
+                while (p < text.Length && (text[p] == '@' || text[p] == '$') && p - i < 2)
+                {
+                    if (text[p] == '@') verbatim = true; else interpolated = true;
+                    p++;
+                }
+                if (p < text.Length && text[p] == '"' && (p == i || verbatim || interpolated))
+                {
+                    sb.Append(text, i, p - i + 1);
+                    i = SkipString(text, p + 1, verbatim, interpolated, sb);
+                    continue;
+                }
+                sb.Append(c);
+                i++;
+            }
+            return sb.ToString();
+        }
+
+        // Copy a string literal's body as blanks (holes of an interpolated
+        // string as code) up to and including its closing quote.
+        private static int SkipString(string text, int i, bool verbatim, bool interpolated, System.Text.StringBuilder sb)
+        {
+            while (i < text.Length)
+            {
+                char c = text[i];
+                char next = i + 1 < text.Length ? text[i + 1] : '\0';
+                if (!verbatim && c == '\\' && i + 1 < text.Length) { sb.Append("  "); i += 2; continue; }
+                if (c == '"')
+                {
+                    if (verbatim && next == '"') { sb.Append("  "); i += 2; continue; }
+                    sb.Append('"');
+                    return i + 1;
+                }
+                if (interpolated && (c == '{' || c == '}') && next == c) { sb.Append("  "); i += 2; continue; }
+                if (interpolated && c == '{')
+                {
+                    // A hole: code up to its matching close brace.
+                    int depth = 0;
+                    sb.Append('(');
+                    i++;
+                    while (i < text.Length)
+                    {
+                        char h = text[i];
+                        if (h == '{') depth++;
+                        else if (h == '}') { if (depth == 0) break; depth--; }
+                        else if (h == '"')
+                        {
+                            sb.Append('"');
+                            i = SkipString(text, i + 1, false, false, sb);
+                            continue;
+                        }
+                        sb.Append(h);
+                        i++;
+                    }
+                    sb.Append(')');
+                    if (i < text.Length) i++;
+                    continue;
+                }
+                sb.Append(' ');
+                i++;
+            }
+            return i;
         }
     }
 }

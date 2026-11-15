@@ -123,6 +123,11 @@ namespace UnityOpenMcpBridge.Tests.Playtest
             Refused("scale > 100", ok, scale: 101f);
             Refused("time", ok, time: "wall");
             Refused("fail_on", ok, failOn: new[] { "warning" });
+            // A root-level path error ("condition: unknown condition …") carries no code prefix.
+            Refused("unknown root key", "{\"sleep\":1}");
+            Assert.AreEqual("invalid_arguments", WaitConditionParser.SplitCode("condition: unknown condition 'sleep'.", out _));
+            Assert.AreEqual("command_unavailable", WaitConditionParser.SplitCode("command_unavailable:condition.project_command: x", out var rest));
+            Assert.AreEqual("condition.project_command: x", rest);
         }
 
         [Test]

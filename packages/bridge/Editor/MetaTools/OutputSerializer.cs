@@ -408,7 +408,7 @@ namespace UnityOpenMcpBridge.MetaTools
         private static readonly HashSet<string> InstantiatingPropertyNames
             = new HashSet<string> { "material", "materials", "mesh" };
 
-        private static bool IsInstantiatingProperty(Type runtimeType, PropertyInfo property)
+        internal static bool IsInstantiatingProperty(Type runtimeType, PropertyInfo property)
         {
             if (property == null || runtimeType == null) return false;
             if (!InstantiatingPropertyNames.Contains(property.Name)) return false;

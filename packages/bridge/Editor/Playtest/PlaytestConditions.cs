@@ -14,6 +14,8 @@
 //   project_command {id, args?, field?}    a synchronous, read-only project
 //                                          command returns true (the project's
 //                                          own predicate — no arbitrary C#)
+//   probe           {id, state?}           a playtest_probe is in `state`
+//                                          (default ended: any end state)
 //   frames          N                      N frames have run
 //   ms              N                      N ms have passed (the operation's
 //                                          time base)
@@ -23,7 +25,7 @@
 //                                          composite levels, e.g. any:[{all:[…]}])
 //
 // Event-like leaves (log) latch once seen; delays (frames, ms) are monotonic;
-// state-like leaves (ui, object, project_command) are re-read at every poll.
+// state-like leaves (ui, object, project_command, probe) are re-read at every poll.
 //
 // Frames. The scheduler ticks at the start of EarlyUpdate, so a poll at frame
 // F+1 sees the state the game left after frame F. A state-like leaf that turns
@@ -393,6 +395,42 @@ namespace UnityOpenMcpBridge.Playtest
         }
     }
 
+    // A frame probe (playtest_probe) is in a state: `ended` (default) holds
+    // once it stopped for any reason, the other names hold for that state.
+    internal sealed class ProbeCondition : WaitCondition
+    {
+        internal static readonly string[] States = { "ended", "running", "until_met", "max_samples_reached", "stopped", "play_mode_exited", "error" };
+        private readonly string id;
+        private readonly string state;
+        private string observed;
+        private int samples = -1;
+
+        internal ProbeCondition(string id, string state)
+        {
+            Type = "probe";
+            this.id = id;
+            this.state = state;
+        }
+
+        internal override void Evaluate(ConditionPoll poll)
+        {
+            var record = ProbeRegistry.Get(id);
+            if (record == null) { observed = null; samples = -1; SetState(false, poll); return; }
+            observed = ProbeRecord.StateName(record.State);
+            samples = record.Samples.Count;
+            SetState(state == "ended" ? !record.Running : observed == state, poll);
+        }
+
+        internal override void AppendState(StringBuilder sb)
+        {
+            sb.Append("{\"id\":").Append(BridgeJson.EscapeString(id));
+            sb.Append(",\"state\":").Append(BridgeJson.EscapeString(state));
+            sb.Append(",\"observed\":").Append(observed == null ? "null" : BridgeJson.EscapeString(observed));
+            sb.Append(",\"samples\":").Append(samples < 0 ? "null" : samples.ToString(CultureInfo.InvariantCulture));
+            sb.Append('}');
+        }
+    }
+
     internal sealed class FramesCondition : WaitCondition
     {
         private readonly int frames;
@@ -506,7 +544,7 @@ namespace UnityOpenMcpBridge.Playtest
         internal const int MaxLeaves = 32;
         internal const int MaxFrames = 1_000_000;
         internal const double MaxMs = 3_600_000;
-        internal static readonly string[] LeafKeys = { "log", "ui", "object", "project_command", "frames", "ms" };
+        internal static readonly string[] LeafKeys = { "log", "ui", "object", "project_command", "probe", "frames", "ms" };
         private static readonly string[] Levels = { "any", "log", "warning", "error", "exception" };
 
         internal static WaitCondition Parse(string raw, string path, out string error)
@@ -552,6 +590,7 @@ namespace UnityOpenMcpBridge.Playtest
                 case "ui": result = ParseUi(value, path + ".ui", out error); break;
                 case "object": result = ParseObject(value, path + ".object", out error); break;
                 case "project_command": result = ParseProjectCommand(value, path + ".project_command", out error); break;
+                case "probe": result = ParseProbe(value, path + ".probe", out error); break;
                 case "frames":
                     if (!TryInt(value, out var frames) || frames < 0 || frames > MaxFrames)
                     { error = path + ".frames must be an integer 0.." + MaxFrames + "."; return null; }
@@ -696,6 +735,25 @@ namespace UnityOpenMcpBridge.Playtest
             return new ProjectCommandCondition(id, string.IsNullOrEmpty(field) ? null : field, entry, values);
         }
 
+        private static WaitCondition ParseProbe(string value, string path, out string error)
+        {
+            if (!CheckKeys(value, path, new[] { "id", "state" }, out error)) return null;
+            var id = Str(value, "id");
+            if (string.IsNullOrEmpty(id)) { error = path + ".id (a playtest_probe id) is required."; return null; }
+            var state = Str(value, "state") ?? "ended";
+            if (Array.IndexOf(ProbeCondition.States, state) < 0)
+            {
+                error = path + ".state must be " + string.Join(", ", ProbeCondition.States) + ".";
+                return null;
+            }
+            if (ProbeRegistry.Get(id) == null)
+            {
+                error = "probe_not_found:" + path + ": no probe '" + id + "' (start it with unity_open_mcp_playtest_probe first; a domain reload drops probes).";
+                return null;
+            }
+            return new ProbeCondition(id, state);
+        }
+
         // ---- raw JSON value helpers --------------------------------------
 
         internal static string Str(string obj, string key)
@@ -733,13 +791,16 @@ namespace UnityOpenMcpBridge.Playtest
             return true;
         }
 
-        // A parse error string may carry a stable code prefix ("code:message").
+        // A parse error string may carry a stable code prefix ("code:message",
+        // no space after the colon). A root-level path error reads
+        // "condition: …" / "until: …" (a space after the colon): no code.
         internal static string SplitCode(string error, out string message)
         {
             message = error;
             if (error == null) return "invalid_arguments";
             int colon = error.IndexOf(':');
-            if (colon > 0 && colon < 40 && error.Substring(0, colon).IndexOf(' ') < 0 && error.Substring(0, colon).IndexOf('.') < 0)
+            if (colon > 0 && colon < 40 && colon + 1 < error.Length && error[colon + 1] != ' ' &&
+                error.Substring(0, colon).IndexOf(' ') < 0 && error.Substring(0, colon).IndexOf('.') < 0)
             {
                 message = error.Substring(colon + 1);
                 return error.Substring(0, colon);

@@ -4,8 +4,9 @@ Activate the `playtest` group (with `input-simulation` to drive input —
 `manage_tools(action: "activate_for", intent: "playtest …")` brings both). These
 tools let an agent read and play the running game the way a tester does: put the
 game on a target device or resolution, read what the screen says, tap a control
-by its label, wait for the game to get somewhere, capture what it shows over time,
-check the result — put the player's save back afterwards, and record the whole
+by its label, wait for the game to get somewhere, trace values over frames,
+capture what it shows over time, check the result — put the player's save back
+afterwards, and record the whole
 session as a report for a human. The workflow is in the
 [Playtest guide](../playtest-guide.md).
 
@@ -14,6 +15,7 @@ session as a report for a human. The workflow is in the
 | `unity_open_mcp_ui_snapshot` | Lists the uGUI on screen as a flat accessibility tree with text, visibility and diagnostics | `com.unity.ugui` present; TextMeshPro text when TextMeshPro is installed |
 | `unity_open_mcp_game_view` | Reads or sets the Game view resolution or a Device Simulator device + orientation, and reports the screen, safe area and notch insets the game sees | always (Unity 6; other Editors answer `unsupported_editor_version`) |
 | `unity_open_mcp_playtest_wait` | Waits in play mode until a condition holds (a log line, a UI query, a GameObject state, the project's own read-only predicate, frames, ms — or all / any of them), with a timeout, an optional time scale for the wait and an early stop on game exceptions | always |
+| `unity_open_mcp_playtest_probe` | Samples a value every N play-mode frames — a field / property path or a read-only C# expression — into a bounded buffer the bridge owns, read incrementally by cursor; ends on a condition, a sample cap, repeated errors, an over-budget sample, stop or play-mode exit | always |
 | `unity_senses_capture_series` | Captures the composed game frame at scheduled play-mode frames (relative to the call or a condition), with an optional crop, per-frame luminance / diff metric and a labelled contact sheet | always (Unity 6; reads the play-mode view) |
 | `unity_open_mcp_player_state` | Snapshots, diffs and restores the player state a session changes — PlayerPrefs, `persistentDataPath` files, opt-in EditorPrefs — in a store outside the project; restore is edit-mode only, a dry run unless confirmed, and gated | always (macOS verified; Windows and Linux readers untested in the field) |
 | `unity_open_mcp_playtest_session` | Records a playtest for a human: the agent's input / wait / capture / project-command calls with their frames and console errors, step verdicts, the state diff — `end` writes a Markdown report | always (server-local; no Unity code) |
@@ -252,12 +254,13 @@ A condition is an object with exactly one key:
 | `ui` `{text_contains, path, visible, matches}` | A query over the `ui_snapshot` screen model matches — or, with `matches: false`, stops matching (a popup closed) | Needs `text_contains` and/or `path`. `text_contains` is normalised and case-insensitive over a node's display text (a control's label; a label counts once, as its control); `path` is a node path or trailing path suffix; `visible: true` (default) counts on-screen nodes, `false` nodes that exist but are hidden. Requires `com.unity.ugui` (`ui_unavailable` otherwise) |
 | `object` `{path \| object_id, state}` | A GameObject is `exists` (default), `active` (`activeInHierarchy`), `inactive` or `destroyed` | Loaded scenes plus `DontDestroyOnLoad`, inactive objects included. `path` is a hierarchy path or a bare name; `object_id` an instance id (e.g. a `ui_snapshot` id). Once found the object is tracked: `destroyed` means that object was destroyed |
 | `project_command` `{id, args, field}` | A synchronous, read-only [project command](project-commands.md) returns JSON `true` — or, with `field`, an object whose top-level `field` is `true` | The project's own predicate ("is the wave over"), called at every poll. Arguments are validated once, at start. Mutating or async commands answer `command_not_allowed`; an unknown id `command_unavailable`. There is no arbitrary C# predicate |
+| `probe` `{id, state}` | A [frame probe](#unity_open_mcp_playtest_probe) is in `state` | `ended` (default) holds once it stopped for any reason; or one of `running`, `until_met`, `max_samples_reached`, `stopped`, `play_mode_exited`, `error`. The probe must exist when the wait starts (`probe_not_found`) |
 | `frames` N | N frames have run since the start | |
 | `ms` N | N ms have passed in the call's `time` base | `time: gameplay` (default) is the game's clock (`Time.time`, so `time_scale` speeds it up); `realtime` is the wall clock (a hitch counts in full) |
 | `all` / `any` `[conditions]` | Every / one of the children holds at the same poll | 1–16 children each. A child may itself be `all` / `any` over leaves — one nested level, e.g. `{"any":[{"all":[{"object":{…}},{"ms":800}]},{"ms":5000}]}` ("the window is open and 800 ms passed, or give up after 5 s"); at most 32 leaves in the whole tree |
 
 Frames are reported precisely. A poll at the start of frame F+1 sees the state the
-game left after frame F, so a state condition (`ui`, `object`, `project_command`)
+game left after frame F, so a state condition (`ui`, `object`, `project_command`, `probe`)
 that turns true there is reported as `frame: F` with `observed_frame: F+1`; a
 `log` reports the frame the message was logged in; `frames` / `ms` the frame they
 elapsed at. `play_time` is that frame's `Time.time`. With `poll_every_frames` N
@@ -312,6 +315,124 @@ message, full stack (≤ 4000 characters), frame and play time. `time_scale` app
 when one was requested. `logs_dropped` appears when more than 2000 console messages
 arrived between two polls, so a `log` condition did not see them all (lower
 `poll_every_frames`).
+
+## `unity_open_mcp_playtest_probe`
+
+Traces a value over play-mode frames: the bridge samples it every `every_frames`
+frames into a buffer that later calls read by cursor. Use it instead of per-frame
+handlers installed from `execute_csharp` (`Application.onBeforeRender += …`) with
+logs kept in `AppDomain.CurrentDomain.SetData` — those run until the next domain
+reload when a call forgets to remove them. A probe is one operation on the same
+play-mode scheduler `playtest_wait` runs on, so the per-frame hook is the
+bridge's and every end removes it. Every action answers at once; gate-free and not
+a project mutation (an expression must classify as read-only).
+
+| Action | Does |
+|---|---|
+| `start` | Binds the source and starts sampling from the next frame. Play mode only (`play_mode_required`). A running `id` is refused (`probe_running`); starting a finished `id` replaces its buffer |
+| `read` | Samples from `since` (a `next_cursor`) on, at most `max` (default 50, ≤ 500); returns `next_cursor` and `has_more`. Never clears the buffer |
+| `stop` | Ends a running probe and returns the summary (a finished one answers its summary with `stopped: false`) |
+| `list` | Every probe with state, sample and error counts, the running count, and `hooks`: the probe operations the scheduler still ticks and whether its tick is in the player loop at all |
+
+`read`, `stop` and `list` work in edit mode too.
+
+### Sources
+
+Exactly one of:
+
+- **`member`** — a field / property path read by reflection. With a target
+  (`game_object_path` or `instance_id`, resolved like the typed GameObject tools,
+  plus `DontDestroyOnLoad`), it starts at the target's `component_type` or at the
+  GameObject itself: `"hp"`, `"stats.current"`, `"transform.position.y"`,
+  `"waves[0].count"`. Private fields count (a `[SerializeField] private` field is
+  the usual thing to watch); a segment may index a list or array. Without a target
+  it is a static path `Namespace.Type.Member…` (`"UnityEngine.Time.frameCount"`,
+  `"MyGame.Session.Instance.score"`). A name the value does not have is refused at
+  start (`member_not_found`, with the members it does have); a getter that clones
+  an asset (`Renderer.material(s)`, `MeshFilter.mesh`) is refused
+  (`member_not_readable` — read `sharedMaterial`).
+- **`expression`** — a C# expression compiled once at start through the
+  `execute_csharp` compiler (default usings plus `usings`) and evaluated every
+  sample. With a target, `target` is the component (`component_type`) or the
+  GameObject: `"target.linearVelocity.magnitude"`. `new { hp = …, pos = … }`
+  samples several values at once. It must only read: an assignment outside an
+  object initializer, `++` / `--`, a `;`, a block-bodied lambda, a call of a known
+  write (`SetActive`, `Destroy`, `AddComponent`, `AddForce`, `Set*`, `Clear`, …)
+  and everything `execute_csharp` treats as disruptive or opaque (compile, import,
+  scene / play-mode changes, members resolved by a computed name) are refused at
+  start with `expression_not_read_only`; the project's C# deny patterns apply
+  (`denied_by_policy`); a compile error is `compilation_error`. Like the
+  classification of a snippet, this is a text check: what a project method does
+  when the expression calls it is not visible to it. Each distinct expression
+  loads one small assembly that stays until the next domain reload, as an
+  `execute_csharp` snippet does.
+
+### Samples
+
+```json
+{ "seq": 12, "frame": 6997, "time": 6.4241, "realtime": 11.6692, "value": {"x": 0, "y": -21.4, "z": 0} }
+```
+
+`frame` is `Time.frameCount`, `time` the gameplay clock (`Time.time`, seconds),
+`realtime` `Time.realtimeSinceStartup`. A sample is read at the start of its frame,
+so it shows the state the previous frame left. Values: numbers, strings (clipped at
+256 characters), enums by name, vectors / quaternions / colours / rects / bounds as
+small objects, Unity objects as `{objectId, type, name}`, the first 16 items of a
+collection (`{"$items": […], "$count": N}` beyond), public fields of other values
+three levels deep; a value whose JSON passes 512 characters becomes
+`{"$truncated": true, "$type", "$chars", "preview"}`. A sample that threw carries
+`error` (`"NullReferenceException: …"`, or `"MissingReferenceException: The probed
+object was destroyed."` once the target is gone) instead of `value`; one that cost
+more than `budget_ms` carries `cost_ms`.
+
+### Arguments
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `id` | required | 1–64 of `[A-Za-z0-9_.-]` |
+| `every_frames` | 1 (max 600) | Sample every N frames; the first sample is the first frame after start |
+| `max_samples` | 200 (max 5000) | Buffer size; reaching it ends the probe `max_samples_reached` |
+| `until` | — | A [`playtest_wait` condition](#conditions) polled at each sample; when it holds the probe ends `until_met` and `reason.fired` names the leaf and frame (the sample of that frame is kept) |
+| `time` | `gameplay` | Clock for `until` `ms` conditions |
+| `budget_ms` | 5 (0.1–100) | Cost of one sample (evaluation + serialisation), measured |
+| `usings` | — | Extra namespaces for an expression |
+
+### Lifecycle and caps
+
+A probe's `state` is one of:
+
+| State | `reason.code` | When |
+|---|---|---|
+| `running` | — | Sampling |
+| `until_met` | `until_met` | `until` held |
+| `max_samples_reached` | `max_samples_reached` | The buffer is full |
+| `stopped` | `stop_requested` / `cancelled` / `domain_reload` | `stop`; a cancel of its operation through `POST /playmode-operations`; the domain is unloading |
+| `play_mode_exited` | `play_mode_exited` | Play mode ended |
+| `error` | `sample_errors` / `over_budget` / `until_error` / `probe_failed` | 5 samples in a row threw; 3 samples in a row cost more than `budget_ms`, or one cost 10 × `budget_ms`; the `until` condition could not be evaluated; the probe's tick failed |
+
+Every end runs the operation's cleanup once: the scheduler stops ticking it (the
+player-loop system goes when no operation is left), the `until` condition's log
+hook is removed and the source lets go of its target. A probe never ends as
+stalled: it waits through a paused Editor or `Time.timeScale` 0.
+
+A finished probe's buffer stays readable — in edit mode too, after play mode ends —
+until the same `id` is started again, until 32 records push the oldest finished one
+out, or until a domain reload. Entering play mode normally reloads the domain, so
+probes from an earlier play session are gone then (`probe_not_found`). At most 8
+probes run at once (`probe_capacity`).
+
+To wait for a probe to finish without polling `read`, use
+`playtest_wait {"condition":{"probe":{"id":"hp"}}}`.
+
+### Trace a value
+
+1. `playtest_probe {"action":"start","id":"boss-hp","game_object_path":"Enemies/Boss","component_type":"MyGame.Health","member":"current","every_frames":5,"max_samples":600,"until":{"object":{"path":"Enemies/Boss","state":"destroyed"}}}`
+2. Drive the fight (`inputsim_*`, project commands).
+3. `playtest_probe {"action":"read","id":"boss-hp","since":0}`, then again with the
+   returned `next_cursor` — only new samples come back.
+4. `playtest_probe {"action":"stop","id":"boss-hp"}` — `summary` has the first and
+   last sample, numeric `min` / `max` / `mean`, the error count and last error, and
+   the sample cost (`mean_ms`, `max_ms`, `over_budget`).
 
 ## `unity_senses_capture_series`
 
@@ -805,7 +926,12 @@ operation (`timed_out`, a stall, `play_mode_exited`) are a flat top-level
 | `unsupported_editor_version` | `game_view` on an Editor outside the verified table (Unity 6 line) |
 | `editor_internals_unavailable` | `game_view`: an internal Game view / Simulator member this Editor lacks (`detected.missing`) |
 | `batch_step_requires_server_poll` | `game_view` set_*, `playtest_wait` or `capture_series` inside `batch_execute` |
-| `play_mode_required` | `playtest_wait` / `capture_series` in edit mode |
+| `play_mode_required` | `playtest_wait` / `capture_series` / `playtest_probe` `start` in edit mode |
+| `probe_running` / `probe_capacity` | `playtest_probe` `start`: the `id` is running / 8 probes are running |
+| `probe_not_found` | `playtest_probe` `read` / `stop` of an unknown id (a domain reload drops probes); a `probe` condition naming one |
+| `expression_not_read_only` | `playtest_probe` `start`: the expression writes or disrupts (`classification`: `writes`, `disruptive`, `opaque`, `savesscenes`) |
+| `member_not_found` / `member_not_readable` | `playtest_probe` `start`: the member path names nothing on the value it reaches (the message lists its members) / a getter that clones an asset, or an index on a non-list |
+| `type_not_found` / `component_not_found` | `playtest_probe` `start`: `component_type` or a static path's type is not loaded / the target has no such component |
 | `timed_out` | `playtest_wait`: the condition did not hold within `timeout_ms` (carries `condition` with every leaf's last state); `capture_series`: `start_on` did not hold within `start_timeout_ms` (outcome `start_on_timed_out`) |
 | `exception_thrown` / `error_logged` | `playtest_wait` with `fail_on`: the game logged an exception / error (carries `exception`) |
 | `condition_error` | A leaf cannot be evaluated (a project command threw) |

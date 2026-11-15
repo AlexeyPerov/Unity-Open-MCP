@@ -209,5 +209,69 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsNull(plain.GuardReason);
             Assert.IsNull(EffectiveToolContract.Resolve("unity_open_mcp_recompile_scripts", "{}").GuardReason);
         }
+
+        // ----- Expressions (playtest_probe): read-only one-liners -----
+
+        [TestCase("UnityEngine.Time.frameCount * 2")]
+        [TestCase("a == b && c != d && e <= f && g >= h")]
+        [TestCase("enemies.Count(e => e.hp > 0)")]
+        [TestCase("new { hp = target.hp, pos = target.transform.position }")]
+        [TestCase("new UnityEngine.Vector3(1, 2, 3) { x = 4 }")]
+        [TestCase("$\"{a}={b}; {c}\"")]
+        [TestCase("@\"a = b;\" + \"x++ ; y = z\" + 'x'")]
+        [TestCase("x switch { 1 => \"one\", _ => \"many\" }")]
+        [TestCase("target is { enabled: true } ? 1 : 0 // a = 1; b++")]
+        [TestCase("UnityEngine.Mathf.Max(a, b) >> 1 << 2")]
+        [TestCase("GetComponent<UnityEngine.Rigidbody>().linearVelocity.magnitude")]
+        public static void Expression_Reads(string expression)
+        {
+            var verdict = SnippetClassifier.ClassifyExpression(expression);
+            Assert.AreEqual(SnippetEffect.Plain, verdict.Effect, verdict.Reason);
+        }
+
+        [TestCase("hp = 0", "assigns (=)")]
+        [TestCase("(hp = 0)", "assigns (=)")]
+        [TestCase("hp += 1", "assigns (+=)")]
+        [TestCase("hp <<= 1", "assigns (<<=)")]
+        [TestCase("x ??= y", "assigns (??=)")]
+        [TestCase("hp++", "increments or decrements (++)")]
+        [TestCase("--hp", "increments or decrements (--)")]
+        [TestCase("a; b", "holds a statement (;)")]
+        [TestCase("((System.Func<int>)(() => { return 1; }))()", "block-bodied lambda")]
+        [TestCase("go.SetActive(false)", "calls SetActive (a write)")]
+        [TestCase("UnityEngine.Object.Destroy(go)", "calls Destroy (a write)")]
+        [TestCase("go.AddComponent<UnityEngine.Rigidbody>()", "calls AddComponent (a write)")]
+        [TestCase("rb.AddForce(UnityEngine.Vector3.up)", "calls AddForce (a write)")]
+        [TestCase("list.Clear()", "calls Clear (a write)")]
+        [TestCase("$\"{(hp = 0)}\"", "assigns (=)")]
+        public static void Expression_Writes(string expression, string reason)
+        {
+            var verdict = SnippetClassifier.ClassifyExpression(expression);
+            Assert.AreEqual(SnippetEffect.Writes, verdict.Effect, verdict.Reason);
+            StringAssert.StartsWith("the expression ", verdict.Reason);
+            StringAssert.Contains(reason, verdict.Reason);
+        }
+
+        [Test]
+        public static void Expression_KeepsTheSnippetVerdicts()
+        {
+            var disruptive = SnippetClassifier.ClassifyExpression("UnityEditor.AssetDatabase.Refresh()");
+            Assert.AreEqual(SnippetEffect.Disruptive, disruptive.Effect);
+            Assert.AreEqual("the expression calls Refresh (asset import)", disruptive.Reason);
+            Assert.AreEqual(SnippetEffect.Opaque,
+                SnippetClassifier.ClassifyExpression("typeof(T).GetProperty(\"a\" + b).GetValue(null)").Effect);
+            Assert.AreEqual(SnippetEffect.SavesScenes,
+                SnippetClassifier.ClassifyExpression("UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes()").Effect);
+            Assert.AreEqual(SnippetEffect.Opaque, SnippetClassifier.ClassifyExpression("  ").Effect);
+        }
+
+        [Test]
+        public static void CodeOnly_BlanksLiteralsAndComments()
+        {
+            Assert.AreEqual("\"     \" + x", SnippetClassifier.CodeOnly("\"a = b\" + x"));
+            Assert.AreEqual("$\"(a)   (b)\"", SnippetClassifier.CodeOnly("$\"{a} = {b}\""));
+            Assert.AreEqual("x         ", SnippetClassifier.CodeOnly("x // y = 1"));
+            Assert.AreEqual("' '", SnippetClassifier.CodeOnly("'='"));
+        }
     }
 }

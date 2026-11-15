@@ -26,7 +26,7 @@ export const playtestWait = makeTool(
     "ui {text_contains, path, visible, matches} = a ui_snapshot query matches (matches:false = stops " +
     "matching, e.g. a popup closed); object {path | object_id, state: exists | active | inactive | " +
     "destroyed}; project_command {id, args, field} = the project's own read-only predicate returns true " +
-    "(no arbitrary C#); frames N; ms N; all / any [conditions] — a child may itself be all / any over leaves " +
+    "(no arbitrary C#); probe {id, state} = a playtest_probe ended (default) or is in state; frames N; ms N; all / any [conditions] — a child may itself be all / any over leaves " +
     "(e.g. {\"any\":[{\"all\":[{\"object\":{…}},{\"ms\":800}]},{\"ms\":5000}]}). The bridge evaluates it inside " +
     "the player loop every poll_every_frames frames and the call returns the terminal result: `fired` " +
     "(which condition — e.g. condition.any[1] — at which frame, observed_frame, play_time, elapsed_ms), " +
@@ -44,7 +44,7 @@ export const playtestWait = makeTool(
     required: ["condition"],
     properties: {
       condition: conditionSchema(
-        "What to wait for: one key — log / ui / object / project_command / frames / ms — or all / any over " +
+        "What to wait for: one key — log / ui / object / project_command / probe / frames / ms — or all / any over " +
           "those, e.g. {\"log\":{\"pattern\":\"Wave \\\\d+ cleared\"}}, {\"ui\":{\"text_contains\":\"Victory\"}}, " +
           "{\"object\":{\"path\":\"Enemies/Boss\",\"state\":\"destroyed\"}}, " +
           "{\"any\":[{\"ms\":5000},{\"log\":{\"pattern\":\"Game over\"}}]}.",

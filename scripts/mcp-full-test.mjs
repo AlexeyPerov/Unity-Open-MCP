@@ -360,6 +360,12 @@ function buildSuite() {
   s("player_state_list", "B", "unity_open_mcp_player_state", { action: "list" });
   // Server-local and read-only; start / mark / end write a session log (manual checklist).
   s("playtest_session_list", "B", "unity_open_mcp_playtest_session", { action: "list" });
+  // list reads the bridge's probe records and scheduler hooks; start samples
+  // play-mode frames, so in edit mode it is refused (play-mode probes: manual checklist).
+  s("playtest_probe_list", "B", "unity_open_mcp_playtest_probe", { action: "list" });
+  s("playtest_probe_start_edit_mode", "B", "unity_open_mcp_playtest_probe", {
+    action: "start", id: "s0-probe", member: "UnityEngine.Time.frameCount", max_samples: 1,
+  }, { expect: "tolerate", tolerate: ["play_mode_required"] });
 
   // --- agent-senses reads (live-only, read-only) ---
   // read_console has a LogEntries reflection bug on Unity 6 (see

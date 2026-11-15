@@ -111,10 +111,6 @@ namespace UnityOpenMcpBridge.MetaTools
             }
 
             var extraUsings = JsonBody.GetStringArray(body, "usings");
-            var allUsings = DefaultUsings
-                .Concat(extraUsings ?? Array.Empty<string>())
-                .Distinct()
-                .ToArray();
 
             // Resolve object_ids to live objects before compiling so the snippet
             // can access them via Refs[index] or Ref<T>(index).
@@ -149,30 +145,11 @@ namespace UnityOpenMcpBridge.MetaTools
                 return ToolDispatchResult.Fail("roslyn_unavailable", RoslynHost.UnavailableHint);
             }
 
-            var source = BuildSource(code, allUsings);
-
-            // fd-exhaustion fix — source-keyed snippet cache: a snippet this
-            // session already compiled skips Roslyn (and the metadata-reference
-            // path) entirely and reuses its loaded assembly.
-            var sourceKey = ComputeSourceKey(source);
-            var cachedAssembly = TryGetCachedSnippetAssembly(sourceKey);
-
-            byte[] pe = null;
-            if (cachedAssembly == null)
-            {
-                string errors;
-                (pe, errors) = RoslynHost.Compile(source);
-                if (pe == null)
-                    return CompilationFailure(errors ?? "Unknown compilation error", code);
-            }
+            var type = CompileSnippetType(code, extraUsings, out var compileFailure);
+            if (type == null) return compileFailure;
 
             try
             {
-                var assembly = cachedAssembly ?? LoadSnippetAssembly(sourceKey, pe);
-                var type = assembly.GetType("UnityOpenMcpSnippet.Snippet");
-                if (type == null)
-                    return ToolDispatchResult.Fail("execution_error", "Compiled snippet type not found");
-
                 var method = type.GetMethod("Run", BindingFlags.Public | BindingFlags.Static);
                 if (method == null)
                     return ToolDispatchResult.Fail("execution_error", "Compiled snippet entry point not found");
@@ -228,6 +205,59 @@ namespace UnityOpenMcpBridge.MetaTools
             catch (Exception e)
             {
                 return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // The one snippet compile path: the default usings plus the caller's,
+        // the generated wrapper (BuildSource), the source-keyed assembly cache
+        // and Roslyn. Returns the compiled UnityOpenMcpSnippet.Snippet type —
+        // its static Run() is the snippet — or null with `failure` set
+        // (roslyn_unavailable / compilation_error / execution_error).
+        // execute_csharp invokes Run once; playtest_probe binds it to a
+        // delegate at start and calls it every sample.
+        internal static Type CompileSnippetType(string code, string[] extraUsings, out ToolDispatchResult failure)
+        {
+            failure = null;
+            if (!RoslynHost.Initialize())
+            {
+                failure = ToolDispatchResult.Fail("roslyn_unavailable", RoslynHost.UnavailableHint);
+                return null;
+            }
+            var allUsings = DefaultUsings
+                .Concat(extraUsings ?? Array.Empty<string>())
+                .Distinct()
+                .ToArray();
+            var source = BuildSource(code, allUsings);
+
+            // fd-exhaustion fix — source-keyed snippet cache: a snippet this
+            // session already compiled skips Roslyn (and the metadata-reference
+            // path) entirely and reuses its loaded assembly.
+            var sourceKey = ComputeSourceKey(source);
+            var cachedAssembly = TryGetCachedSnippetAssembly(sourceKey);
+
+            byte[] pe = null;
+            if (cachedAssembly == null)
+            {
+                string errors;
+                (pe, errors) = RoslynHost.Compile(source);
+                if (pe == null)
+                {
+                    failure = CompilationFailure(errors ?? "Unknown compilation error", code);
+                    return null;
+                }
+            }
+
+            try
+            {
+                var assembly = cachedAssembly ?? LoadSnippetAssembly(sourceKey, pe);
+                var type = assembly.GetType("UnityOpenMcpSnippet.Snippet");
+                if (type == null) failure = ToolDispatchResult.Fail("execution_error", "Compiled snippet type not found");
+                return type;
+            }
+            catch (Exception e)
+            {
+                failure = ToolDispatchResult.Fail("execution_error", e.Message);
+                return null;
             }
         }
 

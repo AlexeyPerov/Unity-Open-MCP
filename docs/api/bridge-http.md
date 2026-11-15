@@ -359,7 +359,8 @@ adapter reports as an unknown outcome.
 ### Play-mode operations
 
 Tools that must run across real play-mode frames (`unity_open_mcp_inputsim_gesture`,
-`unity_open_mcp_playtest_wait`, `unity_senses_capture_series`) start an operation on the bridge's shared
+`unity_open_mcp_playtest_wait`, `unity_senses_capture_series`, and each
+`unity_open_mcp_playtest_probe` probe, whose own actions answer at once) start an operation on the bridge's shared
 play-mode scheduler and return at once with `operation` (`operation_id`, `kind`,
 `state`, `phase`, `progress`). The scheduler is a player-loop system at the start
 of `EarlyUpdate`; it owns per-frame timing (`realtime` or `gameplay`),
@@ -382,7 +383,10 @@ frame runs (a paused Editor; also checked from the Editor update loop), or its
 `no_frames`, `no_progress`) and the tool's `result.error_code`
 (`capture_series_stalled`, `wait_stalled`, `gesture_stalled`); slow progress
 never ends one, and a main-thread hitch counts at most 1 s. Waiting for
-`start_on`, an `at_frames` schedule and encoding always count as progress.
+`start_on`, an `at_frames` schedule and encoding always count as progress. A
+`playtest_probe` operation (wire contract 13) never stalls: it waits through a
+paused Editor or a zero time scale and ends on its own terms; a cancel ends the
+probe `stopped` with reason `cancelled`.
 Every terminal path runs the operation's cleanup exactly once,
 which releases held input, restores a wait's `Time.timeScale` and encodes the
 frames a series captured so far (not on reload / quit). The caller supplies

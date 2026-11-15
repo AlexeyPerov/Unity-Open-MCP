@@ -822,12 +822,13 @@ namespace UnityOpenMcpBridge
         // selector reads. "fields" (component_modify/object_modify),
         // "patches"/"jsonPatches" (gameobject_modify/material), "entries"
         // (assets_copy/assets_move), "deletes" (assets_delete), "condition" /
-        // "start_on" (playtest_wait / capture_series condition trees, whose
-        // project_command args are arbitrary), "canvas_scaler" (screenshot's
+        // "start_on" / "until" (playtest_wait / capture_series / playtest_probe
+        // condition trees, whose project_command args are arbitrary and whose
+        // leaves carry id / path / state keys), "canvas_scaler" (screenshot's
         // prefab view: a CanvasScaler settings object). component_add's
         // "component_types" is a bare-string array (no nested objects), so it
         // cannot shadow a selector and is intentionally not listed.
         private static readonly string[] PatchArrayKeys =
-            { "fields", "entries", "patches", "jsonPatches", "deletes", "condition", "start_on", "canvas_scaler" };
+            { "fields", "entries", "patches", "jsonPatches", "deletes", "condition", "start_on", "until", "canvas_scaler" };
     }
 }

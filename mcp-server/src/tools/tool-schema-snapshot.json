@@ -13801,25 +13801,25 @@
     }
   },
   "unity_open_mcp_playtest_wait": {
-    "description": "Wait in play mode until a condition holds — instead of polling in a loop of calls. CONDITION (exactly one key): log {pattern (regex), level} = a console message logged after the start matches; ui {text_contains, path, visible, matches} = a ui_snapshot query matches (matches:false = stops matching, e.g. a popup closed); object {path | object_id, state: exists | active | inactive | destroyed}; project_command {id, args, field} = the project's own read-only predicate returns true (no arbitrary C#); frames N; ms N; all / any [conditions] — a child may itself be all / any over leaves (e.g. {\"any\":[{\"all\":[{\"object\":{…}},{\"ms\":800}]},{\"ms\":5000}]}). The bridge evaluates it inside the player loop every poll_every_frames frames and the call returns the terminal result: `fired` (which condition — e.g. condition.any[1] — at which frame, observed_frame, play_time, elapsed_ms), every leaf's last observed state, frames, and console errors logged meanwhile. timeout_ms is wall-clock: on expiry the call fails with timed_out plus the last observed state. time_scale applies Time.timeScale for the wait only and is restored on every exit (success, timeout, cancel, exit play, domain reload) unless game code changed it meanwhile (reported). fail_on [\"exception\"] stops at the first exception the game logs (exception_thrown, with message and stack); \"error\" also stops on error logs. ms conditions count `time` (gameplay = scaled by Time.timeScale, default; realtime). Waits with timeout_ms over 40s return a job_id instead — wait on it with unity_open_mcp_jobs (cancel there; exiting play mode / a reload end it, time scale restored). Play-mode only; gate-free; one time-scaled wait at a time (playmode_operation_busy). Not allowed inside batch_execute.",
+    "description": "Wait in play mode until a condition holds — instead of polling in a loop of calls. CONDITION (exactly one key): log {pattern (regex), level} = a console message logged after the start matches; ui {text_contains, path, visible, matches} = a ui_snapshot query matches (matches:false = stops matching, e.g. a popup closed); object {path | object_id, state: exists | active | inactive | destroyed}; project_command {id, args, field} = the project's own read-only predicate returns true (no arbitrary C#); probe {id, state} = a playtest_probe ended (default) or is in state; frames N; ms N; all / any [conditions] — a child may itself be all / any over leaves (e.g. {\"any\":[{\"all\":[{\"object\":{…}},{\"ms\":800}]},{\"ms\":5000}]}). The bridge evaluates it inside the player loop every poll_every_frames frames and the call returns the terminal result: `fired` (which condition — e.g. condition.any[1] — at which frame, observed_frame, play_time, elapsed_ms), every leaf's last observed state, frames, and console errors logged meanwhile. timeout_ms is wall-clock: on expiry the call fails with timed_out plus the last observed state. time_scale applies Time.timeScale for the wait only and is restored on every exit (success, timeout, cancel, exit play, domain reload) unless game code changed it meanwhile (reported). fail_on [\"exception\"] stops at the first exception the game logs (exception_thrown, with message and stack); \"error\" also stops on error logs. ms conditions count `time` (gameplay = scaled by Time.timeScale, default; realtime). Waits with timeout_ms over 40s return a job_id instead — wait on it with unity_open_mcp_jobs (cancel there; exiting play mode / a reload end it, time scale restored). Play-mode only; gate-free; one time-scaled wait at a time (playmode_operation_busy). Not allowed inside batch_execute.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "condition": {
           "additionalProperties": false,
-          "description": "What to wait for: one key — log / ui / object / project_command / frames / ms — or all / any over those, e.g. {\"log\":{\"pattern\":\"Wave \\\\d+ cleared\"}}, {\"ui\":{\"text_contains\":\"Victory\"}}, {\"object\":{\"path\":\"Enemies/Boss\",\"state\":\"destroyed\"}}, {\"any\":[{\"ms\":5000},{\"log\":{\"pattern\":\"Game over\"}}]}.",
+          "description": "What to wait for: one key — log / ui / object / project_command / probe / frames / ms — or all / any over those, e.g. {\"log\":{\"pattern\":\"Wave \\\\d+ cleared\"}}, {\"ui\":{\"text_contains\":\"Victory\"}}, {\"object\":{\"path\":\"Enemies/Boss\",\"state\":\"destroyed\"}}, {\"any\":[{\"ms\":5000},{\"log\":{\"pattern\":\"Game over\"}}]}.",
           "properties": {
             "all": {
               "description": "Holds when every child holds at the same poll (log leaves latch once seen). A child may be all / any over leaves, e.g. {\"all\":[{\"ms\":800},{\"any\":[{\"object\":{…}},{\"object\":{…}}]}]}; at most 32 leaves in all.",
               "items": {
                 "additionalProperties": false,
-                "description": "Exactly one of log, ui, object, project_command, frames, ms — or all / any over those leaves.",
+                "description": "Exactly one of log, ui, object, project_command, probe, frames, ms — or all / any over those leaves.",
                 "properties": {
                   "all": {
                     "description": "Nested: holds when every leaf holds at the same poll.",
                     "items": {
                       "additionalProperties": false,
-                      "description": "Exactly one of log, ui, object, project_command, frames, ms.",
+                      "description": "Exactly one of log, ui, object, project_command, probe, frames, ms.",
                       "properties": {
                         "frames": {
                           "description": "Holds after this many frames have run since the start.",
@@ -13883,6 +13883,32 @@
                               "type": "string"
                             }
                           },
+                          "type": "object"
+                        },
+                        "probe": {
+                          "additionalProperties": false,
+                          "description": "An existing playtest_probe is in state (default ended = any end state).",
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ended",
+                                "running",
+                                "until_met",
+                                "max_samples_reached",
+                                "stopped",
+                                "play_mode_exited",
+                                "error"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
                           "type": "object"
                         },
                         "project_command": {
@@ -13945,7 +13971,7 @@
                     "description": "Nested: holds when one leaf holds.",
                     "items": {
                       "additionalProperties": false,
-                      "description": "Exactly one of log, ui, object, project_command, frames, ms.",
+                      "description": "Exactly one of log, ui, object, project_command, probe, frames, ms.",
                       "properties": {
                         "frames": {
                           "description": "Holds after this many frames have run since the start.",
@@ -14009,6 +14035,32 @@
                               "type": "string"
                             }
                           },
+                          "type": "object"
+                        },
+                        "probe": {
+                          "additionalProperties": false,
+                          "description": "An existing playtest_probe is in state (default ended = any end state).",
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ended",
+                                "running",
+                                "until_met",
+                                "max_samples_reached",
+                                "stopped",
+                                "play_mode_exited",
+                                "error"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
                           "type": "object"
                         },
                         "project_command": {
@@ -14129,6 +14181,32 @@
                         "type": "string"
                       }
                     },
+                    "type": "object"
+                  },
+                  "probe": {
+                    "additionalProperties": false,
+                    "description": "An existing playtest_probe is in state (default ended = any end state).",
+                    "properties": {
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "enum": [
+                          "ended",
+                          "running",
+                          "until_met",
+                          "max_samples_reached",
+                          "stopped",
+                          "play_mode_exited",
+                          "error"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
                     "type": "object"
                   },
                   "project_command": {
@@ -14191,13 +14269,13 @@
               "description": "Holds when one child holds; the result names it (fired.path, e.g. condition.any[1], or condition.any[0].all for a nested set). A child may be all / any over leaves.",
               "items": {
                 "additionalProperties": false,
-                "description": "Exactly one of log, ui, object, project_command, frames, ms — or all / any over those leaves.",
+                "description": "Exactly one of log, ui, object, project_command, probe, frames, ms — or all / any over those leaves.",
                 "properties": {
                   "all": {
                     "description": "Nested: holds when every leaf holds at the same poll.",
                     "items": {
                       "additionalProperties": false,
-                      "description": "Exactly one of log, ui, object, project_command, frames, ms.",
+                      "description": "Exactly one of log, ui, object, project_command, probe, frames, ms.",
                       "properties": {
                         "frames": {
                           "description": "Holds after this many frames have run since the start.",
@@ -14261,6 +14339,32 @@
                               "type": "string"
                             }
                           },
+                          "type": "object"
+                        },
+                        "probe": {
+                          "additionalProperties": false,
+                          "description": "An existing playtest_probe is in state (default ended = any end state).",
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ended",
+                                "running",
+                                "until_met",
+                                "max_samples_reached",
+                                "stopped",
+                                "play_mode_exited",
+                                "error"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
                           "type": "object"
                         },
                         "project_command": {
@@ -14323,7 +14427,7 @@
                     "description": "Nested: holds when one leaf holds.",
                     "items": {
                       "additionalProperties": false,
-                      "description": "Exactly one of log, ui, object, project_command, frames, ms.",
+                      "description": "Exactly one of log, ui, object, project_command, probe, frames, ms.",
                       "properties": {
                         "frames": {
                           "description": "Holds after this many frames have run since the start.",
@@ -14387,6 +14491,32 @@
                               "type": "string"
                             }
                           },
+                          "type": "object"
+                        },
+                        "probe": {
+                          "additionalProperties": false,
+                          "description": "An existing playtest_probe is in state (default ended = any end state).",
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ended",
+                                "running",
+                                "until_met",
+                                "max_samples_reached",
+                                "stopped",
+                                "play_mode_exited",
+                                "error"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
                           "type": "object"
                         },
                         "project_command": {
@@ -14507,6 +14637,32 @@
                         "type": "string"
                       }
                     },
+                    "type": "object"
+                  },
+                  "probe": {
+                    "additionalProperties": false,
+                    "description": "An existing playtest_probe is in state (default ended = any end state).",
+                    "properties": {
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "enum": [
+                          "ended",
+                          "running",
+                          "until_met",
+                          "max_samples_reached",
+                          "stopped",
+                          "play_mode_exited",
+                          "error"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
                     "type": "object"
                   },
                   "project_command": {
@@ -14627,6 +14783,32 @@
                   "type": "string"
                 }
               },
+              "type": "object"
+            },
+            "probe": {
+              "additionalProperties": false,
+              "description": "An existing playtest_probe is in state (default ended = any end state).",
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "ended",
+                    "running",
+                    "until_met",
+                    "max_samples_reached",
+                    "stopped",
+                    "play_mode_exited",
+                    "error"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
               "type": "object"
             },
             "project_command": {
@@ -14830,13 +15012,13 @@
               "description": "Holds when every child holds at the same poll (log leaves latch once seen). A child may be all / any over leaves, e.g. {\"all\":[{\"ms\":800},{\"any\":[{\"object\":{…}},{\"object\":{…}}]}]}; at most 32 leaves in all.",
               "items": {
                 "additionalProperties": false,
-                "description": "Exactly one of log, ui, object, project_command, frames, ms — or all / any over those leaves.",
+                "description": "Exactly one of log, ui, object, project_command, probe, frames, ms — or all / any over those leaves.",
                 "properties": {
                   "all": {
                     "description": "Nested: holds when every leaf holds at the same poll.",
                     "items": {
                       "additionalProperties": false,
-                      "description": "Exactly one of log, ui, object, project_command, frames, ms.",
+                      "description": "Exactly one of log, ui, object, project_command, probe, frames, ms.",
                       "properties": {
                         "frames": {
                           "description": "Holds after this many frames have run since the start.",
@@ -14900,6 +15082,32 @@
                               "type": "string"
                             }
                           },
+                          "type": "object"
+                        },
+                        "probe": {
+                          "additionalProperties": false,
+                          "description": "An existing playtest_probe is in state (default ended = any end state).",
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ended",
+                                "running",
+                                "until_met",
+                                "max_samples_reached",
+                                "stopped",
+                                "play_mode_exited",
+                                "error"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
                           "type": "object"
                         },
                         "project_command": {
@@ -14962,7 +15170,7 @@
                     "description": "Nested: holds when one leaf holds.",
                     "items": {
                       "additionalProperties": false,
-                      "description": "Exactly one of log, ui, object, project_command, frames, ms.",
+                      "description": "Exactly one of log, ui, object, project_command, probe, frames, ms.",
                       "properties": {
                         "frames": {
                           "description": "Holds after this many frames have run since the start.",
@@ -15026,6 +15234,32 @@
                               "type": "string"
                             }
                           },
+                          "type": "object"
+                        },
+                        "probe": {
+                          "additionalProperties": false,
+                          "description": "An existing playtest_probe is in state (default ended = any end state).",
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ended",
+                                "running",
+                                "until_met",
+                                "max_samples_reached",
+                                "stopped",
+                                "play_mode_exited",
+                                "error"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
                           "type": "object"
                         },
                         "project_command": {
@@ -15146,6 +15380,32 @@
                         "type": "string"
                       }
                     },
+                    "type": "object"
+                  },
+                  "probe": {
+                    "additionalProperties": false,
+                    "description": "An existing playtest_probe is in state (default ended = any end state).",
+                    "properties": {
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "enum": [
+                          "ended",
+                          "running",
+                          "until_met",
+                          "max_samples_reached",
+                          "stopped",
+                          "play_mode_exited",
+                          "error"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
                     "type": "object"
                   },
                   "project_command": {
@@ -15208,13 +15468,13 @@
               "description": "Holds when one child holds; the result names it (fired.path, e.g. condition.any[1], or condition.any[0].all for a nested set). A child may be all / any over leaves.",
               "items": {
                 "additionalProperties": false,
-                "description": "Exactly one of log, ui, object, project_command, frames, ms — or all / any over those leaves.",
+                "description": "Exactly one of log, ui, object, project_command, probe, frames, ms — or all / any over those leaves.",
                 "properties": {
                   "all": {
                     "description": "Nested: holds when every leaf holds at the same poll.",
                     "items": {
                       "additionalProperties": false,
-                      "description": "Exactly one of log, ui, object, project_command, frames, ms.",
+                      "description": "Exactly one of log, ui, object, project_command, probe, frames, ms.",
                       "properties": {
                         "frames": {
                           "description": "Holds after this many frames have run since the start.",
@@ -15278,6 +15538,32 @@
                               "type": "string"
                             }
                           },
+                          "type": "object"
+                        },
+                        "probe": {
+                          "additionalProperties": false,
+                          "description": "An existing playtest_probe is in state (default ended = any end state).",
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ended",
+                                "running",
+                                "until_met",
+                                "max_samples_reached",
+                                "stopped",
+                                "play_mode_exited",
+                                "error"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
                           "type": "object"
                         },
                         "project_command": {
@@ -15340,7 +15626,7 @@
                     "description": "Nested: holds when one leaf holds.",
                     "items": {
                       "additionalProperties": false,
-                      "description": "Exactly one of log, ui, object, project_command, frames, ms.",
+                      "description": "Exactly one of log, ui, object, project_command, probe, frames, ms.",
                       "properties": {
                         "frames": {
                           "description": "Holds after this many frames have run since the start.",
@@ -15404,6 +15690,32 @@
                               "type": "string"
                             }
                           },
+                          "type": "object"
+                        },
+                        "probe": {
+                          "additionalProperties": false,
+                          "description": "An existing playtest_probe is in state (default ended = any end state).",
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ended",
+                                "running",
+                                "until_met",
+                                "max_samples_reached",
+                                "stopped",
+                                "play_mode_exited",
+                                "error"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
                           "type": "object"
                         },
                         "project_command": {
@@ -15524,6 +15836,32 @@
                         "type": "string"
                       }
                     },
+                    "type": "object"
+                  },
+                  "probe": {
+                    "additionalProperties": false,
+                    "description": "An existing playtest_probe is in state (default ended = any end state).",
+                    "properties": {
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "enum": [
+                          "ended",
+                          "running",
+                          "until_met",
+                          "max_samples_reached",
+                          "stopped",
+                          "play_mode_exited",
+                          "error"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
                     "type": "object"
                   },
                   "project_command": {
@@ -15644,6 +15982,32 @@
                   "type": "string"
                 }
               },
+              "type": "object"
+            },
+            "probe": {
+              "additionalProperties": false,
+              "description": "An existing playtest_probe is in state (default ended = any end state).",
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "ended",
+                    "running",
+                    "until_met",
+                    "max_samples_reached",
+                    "stopped",
+                    "play_mode_exited",
+                    "error"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
               "type": "object"
             },
             "project_command": {
@@ -15903,6 +16267,1179 @@
             "suspicious"
           ],
           "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    }
+  },
+  "unity_open_mcp_playtest_probe": {
+    "description": "Trace values over play-mode frames without per-frame hooks of your own: the bridge samples a value every every_frames frames into a bounded buffer that later calls read incrementally — instead of Application.onBeforeRender handlers and AppDomain.SetData logs from execute_csharp, which leak until a reload. SOURCE (exactly one): member = a field / property path read by reflection, on a target GameObject (game_object_path or instance_id) or its component (component_type), e.g. member \"health.current\" or \"transform.position\" (private fields included; list[0] indexes), or without a target a static path Namespace.Type.Member (\"UnityEngine.Time.frameCount\"); expression = a C# expression compiled once (the execute_csharp compiler, default usings + `usings`), with a target available as `target` (e.g. \"target.velocity.magnitude\" with component_type UnityEngine.Rigidbody). The expression must only read: an assignment, ++/--, a `;`, a known write call (SetActive, Destroy, AddForce, Set*, …) or anything execute_csharp treats as disruptive is refused at start (expression_not_read_only). ACTIONS: start {id, source, every_frames, max_samples, until, budget_ms} — play mode only (play_mode_required); samples carry seq, frame, time (gameplay s), realtime (s) and value (numbers, strings, enums, vectors / colours as small objects, the first items of a collection; large values become a $truncated marker) or error; values are read at the start of the frame, i.e. the state the previous frame left. read {id, since: next_cursor, max} returns only samples from the cursor on and never clears the buffer. stop {id} ends it and returns a summary (first / last, numeric min / max / mean, errors, cost). list = every probe, running count and the scheduler hooks still installed. STATES: running, until_met (until = a playtest_wait condition: object / log / ui / project_command / probe / frames / ms, all / any — polled at each sample), max_samples_reached (the buffer's upper bound, at most 5000), stopped, play_mode_exited, error (reason sample_errors after consecutive failing samples, or over_budget: a sample costing over budget_ms 3 times in a row, or 10x once). At most 8 probes run at once (probe_capacity). A finished buffer stays readable — also in edit mode after play mode ends — until the id is started again or the domain reloads (entering play mode usually reloads it). Wait for a probe to end with playtest_wait {\"condition\":{\"probe\":{\"id\":…}}}. Gate-free.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "description": "start: begin sampling (play mode). read: samples from `since` on (incremental, does not clear). stop: end it, return the summary. list: every probe and the hooks still installed.",
+          "enum": [
+            "start",
+            "read",
+            "stop",
+            "list"
+          ],
+          "type": "string"
+        },
+        "budget_ms": {
+          "default": 5,
+          "description": "[start] Cost budget of one sample (evaluation + serialisation). A sample over it carries cost_ms; 3 in a row, or one over 10x, end the probe as error / over_budget.",
+          "maximum": 100,
+          "minimum": 0.1,
+          "type": "number"
+        },
+        "component_type": {
+          "description": "Component type (full name preferred); alternative to component_instance_id.",
+          "type": "string"
+        },
+        "every_frames": {
+          "default": 1,
+          "description": "[start] Sample every N frames (the first sample is the first frame after start). until is polled at each sample.",
+          "maximum": 600,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "expression": {
+          "description": "[start] A read-only C# expression evaluated every sample, e.g. \"UnityEngine.Time.frameCount * 2\", \"target.velocity.magnitude\", \"UnityEngine.Object.FindObjectsByType<Enemy>(UnityEngine.FindObjectsSortMode.None).Length\". `target` is the target's component (component_type) or GameObject. Alternative to member.",
+          "maxLength": 4000,
+          "minLength": 1,
+          "type": "string"
+        },
+        "game_object_path": {
+          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "type": "string"
+        },
+        "id": {
+          "description": "[start / read / stop] Probe id: 1-64 of [A-Za-z0-9_.-]. start refuses a running id (probe_running); starting a finished id replaces its buffer.",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$",
+          "type": "string"
+        },
+        "instance_id": {
+          "default": 0,
+          "description": "[start] Target GameObject instance id. Alternative to game_object_path.",
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "max": {
+          "default": 50,
+          "description": "[read] Most samples to return; has_more says whether more are buffered.",
+          "maximum": 500,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_samples": {
+          "default": 200,
+          "description": "[start] Buffer size; reaching it ends the probe as max_samples_reached.",
+          "maximum": 5000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "member": {
+          "description": "[start] Field / property path. With a target: on the component (component_type) or the GameObject, e.g. \"hp\", \"stats.current\", \"transform.position.y\", \"waves[0].count\". Without a target: a static path Namespace.Type.Member, e.g. \"UnityEngine.Time.frameCount\". Alternative to expression.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
+        },
+        "since": {
+          "default": 0,
+          "description": "[read] Cursor: the next_cursor of the previous read (0 = from the first sample).",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "target_path": {
+          "deprecated": true,
+          "description": "Deprecated alias; use game_object_path.",
+          "type": "string",
+          "x-alias-for": "game_object_path"
+        },
+        "time": {
+          "default": "gameplay",
+          "description": "[start] Clock for until ms conditions: gameplay (scaled by Time.timeScale) or realtime.",
+          "enum": [
+            "gameplay",
+            "realtime"
+          ],
+          "type": "string"
+        },
+        "until": {
+          "additionalProperties": false,
+          "description": "[start] End the probe when this playtest_wait condition holds (state until_met; reason.fired says which leaf and frame), e.g. {\"object\":{\"path\":\"Enemies/Boss\",\"state\":\"destroyed\"}}, {\"ms\":5000}, {\"any\":[{\"frames\":600},{\"log\":{\"pattern\":\"Game over\"}}]}.",
+          "properties": {
+            "all": {
+              "description": "Holds when every child holds at the same poll (log leaves latch once seen). A child may be all / any over leaves, e.g. {\"all\":[{\"ms\":800},{\"any\":[{\"object\":{…}},{\"object\":{…}}]}]}; at most 32 leaves in all.",
+              "items": {
+                "additionalProperties": false,
+                "description": "Exactly one of log, ui, object, project_command, probe, frames, ms — or all / any over those leaves.",
+                "properties": {
+                  "all": {
+                    "description": "Nested: holds when every leaf holds at the same poll.",
+                    "items": {
+                      "additionalProperties": false,
+                      "description": "Exactly one of log, ui, object, project_command, probe, frames, ms.",
+                      "properties": {
+                        "frames": {
+                          "description": "Holds after this many frames have run since the start.",
+                          "maximum": 1000000,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "log": {
+                          "additionalProperties": false,
+                          "description": "A console message logged after the wait started matches `pattern` (latched once seen; reports the frame it was logged in).",
+                          "properties": {
+                            "level": {
+                              "description": "any (default) | log | warning | error (Error, Exception, Assert) | exception.",
+                              "enum": [
+                                "any",
+                                "log",
+                                "warning",
+                                "error",
+                                "exception"
+                              ],
+                              "type": "string"
+                            },
+                            "pattern": {
+                              "description": ".NET regex, case-sensitive, matched against the message text.",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "pattern"
+                          ],
+                          "type": "object"
+                        },
+                        "ms": {
+                          "description": "Holds after this many ms (the call's `time` base) since the start.",
+                          "maximum": 3600000,
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        "object": {
+                          "additionalProperties": false,
+                          "description": "A GameObject (loaded scenes + DontDestroyOnLoad, inactive included) by path or object_id is in `state`. Once found it is tracked: destroyed means that object was destroyed.",
+                          "properties": {
+                            "object_id": {
+                              "description": "Instance id (e.g. a ui_snapshot node id). Alternative to path.",
+                              "type": "string"
+                            },
+                            "path": {
+                              "description": "Hierarchy path (plain names, 'Root/Child') or a bare name (first match anywhere).",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "description": "exists (default) | active (activeInHierarchy) | inactive | destroyed (absent).",
+                              "enum": [
+                                "exists",
+                                "active",
+                                "inactive",
+                                "destroyed"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "probe": {
+                          "additionalProperties": false,
+                          "description": "An existing playtest_probe is in state (default ended = any end state).",
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ended",
+                                "running",
+                                "until_met",
+                                "max_samples_reached",
+                                "stopped",
+                                "play_mode_exited",
+                                "error"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
+                          "type": "object"
+                        },
+                        "project_command": {
+                          "additionalProperties": false,
+                          "description": "The project's own predicate: a synchronous, read-only project command (unity_open_mcp_project_commands) called at each poll holds when it returns JSON true — or, with `field`, an object whose `field` is true. Mutating or async commands are refused (command_not_allowed); there is no arbitrary C# predicate.",
+                          "properties": {
+                            "args": {
+                              "description": "The command's typed arguments (validated against its schema once, at start).",
+                              "type": "object"
+                            },
+                            "field": {
+                              "description": "Top-level field of the command's JSON object result that must be true.",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "id": {
+                              "description": "Project command id (project.<owner>.<command>).",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
+                          "type": "object"
+                        },
+                        "ui": {
+                          "additionalProperties": false,
+                          "description": "A ui_snapshot query over the uGUI screen model matches (or, with matches:false, stops matching). Needs text_contains and/or path. Requires com.unity.ugui.",
+                          "properties": {
+                            "matches": {
+                              "description": "true (default) = holds while at least one node matches; false = holds while none does (a popup closed).",
+                              "type": "boolean"
+                            },
+                            "path": {
+                              "description": "Node hierarchy path or trailing path suffix ('Popup/Title').",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "text_contains": {
+                              "description": "Node display text contains this (normalised, case-insensitive; a control's text is its label).",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "visible": {
+                              "description": "true (default) = count on-screen nodes only; false = count nodes that exist but are not visible.",
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "maxItems": 16,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "any": {
+                    "description": "Nested: holds when one leaf holds.",
+                    "items": {
+                      "additionalProperties": false,
+                      "description": "Exactly one of log, ui, object, project_command, probe, frames, ms.",
+                      "properties": {
+                        "frames": {
+                          "description": "Holds after this many frames have run since the start.",
+                          "maximum": 1000000,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "log": {
+                          "additionalProperties": false,
+                          "description": "A console message logged after the wait started matches `pattern` (latched once seen; reports the frame it was logged in).",
+                          "properties": {
+                            "level": {
+                              "description": "any (default) | log | warning | error (Error, Exception, Assert) | exception.",
+                              "enum": [
+                                "any",
+                                "log",
+                                "warning",
+                                "error",
+                                "exception"
+                              ],
+                              "type": "string"
+                            },
+                            "pattern": {
+                              "description": ".NET regex, case-sensitive, matched against the message text.",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "pattern"
+                          ],
+                          "type": "object"
+                        },
+                        "ms": {
+                          "description": "Holds after this many ms (the call's `time` base) since the start.",
+                          "maximum": 3600000,
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        "object": {
+                          "additionalProperties": false,
+                          "description": "A GameObject (loaded scenes + DontDestroyOnLoad, inactive included) by path or object_id is in `state`. Once found it is tracked: destroyed means that object was destroyed.",
+                          "properties": {
+                            "object_id": {
+                              "description": "Instance id (e.g. a ui_snapshot node id). Alternative to path.",
+                              "type": "string"
+                            },
+                            "path": {
+                              "description": "Hierarchy path (plain names, 'Root/Child') or a bare name (first match anywhere).",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "description": "exists (default) | active (activeInHierarchy) | inactive | destroyed (absent).",
+                              "enum": [
+                                "exists",
+                                "active",
+                                "inactive",
+                                "destroyed"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "probe": {
+                          "additionalProperties": false,
+                          "description": "An existing playtest_probe is in state (default ended = any end state).",
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ended",
+                                "running",
+                                "until_met",
+                                "max_samples_reached",
+                                "stopped",
+                                "play_mode_exited",
+                                "error"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
+                          "type": "object"
+                        },
+                        "project_command": {
+                          "additionalProperties": false,
+                          "description": "The project's own predicate: a synchronous, read-only project command (unity_open_mcp_project_commands) called at each poll holds when it returns JSON true — or, with `field`, an object whose `field` is true. Mutating or async commands are refused (command_not_allowed); there is no arbitrary C# predicate.",
+                          "properties": {
+                            "args": {
+                              "description": "The command's typed arguments (validated against its schema once, at start).",
+                              "type": "object"
+                            },
+                            "field": {
+                              "description": "Top-level field of the command's JSON object result that must be true.",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "id": {
+                              "description": "Project command id (project.<owner>.<command>).",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
+                          "type": "object"
+                        },
+                        "ui": {
+                          "additionalProperties": false,
+                          "description": "A ui_snapshot query over the uGUI screen model matches (or, with matches:false, stops matching). Needs text_contains and/or path. Requires com.unity.ugui.",
+                          "properties": {
+                            "matches": {
+                              "description": "true (default) = holds while at least one node matches; false = holds while none does (a popup closed).",
+                              "type": "boolean"
+                            },
+                            "path": {
+                              "description": "Node hierarchy path or trailing path suffix ('Popup/Title').",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "text_contains": {
+                              "description": "Node display text contains this (normalised, case-insensitive; a control's text is its label).",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "visible": {
+                              "description": "true (default) = count on-screen nodes only; false = count nodes that exist but are not visible.",
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "maxItems": 16,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "frames": {
+                    "description": "Holds after this many frames have run since the start.",
+                    "maximum": 1000000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "log": {
+                    "additionalProperties": false,
+                    "description": "A console message logged after the wait started matches `pattern` (latched once seen; reports the frame it was logged in).",
+                    "properties": {
+                      "level": {
+                        "description": "any (default) | log | warning | error (Error, Exception, Assert) | exception.",
+                        "enum": [
+                          "any",
+                          "log",
+                          "warning",
+                          "error",
+                          "exception"
+                        ],
+                        "type": "string"
+                      },
+                      "pattern": {
+                        "description": ".NET regex, case-sensitive, matched against the message text.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ],
+                    "type": "object"
+                  },
+                  "ms": {
+                    "description": "Holds after this many ms (the call's `time` base) since the start.",
+                    "maximum": 3600000,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "object": {
+                    "additionalProperties": false,
+                    "description": "A GameObject (loaded scenes + DontDestroyOnLoad, inactive included) by path or object_id is in `state`. Once found it is tracked: destroyed means that object was destroyed.",
+                    "properties": {
+                      "object_id": {
+                        "description": "Instance id (e.g. a ui_snapshot node id). Alternative to path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "Hierarchy path (plain names, 'Root/Child') or a bare name (first match anywhere).",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "description": "exists (default) | active (activeInHierarchy) | inactive | destroyed (absent).",
+                        "enum": [
+                          "exists",
+                          "active",
+                          "inactive",
+                          "destroyed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "probe": {
+                    "additionalProperties": false,
+                    "description": "An existing playtest_probe is in state (default ended = any end state).",
+                    "properties": {
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "enum": [
+                          "ended",
+                          "running",
+                          "until_met",
+                          "max_samples_reached",
+                          "stopped",
+                          "play_mode_exited",
+                          "error"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "type": "object"
+                  },
+                  "project_command": {
+                    "additionalProperties": false,
+                    "description": "The project's own predicate: a synchronous, read-only project command (unity_open_mcp_project_commands) called at each poll holds when it returns JSON true — or, with `field`, an object whose `field` is true. Mutating or async commands are refused (command_not_allowed); there is no arbitrary C# predicate.",
+                    "properties": {
+                      "args": {
+                        "description": "The command's typed arguments (validated against its schema once, at start).",
+                        "type": "object"
+                      },
+                      "field": {
+                        "description": "Top-level field of the command's JSON object result that must be true.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "id": {
+                        "description": "Project command id (project.<owner>.<command>).",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "type": "object"
+                  },
+                  "ui": {
+                    "additionalProperties": false,
+                    "description": "A ui_snapshot query over the uGUI screen model matches (or, with matches:false, stops matching). Needs text_contains and/or path. Requires com.unity.ugui.",
+                    "properties": {
+                      "matches": {
+                        "description": "true (default) = holds while at least one node matches; false = holds while none does (a popup closed).",
+                        "type": "boolean"
+                      },
+                      "path": {
+                        "description": "Node hierarchy path or trailing path suffix ('Popup/Title').",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "text_contains": {
+                        "description": "Node display text contains this (normalised, case-insensitive; a control's text is its label).",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "visible": {
+                        "description": "true (default) = count on-screen nodes only; false = count nodes that exist but are not visible.",
+                        "type": "boolean"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "type": "array"
+            },
+            "any": {
+              "description": "Holds when one child holds; the result names it (fired.path, e.g. condition.any[1], or condition.any[0].all for a nested set). A child may be all / any over leaves.",
+              "items": {
+                "additionalProperties": false,
+                "description": "Exactly one of log, ui, object, project_command, probe, frames, ms — or all / any over those leaves.",
+                "properties": {
+                  "all": {
+                    "description": "Nested: holds when every leaf holds at the same poll.",
+                    "items": {
+                      "additionalProperties": false,
+                      "description": "Exactly one of log, ui, object, project_command, probe, frames, ms.",
+                      "properties": {
+                        "frames": {
+                          "description": "Holds after this many frames have run since the start.",
+                          "maximum": 1000000,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "log": {
+                          "additionalProperties": false,
+                          "description": "A console message logged after the wait started matches `pattern` (latched once seen; reports the frame it was logged in).",
+                          "properties": {
+                            "level": {
+                              "description": "any (default) | log | warning | error (Error, Exception, Assert) | exception.",
+                              "enum": [
+                                "any",
+                                "log",
+                                "warning",
+                                "error",
+                                "exception"
+                              ],
+                              "type": "string"
+                            },
+                            "pattern": {
+                              "description": ".NET regex, case-sensitive, matched against the message text.",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "pattern"
+                          ],
+                          "type": "object"
+                        },
+                        "ms": {
+                          "description": "Holds after this many ms (the call's `time` base) since the start.",
+                          "maximum": 3600000,
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        "object": {
+                          "additionalProperties": false,
+                          "description": "A GameObject (loaded scenes + DontDestroyOnLoad, inactive included) by path or object_id is in `state`. Once found it is tracked: destroyed means that object was destroyed.",
+                          "properties": {
+                            "object_id": {
+                              "description": "Instance id (e.g. a ui_snapshot node id). Alternative to path.",
+                              "type": "string"
+                            },
+                            "path": {
+                              "description": "Hierarchy path (plain names, 'Root/Child') or a bare name (first match anywhere).",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "description": "exists (default) | active (activeInHierarchy) | inactive | destroyed (absent).",
+                              "enum": [
+                                "exists",
+                                "active",
+                                "inactive",
+                                "destroyed"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "probe": {
+                          "additionalProperties": false,
+                          "description": "An existing playtest_probe is in state (default ended = any end state).",
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ended",
+                                "running",
+                                "until_met",
+                                "max_samples_reached",
+                                "stopped",
+                                "play_mode_exited",
+                                "error"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
+                          "type": "object"
+                        },
+                        "project_command": {
+                          "additionalProperties": false,
+                          "description": "The project's own predicate: a synchronous, read-only project command (unity_open_mcp_project_commands) called at each poll holds when it returns JSON true — or, with `field`, an object whose `field` is true. Mutating or async commands are refused (command_not_allowed); there is no arbitrary C# predicate.",
+                          "properties": {
+                            "args": {
+                              "description": "The command's typed arguments (validated against its schema once, at start).",
+                              "type": "object"
+                            },
+                            "field": {
+                              "description": "Top-level field of the command's JSON object result that must be true.",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "id": {
+                              "description": "Project command id (project.<owner>.<command>).",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
+                          "type": "object"
+                        },
+                        "ui": {
+                          "additionalProperties": false,
+                          "description": "A ui_snapshot query over the uGUI screen model matches (or, with matches:false, stops matching). Needs text_contains and/or path. Requires com.unity.ugui.",
+                          "properties": {
+                            "matches": {
+                              "description": "true (default) = holds while at least one node matches; false = holds while none does (a popup closed).",
+                              "type": "boolean"
+                            },
+                            "path": {
+                              "description": "Node hierarchy path or trailing path suffix ('Popup/Title').",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "text_contains": {
+                              "description": "Node display text contains this (normalised, case-insensitive; a control's text is its label).",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "visible": {
+                              "description": "true (default) = count on-screen nodes only; false = count nodes that exist but are not visible.",
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "maxItems": 16,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "any": {
+                    "description": "Nested: holds when one leaf holds.",
+                    "items": {
+                      "additionalProperties": false,
+                      "description": "Exactly one of log, ui, object, project_command, probe, frames, ms.",
+                      "properties": {
+                        "frames": {
+                          "description": "Holds after this many frames have run since the start.",
+                          "maximum": 1000000,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "log": {
+                          "additionalProperties": false,
+                          "description": "A console message logged after the wait started matches `pattern` (latched once seen; reports the frame it was logged in).",
+                          "properties": {
+                            "level": {
+                              "description": "any (default) | log | warning | error (Error, Exception, Assert) | exception.",
+                              "enum": [
+                                "any",
+                                "log",
+                                "warning",
+                                "error",
+                                "exception"
+                              ],
+                              "type": "string"
+                            },
+                            "pattern": {
+                              "description": ".NET regex, case-sensitive, matched against the message text.",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "pattern"
+                          ],
+                          "type": "object"
+                        },
+                        "ms": {
+                          "description": "Holds after this many ms (the call's `time` base) since the start.",
+                          "maximum": 3600000,
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        "object": {
+                          "additionalProperties": false,
+                          "description": "A GameObject (loaded scenes + DontDestroyOnLoad, inactive included) by path or object_id is in `state`. Once found it is tracked: destroyed means that object was destroyed.",
+                          "properties": {
+                            "object_id": {
+                              "description": "Instance id (e.g. a ui_snapshot node id). Alternative to path.",
+                              "type": "string"
+                            },
+                            "path": {
+                              "description": "Hierarchy path (plain names, 'Root/Child') or a bare name (first match anywhere).",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "description": "exists (default) | active (activeInHierarchy) | inactive | destroyed (absent).",
+                              "enum": [
+                                "exists",
+                                "active",
+                                "inactive",
+                                "destroyed"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "probe": {
+                          "additionalProperties": false,
+                          "description": "An existing playtest_probe is in state (default ended = any end state).",
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "ended",
+                                "running",
+                                "until_met",
+                                "max_samples_reached",
+                                "stopped",
+                                "play_mode_exited",
+                                "error"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
+                          "type": "object"
+                        },
+                        "project_command": {
+                          "additionalProperties": false,
+                          "description": "The project's own predicate: a synchronous, read-only project command (unity_open_mcp_project_commands) called at each poll holds when it returns JSON true — or, with `field`, an object whose `field` is true. Mutating or async commands are refused (command_not_allowed); there is no arbitrary C# predicate.",
+                          "properties": {
+                            "args": {
+                              "description": "The command's typed arguments (validated against its schema once, at start).",
+                              "type": "object"
+                            },
+                            "field": {
+                              "description": "Top-level field of the command's JSON object result that must be true.",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "id": {
+                              "description": "Project command id (project.<owner>.<command>).",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ],
+                          "type": "object"
+                        },
+                        "ui": {
+                          "additionalProperties": false,
+                          "description": "A ui_snapshot query over the uGUI screen model matches (or, with matches:false, stops matching). Needs text_contains and/or path. Requires com.unity.ugui.",
+                          "properties": {
+                            "matches": {
+                              "description": "true (default) = holds while at least one node matches; false = holds while none does (a popup closed).",
+                              "type": "boolean"
+                            },
+                            "path": {
+                              "description": "Node hierarchy path or trailing path suffix ('Popup/Title').",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "text_contains": {
+                              "description": "Node display text contains this (normalised, case-insensitive; a control's text is its label).",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "visible": {
+                              "description": "true (default) = count on-screen nodes only; false = count nodes that exist but are not visible.",
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "maxItems": 16,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "frames": {
+                    "description": "Holds after this many frames have run since the start.",
+                    "maximum": 1000000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "log": {
+                    "additionalProperties": false,
+                    "description": "A console message logged after the wait started matches `pattern` (latched once seen; reports the frame it was logged in).",
+                    "properties": {
+                      "level": {
+                        "description": "any (default) | log | warning | error (Error, Exception, Assert) | exception.",
+                        "enum": [
+                          "any",
+                          "log",
+                          "warning",
+                          "error",
+                          "exception"
+                        ],
+                        "type": "string"
+                      },
+                      "pattern": {
+                        "description": ".NET regex, case-sensitive, matched against the message text.",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "pattern"
+                    ],
+                    "type": "object"
+                  },
+                  "ms": {
+                    "description": "Holds after this many ms (the call's `time` base) since the start.",
+                    "maximum": 3600000,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "object": {
+                    "additionalProperties": false,
+                    "description": "A GameObject (loaded scenes + DontDestroyOnLoad, inactive included) by path or object_id is in `state`. Once found it is tracked: destroyed means that object was destroyed.",
+                    "properties": {
+                      "object_id": {
+                        "description": "Instance id (e.g. a ui_snapshot node id). Alternative to path.",
+                        "type": "string"
+                      },
+                      "path": {
+                        "description": "Hierarchy path (plain names, 'Root/Child') or a bare name (first match anywhere).",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "description": "exists (default) | active (activeInHierarchy) | inactive | destroyed (absent).",
+                        "enum": [
+                          "exists",
+                          "active",
+                          "inactive",
+                          "destroyed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "probe": {
+                    "additionalProperties": false,
+                    "description": "An existing playtest_probe is in state (default ended = any end state).",
+                    "properties": {
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "enum": [
+                          "ended",
+                          "running",
+                          "until_met",
+                          "max_samples_reached",
+                          "stopped",
+                          "play_mode_exited",
+                          "error"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "type": "object"
+                  },
+                  "project_command": {
+                    "additionalProperties": false,
+                    "description": "The project's own predicate: a synchronous, read-only project command (unity_open_mcp_project_commands) called at each poll holds when it returns JSON true — or, with `field`, an object whose `field` is true. Mutating or async commands are refused (command_not_allowed); there is no arbitrary C# predicate.",
+                    "properties": {
+                      "args": {
+                        "description": "The command's typed arguments (validated against its schema once, at start).",
+                        "type": "object"
+                      },
+                      "field": {
+                        "description": "Top-level field of the command's JSON object result that must be true.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "id": {
+                        "description": "Project command id (project.<owner>.<command>).",
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "type": "object"
+                  },
+                  "ui": {
+                    "additionalProperties": false,
+                    "description": "A ui_snapshot query over the uGUI screen model matches (or, with matches:false, stops matching). Needs text_contains and/or path. Requires com.unity.ugui.",
+                    "properties": {
+                      "matches": {
+                        "description": "true (default) = holds while at least one node matches; false = holds while none does (a popup closed).",
+                        "type": "boolean"
+                      },
+                      "path": {
+                        "description": "Node hierarchy path or trailing path suffix ('Popup/Title').",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "text_contains": {
+                        "description": "Node display text contains this (normalised, case-insensitive; a control's text is its label).",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "visible": {
+                        "description": "true (default) = count on-screen nodes only; false = count nodes that exist but are not visible.",
+                        "type": "boolean"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "type": "array"
+            },
+            "frames": {
+              "description": "Holds after this many frames have run since the start.",
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "log": {
+              "additionalProperties": false,
+              "description": "A console message logged after the wait started matches `pattern` (latched once seen; reports the frame it was logged in).",
+              "properties": {
+                "level": {
+                  "description": "any (default) | log | warning | error (Error, Exception, Assert) | exception.",
+                  "enum": [
+                    "any",
+                    "log",
+                    "warning",
+                    "error",
+                    "exception"
+                  ],
+                  "type": "string"
+                },
+                "pattern": {
+                  "description": ".NET regex, case-sensitive, matched against the message text.",
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pattern"
+              ],
+              "type": "object"
+            },
+            "ms": {
+              "description": "Holds after this many ms (the call's `time` base) since the start.",
+              "maximum": 3600000,
+              "minimum": 0,
+              "type": "number"
+            },
+            "object": {
+              "additionalProperties": false,
+              "description": "A GameObject (loaded scenes + DontDestroyOnLoad, inactive included) by path or object_id is in `state`. Once found it is tracked: destroyed means that object was destroyed.",
+              "properties": {
+                "object_id": {
+                  "description": "Instance id (e.g. a ui_snapshot node id). Alternative to path.",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Hierarchy path (plain names, 'Root/Child') or a bare name (first match anywhere).",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "state": {
+                  "description": "exists (default) | active (activeInHierarchy) | inactive | destroyed (absent).",
+                  "enum": [
+                    "exists",
+                    "active",
+                    "inactive",
+                    "destroyed"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "probe": {
+              "additionalProperties": false,
+              "description": "An existing playtest_probe is in state (default ended = any end state).",
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "ended",
+                    "running",
+                    "until_met",
+                    "max_samples_reached",
+                    "stopped",
+                    "play_mode_exited",
+                    "error"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            },
+            "project_command": {
+              "additionalProperties": false,
+              "description": "The project's own predicate: a synchronous, read-only project command (unity_open_mcp_project_commands) called at each poll holds when it returns JSON true — or, with `field`, an object whose `field` is true. Mutating or async commands are refused (command_not_allowed); there is no arbitrary C# predicate.",
+              "properties": {
+                "args": {
+                  "description": "The command's typed arguments (validated against its schema once, at start).",
+                  "type": "object"
+                },
+                "field": {
+                  "description": "Top-level field of the command's JSON object result that must be true.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Project command id (project.<owner>.<command>).",
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            },
+            "ui": {
+              "additionalProperties": false,
+              "description": "A ui_snapshot query over the uGUI screen model matches (or, with matches:false, stops matching). Needs text_contains and/or path. Requires com.unity.ugui.",
+              "properties": {
+                "matches": {
+                  "description": "true (default) = holds while at least one node matches; false = holds while none does (a popup closed).",
+                  "type": "boolean"
+                },
+                "path": {
+                  "description": "Node hierarchy path or trailing path suffix ('Popup/Title').",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "text_contains": {
+                  "description": "Node display text contains this (normalised, case-insensitive; a control's text is its label).",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "visible": {
+                  "description": "true (default) = count on-screen nodes only; false = count nodes that exist but are not visible.",
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "usings": {
+          "description": "[start, expression] Extra using namespaces (System, System.Linq, UnityEngine and UnityEditor are always in).",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "type": "array"
         }
       },
       "required": [

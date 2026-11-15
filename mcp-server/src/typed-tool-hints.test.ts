@@ -6,6 +6,8 @@ test("typedToolHints names the typed tool a snippet re-implements", () => {
   assert.match(typedToolHints("return UnityEngine.PlayerPrefs.GetInt(\"coins\");").join(), /playerprefs_get/);
   assert.match(typedToolHints("UnityEngine.PlayerPrefs.SetInt(\"coins\", 5); return 1;").join(), /playerprefs_set/);
   assert.match(typedToolHints("UnityEngine.Time.timeScale = 4f; return 1;").join(), /settings_set_time/);
+  assert.match(typedToolHints("UnityEngine.Application.onBeforeRender += Tick; return 1;").join(), /playtest_probe/);
+  assert.match(typedToolHints("return System.AppDomain.CurrentDomain.GetData(\"ep04.log\");").join(), /playtest_probe/);
   assert.deepEqual(typedToolHints("return UnityEngine.Time.timeScale == 1f;"), [], "a comparison is not a write");
   assert.match(typedToolHints("var f = t.GetField(\"_hp\", BindingFlags.NonPublic | BindingFlags.Instance); return f.GetValue(o);").join(), /include_non_public/);
   assert.match(typedToolHints("return typeof(X).GetMethod(\"Run\").Invoke(null, null);").join(), /invoke_method/);

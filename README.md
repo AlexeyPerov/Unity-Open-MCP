@@ -50,7 +50,9 @@ screen (uGUI text, visibility, layout diagnostics), taps controls by their
 on-screen label, clicks, drags, swipes and plays multi-second gestures over real
 frames (legacy Input Manager and Input System projects alike), and waits until
 the game gets somewhere — a log line, a label, an object, or the project's own
-predicate, optionally fast-forwarded. Captures come at the device's native
+predicate, optionally fast-forwarded — and traces values (HP, cooldowns,
+velocities) every N frames into a buffer it reads back, without per-frame hooks
+left behind. Captures come at the device's native
 resolution and safe area, or as frame-scheduled series for animated content. The
 player's save (PlayerPrefs and `persistentDataPath`) is snapshotted and restored,
 so a session does not spend the developer's progress, and the whole run is

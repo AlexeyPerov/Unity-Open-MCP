@@ -296,6 +296,16 @@ export const RECOMMENDED_TOOL_CHAINS: RecommendedToolChain[] = [
     ],
   },
   {
+    name: "playtest-trace-values",
+    task: "Trace a value over play-mode frames (HP, cooldown, velocity, a counter) without installing per-frame hooks from snippets.",
+    steps: [
+      "unity_open_mcp_playtest_probe (action start, id, member + game_object_path / component_type — or a static Type.Member, or a read-only expression; every_frames, max_samples, until)",
+      "play / drive the game; unity_open_mcp_playtest_wait (condition probe {id}) to wait until the probe ends",
+      "unity_open_mcp_playtest_probe (action read, id, since next_cursor) — only new samples; repeat with the returned next_cursor",
+      "unity_open_mcp_playtest_probe (action stop, id) — summary: first / last, numeric min / max / mean, errors, cost",
+    ],
+  },
+  {
     name: "playtest-state-sandbox",
     task: "Run a live playtest without spending the developer's save: capture the player state, see what the session changed, put it back.",
     steps: [

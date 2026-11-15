@@ -1,5 +1,6 @@
 // Point execute_csharp callers at the typed tool that already does what their
-// snippet does. Snippets that edit a prefab through LoadPrefabContents, read
+// snippet does. Snippets that install a per-frame hook to trace values, edit a
+// prefab through LoadPrefabContents, read
 // PlayerPrefs, set Time.timeScale, save a scene, call a method by reflection
 // or dump private fields each have a typed, schema-checked equivalent that
 // agents rarely discover on their own. The hint is advisory: it rides on the
@@ -12,6 +13,16 @@ interface HintRule {
 }
 
 const RULES: HintRule[] = [
+  {
+    // A per-frame hook installed from a snippet (with its log kept between
+    // calls in AppDomain data) is what a frame probe replaces; such a hook
+    // runs until the next domain reload when a later call forgets to remove it.
+    patterns: [/\b(?:Application\s*\.\s*onBeforeRender|AppDomain\s*\.\s*CurrentDomain\s*\.\s*(?:SetData|GetData))\b/],
+    hint:
+      "unity_open_mcp_playtest_probe samples a member path or read-only expression every N play-mode frames into a " +
+      "buffer the bridge owns (start / read by cursor / stop); the bridge removes it on stop, play-mode exit and reload — " +
+      "no per-frame hook or AppDomain data to clean up.",
+  },
   {
     patterns: [/\bPrefabUtility\s*\.\s*LoadPrefabContents\b/],
     hint:

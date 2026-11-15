@@ -25,7 +25,9 @@
 // which keeps running while the Editor is paused and the player loop is not.
 // After StallWindowMs the operation ends `failed` with reason `stalled`, its own
 // StalledCode and `stall.reason` (editor_paused | time_scale_zero | no_frames |
-// no_progress); its cleanup keeps what it has (frames already captured).
+// no_progress); its cleanup keeps what it has (frames already captured). An
+// open-ended observer (a playtest_probe sampler) opts out with CanStall false:
+// it waits through a paused Editor and ends only on its own terms.
 //
 // fd hygiene (packages/bridge/AGENTS.md): this scheduler owns no OS handles —
 // no Timer, WaitHandle, socket or stream. The player-loop system is removed in
@@ -77,6 +79,10 @@ namespace UnityOpenMcpBridge
 
         // Error code of a `stalled` end (no progress for StallWindowMs).
         public virtual string StalledCode => "operation_stalled";
+        // False for an open-ended observer (a frame probe) that ends on its own
+        // terms: it waits through a paused Editor or a zero time scale and is
+        // never ended as stalled.
+        public virtual bool CanStall => true;
         // What the stalled end kept / released, appended to its message.
         protected internal virtual string StallNote => "";
 
@@ -165,6 +171,15 @@ namespace UnityOpenMcpBridge
         internal static double NowMs => ClockOverride?.Invoke() ?? clock.Elapsed.TotalMilliseconds;
 
         internal static bool AnyRunning => entries.Values.Any(e => !e.Terminal);
+
+        // Running operations of one kind (a tool name).
+        internal static int RunningCount(string kind) => entries.Values.Count(e => !e.Terminal && e.Op.Kind == kind);
+
+        // Whether the scheduler's tick is in the live player loop right now.
+        internal static bool TickInstalled => !SuppressPlayerLoop ? Contains(PlayerLoop.GetCurrentPlayerLoop()) : installed;
+
+        // Play mode as the scheduler sees it (the test seam included).
+        internal static bool IsPlayingNow => IsPlaying;
 
         // The id of the running operation holding `resource`, or null.
         internal static string RunningWithResource(string resource)
@@ -311,6 +326,7 @@ namespace UnityOpenMcpBridge
                 }
                 if (!done)
                 {
+                    if (!op.CanStall) continue;
                     var now = NowMs;
                     entry.LastTickMs = now;
                     entry.LastTimeScale = timeScale;
@@ -353,7 +369,7 @@ namespace UnityOpenMcpBridge
             bool ended = false;
             foreach (var entry in entries.Values)
             {
-                if (entry.Terminal) continue;
+                if (entry.Terminal || !entry.Op.CanStall) continue;
                 Account(entry, false, now);
                 if (entry.StalledMs < StallWindowMs) continue;
                 Stall(entry, now);

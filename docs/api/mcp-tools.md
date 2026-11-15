@@ -23,7 +23,7 @@ definitions live in `mcp-server/src/tools/`.
 | [CLI and automation](cli-automation.md) | CLI commands, options, JSON output, and links to canonical CI behavior. |
 | [CI templates](../ci/README.md) | Pipeline shape, CLI exit codes, baselines, and provider templates. |
 | [Input simulation](input-simulation.md) | Input backends (legacy Input Manager / Input System), pointer delivery and `raycast_real`, touch, gestures over real frames, target by label (`target_text`), frame stepping, and supported input boundaries. |
-| [Playtest tools](playtest.md) | `ui_snapshot` (uGUI screen as an accessibility tree: text, visibility, occlusion, diagnostics), profiles and paging, the snapshot → tap-by-label loop, `game_view` (Game view resolution, Device Simulator device / orientation, safe area, settle-on-return), `playtest_wait` (wait until a log / UI / object / project-predicate condition holds, timeout, time scale for the wait, fail on exception), `capture_series` (frame-scheduled composed captures, metrics, contact sheet; gesture `capture_at_ms`), `player_state` (snapshot / diff / restore of PlayerPrefs, `persistentDataPath` and opt-in EditorPrefs; restore overwrites state and removes files not in the snapshot) and `playtest_session` (record a playtest — steps, verdicts, frames, the console errors each step caused — into a Markdown report for a human). The workflow is in the [Playtest guide](../playtest-guide.md). |
+| [Playtest tools](playtest.md) | `ui_snapshot` (uGUI screen as an accessibility tree: text, visibility, occlusion, diagnostics), profiles and paging, the snapshot → tap-by-label loop, `game_view` (Game view resolution, Device Simulator device / orientation, safe area, settle-on-return), `playtest_wait` (wait until a log / UI / object / project-predicate / probe condition holds, timeout, time scale for the wait, fail on exception), `playtest_probe` (sample a member path or read-only C# expression every N frames into a bridge-owned buffer read by cursor; ends on a condition, a sample cap, errors, an over-budget sample, stop or play-mode exit), `capture_series` (frame-scheduled composed captures, metrics, contact sheet; gesture `capture_at_ms`), `player_state` (snapshot / diff / restore of PlayerPrefs, `persistentDataPath` and opt-in EditorPrefs; restore overwrites state and removes files not in the snapshot) and `playtest_session` (record a playtest — steps, verdicts, frames, the console errors each step caused — into a Markdown report for a human). The workflow is in the [Playtest guide](../playtest-guide.md). |
 | [Project commands](project-commands.md) | Editor-only authoring, typed list/describe/invoke, schema versions and safety boundaries. |
 | [Asynchronous jobs](jobs.md) | Job lifecycle, observation, idempotency, cancellation, retention and adapter contracts. |
 | [MCP resources](resources.md) | Resource URIs, payloads, and resource routing. |
@@ -65,7 +65,8 @@ definitions live in `mcp-server/src/tools/`.
   (`game_view`: safe area and notch insets the game sees), read the uGUI screen
   (`ui_snapshot`: texts, visibility, overflow / placeholder / touch-size
   diagnostics), tap controls by their on-screen label, wait until the game gets
-  somewhere (`playtest_wait`), capture timed frame series of animated content
+  somewhere (`playtest_wait`), trace values over frames into a bridge-owned
+  buffer (`playtest_probe`), capture timed frame series of animated content
   (`capture_series`), sandbox the player's save around a session
   (`player_state`) and record the session as a reviewable report
   (`playtest_session`).
@@ -1077,7 +1078,9 @@ The same data is structured as `error.didYouMean` (`types[]`: `name`,
 `candidates`; `members[]`: `type`, `member`, `closest`), and `agentNextSteps`
 points at `find_members` for anything not found.
 
-A snippet that re-implements a typed tool (edits a prefab through
+A snippet that re-implements a typed tool (installs a per-frame hook with
+`Application.onBeforeRender` or keeps data in `AppDomain.CurrentDomain` —
+`playtest_probe` —, edits a prefab through
 `PrefabUtility.LoadPrefabContents` — the typed tools' `in_prefab` —, reads or
 writes `PlayerPrefs`, sets `Time.timeScale`, saves a scene, calls a method or
 reads a private field by reflection, `GameObject.Find`,

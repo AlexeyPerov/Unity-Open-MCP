@@ -364,7 +364,10 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "game sees; set_* waits until the game reports the new size. playtest_wait: wait in play " +
       "mode until a condition holds (log regex / ui_snapshot query / object exists-active-destroyed / " +
       "read-only project command / frames / ms, all / any), with timeout, optional time_scale for the " +
-      "wait only and fail_on exception — never poll in a loop of calls. capture_series " +
+      "wait only and fail_on exception — never poll in a loop of calls. playtest_probe: sample a " +
+      "member path or read-only C# expression every N frames into a bounded buffer the bridge owns " +
+      "(start / read by cursor / stop / list; until, max_samples, error and cost caps; removed on " +
+      "stop, play-mode exit and reload) — instead of per-frame hooks from snippets. capture_series " +
       "(unity_senses_*): frame-scheduled composed captures inside the player loop (at_ms / every_ms / " +
       "at_frames, after an optional start_on condition) with region crop, luminance / diff metric and " +
       "a labelled contact sheet. Both run on the play-mode scheduler (jobs when long). player_state: " +
@@ -1030,6 +1033,9 @@ assign("playtest", [
   // capture_series keeps the unity_senses_* prefix (live-only, never batch).
   "unity_open_mcp_playtest_wait",
   "unity_senses_capture_series",
+  // Frame probe: one never-stalling operation per probe on the same
+  // scheduler; every action answers at once (read is incremental by cursor).
+  "unity_open_mcp_playtest_probe",
   // Player-state sandbox (bridge root assembly): snapshot / diff / list /
   // delete are read-only for the project; restore with confirm:true is the one
   // gated mutation (request-level classification in the bridge).

@@ -116,7 +116,9 @@ player could do.
    condition — a log line, a `ui` query (`matches: false` for "the popup closed"),
    an object, the project's own read-only predicate (`state_dump` with `field`),
    `frames` / `ms` — and a `timeout_ms`. `time_scale` fast-forwards for the wait
-   only.
+   only. To see how a value moves (HP, a cooldown, a speed), start a
+   `playtest_probe` on it before acting and `read` its buffer after — not a
+   per-frame hook from `execute_csharp`.
 4. **Look**: animated content needs a series —
    `capture_series {"start_on":{"log":{"pattern":"Popup opening"}},"at_ms":[0,100,200,300],"contact_sheet":true}`;
    a static screen needs one `unity_senses_screenshot {"view":"composed"}`.

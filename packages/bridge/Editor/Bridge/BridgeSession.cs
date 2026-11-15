@@ -117,7 +117,17 @@ namespace UnityOpenMcpBridge
         //       prefab_asset_not_found, prefab_asset_not_editable,
         //       prefab_stage_unsaved, prefab_save_failed,
         //       prefab_root_protected, in_prefab_unsupported.
-        public const int WireContract = 12;
+        //  13 — Frame probes: playtest_probe (start / read / stop / list) on the
+        //       play-mode scheduler (an operation that never stalls); states
+        //       running / until_met / max_samples_reached / stopped /
+        //       play_mode_exited / error with a reason code (until_met,
+        //       max_samples_reached, stop_requested, cancelled,
+        //       play_mode_exited, sample_errors, over_budget, until_error,
+        //       probe_failed); refusals probe_running / probe_capacity /
+        //       probe_not_found / expression_not_read_only / member_not_found /
+        //       member_not_readable / type_not_found / component_not_found;
+        //       the `probe` wait condition; `until` read as a condition tree.
+        public const int WireContract = 13;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
 

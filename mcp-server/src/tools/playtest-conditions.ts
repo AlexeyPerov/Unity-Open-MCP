@@ -1,6 +1,7 @@
-// Condition shapes shared by unity_open_mcp_playtest_wait (`condition`) and
-// unity_senses_capture_series (`start_on`). A condition is an object with
-// exactly one key: a leaf (log / ui / object / project_command / frames / ms)
+// Condition shapes shared by unity_open_mcp_playtest_wait (`condition`),
+// unity_senses_capture_series (`start_on`) and unity_open_mcp_playtest_probe
+// (`until`). A condition is an object with exactly one key: a leaf (log / ui /
+// object / project_command / probe / frames / ms)
 // or `all` / `any` over conditions, where a child may itself be all / any
 // over leaves (one nested level, at most CONDITION_MAX_LEAVES leaves). The
 // bridge parses and enforces the one-key rule and the bounds; the schema
@@ -8,7 +9,8 @@
 
 export const OBJECT_STATES = ["exists", "active", "inactive", "destroyed"] as const;
 export const LOG_LEVELS = ["any", "log", "warning", "error", "exception"] as const;
-export const CONDITION_LEAVES = ["log", "ui", "object", "project_command", "frames", "ms"] as const;
+export const PROBE_CONDITION_STATES = ["ended", "running", "until_met", "max_samples_reached", "stopped", "play_mode_exited", "error"] as const;
+export const CONDITION_LEAVES = ["log", "ui", "object", "project_command", "probe", "frames", "ms"] as const;
 export const CONDITION_MAX_CHILDREN = 16;
 /** Mirrors the bridge's WaitConditionParser.MaxLeaves (whole tree). */
 export const CONDITION_MAX_LEAVES = 32;
@@ -67,13 +69,23 @@ const leafProperties = {
     },
     additionalProperties: false,
   },
+  probe: {
+    type: "object",
+    required: ["id"],
+    description: "An existing playtest_probe is in state (default ended = any end state).",
+    properties: {
+      id: { type: "string", minLength: 1 },
+      state: { type: "string", enum: [...PROBE_CONDITION_STATES] },
+    },
+    additionalProperties: false,
+  },
   frames: { type: "integer", minimum: 0, maximum: 1_000_000, description: "Holds after this many frames have run since the start." },
   ms: { type: "number", minimum: 0, maximum: 3_600_000, description: "Holds after this many ms (the call's `time` base) since the start." },
 } as const;
 
 const leafCondition = {
   type: "object",
-  description: "Exactly one of log, ui, object, project_command, frames, ms.",
+  description: "Exactly one of log, ui, object, project_command, probe, frames, ms.",
   properties: leafProperties,
   additionalProperties: false,
 } as const;
@@ -81,7 +93,7 @@ const leafCondition = {
 /** A child of the root all / any: a leaf, or all / any over leaves. */
 const nestedCondition = {
   type: "object",
-  description: "Exactly one of log, ui, object, project_command, frames, ms — or all / any over those leaves.",
+  description: "Exactly one of log, ui, object, project_command, probe, frames, ms — or all / any over those leaves.",
   properties: {
     ...leafProperties,
     all: {

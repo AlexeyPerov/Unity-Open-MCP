@@ -119,6 +119,12 @@ probe the uGUI sub-assembly registers, GameObject state, a read-only project
 command, frames, ms) are evaluated inside the player loop, and the series
 recorder reads the play-mode view's render target at scheduled frames (shared
 with `inputsim_gesture` `capture_at_ms`) and encodes PNGs after the last capture.
+`playtest_probe` (`Editor/Playtest/`) runs each probe as one scheduler operation
+that never stalls: it reads a reflected member path or a read-only expression
+compiled through the `execute_csharp` compile path (classified by the same
+`SnippetClassifier`) every N frames into a bounded, domain-local buffer; the
+scheduler's cleanup removes it on every end, and a domain reload drops the
+records.
 `player_state` (`Editor/Playtest/`) keeps its snapshots outside the project, in
 the platform app-data folder (`unity-open-mcp/player-state/<company>/<product>/`):
 it reads the platform PlayerPrefs / EditorPrefs store after flushing the Editor's

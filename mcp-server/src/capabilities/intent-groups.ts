@@ -122,6 +122,8 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "inputsim_pointer / inputsim_touch / inputsim_gesture), set the Game view resolution " +
       "or a Device Simulator device to check layout and the safe area (game_view), wait until a " +
       "log / UI / object / project-predicate condition holds (playtest_wait, optional time_scale), " +
+      "trace a value every N frames into a bridge-owned buffer (playtest_probe: member path or " +
+      "read-only expression, read by cursor), " +
       "capture frame-scheduled series of animated content (capture_series, gesture capture_at_ms) " +
       "sandbox the player state a session changes (player_state: snapshot / diff / restore of " +
       "PlayerPrefs and persistentDataPath) and record the session for a human (playtest_session: " +
@@ -148,6 +150,11 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "aspect-ratio",
       "wait-until",
       "wait-for",
+      "frame-probe",
+      "playtest-probe",
+      "trace",
+      "trace-values",
+      "sample-values",
       "playtest-wait",
       "timer",
       "timers",
