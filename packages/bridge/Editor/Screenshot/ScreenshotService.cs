@@ -10,13 +10,15 @@ using Object = UnityEngine.Object;
 
 namespace UnityOpenMcpBridge.Screenshot
 {
-    // Rendering logic for the three screenshot modes.
+    // Rendering logic for the screenshot modes.
     //
     // scene    — capture the last active Scene view camera.
     // game     — capture the main (game) camera.
+    // composed — the player's frame (below).
     // isolated — render one GameObject in a 2x2 composite (Front/Right/Back/Top)
     //            with layer culling and background choice. Scene state is restored
     //            in finally blocks so the editor is left untouched.
+    // prefab   — a UI prefab / canvas in a preview scene (PrefabView.cs).
     static class ScreenshotService
     {
         public static readonly string OutputDir = Path.Combine(
@@ -340,13 +342,14 @@ namespace UnityOpenMcpBridge.Screenshot
         internal sealed class GameViewContext
         {
             public EditorWindow View;
-            public string Mode = "unknown";       // game | simulator | none | unknown
+            public string Mode = "unknown";       // game | simulator | none | unknown | preview (prefab view)
             public string SizeLabel;               // Game view size entry
             public string Device;                  // Simulator device id
             public string Orientation;
             public int ScreenWidth, ScreenHeight;
             public Rect SafeArea;
             public bool? FrontTab;                 // the view is its dock area's front tab; null when unknown
+            public bool ReportSafeArea;            // print safe_area outside simulator mode (prefab view)
             public string Note;
         }
 
@@ -398,7 +401,7 @@ namespace UnityOpenMcpBridge.Screenshot
             if (ctx.SizeLabel != null) sb.Append(",\"size\":").Append(BridgeJson.EscapeString(ctx.SizeLabel));
             if (ctx.Orientation != null) sb.Append(",\"orientation\":").Append(BridgeJson.EscapeString(ctx.Orientation));
             sb.Append(",\"screen\":[").Append(ctx.ScreenWidth).Append(',').Append(ctx.ScreenHeight).Append(']');
-            if (ctx.Mode == "simulator")
+            if (ctx.Mode == "simulator" || ctx.ReportSafeArea)
             {
                 sb.Append(",\"safe_area\":");
                 AppendRect(sb, ctx.SafeArea);
@@ -414,8 +417,9 @@ namespace UnityOpenMcpBridge.Screenshot
             sb.Append(",\"width\":").Append(c.Width).Append(",\"height\":").Append(c.Height);
             // native: the game's own resolution, unscaled; fitted: a frame scaled
             // into width x height (padded when the aspect differs); requested:
-            // Camera.main rendered directly at width x height.
-            string sizeMode = c.Native ? "native" : c.Source == "main_camera" ? "requested" : "fitted";
+            // rendered directly at the asked size (Camera.main at width x height,
+            // the prefab view at its width x height / device / size entry).
+            string sizeMode = c.Native ? "native" : c.Source == "main_camera" || c.Requested ? "requested" : "fitted";
             sb.Append(",\"size\":").Append(BridgeJson.EscapeString(sizeMode));
             if (sizeMode == "fitted")
             {
@@ -445,6 +449,7 @@ namespace UnityOpenMcpBridge.Screenshot
                 sb.Append(",\"capturedAt\":");
                 AppendContext(sb, c.Context);
             }
+            if (c.DetailJson != null) sb.Append(",\"prefab\":").Append(c.DetailJson);
         }
 
         private static void AppendRect(System.Text.StringBuilder sb, Rect r)
@@ -464,15 +469,17 @@ namespace UnityOpenMcpBridge.Screenshot
                 if (size != "native") return "size must be \"native\" (or omitted).";
                 sizeNative = true;
             }
-            if (sizeNative && view != "composed" && view != "game") return "size: \"native\" applies to the composed and game views.";
+            if (sizeNative && view != "composed" && view != "game" && view != "prefab") return "size: \"native\" applies to the composed, game and prefab views.";
             if (sizeNative && (width.HasValue || height.HasValue)) return "size: \"native\" returns the game's own resolution; drop width/height or drop size.";
-            // composed fits the native frame into width x height, so it needs both;
-            // scene / game / isolated default each missing axis (1280 / 720).
-            if (view == "composed" && width.HasValue != height.HasValue) return "Pass width and height together for the composed view (or neither).";
+            // composed fits the native frame into width x height and prefab renders
+            // at it, so they need both; scene / game / isolated default each
+            // missing axis (1280 / 720).
+            if ((view == "composed" || view == "prefab") && width.HasValue != height.HasValue)
+                return "Pass width and height together for the " + view + " view (or neither).";
             if (!string.IsNullOrEmpty(overlay) && overlay != "none")
             {
                 if (overlay != "safe_area") return "overlay must be \"safe_area\" (or omitted).";
-                if (view != "composed") return "overlay: \"safe_area\" applies to the composed view.";
+                if (view != "composed" && view != "prefab") return "overlay: \"safe_area\" applies to the composed and prefab views.";
             }
             return null;
         }
@@ -854,11 +861,13 @@ namespace UnityOpenMcpBridge.Screenshot
         public int Width, Height;               // the returned image
         public int NativeWidth, NativeHeight;   // the frame before any fit
         public bool Native;                     // returned at native size (no scaling)
+        public bool Requested;                  // rendered directly at the asked size (not fitted)
         public RectInt Content;                 // fitted frame inside the image, top-left origin
-        public string Source;                   // play_mode_view | cameras | screen_capture | main_camera
+        public string Source;                   // play_mode_view | cameras | screen_capture | main_camera | preview_scene
         public bool SafeAreaOverlay;
         public Rect SafeArea;                   // game screen pixels, bottom-left origin
         public ScreenshotService.GameViewContext Context;
+        public string DetailJson;               // prefab view: what was rendered and how ({...}, the "prefab" field)
     }
 
     // A capture refused for a reason the caller can act on: the capture tools
@@ -866,10 +875,12 @@ namespace UnityOpenMcpBridge.Screenshot
     internal sealed class CaptureRefusedException : InvalidOperationException
     {
         public readonly string Code;
+        public readonly string DetailJson;      // a JSON object whose members join the error, or null
 
-        public CaptureRefusedException(string code, string message) : base(message)
+        public CaptureRefusedException(string code, string message, string detailJson = null) : base(message)
         {
             Code = code;
+            DetailJson = detailJson;
         }
     }
 }

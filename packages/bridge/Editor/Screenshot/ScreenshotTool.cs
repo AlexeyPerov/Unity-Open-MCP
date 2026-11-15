@@ -8,13 +8,16 @@ namespace UnityOpenMcpBridge.Screenshot
 {
     // M10 Plan 2 T3.1 — Screenshot meta-tool (typed/registry pattern).
     //
-    // Gives the agent eyes: capture the Scene view, Game view, or an isolated
-    // composite of a single GameObject. Returns the saved file path so MCP
-    // servers can pass a reference instead of a huge base64 blob.
+    // Gives the agent eyes: capture the Scene view, Game view, the composed
+    // player frame, an isolated composite of a single GameObject, or a UI
+    // prefab rendered in a preview scene (view "prefab", PrefabView.cs).
+    // Returns the saved file path so MCP servers can pass a reference instead
+    // of a huge base64 blob.
     //
     // Non-mutating: screenshots do not touch assets/scenes. Isolated mode
     // changes scene state transiently (creates a temp camera) but restores
-    // everything in finally blocks.
+    // everything in finally blocks; the prefab view builds and closes its own
+    // preview scene.
     [BridgeToolType]
     public class Tool_Screenshot
     {
@@ -23,8 +26,9 @@ namespace UnityOpenMcpBridge.Screenshot
         [System.ComponentModel.Description(
             "Capture a screenshot from the Scene view, Game view (Camera.main), the composed " +
             "player frame (native game resolution by default; width/height of another aspect are " +
-            "padded, never stretched; optional safe-area overlay), or an isolated 2x2 composite of " +
-            "a single GameObject. Returns the saved PNG file path and the device/resolution it was taken at.")]
+            "padded, never stretched; optional safe-area overlay), an isolated 2x2 composite of " +
+            "a single GameObject, or a UI prefab / canvas rendered in a preview scene in edit mode " +
+            "(view prefab). Returns the saved PNG file path and the device/resolution it was taken at.")]
         public string Screenshot(
             string view = "scene",
             int? width = null,
@@ -36,11 +40,33 @@ namespace UnityOpenMcpBridge.Screenshot
             string region = null,
             float? scale = null,
             int? max_edge = null,
-            string save_to = null)
+            string save_to = null,
+            string asset_path = null,
+            string game_object_path = null,
+            string device = null,
+            string orientation = null,
+            string size_label = null,
+            string canvas_scaler = null,
+            string scaler_from = null)
         {
             view = (view ?? "scene").ToLowerInvariant();
             var argError = ScreenshotService.ValidateFrameArgs(view, width, height, size, overlay);
             if (argError != null) return ErrorJson("validation_error", argError);
+            var prefab = new PrefabViewRequest
+            {
+                AssetPath = asset_path, GameObjectPath = game_object_path, Width = width, Height = height,
+                Device = device, Orientation = orientation, SizeLabel = size_label,
+                CanvasScaler = canvas_scaler, ScalerFrom = scaler_from,
+                SafeAreaOverlay = overlay == "safe_area", Transparent = background == "transparent",
+            };
+            if (view == "prefab")
+            {
+                var prefabError = PrefabView.ValidateArgs(prefab, out var prefabCode);
+                if (prefabError != null) return ErrorJson(prefabCode, prefabError);
+            }
+            else if (PrefabView.HasPrefabArgs(prefab))
+                return ErrorJson("validation_error",
+                    "asset_path, game_object_path, device, orientation, size_label, canvas_scaler and scaler_from apply to view \"prefab\"; pass view: \"prefab\".");
             var postError = ImagePostProcess.Parse(region, scale, max_edge, save_to, out var post);
             if (postError != null) return ErrorJson("invalid_arguments", postError);
             // scene / game / isolated default each missing axis to 1280 / 720; composed defaults to native.
@@ -67,6 +93,13 @@ namespace UnityOpenMcpBridge.Screenshot
                     // are passed; another aspect is padded, never stretched.
                     case "composed":
                         return BuildFrameJson(view, ScreenshotService.CaptureComposedView(width, height, overlay == "safe_area"), post);
+                    // A UI prefab (or a canvas of a loaded scene) cloned into a
+                    // preview scene and rendered through a Screen Space - Camera
+                    // canvas: no project scene is loaded, dirtied or changed.
+                    case "prefab":
+                        var rendered = PrefabView.Capture(prefab);
+                        rendered.FilePath = ScreenshotService.SavePng(rendered.Png, "prefab");
+                        return BuildFrameJson(view, rendered, post);
                     case "isolated":
                         if (string.IsNullOrEmpty(object_path))
                             return ErrorJson("missing_parameter",
@@ -81,14 +114,14 @@ namespace UnityOpenMcpBridge.Screenshot
                         break;
                     default:
                         return ErrorJson("validation_error",
-                            $"Unknown view '{view}'. Use 'scene', 'game', 'composed', or 'isolated'.");
+                            $"Unknown view '{view}'. Use 'scene', 'game', 'composed', 'isolated', or 'prefab'.");
                 }
 
                 return BuildSuccessJson(view, w, h, filePath, post);
             }
             catch (CaptureRefusedException e)
             {
-                return ErrorJson(e.Code, e.Message);
+                return ErrorJson(e.Code, e.Message, e.DetailJson);
             }
             catch (System.Exception e)
             {
@@ -173,11 +206,15 @@ namespace UnityOpenMcpBridge.Screenshot
             return sb.ToString();
         }
 
-        private static string ErrorJson(string code, string message)
+        // `detail`: a JSON object whose members join the error (candidates, labels, …).
+        private static string ErrorJson(string code, string message, string detail = null)
         {
             var sb = new StringBuilder(256);
             sb.Append("{\"error\":{\"code\":").Append(Esc(code));
             sb.Append(",\"message\":").Append(Esc(message));
+            detail = detail?.Trim();
+            if (!string.IsNullOrEmpty(detail) && detail.Length > 2 && detail[0] == '{')
+                sb.Append(',').Append(detail, 1, detail.Length - 2);
             sb.Append("}}");
             return sb.ToString();
         }

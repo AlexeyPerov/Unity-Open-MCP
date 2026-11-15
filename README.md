@@ -66,9 +66,9 @@ See the [Playtest guide](docs/playtest-guide.md) and
 
 ### Test and observe
 
-Run Edit/Play Mode tests, inspect the console, capture screenshots, profiler and
-memory data, and pull events — the feedback an agent needs to trust its own
-changes.
+Run Edit/Play Mode tests, inspect the console, capture screenshots (a UI prefab
+renders in edit mode without touching a scene), profiler and memory data, and pull
+events — the feedback an agent needs to trust its own changes.
 
 ### Live, batch, or offline
 

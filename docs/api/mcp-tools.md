@@ -94,6 +94,7 @@ a multi-step workflow. For session groups, see [Tool groups](tool-groups.md).
 | Game testing | Probe the UI for interactables, enter play mode, click the Start button by id, advance a few frames, then screenshot to confirm the level loaded. |
 | Playtest | Snapshot the shop screen, tap "Buy" by its label, then check the coin counter text and report any overflowing or placeholder texts. |
 | Device check | Switch the Device Simulator to a notched phone in portrait, then capture the composed frame with the safe-area overlay and check nothing sits under the notch. |
+| UI layout | Render `Assets/UI/Shop.prefab` at 1242×2688 and on a notched phone with the safe-area overlay — without opening a scene — and check the layout and texts. |
 | Tool groups | Reset tool groups, then activate only `core` and `gate-and-verify`. |
 | Batch mutations | In one batch: create ten empty GameObjects named `Enemy_1`…`Enemy_10` under an `Enemies` parent. |
 | Verify / CI | Create a verify baseline for this project, then report any new blocking issues since the last baseline. |
@@ -585,7 +586,8 @@ Space Overlay UI.
   (`source: "play_mode_view"`): no Editor toolbar or tabs, and no device bezel in
   the Device Simulator. In edit mode the enabled cameras are composited by depth
   at the game's resolution (`source: "cameras"`; Overlay canvases do not render
-  in edit mode). When the view's render target cannot be reached (an Editor
+  in edit mode — render a UI prefab or canvas with the
+  [prefab view](#prefab-view-unity_senses_screenshot-view-prefab) instead). When the view's render target cannot be reached (an Editor
   without the Game view adapter), the frame falls back to `ScreenCapture`
   (`source: "screen_capture"`) with a `warning` that it may include Editor
   chrome. A `warning` also appears when the play-mode view is not the front tab
@@ -644,6 +646,80 @@ isolated a missing width or height still defaults on its own (1280 / 720).
 > width/height of another aspect is padded instead of stretched; callers that pass
 > width/height still get an image of exactly that size. This is a fix, not a
 > breaking change.
+
+### Prefab view (`unity_senses_screenshot` view `prefab`)
+
+`view: "prefab"` renders a UI prefab (`asset_path`, as saved on disk) or a canvas
+or panel of a loaded scene / the open prefab stage (`game_object_path`) in edit
+mode, without touching a project scene. Use it for UI layout checks instead of
+opening a scratch scene, instantiating the prefab and rendering a camera into a
+`RenderTexture` by snippet.
+
+- **How it renders.** The prefab is cloned into a preview scene
+  (`EditorSceneManager.NewPreviewScene`) and drawn by a temporary camera of that
+  scene through a Screen Space - Camera canvas. A prefab whose root has a Canvas
+  keeps its own canvas and CanvasScaler, switched to Screen Space - Camera for the
+  render (`prefab.canvas: "own"`; `render_mode` names the authored mode); a root
+  without a Canvas but with root canvases below it switches each (World Space ones
+  are skipped). A panel without a Canvas (RectTransform root) is wrapped in a
+  temporary canvas (`prefab.canvas: "wrapped"`). An inactive root is activated on
+  the clone (`activated: true`). The canvas update and a layout rebuild run before
+  the one render, so layout groups, content size fitters and TextMesh Pro text are
+  right on the first frame. Everything is destroyed and the preview scene closed
+  afterwards, also when the render fails. Works with the built-in render pipeline
+  and URP (`source: "preview_scene"`).
+- **No side effects.** No project scene is loaded, unloaded, dirtied or changed
+  and no asset is written; the scene list, active scene and preview-scene count
+  are the same after the call. Scripts marked `[ExecuteAlways]` /
+  `[ExecuteInEditMode]` run their edit-mode callbacks on the clone, as in any
+  scene. Play mode is refused with `edit_mode_required` (every script of the clone
+  would wake up in the running game) — capture the running screen with `composed`.
+- **Screen size.** `width` + `height` (pixels), a Device Simulator `device` (an id
+  from [`game_view`](playtest.md#unity_open_mcp_game_view) `list_devices`, exact or
+  a unique substring) with an optional `orientation` (default portrait), or a
+  fixed-resolution Game view `size_label` (e.g. `Open MCP 1080x1920`). With none of
+  them, the game's own screen (the Game view size or the simulated device;
+  `size: "native"`, and `capturedAt.note` says so). The image is rendered at that
+  size (`size: "requested"`), never fitted.
+- **CanvasScaler.** The base, in order: `scaler_from` (a prefab asset — its root
+  canvas, else its first canvas with a CanvasScaler — or a GameObject path in a
+  loaded scene / the open prefab stage — its root canvas); the rendered root
+  canvas's own CanvasScaler; for a scene object, the root canvas it sits under;
+  for a panel, the first screen-space canvas with a CanvasScaler in the loaded
+  scenes (active scene first, hierarchy order, active canvases before inactive
+  ones); otherwise Unity's CanvasScaler defaults (constant pixel size, scale 1). A
+  prefab with its own canvas but no CanvasScaler and no other base renders at
+  scale 1 (`from: "none"`). `canvas_scaler` then overrides single values:
+  `ui_scale_mode` (`constant_pixel_size` / `scale_with_screen_size` /
+  `constant_physical_size`), `scale_factor`, `reference_resolution` `[w, h]`,
+  `screen_match_mode` (`match_width_or_height` / `expand` / `shrink`),
+  `match_width_or_height` (0–1), `reference_pixels_per_unit`, `physical_unit`,
+  `fallback_screen_dpi`, `default_sprite_dpi`. The response's `prefab.scaler`
+  reports `from` (`scaler_from` / `own` / `parent_canvas` / `scene` / `default` /
+  `none`), `from_path`, the `overrides` applied and the settings used;
+  `prefab.scale_factor` is the canvas scale the render ended up with.
+- **Safe area.** `overlay: "safe_area"` draws the named device's safe area for that
+  orientation (the Simulator's when no size is passed; the whole screen otherwise),
+  as on `composed`. `capturedAt` (`mode: "preview"`) repeats `device` / `size`,
+  `orientation`, `screen` and `safe_area`. Game code that reads `Screen.safeArea`
+  does not run in edit mode; the overlay shows where the unsafe band falls.
+- **Background.** `background: "transparent"` keeps alpha 0 behind the UI; any other
+  value is solid grey.
+- **Out of scope.** A prefab whose root has neither a Canvas nor a RectTransform and
+  no Canvas below it, or only World Space canvases, is refused with
+  `not_a_ui_prefab` — place it in a scene and use `isolated`, `scene` or
+  `unity_senses_screenshot_camera`.
+- **Errors.** `missing_parameter` (no `asset_path` / `game_object_path`),
+  `validation_error` (both sources, more than one size form, `orientation` without
+  `device`, a bad `canvas_scaler` key or value, a non-fixed `size_label`, a
+  prefab-view argument on another view), `asset_not_found`, `not_a_prefab`,
+  `not_a_ui_prefab`, `device_not_found` (`available`) / `ambiguous_device`
+  (`candidates`), `size_not_found` (`labels`), `scaler_not_found`,
+  `native_size_unavailable`, `edit_mode_required`, `ugui_unavailable` (the view
+  needs `com.unity.ugui`), and the shared resolver's codes for `game_object_path`
+  (`gameobject_not_found`, `ambiguous_path`, …).
+
+`region`, `scale`, `max_edge` and `save_to` work as for every view.
 
 ### `unity_senses_visual_compare`
 

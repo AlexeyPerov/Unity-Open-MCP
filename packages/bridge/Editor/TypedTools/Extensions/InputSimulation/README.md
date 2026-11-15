@@ -33,7 +33,9 @@ Layout:
 - `Core/` (uGUI sub-asmdef): pointer / pointer3d / step / probe, `raycast_real`,
   the uGUI top-hit probe used by gesture traces, and the screen model
   (`UiScreenModel.cs`: nodes, visibility, text normalisation, the label resolver)
-  behind `ui_snapshot` (`UiSnapshotTools.cs`).
+  behind `ui_snapshot` (`UiSnapshotTools.cs`). It also registers the uGUI half of
+  `unity_senses_screenshot`'s prefab view (`UguiPreviewSupport.cs`: CanvasScaler
+  read / write and the layout rebuild), which the bridge root cannot reference.
 - `Tmp/` (TextMeshPro sub-asmdef, `UNITY_OPEN_MCP_EXT_INPUTSIM_TMP` from two
   versionDefines: `com.unity.textmeshpro` ≥ 3.0 or `com.unity.ugui` ≥ 2.0): the
   `TMP_Text` reader that registers into `UiTextReaders`. Without either package

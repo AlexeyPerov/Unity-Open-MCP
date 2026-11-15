@@ -328,6 +328,15 @@ export const RECOMMENDED_TOOL_CHAINS: RecommendedToolChain[] = [
     ],
   },
   {
+    name: "ui-prefab-layout-check",
+    task: "Check a UI prefab's layout, texts and anchors at a target screen in edit mode, without opening or dirtying a scene.",
+    steps: [
+      "unity_senses_screenshot (view prefab, asset_path, width + height or device + overlay safe_area) — no scratch scene, no RenderTexture snippet",
+      "read prefab.canvas / prefab.scaler.from / prefab.scale_factor — a panel without a Canvas takes scaler_from or canvas_scaler when the default base is wrong",
+      "edit with in_prefab typed tools (ui_* / component_modify), then render again to compare",
+    ],
+  },
+  {
     name: "batch-setup",
     task:
       "Bundle multi-step setup (create objects + materials + assignments) into one round trip.",

@@ -34,7 +34,7 @@ Use exact schemas, scoped mutations, and gate evidence to work on the selected U
 - Before scene switches, play transitions, snippets, or choosing live/batch/offline routes: [Routing and lifecycle](references/routing-and-lifecycle.md).
 - Before batching, interpreting a failed gate, or applying fixes: [Batch and gates](references/batch-and-gates.md).
 - Before file-level repair, YAML edits, or offline asset investigation: [YAML and offline work](references/yaml-and-offline-work.md).
-- Before screenshots, event capture, or test runs: [Senses and tests](references/senses-and-tests.md).
+- Before screenshots, event capture, or test runs: [Senses and tests](references/senses-and-tests.md). Check a UI prefab's layout in edit mode with `unity_senses_screenshot {"view":"prefab","asset_path":"…","width":…,"height":…}` (or `device`), never with a scratch scene and a `RenderTexture` snippet.
 - Before driving gameplay input (taps, drags, multi-second gestures — legacy Input Manager or Input System): activate `input-simulation` and follow its domain skill; read the reported `backend` array and refusals instead of reflecting into game input code.
 - To playtest the game (read the screen, tap by label, wait, capture, isolate the save, record a report for a human): follow [Playtest](#playtest) below.
 

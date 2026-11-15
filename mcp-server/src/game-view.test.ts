@@ -59,6 +59,32 @@ test("composed capture schemas: native by default, padded not stretched, safe-ar
   assert.equal(props("unity_senses_visual_compare").width.default, 1280);
 });
 
+test("screenshot prefab view: preview-scene UI render with the game_view size catalog", async () => {
+  const { validateSchema } = await import("./tool-contract.js");
+  const schema = tool("unity_senses_screenshot").inputSchema as Record<string, any>;
+  const p = props("unity_senses_screenshot");
+  assert.ok(p.view.enum.includes("prefab"));
+  // capture_inline keeps the file-free views only.
+  assert.ok(!props("unity_senses_capture_inline").view.enum.includes("prefab"));
+  // The size catalog is game_view's: device ids, its orientations, size labels.
+  assert.deepEqual(p.orientation.enum, props(GAME_VIEW_TOOL).orientation.enum);
+  for (const key of ["asset_path", "game_object_path", "device", "orientation", "size_label", "canvas_scaler", "scaler_from"])
+    assert.equal(p[key].default, undefined, `${key} must not default (the bridge picks the base and the size)`);
+  assert.equal(p.canvas_scaler.type, "object");
+  assert.equal(p.canvas_scaler.additionalProperties, false);
+  assert.match(tool("unity_senses_screenshot").description!, /preview scene/);
+
+  const ok = { view: "prefab", asset_path: "Assets/UI/Shop.prefab", width: 1242, height: 2688,
+    canvas_scaler: { ui_scale_mode: "scale_with_screen_size", reference_resolution: [1080, 1920], match_width_or_height: 0.5 } };
+  assert.deepEqual(validateSchema(ok, schema), []);
+  assert.deepEqual(validateSchema({ view: "prefab", asset_path: "Assets/UI/Shop.prefab", device: "iOS Notch Device (1170x2532)",
+    orientation: "landscape_left", overlay: "safe_area" }, schema), []);
+  const bad = validateSchema({ view: "prefab", asset_path: "Assets/UI/Shop.prefab",
+    canvas_scaler: { match: 0.5, reference_resolution: [0, 1920] } }, schema);
+  assert.ok(bad.some((e) => /canvas_scaler\.match is unknown/.test(e)), bad.join("; "));
+  assert.ok(bad.some((e) => /reference_resolution\[0\] violates exclusiveMinimum/.test(e)), bad.join("; "));
+});
+
 // ---------------------------------------------------------------------------
 // Settle routing
 // ---------------------------------------------------------------------------

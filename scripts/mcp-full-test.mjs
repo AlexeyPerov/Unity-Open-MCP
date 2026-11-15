@@ -375,6 +375,9 @@ function buildSuite() {
   // specs/feedback.md — inline base64 image data breaks JSON serialization).
   // Tolerate so the route is exercised + the bug surfaced without failing.
   s("screenshot", "B", "unity_senses_screenshot", { width: 64, height: 64 }, { expect: "tolerate", tolerate: ["bridge_response_unparsable"] });
+  // The prefab view on a non-UI fixture: the args pass both schemas and the
+  // bridge answers with the view's own refusal (a UI render is a live check).
+  s("screenshot_prefab", "B", "unity_senses_screenshot", { view: "prefab", asset_path: "Assets/Fixtures/HealthyFixture.prefab", width: 64, height: 64 }, { expect: "tolerate", tolerate: ["not_a_ui_prefab"] });
   s("screenshot_camera", "B", "unity_senses_screenshot_camera", { position: "0,5,-10", rotation: "30,0,0", width: 64, height: 64 }, { expect: "tolerate", tolerate: ["bridge_response_unparsable", "missing_parameter"] });
   s("capture_inline", "B", "unity_senses_capture_inline", { width: 64, height: 64 }, { expect: "tolerate", tolerate: ["bridge_response_unparsable"] });
   s("screenshot_window", "B", "unity_senses_screenshot_window", { window_title: "Scene", width: 64, height: 64 }, { expect: "tolerate", tolerate: ["bridge_response_unparsable", "missing_parameter", "not_supported"] });
