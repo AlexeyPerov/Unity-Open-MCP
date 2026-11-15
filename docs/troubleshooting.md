@@ -83,6 +83,19 @@ live tools time out. Errors mention **`dead_bridge`** or **`main_thread_blocked`
 - **Unsaved scene modals** — Unity's "Save scene?" / **"Scene(s) Have Been
   Modified"** dialog blocks the main thread. Save or revert dirty scenes, or
   click **Don't Save** for throwaway temp scenes.
+- **An open scene changed on disk** (a `git checkout`, a generator, YAML written
+  by hand) — Unity's own refresh, when the Editor window regains focus, asks
+  about it in the native "Scene(s) Have Been Modified" dialog ("Prefab Has Been
+  Changed on Disk" for a prefab stage with unsaved changes). A refresh started by
+  a tool does not: `assets_refresh` (and `execute_menu "Assets/Refresh"`,
+  `recompile_scripts`) reloads a clean changed scene in place and lists it in
+  `reloadedScenes`, and refuses with **`open_scene_changed_on_disk`** when the
+  scene has unsaved edits, play mode is on, or its file is gone. Follow the
+  refusal's `agentNextSteps` — `scene_save` keeps the in-memory edits,
+  `scene_open` with `ignore_scene_dirty: true` takes the disk version — then run
+  `assets_refresh` again. After changing an open scene's file on disk, refresh
+  through `assets_refresh` rather than by switching to the Editor. See
+  [Refreshes and open scenes changed on disk](api/mcp-tools.md#refreshes-and-open-scenes-changed-on-disk).
 - **Stale bridge after recompile** — see [Address already in use](#bridge-wont-start-address-already-in-use) above.
 - **Compile in progress** — wait until the Editor finishes; Status shows
   **Running (compiling)** when applicable.

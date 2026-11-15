@@ -127,6 +127,18 @@ namespace UnityOpenMcpBridge
         private static readonly Regex PropertyWrite = new Regex(
             @"\b(?:SetValue|SetMethod|GetSetMethod)\b", RegexOptions.CultureInvariant);
 
+        private static readonly Regex AssetImportCall = new Regex(
+            @"\b(?:Refresh|ImportAsset|ImportPackage|SaveAndReimport|ForceReserializeAssets|AllowAutoRefresh)\b",
+            RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// Whether the snippet text calls an asset refresh or import (the
+        /// "asset import" rule): it can reimport an open scene whose file
+        /// changed on disk, which raises Unity's native dialog.
+        /// </summary>
+        internal static bool CallsAssetImport(string code) =>
+            !string.IsNullOrEmpty(code) && AssetImportCall.IsMatch(code);
+
         internal static SnippetVerdict Classify(string code)
         {
             // Nothing to read: keep the tool's guarded default.

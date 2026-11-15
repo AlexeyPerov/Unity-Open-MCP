@@ -96,7 +96,7 @@ namespace UnityOpenMcpBridge.Extensions.AnimationExt
             }
 
             AssetDatabase.SaveAssets();
-            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+            OpenSceneDiskSync.RefreshAfterEdit(ImportAssetOptions.ForceSynchronousImport);
 
             var sb = new StringBuilder(256);
             sb.Append("\"create\":{");
@@ -218,7 +218,7 @@ namespace UnityOpenMcpBridge.Extensions.AnimationExt
 
             EditorUtility.SetDirty(controller);
             AssetDatabase.SaveAssets();
-            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+            OpenSceneDiskSync.RefreshAfterEdit(ImportAssetOptions.ForceSynchronousImport);
 
             var sb = new StringBuilder(256);
             sb.Append("\"modify\":{");

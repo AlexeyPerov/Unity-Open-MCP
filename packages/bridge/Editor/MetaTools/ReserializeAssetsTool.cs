@@ -73,7 +73,7 @@ namespace UnityOpenMcpBridge.MetaTools
             try
             {
                 AssetDatabase.ForceReserializeAssets(normalized, options);
-                AssetDatabase.Refresh();
+                OpenSceneDiskSync.RefreshAfterEdit();
             }
             catch (System.Exception e)
             {

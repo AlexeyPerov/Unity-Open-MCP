@@ -23,7 +23,9 @@ export const recompileScripts = makeTool(
     "the first errors inline. A failed compile is a failed call (isError, mutation.error.code `compile_failed`); " +
     "fix the errors and call it again. dllMtimeBefore / dllMtimeAfter / recompiled in mutation.output show " +
     "whether the assemblies were rewritten. Disruptive: refused with `scene_dirty` while a loaded scene has " +
-    "unsaved changes. paths_hint is optional (default [\"Assets\"]).",
+    "unsaved changes. The project refresh a deleted script needs treats open scenes that changed on disk " +
+    "like assets_refresh (reloaded in place, or `open_scene_changed_on_disk` and nothing compiled). " +
+    "paths_hint is optional (default [\"Assets\"]).",
   {
         properties: {
           ignore_scene_dirty: { ...IGNORE_SCENE_DIRTY_BASE, description: "Opt out of the active-scene dirty guard. When false (default), the call is refused with code `scene_dirty` if any loaded scene has unsaved changes (the reload this call triggers could raise Unity's native save modal). Set true to proceed and accept the risk." },

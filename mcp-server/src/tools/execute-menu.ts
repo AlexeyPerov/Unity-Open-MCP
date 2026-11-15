@@ -12,7 +12,10 @@ export const executeMenu = makeTool(
     "arbitrary value: a menu that needs longer cannot be waited out in one " +
     "call (wait with unity_open_mcp_editor_status {\"wait_until\":\"idle\"} instead). " +
     "`Assets/Refresh` is the menu form of assets_refresh: a gated mutation (scope defaults " +
-    "to Assets) whose result carries the same `compile` block. A `timeout` response does NOT " +
+    "to Assets) whose result carries the same `compile` block and answers " +
+    "{menuPath, executed, reloadedScenes} — an open scene that changed on disk is reloaded in " +
+    "place, or the refresh is refused with `open_scene_changed_on_disk`, as with assets_refresh. " +
+    "A `timeout` response does NOT " +
     "mean the menu failed — it usually completed after the wait elapsed; " +
     "confirm with unity_open_mcp_editor_status or an asset probe rather than " +
     "retrying, because a blind retry of an authoring menu can double-write " +

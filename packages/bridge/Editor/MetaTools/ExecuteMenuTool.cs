@@ -144,6 +144,22 @@ namespace UnityOpenMcpBridge.MetaTools
             return false;
         }
 
+        // Assets/Refresh: an open scene that changed on disk is reloaded in
+        // place around the refresh, or the refresh is refused
+        // (open_scene_changed_on_disk) when that would lose edits. The result
+        // names the reloaded scenes.
+        private static ToolDispatchResult ExecuteRefreshMenu(string menuPath)
+        {
+            var executed = false;
+            var sync = OpenSceneDiskSync.Run(() => executed = EditorApplication.ExecuteMenuItem(menuPath));
+            if (sync.Refused) return sync.Refusal();
+            if (!executed)
+                return ToolDispatchResult.Fail("menu_disabled",
+                    $"Menu item '{menuPath}' was not executed: Unity reported it disabled in the current Editor state.");
+            return ToolDispatchResult.Ok("{\"menuPath\":" + BridgeJson.EscapeString(menuPath) + ",\"executed\":true," +
+                                         sync.MembersJson() + "}");
+        }
+
         public static ToolDispatchResult Execute(string body)
         {
             var menuPath = JsonBody.GetString(body, "menu_path");
@@ -175,6 +191,9 @@ namespace UnityOpenMcpBridge.MetaTools
 
             try
             {
+                // The menu form of assets_refresh refreshes around the open
+                // scenes that changed on disk like assets_refresh does.
+                if (IsRefreshMenu(menuPath)) return ExecuteRefreshMenu(menuPath);
                 if (!EditorApplication.ExecuteMenuItem(menuPath))
                 {
                     var exists = MenuItemExists(menuPath);

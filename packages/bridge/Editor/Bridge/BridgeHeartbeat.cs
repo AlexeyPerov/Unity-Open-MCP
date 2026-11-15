@@ -121,6 +121,49 @@ namespace UnityOpenMcpBridge
             WriteNow();
         }
 
+        // The lock's first write in a domain (main thread). It carries the
+        // Editor's state as it is now and the compile block SessionState kept
+        // across the reload: a fresh domain's flags still hold their defaults
+        // (not playing, no compile block) until the first update tick, and
+        // after a reload in play mode that tick comes seconds later — a lock
+        // written from those defaults read `idle` / `isPlaying: false` /
+        // `compile: null` in the middle of a play session.
+        internal static void AcquireLock(string projectPath, int port)
+        {
+            Snapshot(out var state, out var isPlaying, out var isCompiling, out var compileJson);
+            BridgeInstanceLock.Acquire(projectPath, port, state, isPlaying, isCompiling, compileJson);
+        }
+
+        // The Editor state the lock reports when no forced transition is
+        // pending. Pure: a domain reload that comes back inside play mode, or
+        // in the middle of entering it, is playing / entering_playmode, never
+        // idle.
+        internal static string DeriveState(bool reloadDue, bool isCompiling, bool isPlaying, bool willChangePlaymode)
+        {
+            // A call requested a domain reload that has not started yet:
+            // readers must wait for it, not dispatch into it.
+            if (reloadDue) return BridgeInstanceLock.StateReloading;
+            if (isCompiling) return BridgeInstanceLock.StateCompiling;
+            if (willChangePlaymode && !isPlaying) return BridgeInstanceLock.StateEnteringPlaymode;
+            if (!willChangePlaymode && isPlaying) return BridgeInstanceLock.StateExitingPlaymode;
+            return isPlaying ? BridgeInstanceLock.StatePlaying : BridgeInstanceLock.StateIdle;
+        }
+
+        // Main thread: the flags read from the Editor now (not the values the
+        // last update tick cached — the heartbeat's own update callback can run
+        // before BridgeSession's in a tick, and a play-mode callback before its
+        // refresh) plus the compile block.
+        private static void Snapshot(out string state, out bool isPlaying, out bool isCompiling, out string compileJson)
+        {
+            BridgeSession.RefreshVolatileState();
+            isCompiling = BridgeSession.IsCompiling;
+            isPlaying = BridgeSession.IsPlaying;
+            state = DeriveState(BridgeReloadRequest.Due, isCompiling, isPlaying, BridgeSession.WillChangePlaymode);
+            compileJson = null;
+            try { compileJson = BridgeCompileState.LockJson(); }
+            catch { /* the compile block is advisory; the heartbeat must still beat */ }
+        }
+
         // Compute the effective state and write the lock. Forced state wins
         // until the underlying flag disagrees with it; then we clear the
         // force and fall back to the derived state.
@@ -128,9 +171,7 @@ namespace UnityOpenMcpBridge
         {
             if (!BridgeInstanceLock.IsAcquired) return;
 
-            string state;
-            bool isCompiling = BridgeSession.IsCompiling;
-            bool isPlaying = BridgeSession.IsPlaying;
+            Snapshot(out var state, out var isPlaying, out var isCompiling, out var compileJson);
 
             if (_forcedPending && !string.IsNullOrEmpty(_forcedState))
             {
@@ -181,28 +222,7 @@ namespace UnityOpenMcpBridge
                     _forcedPending = false;
                 }
             }
-            else if (BridgeReloadRequest.Due)
-            {
-                // A call requested a domain reload that has not started yet:
-                // readers must wait for it, not dispatch into it.
-                state = BridgeInstanceLock.StateReloading;
-            }
-            else if (isCompiling)
-            {
-                state = BridgeInstanceLock.StateCompiling;
-            }
-            else if (isPlaying)
-            {
-                state = BridgeInstanceLock.StatePlaying;
-            }
-            else
-            {
-                state = BridgeInstanceLock.StateIdle;
-            }
 
-            string compileJson = null;
-            try { compileJson = BridgeCompileState.LockJson(); }
-            catch { /* the compile block is advisory; the heartbeat must still beat */ }
             BridgeInstanceLock.UpdateState(state, isPlaying, isCompiling, compileJson);
         }
 

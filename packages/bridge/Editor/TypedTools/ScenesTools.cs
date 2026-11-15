@@ -81,7 +81,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("create_failed",
                     $"Failed to save scene at '{normalized}'.");
 
-            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+            OpenSceneDiskSync.RefreshAfterEdit(ImportAssetOptions.ForceSynchronousImport);
 
             // After SaveScene the in-memory scene name should match the asset
             // filename stem, but in some Unity versions/additive paths the

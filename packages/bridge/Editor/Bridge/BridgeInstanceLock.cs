@@ -66,9 +66,19 @@ namespace UnityOpenMcpBridge
         public static int CurrentPort => _acquiredPort;
         public static string AuthToken => _authToken;
 
-        // Write the initial lock and sweep stale locks. Safe to call on the
-        // listener worker thread (BridgeHttpServer.Start) — no Unity APIs.
+        // Write the initial lock and sweep stale locks. No Unity APIs: the
+        // caller supplies the Editor state the first write carries.
+        // BridgeHttpServer acquires through BridgeHeartbeat.AcquireLock, which
+        // reads it on the main thread; this overload (tests, diagnostics)
+        // writes an idle Editor and keeps the last known compile block.
         public static void Acquire(string projectPath, int port)
+            => Acquire(projectPath, port, StateIdle, isPlaying: false, isCompiling: false, compileJson: null);
+
+        // The first write of a domain is a heartbeat like any other: a domain
+        // reloaded in play mode (or while entering it) must not read idle /
+        // not playing, and the compile block (SessionState, so it survives the
+        // reload) must not read null until the first update tick.
+        internal static void Acquire(string projectPath, int port, string state, bool isPlaying, bool isCompiling, string compileJson)
         {
             if (string.IsNullOrEmpty(projectPath))
             {
@@ -98,9 +108,11 @@ namespace UnityOpenMcpBridge
             // invalidates any previously discovered token.
             _authToken = BridgeAuthToken.Generate();
 
+            if (compileJson != null) _compileJson = compileJson;
+
             try
             {
-                WriteLock(StateIdle, isPlaying: false, isCompiling: false, DateTime.UtcNow);
+                WriteLock(state ?? StateIdle, isPlaying, isCompiling, DateTime.UtcNow);
                 _acquired = true;
             }
             catch (Exception e)
@@ -137,6 +149,42 @@ namespace UnityOpenMcpBridge
                 UnityEngine.Debug.LogWarning(
                     $"[BridgeInstanceLock] Heartbeat write failed: {e.Message}");
             }
+        }
+
+        // Test seam: the live bridge's lock identity. A fixture that acquires
+        // and releases test locks (under InstancesDirOverride) puts it back
+        // afterwards, so running it in a live Editor leaves the real lock
+        // beating instead of released.
+        internal sealed class HeldForTest
+        {
+            internal bool Acquired;
+            internal string ProjectPath;
+            internal int Port;
+            internal string ProjectHash;
+            internal int Pid;
+            internal DateTime StartedAt;
+            internal string AuthToken;
+            internal string CompileJson;
+        }
+
+        internal static HeldForTest SaveForTest() => new HeldForTest
+        {
+            Acquired = _acquired, ProjectPath = _acquiredProjectPath, Port = _acquiredPort,
+            ProjectHash = _acquiredProjectHash, Pid = _pid, StartedAt = _startedAt,
+            AuthToken = _authToken, CompileJson = _compileJson,
+        };
+
+        internal static void RestoreForTest(HeldForTest held)
+        {
+            if (held == null) return;
+            _acquiredProjectPath = held.ProjectPath;
+            _acquiredPort = held.Port;
+            _acquiredProjectHash = held.ProjectHash;
+            _pid = held.Pid;
+            _startedAt = held.StartedAt;
+            _authToken = held.AuthToken;
+            _compileJson = held.CompileJson;
+            _acquired = held.Acquired;
         }
 
         // Delete the lock on graceful shutdown. Best-effort.

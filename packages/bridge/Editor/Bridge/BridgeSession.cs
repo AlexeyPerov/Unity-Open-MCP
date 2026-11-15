@@ -136,9 +136,27 @@ namespace UnityOpenMcpBridge
         //       result `shaderGraph.window`, codes editor_window_unavailable /
         //       window_open_failed / graph_has_unsaved_changes (also from
         //       node_add / node_connect under a window with unsaved edits).
-        public const int WireContract = 14;
+        //  15 — A refresh a tool starts never leaves Unity's native "changed on
+        //       disk" dialog behind: an open scene whose file changed on disk is
+        //       reloaded in place around it (assets_refresh result
+        //       `reloadedScenes`; execute_menu Assets/Refresh answers
+        //       {menuPath, executed, reloadedScenes}; recompile_scripts'
+        //       scriptImport), or the refresh is refused with
+        //       open_scene_changed_on_disk (error `scenes` [{path, reason:
+        //       unsaved_changes | file_missing | play_mode}], `prefabStage`) when
+        //       the scene has unsaved changes, its file is gone, play mode is on,
+        //       or a prefab stage with unsaved changes has its prefab changed;
+        //       an execute_csharp snippet that calls AssetDatabase.Refresh /
+        //       ImportAsset is refused with it while anything open changed on
+        //       disk (a clean scene: reason `changed`). The instance lock's
+        //       first write after a domain reload carries the Editor's state
+        //       (playing / entering_playmode, never idle in play mode) and the
+        //       last compile block (never null).
+        public const int WireContract = 15;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
+        // EditorApplication.isPlayingOrWillChangePlaymode as last refreshed.
+        internal static bool WillChangePlaymode => _willChangePlaymode;
 
         // The Editor transition in progress, as /ping reports it: "compiling"
         // (a compile is running or due, or the domain is about to reload),
@@ -172,11 +190,16 @@ namespace UnityOpenMcpBridge
         private static volatile bool _willChangePlaymode;
         private static volatile bool _connected;
         private static volatile bool _initialized;
+        // Set by beforeAssemblyReload: this domain is about to unload, which
+        // reads as compiling whatever the Editor's own flag says (a static
+        // field: the new domain starts with it false).
+        private static volatile bool _reloadStarted;
 
         [InitializeOnLoadMethod]
         private static void Initialize()
         {
             CacheStaticState();
+            RefreshVolatileState();
             _initialized = true;
 
             EditorApplication.update -= RefreshVolatileState;
@@ -198,16 +221,19 @@ namespace UnityOpenMcpBridge
         }
 
         // Main thread. Also called by a tool that just changed play mode, so
-        // the transition shows before the next update tick.
+        // the transition shows before the next update tick, and by every
+        // instance-lock write (BridgeHeartbeat), so the lock never carries a
+        // value from before the current domain's first update tick.
         internal static void RefreshVolatileState()
         {
-            _isCompiling = EditorApplication.isCompiling;
+            _isCompiling = _reloadStarted || EditorApplication.isCompiling;
             _isPlaying = EditorApplication.isPlaying;
             _willChangePlaymode = EditorApplication.isPlayingOrWillChangePlaymode;
         }
 
         private static void OnBeforeAssemblyReload()
         {
+            _reloadStarted = true;
             _isCompiling = true;
             _connected = false;
         }

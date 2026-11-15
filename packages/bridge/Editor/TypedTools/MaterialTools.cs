@@ -72,7 +72,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 material.name = System.IO.Path.GetFileNameWithoutExtension(normalized);
                 AssetDatabase.CreateAsset(material, normalized);
                 AssetDatabase.SaveAssets();
-                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                OpenSceneDiskSync.RefreshAfterEdit(ImportAssetOptions.ForceSynchronousImport);
             }
             catch (System.Exception e)
             {

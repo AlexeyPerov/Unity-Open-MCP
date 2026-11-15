@@ -108,7 +108,7 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
 
             U2D.SpriteAtlasAsset.Save(asset, normalized.Path);
             AssetDatabase.SaveAssets();
-            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+            OpenSceneDiskSync.RefreshAfterEdit(ImportAssetOptions.ForceSynchronousImport);
 
             // include_in_build moved from SpriteAtlasAsset to SpriteAtlasImporter
             // (the Asset method is deprecated). Apply after save so the importer

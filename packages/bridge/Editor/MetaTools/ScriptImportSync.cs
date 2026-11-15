@@ -21,8 +21,10 @@ namespace UnityOpenMcpBridge.MetaTools
     // AssetDatabase.Refresh — there is no scoped import of a file that is gone.
     // Either can run asset postprocessors and requests a compile itself, which
     // is the compile recompile_scripts asks for anyway; nothing reloads before
-    // the call returns. Scope: Assets/ and local / embedded packages, the
-    // mutable roots (registry and git packages are immutable).
+    // the call returns. The refresh goes through OpenSceneDiskSync: an open
+    // scene that changed on disk never leaves Unity's native dialog behind.
+    // Scope: Assets/ and local / embedded packages, the mutable roots
+    // (registry and git packages are immutable).
     internal static class ScriptImportSync
     {
         private static readonly string[] Extensions = { ".cs", ".asmdef", ".asmref" };
@@ -37,9 +39,11 @@ namespace UnityOpenMcpBridge.MetaTools
         internal sealed class Outcome
         {
             internal Plan Plan = new Plan();
-            /// <summary>none | imported | refreshed | failed</summary>
+            /// <summary>none | imported | refreshed | refused | failed</summary>
             internal string Action = "none";
             internal string Error;
+            /// <summary>The refresh a deletion needs, around the open scenes that changed on disk.</summary>
+            internal OpenSceneDiskSync.Outcome Refresh;
 
             internal string ToJson()
             {
@@ -49,6 +53,7 @@ namespace UnityOpenMcpBridge.MetaTools
                 sb.Append(",\"newCount\":").Append(Plan.NewPaths.Count);
                 AppendList(sb, "deletedScripts", Plan.DeletedPaths);
                 sb.Append(",\"deletedCount\":").Append(Plan.DeletedPaths.Count);
+                if (Refresh != null && Refresh.Ran) sb.Append(',').Append(Refresh.MembersJson());
                 if (Error != null) sb.Append(",\"error\":").Append(BridgeJson.EscapeString(Error));
                 return sb.Append('}').ToString();
             }
@@ -87,8 +92,11 @@ namespace UnityOpenMcpBridge.MetaTools
                     path => File.Exists(ToDisk(path, roots)));
                 if (outcome.Plan.DeletedPaths.Count > 0)
                 {
-                    AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
-                    outcome.Action = "refreshed";
+                    // An open scene that changed on disk is reloaded around the
+                    // refresh, or the refresh is refused (and nothing compiled)
+                    // when a reload would lose edits.
+                    outcome.Refresh = OpenSceneDiskSync.Run(() => AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport));
+                    outcome.Action = outcome.Refresh.Ran ? "refreshed" : "refused";
                 }
                 else if (outcome.Plan.NewPaths.Count > 0)
                 {

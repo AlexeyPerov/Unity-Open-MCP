@@ -113,7 +113,7 @@ namespace UnityOpenMcpBridge.MetaTools
             if ((mutationFailed || gateIntroducedErrors) && rollback.HasSnapshot)
             {
                 var restore = rollback.Restore();
-                AssetDatabase.Refresh();
+                OpenSceneDiskSync.RefreshAfterEdit();
 
                 result.RolledBack = true;
                 result.RollbackReason = mutationFailed

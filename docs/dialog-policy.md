@@ -19,6 +19,13 @@ the dedicated opt-in `UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1` is set; the
 dismiss loop reports it as `blocked` with an audit line so the stall surfaces
 with a clear diagnosis instead of a silent timeout.
 
+A refresh started by a tool never raises "Scene has been modified externally"
+in the first place: it reloads a clean changed scene in place itself and
+refuses (`open_scene_changed_on_disk`) when that would lose unsaved edits — see
+[Refreshes and open scenes changed on disk](api/mcp-tools.md#refreshes-and-open-scenes-changed-on-disk).
+The dismiss loop is for Unity's own refresh (Auto Refresh when the Editor
+regains focus).
+
 Set these in your MCP client config (`env` block) or in the shell when running
 CLI commands such as `wait-for-ready`.
 

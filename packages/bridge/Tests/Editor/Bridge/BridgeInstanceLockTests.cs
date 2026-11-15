@@ -19,6 +19,20 @@ namespace UnityOpenMcpBridge.Tests
         private const string OtherProjectPath = "/test/OtherGame";
 
         private string _tempDir;
+        private BridgeInstanceLock.HeldForTest _live;
+
+        // These tests acquire and release locks of their own; put the live
+        // bridge's lock (the Editor running them) back when they are done.
+        [OneTimeSetUp]
+        public void SaveLiveLock() => _live = BridgeInstanceLock.SaveForTest();
+
+        [OneTimeTearDown]
+        public void RestoreLiveLock()
+        {
+            InstancePortResolver.InstancesDirOverride = null;
+            BridgeInstanceLock.RestoreForTest(_live);
+            BridgeHeartbeat.WriteNowIfRunning();
+        }
 
         [SetUp]
         public void SetUp()
@@ -80,6 +94,32 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("\"projectPath\":\"/test/MyGame\"", json);
             StringAssert.Contains("\"state\":\"idle\"", json, "Initial state is idle");
             StringAssert.Contains($"\"projectHash\":\"{InstancePortResolver.ProjectHash(TestProjectPath)}\"", json);
+        }
+
+        [Test]
+        public void Acquire_FirstWrite_CarriesTheGivenStateAndCompileBlock()
+        {
+            // The first write of a domain reloaded in play mode.
+            BridgeInstanceLock.Acquire(TestProjectPath, 22028, BridgeInstanceLock.StatePlaying,
+                isPlaying: true, isCompiling: false, compileJson: "{\"generation\":7,\"running\":false}");
+
+            var json = File.ReadAllText(InstancePortResolver.LockPath(TestProjectPath));
+            StringAssert.Contains("\"state\":\"playing\"", json);
+            StringAssert.Contains("\"isPlaying\":true", json);
+            StringAssert.Contains("\"compile\":{\"generation\":7,", json);
+        }
+
+        [Test]
+        public void AcquireLock_FirstWrite_CarriesTheEditorStateAndTheCompileGeneration()
+        {
+            BridgeHeartbeat.AcquireLock(TestProjectPath, 22028);
+
+            var json = File.ReadAllText(InstancePortResolver.LockPath(TestProjectPath));
+            // An EditMode test runs in a settled Editor: idle, not playing.
+            StringAssert.Contains("\"state\":\"idle\"", json);
+            StringAssert.Contains("\"isPlaying\":false", json);
+            // Never null: the generation SessionState carried across reloads.
+            StringAssert.Contains("\"compile\":{\"generation\":" + BridgeCompileState.Generation + ",", json);
         }
 
         [Test]

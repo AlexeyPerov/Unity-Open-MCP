@@ -1050,7 +1050,7 @@ namespace UnityOpenMcpBridge
             return list.ToArray();
         }
 
-        private static string SceneCall(string tool, string scenePath, string extraArgs) =>
+        internal static string SceneCall(string tool, string scenePath, string extraArgs) =>
             tool + " {\"asset_path\":\"" + scenePath + "\",\"paths_hint\":[\"" + scenePath + "\"]" + (extraArgs ?? "") + "}";
 
         // /ping response body — live bridge status snapshot.

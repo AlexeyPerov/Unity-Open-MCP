@@ -342,8 +342,10 @@ namespace UnityOpenMcpBridge
                 // only after the listener is bound, so the lock never
                 // advertises a port nothing is listening on. Acquire rewrites
                 // the path/port from BridgeSession (the authoritative source)
-                // rather than the port-resolver fallback used at static init.
-                BridgeInstanceLock.Acquire(BridgeSession.ProjectPath ?? GetProjectPathForPort(), _port);
+                // rather than the port-resolver fallback used at static init,
+                // and its first write already carries the Editor's state
+                // (playing after a reload in play mode) and compile block.
+                BridgeHeartbeat.AcquireLock(BridgeSession.ProjectPath ?? GetProjectPathForPort(), _port);
                 BridgeHeartbeat.Start();
 
                 var bindNote = BridgeBindAddress.IsRemote(effectiveBind)
@@ -1513,6 +1515,10 @@ namespace UnityOpenMcpBridge
             // Asynchronous project-command starts run the same preflight.
             var sceneDirty = SceneDirtyGuard.Refuse(contract, body);
             if (sceneDirty != null) return sceneDirty;
+            // A snippet whose own refresh would reimport an open scene that
+            // changed on disk (Unity's native dialog would follow it).
+            var changedOnDisk = OpenSceneDiskSync.RefuseSnippet(contract, body);
+            if (changedOnDisk != null) return changedOnDisk;
 
             if (!isMutating)
             {

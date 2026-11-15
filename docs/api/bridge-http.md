@@ -44,7 +44,11 @@ clients don't accumulate subscriber state.
   alone does not mean the bridge is dead (see
   [lost bridge vs. long reload](routing-lifecycle.md#a-lost-response-or-a-long-reload-is-not-a-dead-bridge)).
   `state` reads `reloading` from the moment a call requests a domain reload
-  until it starts (wire contract 9).
+  until it starts (wire contract 9). The first write of a reloaded domain is
+  read from the Editor, not from defaults (wire contract 15): after a reload in
+  play mode it reads `playing` (or `entering_playmode` while play mode is being
+  entered), never `idle` / `isPlaying: false`, and it carries the last `compile`
+  block, which survives the reload.
 
 ## Authentication and bind mode
 
@@ -135,6 +139,13 @@ default scope instead: `assets_refresh` with `whole_project: true`, its menu
 form `execute_menu "Assets/Refresh"`, and `recompile_scripts` scope the gate to
 `["Assets"]` when `paths_hint` is omitted; `reimport_package` scopes it to
 `Packages/<package_id>`.
+
+Every project refresh a tool starts checks the open scenes first (wire contract
+15): an open scene whose file changed on disk since its last import is reloaded
+in place around the refresh, or the refresh is refused with
+`open_scene_changed_on_disk` when that would lose edits — so Unity's native
+"changed on disk" dialog never blocks the main thread. See
+[Refreshes and open scenes changed on disk](mcp-tools.md#refreshes-and-open-scenes-changed-on-disk).
 
 Rule auto-selection maps the `paths_hint` extensions to rule families. Only
 **registered** rule families are ever auto-selected: image (`.png`, `.jpg`,

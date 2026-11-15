@@ -16,7 +16,12 @@ export const assetsRefresh = makeTool(
     "`compiling` (past ~40 s the wait continues as a unity_open_mcp_jobs job) and " +
     "`compile: {generationAtStart, generation, status, errorCount, errors}`; a failed compile " +
     "fails the call (mutation.error.code `compile_failed`; the import itself is kept). A refresh " +
-    "that starts no compile answers at once, unchanged. Light mutation: " +
+    "that starts no compile answers at once, unchanged. An open scene whose file changed on disk " +
+    "(git checkout, a generator) is reloaded in place around the refresh and listed in " +
+    "`reloadedScenes`, so Unity's native \"Scene(s) Have Been Modified\" dialog never blocks the " +
+    "Editor; when that would lose unsaved edits (or play mode is on, or a prefab stage with unsaved " +
+    "changes has its prefab changed) the refresh is refused with `open_scene_changed_on_disk`, naming " +
+    "the scenes and the choices (scene_save keeps the edits, scene_open takes the disk version). Light mutation: " +
     "runs the gate path. Pass `whole_project: true` (default) " +
     "when you changed files in arbitrary places; pass it `false` with a scoped `paths_hint` " +
     "for a known small change set.",

@@ -957,7 +957,11 @@ assembly stale after `assets_refresh` / `execute_csharp`.
    folder Unity does not know, recursively, or the file), a deletion with one
    `AssetDatabase.Refresh`. Without this a new type is in no assembly and every
    use of it fails with CS0103 / CS0246. `mutation.output.scriptImport` reports
-   `action` (`none` / `imported` / `refreshed`) and the paths.
+   `action` (`none` / `imported` / `refreshed`) and the paths. The refresh a
+   deletion needs treats open scenes that changed on disk like
+   [`assets_refresh`](#refreshes-and-open-scenes-changed-on-disk): a clean one is
+   reloaded in place (`scriptImport.reloadedScenes`), and otherwise the call
+   fails with `open_scene_changed_on_disk` before any compile is requested.
 2. **Requests the compile** (`CompilationPipeline.RequestScriptCompilation()`)
    and reports the request: `status: "compile_requested"`, `dllMtimeBefore` /
    `dllMtimeAfter` (newest `Library/ScriptAssemblies/*.dll` mtime, UTC ticks),
@@ -998,6 +1002,52 @@ reload-unsafe either way). The call is disruptive: refused with `scene_dirty`
 while a loaded scene has unsaved changes (`ignore_scene_dirty` opts out).
 `compile_request_failed` means `RequestScriptCompilation` itself threw; nothing
 was compiled.
+
+### Refreshes and open scenes changed on disk
+
+When a scene file that is open in the Editor changes on disk (a `git checkout`,
+a code generator, YAML written by an agent) and a refresh then reimports it,
+Unity asks what to do in its native "Scene(s) Have Been Modified" dialog; a
+prefab stage with unsaved changes whose prefab changed asks "Prefab Has Been
+Changed on Disk". Either dialog blocks the main thread until a human answers it,
+and no tool can. A refresh started by a tool never leaves one behind:
+`assets_refresh`, `execute_menu "Assets/Refresh"`, the refresh `recompile_scripts`
+runs for a deleted script, and the project refresh other tools run after their
+own edit (`assets_create_folder` / `_copy` / `_move` / `_delete`,
+`scene_create`, `material_create`, `reserialize`, tag and layer edits, the
+animation and sprite-atlas domain tools, an `apply_fix` rollback) all check the
+open scenes first. "Changed" means the file's content no longer matches what the
+AssetDatabase last imported — exactly the files a refresh reimports — so a
+scene opened after its file changed still counts.
+
+- **A clean open scene that changed** is closed before the refresh and reopened
+  in place after it: loaded or unloaded as before, the same hierarchy order, the
+  same active scene. Nothing is lost (it had no unsaved edits); the scene now
+  shows the file on disk. `assets_refresh` lists it in `reloadedScenes`
+  (`[]` when none), `execute_menu "Assets/Refresh"` answers
+  `{menuPath, executed: true, reloadedScenes}`.
+- **Otherwise the refresh is refused before it runs** with
+  `open_scene_changed_on_disk` (a failed call; the error carries
+  `scenes: [{path, reason}]` and `prefabStage`): `reason` `unsaved_changes`
+  (choose: `scene_save` keeps the in-memory edits and overwrites the change on
+  disk; `scene_open` with `ignore_scene_dirty: true` takes the disk version and
+  drops the edits — then retry), `file_missing` (the open scene's file is gone),
+  `play_mode` (stop play mode, then retry: in edit mode the scene is reloaded),
+  or `prefabStage` (`prefab_save` keeps the stage's edits, `prefab_close
+  {"save": false}` takes the disk version). `agentNextSteps` names the exact
+  calls. A clean prefab stage needs nothing: Unity reloads it without asking.
+- The other tools' follow-up refresh is skipped instead of failing a call whose
+  own edit already happened; the call's `logs` carry a warning naming the scene.
+  Resolve it, then run `assets_refresh`.
+- An `execute_csharp` snippet that refreshes or imports itself
+  (`AssetDatabase.Refresh`, `ImportAsset`, …) cannot be wrapped, so it is refused
+  with `open_scene_changed_on_disk` before it runs while any open scene (clean
+  or not — a clean one is listed with `reason: "changed"`) or the prefab stage
+  changed on disk. Run `assets_refresh` first, then the snippet.
+
+Unity's own refresh (Auto Refresh when the Editor window regains focus) is not
+a tool call and can still raise the dialog; run `assets_refresh` after changing
+an open scene on disk instead of switching to the Editor.
 
 ### `unity_open_mcp_upgrade`
 
@@ -1143,7 +1193,11 @@ envelope's `agentNextSteps` says exactly this.
 imports changed files, runs their postprocessors and can start a compile and
 domain reload. It is a gated mutation with `assets_refresh`'s lifecycle
 (`editor_settle`, no dirty-scene guard) and default scope (`Assets` when
-`paths_hint` is empty), and its envelope carries the same `compile` block.
+`paths_hint` is empty), and its envelope carries the same `compile` block. It
+handles open scenes that changed on disk like `assets_refresh` (reloaded in
+place, or refused with `open_scene_changed_on_disk` — see
+[Refreshes and open scenes changed on disk](#refreshes-and-open-scenes-changed-on-disk))
+and answers `{menuPath, executed: true, reloadedScenes}` instead of `"ok"`.
 
 A menu that does not run answers with one of two codes: `menu_not_found` (no
 item is registered at that path — fix the path) or `menu_disabled` (the item

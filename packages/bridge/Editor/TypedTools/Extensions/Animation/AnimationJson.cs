@@ -99,7 +99,7 @@ namespace UnityOpenMcpBridge.Extensions.AnimationExt
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
                 Directory.CreateDirectory(directory);
-                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                OpenSceneDiskSync.RefreshAfterEdit(ImportAssetOptions.ForceSynchronousImport);
             }
         }
     }

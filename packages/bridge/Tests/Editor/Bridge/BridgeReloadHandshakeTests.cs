@@ -94,6 +94,20 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void LockState_ADomainReloadedInPlayMode_IsPlaying_NeverIdle()
+        {
+            // Reloaded in play mode: isPlaying and isPlayingOrWillChangePlaymode
+            // are both true at the new domain's first lock write.
+            Assert.AreEqual(BridgeInstanceLock.StatePlaying, BridgeHeartbeat.DeriveState(false, false, true, true));
+            // Reloaded while entering play mode: not playing yet, on the way.
+            Assert.AreEqual(BridgeInstanceLock.StateEnteringPlaymode, BridgeHeartbeat.DeriveState(false, false, false, true));
+            Assert.AreEqual(BridgeInstanceLock.StateExitingPlaymode, BridgeHeartbeat.DeriveState(false, false, true, false));
+            Assert.AreEqual(BridgeInstanceLock.StateCompiling, BridgeHeartbeat.DeriveState(false, true, true, true));
+            Assert.AreEqual(BridgeInstanceLock.StateReloading, BridgeHeartbeat.DeriveState(true, false, true, true));
+            Assert.AreEqual(BridgeInstanceLock.StateIdle, BridgeHeartbeat.DeriveState(false, false, false, false));
+        }
+
+        [Test]
         public void EditorReloadingJson_IsWellFormed_AndSaysWhetherTheCallRan()
         {
             var notRun = BridgeJson.BuildEditorReloadingJson("unity_open_mcp_gameobject_create", false, "entering_playmode");

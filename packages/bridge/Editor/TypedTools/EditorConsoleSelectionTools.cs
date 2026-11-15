@@ -846,7 +846,7 @@ namespace UnityOpenMcpBridge.TypedTools
         {
             AssetDatabase.SaveAssetIfDirty(
                 AssetDatabase.LoadMainAssetAtPath("ProjectSettings/TagManager.asset"));
-            AssetDatabase.Refresh();
+            OpenSceneDiskSync.RefreshAfterEdit();
         }
 
         private static readonly HashSet<string> ReservedTags = new HashSet<string>

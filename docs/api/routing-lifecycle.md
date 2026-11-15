@@ -249,6 +249,7 @@ pointed at a top-level call it cannot make.
 | `batch_spawn_failed` | Headless Unity produced no classifiable result (non-zero exit, no markers). | Inspect compile errors, package state, project lock, and path. |
 | `batch_step_requires_server_poll` | A `batch_execute` step's terminal result is produced by the server polling a results file, which the batch route does not do (today: `unity_senses_run_tests`, `unity_open_mcp_inputsim_gesture`, `unity_open_mcp_playtest_wait`, `unity_senses_capture_series`, `unity_open_mcp_game_view` set actions). | Call the tool as a single top-level call. The message also names a reachable `execute_csharp` / `invoke_method` equivalent for clients that cannot see the tool. |
 | `scene_dirty` | A disruptive call was refused because a loaded scene has unsaved work, including unsaved additive scenes. The guard covers every `restart_then_settle` call (recompile, package and asmdef edits, build target/defines, player settings, menus, single-mode scene switches, upgrade, and an `execute_csharp` snippet whose text can disrupt the Editor) plus `editor_set_state` play and `run_tests`; each publishes `ignore_scene_dirty`. A snippet that only writes assets is not refused, and one that saves scenes is refused only for an untitled dirty scene — see [`execute_csharp`](mcp-tools.md#unity_open_mcp_execute_csharp). | Follow `agentNextSteps`, in order: save with `scene_save` (the step carries the call and the dirty scene's path; an untitled scene gets a save-as path), or discard by reopening the scene with `scene_open` + `ignore_scene_dirty: true`, or deliberately retry with `ignore_scene_dirty: true` and accept Unity's native save prompt. |
+| `open_scene_changed_on_disk` | A refresh (`assets_refresh`, `execute_menu "Assets/Refresh"`, the refresh `recompile_scripts` runs for a deleted script, an `execute_csharp` snippet that calls `AssetDatabase.Refresh` / `ImportAsset` — refused while anything open changed on disk) was refused before it ran: an open scene changed on disk and has unsaved changes, its file is gone, play mode is on, or a prefab stage with unsaved changes has its prefab changed. Refreshing would raise Unity's native "changed on disk" dialog, which blocks the Editor until a human answers it. A clean changed scene is not refused: it is reloaded in place (`reloadedScenes`). Carries `scenes: [{path, reason}]` and `prefabStage`. | Follow `agentNextSteps`: `scene_save` keeps the edits (overwrites the disk change), `scene_open` + `ignore_scene_dirty: true` takes the disk version; stop play mode; `prefab_save` / `prefab_close {"save": false}` for the prefab stage. Then retry. See [refreshes and open scenes](mcp-tools.md#refreshes-and-open-scenes-changed-on-disk). |
 | `bridge_response_unparsable` | A bridge response could not be parsed while the Editor was settled (no reload or play-mode change explains it). | Do not trust partial output; check bridge health before retrying. A response cut off by a reload is `editor_reloading` / `triggered_reload` instead. |
 
 A failed tool POST is replayed only for proven pre-connection failures
@@ -290,7 +291,10 @@ A compile ends in a domain reload that tears the bridge's listener down, and
 entering play mode reloads it too. The MCP server reads the Editor from outside
 for the whole window — the instance lock (heartbeat `state`, `isPlaying` /
 `isCompiling`, and a `compile` block with the last generation, `failed`,
-`errorCount` and `pending`), one `/ping` probe (`transition`) and, once settled,
+`errorCount` and `pending`; the new domain's first write already carries the
+Editor's state and that block, so a reload in play mode reads `playing` and a
+reload while entering it `entering_playmode` — never `idle` — and the generation
+never reads `null`), one `/ping` probe (`transition`) and, once settled,
 `/compile-state` — through one reader shared by `bridge_status`,
 `editor_status`, `ping`, the policy below and the CLI `wait-for-ready`.
 

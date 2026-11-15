@@ -84,7 +84,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
 
             if (created.Count > 0)
-                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                OpenSceneDiskSync.RefreshAfterEdit(ImportAssetOptions.ForceSynchronousImport);
 
             return ToolDispatchResult.Ok(BuildFolderOpResult(created, errors, "created"));
         }
@@ -172,7 +172,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
 
             if (done.Count > 0)
-                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                OpenSceneDiskSync.RefreshAfterEdit(ImportAssetOptions.ForceSynchronousImport);
 
             return ToolDispatchResult.Ok(BuildFolderOpResult(done, errors, op == "copy" ? "copied" : "moved"));
         }
@@ -221,7 +221,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
 
             if (deleted.Count > 0)
-                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                OpenSceneDiskSync.RefreshAfterEdit(ImportAssetOptions.ForceSynchronousImport);
 
             return ToolDispatchResult.Ok(BuildFolderOpResult(deleted, errors, "deleted"));
         }
@@ -230,7 +230,11 @@ namespace UnityOpenMcpBridge.TypedTools
         {
             var wholeProject = JsonBody.GetBool(body, "whole_project", true);
             var generationAtStart = BridgeCompileState.Generation;
-            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+            // An open scene that changed on disk is reloaded in place around
+            // the refresh, or the refresh is refused when that would lose
+            // edits — never left to Unity's native "changed on disk" dialog.
+            var sync = OpenSceneDiskSync.Run(() => AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport));
+            if (sync.Refused) return sync.Refusal();
             // A refresh that imported scripts leaves the compile requested, not
             // started: it runs on a later update, and isCompiling can read false
             // again before it does. Record it so a wait holds until it ran.
@@ -242,6 +246,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(",\"isCompiling\":").Append(EditorApplication.isCompiling ? "true" : "false");
             sb.Append(",\"compileDue\":").Append(compileDue ? "true" : "false");
             sb.Append(",\"compileGenerationAtStart\":").Append(generationAtStart);
+            sb.Append(',').Append(sync.MembersJson());
             sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }

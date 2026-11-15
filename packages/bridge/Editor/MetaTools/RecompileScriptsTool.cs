@@ -37,6 +37,7 @@ namespace UnityOpenMcpBridge.MetaTools
             // New or deleted script files written outside Unity: import them
             // first, or the compile cannot see them (ScriptImportSync).
             var scriptImport = ScriptImportSync.Run();
+            if (scriptImport.Action == "refused") return scriptImport.Refresh.Refusal();
 
             // Request a script compilation. Wrapped because
             // CompilationPipeline.RequestScriptCompilation throws if a compile
