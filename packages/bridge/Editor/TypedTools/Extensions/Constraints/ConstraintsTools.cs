@@ -174,7 +174,11 @@ namespace UnityOpenMcpBridge.Extensions.ConstraintsExt
             sb.Append("\"constraint\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
             sb.Append("\"type\":").Append(ConstraintsJson.Esc(type.Name)).Append(',');
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson((constraint as Component))).Append(',');
+            // instanceId is the host GameObject's (what the typed tools take
+            // as instance_id); the constraint component's id is
+            // componentInstanceId.
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(constraint as Component)).Append(',');
             sb.Append("\"path\":").Append(ConstraintsJson.Esc(ConstraintsTargets.BuildPath(host))).Append(',');
             sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(host)).Append(',');
             sb.Append("\"constraintActive\":").Append(constraint.constraintActive ? "true" : "false").Append(',');
@@ -304,7 +308,8 @@ namespace UnityOpenMcpBridge.Extensions.ConstraintsExt
             var sb = new StringBuilder(280);
             sb.Append("\"lodGroup\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(group)).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(group)).Append(',');
             sb.Append("\"path\":").Append(ConstraintsJson.Esc(ConstraintsTargets.BuildPath(host))).Append(',');
             sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(host)).Append(',');
             sb.Append("\"fadeMode\":").Append(ConstraintsJson.Esc(group.fadeMode.ToString())).Append(',');

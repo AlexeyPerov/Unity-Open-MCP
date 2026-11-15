@@ -1534,9 +1534,11 @@ namespace UnityOpenMcpBridge
             // is restored to its pre-fix state. Reuses GatePolicy internally;
             // dry-run apply_fix is short-circuited earlier (HandleDryRunApplyFix).
             if (toolName == "unity_open_mcp_apply_fix")
-                return ApplyFixGateRunner.Execute(body, gateMode, pathsHint);
+                return ToolUndoStep.Run(toolName, () => ApplyFixGateRunner.Execute(body, gateMode, pathsHint));
 
-            return GatePolicy.Execute(mode, pathsHint, invoke);
+            // One mutating call is one undo step (a batch's runner opens its
+            // own group around all its steps).
+            return GatePolicy.Execute(mode, pathsHint, () => ToolUndoStep.Run(toolName, invoke));
         }
 
         // M27 Plan 4 — made internal so BatchExecuteTool can reuse the EXACT same

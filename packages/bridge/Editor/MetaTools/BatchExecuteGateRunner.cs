@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using UnityEditor;
 
 namespace UnityOpenMcpBridge.MetaTools
 {
@@ -35,49 +34,17 @@ namespace UnityOpenMcpBridge.MetaTools
                     "A mixed/mutating batch requires the explicit union paths_hint before any step runs."), "request_rejected");
             var mode = GatePolicy.ParseMode(gateMode);
 
-            // Mark the undo group boundary BEFORE the batch runs. Every nested
-            // typed tool calls Undo.RegisterCreatedObjectUndo / RecordObject /
-            // AddComponent inside this window; CollapseUndoOperations at the end
-            // folds them into a single undo step labelled "Open MCP Batch".
-            Undo.IncrementCurrentGroup();
-            int groupBefore = Undo.GetCurrentGroup();
-            Undo.SetCurrentGroupName("Open MCP Batch");
-
-            GateDispatchResult result;
-            try
-            {
+            // The whole batch is ONE undo step ("MCP batch_execute"): every
+            // nested typed tool records into the group opened here, and the
+            // group is collapsed regardless of outcome — a partial batch still
+            // produced side effects the operator may want to undo as a unit.
+            // Nested steps dispatch below the top-level path, so they open no
+            // group of their own.
+            var result = ToolUndoStep.Run("unity_open_mcp_batch_execute",
                 // Reuse the exact gate path (checkpoint → batch → validate →
                 // delta). BatchExecuteTool.Execute runs the nested dispatch
                 // loop + BridgeBatchRunHistory progress + per-step collection.
-                result = GatePolicy.Execute(mode, pathsHint,
-                    () => BatchExecuteTool.Execute(body, plan));
-            }
-            finally
-            {
-                // Collapse the per-step undos into ONE undo step regardless of
-                // outcome — a partial batch still produced side effects the
-                // operator may want to undo as a unit. GetCurrentGroup() may
-                // have advanced past groupBefore if nested tools incremented
-                // it; CollapseUndoOperations(g) folds everything ABOVE g down
-                // to g, so we pass groupBefore (the boundary captured before
-                // the batch) — passing groupAfter would collapse nothing.
-                try
-                {
-                    int groupAfter = Undo.GetCurrentGroup();
-                    if (groupAfter > groupBefore)
-                    {
-                        Undo.CollapseUndoOperations(groupBefore);
-                    }
-                    // Stamp the final group name so the Editor's Edit > Undo
-                    // menu reads "Undo Open MCP Batch" (not a generic label).
-                    Undo.SetCurrentGroupName("Open MCP Batch");
-                }
-                catch
-                {
-                    // Undo collapse is best-effort; never let it mask the
-                    // actual dispatch result / fault.
-                }
-            }
+                () => GatePolicy.Execute(mode, pathsHint, () => BatchExecuteTool.Execute(body, plan)));
 
             // Augment agentNextSteps with batch-specific guidance so the agent
             // knows how to interpret a partial result + where to look next.

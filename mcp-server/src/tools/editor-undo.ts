@@ -12,6 +12,9 @@ export const editorUndo = makeTool(
     "gate-free and returns directly without the gate envelope. Works against " +
     "every undo-recorded action the bridge takes (gameobject_*, component_*, " +
     "selection_set, material_set_*, prefab_*, scene_*) plus human actions. " +
+    "Each mutating bridge call is one step (named `MCP <tool>`, e.g. " +
+    "`MCP gameobject_create`) and a whole batch_execute is one step, so " +
+    "steps: 1 reverts exactly the last call; read-only calls add no step. " +
     "Use steps > 1 to undo multiple actions in one call. Prefer this over raw " +
     "execute_csharp Undo.PerformUndo() — schema-validated and surfaces the " +
     "post-undo selection so the agent knows what reverted.",

@@ -5177,7 +5177,7 @@
     }
   },
   "unity_open_mcp_editor_undo": {
-    "description": "Perform an editor Undo — reverts the most recent recorded action (one step). Mutates editor undo state only (writes no assets), so it is gate-free and returns directly without the gate envelope. Works against every undo-recorded action the bridge takes (gameobject_*, component_*, selection_set, material_set_*, prefab_*, scene_*) plus human actions. Use steps > 1 to undo multiple actions in one call. Prefer this over raw execute_csharp Undo.PerformUndo() — schema-validated and surfaces the post-undo selection so the agent knows what reverted.",
+    "description": "Perform an editor Undo — reverts the most recent recorded action (one step). Mutates editor undo state only (writes no assets), so it is gate-free and returns directly without the gate envelope. Works against every undo-recorded action the bridge takes (gameobject_*, component_*, selection_set, material_set_*, prefab_*, scene_*) plus human actions. Each mutating bridge call is one step (named `MCP <tool>`, e.g. `MCP gameobject_create`) and a whole batch_execute is one step, so steps: 1 reverts exactly the last call; read-only calls add no step. Use steps > 1 to undo multiple actions in one call. Prefer this over raw execute_csharp Undo.PerformUndo() — schema-validated and surfaces the post-undo selection so the agent knows what reverted.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -5192,7 +5192,7 @@
     }
   },
   "unity_open_mcp_editor_redo": {
-    "description": "Perform an editor Redo — re-applies the most recent undone action (one step). Mutates editor undo state only (writes no assets), so it is gate-free and returns directly without the gate envelope. Use steps > 1 to redo multiple actions in one call. Prefer this over raw execute_csharp Undo.PerformRedo() — schema-validated and surfaces the post-redo selection so the agent knows what re-applied.",
+    "description": "Perform an editor Redo — re-applies the most recent undone action (one step). Mutates editor undo state only (writes no assets), so it is gate-free and returns directly without the gate envelope. Each mutating bridge call (or whole batch_execute) is one step. Use steps > 1 to redo multiple actions in one call. Prefer this over raw execute_csharp Undo.PerformRedo() — schema-validated and surfaces the post-redo selection so the agent knows what re-applied.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -12231,12 +12231,22 @@
     }
   },
   "unity_open_mcp_shader_graph_open": {
-    "description": "Open a Shader Graph asset in the graph editor window and return a structured summary (node count, each node's id / name / type / position / slots, edge count, each edge's output→input node+slot). Read-only window bring-up — Gate is Off, no paths_hint. The summary is read from the graph as the Shader Graph importer loads it; nodes include the master stack's block nodes, and each slot is { id, name, direction: input | output }. Use it to discover node ids and slot ids before node_add / node_connect. Requires com.unity.shadergraph.",
+    "description": "Open a Shader Graph asset in its Shader Graph editor window (or focus the window already showing it) and return a structured summary (node count, each node's id / name / type / position / slots, edge count, each edge's output→input node+slot) plus `window` { action: opened | focused | closed | not_open | none, open, title }. `window: \"none\"` returns the summary without touching windows (works in batch mode); `\"close\"` closes the graph's window. Writes no asset — Gate is Off, no paths_hint. Refuses `editor_window_unavailable` in batch mode (use window none) and `graph_has_unsaved_changes` when closing a window that holds unsaved edits. The window stays open after the call; node_add / node_connect reload it. Close it before deleting or moving the graph — Shader Graph asks in a modal dialog otherwise. The summary is read from the graph as the importer loads it; nodes include the master stack's block nodes, and each slot is { id, name, direction: input | output }. Use it to discover node ids and slot ids before node_add / node_connect. Requires com.unity.shadergraph.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "asset_path": {
-          "description": "Shader Graph asset path ('Assets/.../*.shadergraph'). Highest and only resolver.",
+          "description": "Shader Graph asset path ('Assets/.../*.shadergraph' or a '.shadersubgraph'). Highest and only resolver.",
+          "type": "string"
+        },
+        "window": {
+          "default": "open",
+          "description": "open (default): open the graph's window or focus it. none: summary only. close: close the graph's window (refused while it has unsaved changes).",
+          "enum": [
+            "open",
+            "none",
+            "close"
+          ],
           "type": "string"
         }
       },

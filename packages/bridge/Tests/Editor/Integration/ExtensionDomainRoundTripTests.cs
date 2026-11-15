@@ -112,7 +112,8 @@ namespace UnityOpenMcpBridge.Tests
                 Assert.IsFalse(refused.Success);
                 Assert.AreEqual("connection_rejected", refused.ErrorCode);
 
-                var open = Dispatch("unity_open_mcp_shader_graph_open", "{\"asset_path\":\"" + path + "\"}");
+                var open = Dispatch("unity_open_mcp_shader_graph_open",
+                    "{\"asset_path\":\"" + path + "\",\"window\":\"none\"}");
                 Assert.IsTrue(open.Success, open.ErrorMessage ?? open.Output);
                 StringAssert.Contains("\"edgeCount\":1", open.Output);
                 StringAssert.Contains("\"outputNodeId\":\"" + colorId + "\"", open.Output);
@@ -141,6 +142,81 @@ namespace UnityOpenMcpBridge.Tests
                 AssetDatabase.DeleteAsset(path);
             }
         }
+
+        // shader_graph_open shows the graph in its Shader Graph window (once,
+        // however often it is called), an edit made while the window is open
+        // reloads the window instead of leaving it to ask "Graph has changed
+        // on disk", and window:"close" closes it. In batch mode there are no
+        // windows, so the call refuses.
+        [Test]
+        public void ShaderGraph_Open_ShowsTheWindow_EditReloadsIt_CloseClosesIt()
+        {
+            RequireTool("unity_open_mcp_shader_graph_open");
+            var path = $"Assets/ExtRoundTrip_{System.Guid.NewGuid():N}.shadergraph";
+            var hint = ",\"paths_hint\":[\"" + path + "\"]";
+            try
+            {
+                var create = Dispatch("unity_open_mcp_shader_graph_create",
+                    "{\"asset_path\":\"" + path + "\",\"shader_type\":\"Unlit\"" + hint + "}");
+                Assert.IsTrue(create.Success, create.ErrorMessage ?? create.Output);
+
+                var open = Dispatch("unity_open_mcp_shader_graph_open", "{\"asset_path\":\"" + path + "\"}");
+                if (Application.isBatchMode)
+                {
+                    Assert.IsFalse(open.Success);
+                    Assert.AreEqual("editor_window_unavailable", open.ErrorCode);
+                    return;
+                }
+                Assert.IsTrue(open.Success, open.ErrorMessage ?? open.Output);
+                StringAssert.Contains("\"window\":{\"action\":\"opened\",\"open\":true", open.Output);
+                Assert.AreEqual(1, GraphWindows(path).Length, "one Shader Graph window shows the graph");
+
+                var again = Dispatch("unity_open_mcp_shader_graph_open", "{\"asset_path\":\"" + path + "\"}");
+                Assert.IsTrue(again.Success, again.ErrorMessage ?? again.Output);
+                StringAssert.Contains("\"action\":\"focused\"", again.Output);
+                Assert.AreEqual(1, GraphWindows(path).Length, "a second open focuses the same window");
+
+                var add = Dispatch("unity_open_mcp_shader_graph_node_add",
+                    "{\"asset_path\":\"" + path + "\",\"node_type\":\"Color\"" + hint + "}");
+                Assert.IsTrue(add.Success, add.ErrorMessage ?? add.Output);
+                var window = GraphWindows(path)[0];
+                var nodeId = Field(add.Output, "nodeId");
+                StringAssert.Contains(nodeId, WindowField(window, "m_LastSerializedFileContents") as string,
+                    "the window reloaded the edited file");
+                Assert.AreEqual(false, WindowField(window, "m_AssetMaybeChangedOnDisk"),
+                    "the window has no pending changed-on-disk check (it would ask in a dialog)");
+                Assert.IsFalse(window.hasUnsavedChanges);
+
+                var close = Dispatch("unity_open_mcp_shader_graph_open",
+                    "{\"asset_path\":\"" + path + "\",\"window\":\"close\"}");
+                Assert.IsTrue(close.Success, close.ErrorMessage ?? close.Output);
+                StringAssert.Contains("\"window\":{\"action\":\"closed\",\"open\":false,\"closed\":1}", close.Output);
+                Assert.AreEqual(0, GraphWindows(path).Length);
+            }
+            finally
+            {
+                // Deleting a graph whose window is open makes the window ask
+                // in a dialog: close it first, and keep the asset if that fails.
+                Dispatch("unity_open_mcp_shader_graph_open", "{\"asset_path\":\"" + path + "\",\"window\":\"close\"}");
+                if (GraphWindows(path).Length == 0) AssetDatabase.DeleteAsset(path);
+            }
+        }
+
+        private static EditorWindow[] GraphWindows(string assetPath)
+        {
+            var type = System.Type.GetType("UnityEditor.ShaderGraph.Drawing.MaterialGraphEditWindow, Unity.ShaderGraph.Editor");
+            if (type == null) return new EditorWindow[0];
+            var guid = AssetDatabase.AssetPathToGUID(assetPath);
+            var selected = type.GetProperty("selectedGuid");
+            var list = new System.Collections.Generic.List<EditorWindow>();
+            foreach (var o in Resources.FindObjectsOfTypeAll(type))
+                if (o is EditorWindow w && w != null && selected?.GetValue(w) as string == guid) list.Add(w);
+            return list.ToArray();
+        }
+
+        private static object WindowField(EditorWindow window, string field)
+            => window.GetType().GetField(field, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                ?.GetValue(window);
 
         [Test]
         public void Timeline_ClipAdd_BindsDoubleTimes()

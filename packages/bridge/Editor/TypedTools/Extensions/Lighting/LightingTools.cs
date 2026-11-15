@@ -542,7 +542,10 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
             var sb = new StringBuilder(260);
             sb.Append("\"light\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(light)).Append(',');
+            // instanceId is the host GameObject's (what light_set /
+            // light_modify take); the Light's own id is componentInstanceId.
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(light.gameObject)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(light)).Append(',');
             sb.Append("\"type\":").Append(LightingJson.Esc(light.type.ToString())).Append(',');
             sb.Append("\"color\":").Append(Color4(light.color)).Append(',');
             sb.Append("\"intensity\":").Append(Num(light.intensity)).Append(',');

@@ -8,7 +8,8 @@ export const editorRedo = makeTool(
   "unity_open_mcp_editor_redo",
   "Perform an editor Redo — re-applies the most recent undone action (one " +
     "step). Mutates editor undo state only (writes no assets), so it is " +
-    "gate-free and returns directly without the gate envelope. Use steps > 1 " +
+    "gate-free and returns directly without the gate envelope. Each mutating " +
+    "bridge call (or whole batch_execute) is one step. Use steps > 1 " +
     "to redo multiple actions in one call. Prefer this over raw execute_csharp " +
     "Undo.PerformRedo() — schema-validated and surfaces the post-redo " +
     "selection so the agent knows what re-applied.",

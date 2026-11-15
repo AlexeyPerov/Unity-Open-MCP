@@ -99,6 +99,11 @@ into `inheritedErrors` / `inheritedWarnings` / `inheritedIssues` /
 `inheritedFrom` (wire contract 10). See the
 [mutation and gate contract](mcp-tools.md#mutation-and-gate-contract).
 
+Each gated mutating call runs in an undo group of its own, named after the tool
+(`MCP <tool>`), and a mutating `batch_execute` in one group for all its steps
+(wire contract 14), so one `editor_undo` reverts one call. See the
+[mutation and gate contract](mcp-tools.md#mutation-and-gate-contract).
+
 A call that names `in_prefab` (wire contract 12) writes that prefab asset during
 the call, so its gate scope is `paths_hint` plus the asset when `paths_hint` does
 not cover it, and the delta validates the saved file. See

@@ -39,7 +39,6 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
 using U2D = UnityEditor.U2D;
-using UnityOpenMcpBridge.ObjectRefs;
 
 // SpriteAtlasAsset's settings getters/setters (SetIncludeInBuild,
 // GetPackingSettings, GetTextureSettings, GetPlatformSettings, ...) are
@@ -90,15 +89,20 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             EnsureFolderFor(normalized.Path);
 
             // Create via the SpriteAtlasAsset authoring API: new instance →
-            // Internal_Create (binds the native backing) → Save to disk.
+            // Internal_Create (binds the native backing) → Save to disk. The
+            // constructor binds it itself on Unity 6 (a second Internal_Create
+            // logs an engine assertion), so bind only an unbound instance.
             var asset = new U2D.SpriteAtlasAsset();
-            var internalCreate = typeof(U2D.SpriteAtlasAsset).GetMethod(
-                "Internal_Create",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-            if (internalCreate == null)
-                return SpriteAtlasJson.Error("api_unavailable",
-                    "SpriteAtlasAsset.Internal_Create is unavailable on this Unity version.");
-            internalCreate.Invoke(null, new object[] { asset });
+            if (asset == null)
+            {
+                var internalCreate = typeof(U2D.SpriteAtlasAsset).GetMethod(
+                    "Internal_Create",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (internalCreate == null)
+                    return SpriteAtlasJson.Error("api_unavailable",
+                        "SpriteAtlasAsset.Internal_Create is unavailable on this Unity version.");
+                internalCreate.Invoke(null, new object[] { asset });
+            }
 
             asset.name = System.IO.Path.GetFileNameWithoutExtension(normalized.Path);
 
@@ -116,14 +120,13 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
                 importer.SaveAndReimport();
             }
 
-            var loaded = AssetDatabase.LoadAssetAtPath<UnityEngine.U2D.SpriteAtlas>(normalized.Path);
-            long instanceId = loaded != null ? InstanceId.Of(loaded) : 0;
-
+            // No instanceId: the file holds the authoring SpriteAtlasAsset, and
+            // the runtime SpriteAtlas does not exist until the atlas is packed,
+            // so no id would name the atlas. Every atlas tool takes the path.
             var sb = new StringBuilder(160);
             sb.Append("\"path\":").Append(SpriteAtlasJson.Esc(normalized.Path));
             sb.Append(",\"name\":").Append(SpriteAtlasJson.Esc(asset.name));
             sb.Append(",\"includeInBuild\":").Append(include_in_build ? "true" : "false");
-            sb.Append(",\"instanceId\":").Append(instanceId);
             return SpriteAtlasJson.Ok(sb.ToString());
         }
 

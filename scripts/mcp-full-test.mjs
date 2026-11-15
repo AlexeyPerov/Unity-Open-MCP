@@ -779,10 +779,10 @@ function buildSuite() {
   // --- lighting (temp GOs for lights) ---
   s("light_add", "C", "unity_open_mcp_light_add", {
     resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, light_type: "Point", paths_hint: SCENE_HINT }),
-  }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.lightId = pluck(r, "mutation.output.instanceId"); } });
+  }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.lightId = pluck(r, "mutation.output.light.instanceId"); } });
   s("light_set", "C", "unity_open_mcp_light_set", {
-    // The Light lives on the sphere light_add targeted; the setters resolve the host GameObject.
-    resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, intensity: 2, paths_hint: SCENE_HINT }),
+    // light_add's instanceId is the host GameObject's: the setters take it back.
+    resolveArgs: (ctx) => ({ instance_id: ctx.lightId, intensity: 2, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("light_modify", "C", "unity_open_mcp_light_modify", {
     resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, fields_json: JSON.stringify([{ field: "intensity", value: 3 }]), paths_hint: SCENE_HINT }),
@@ -801,9 +801,9 @@ function buildSuite() {
   // --- audio ---
   s("audio_source_add", "C", "unity_open_mcp_audio_source_add", {
     resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, paths_hint: SCENE_HINT }),
-  }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.audioSrcId = pluck(r, "mutation.output.instanceId"); } });
+  }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.audioSrcId = pluck(r, "mutation.output.source.instanceId"); } });
   s("audio_source_modify", "C", "unity_open_mcp_audio_source_modify", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, volume: 0.5, paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.audioSrcId, volume: 0.5, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("audio_listener_get", "C", "unity_open_mcp_audio_listener_get");
   // The demo ships no AudioMixer: the lookup path is reached and answers asset_not_found.
@@ -812,12 +812,16 @@ function buildSuite() {
   // --- ui ---
   s("ui_canvas_add", "C", "unity_open_mcp_ui_canvas_add", {
     paths_hint: SCENE_HINT,
-  }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.canvasPath = pluck(r, "mutation.output.canvas.path"); } });
+  }, { gate: true, expect: "gate", after: (r, ctx) => {
+    ctx.canvasPath = pluck(r, "mutation.output.canvas.path");
+    ctx.canvasId = pluck(r, "mutation.output.canvas.instanceId");
+  } });
   s("ui_element_add", "C", "unity_open_mcp_ui_element_add", {
-    resolveArgs: (ctx) => ({ parent_path: ctx.canvasPath, element_type: "Text", paths_hint: SCENE_HINT }),
+    // The canvas's instanceId is its GameObject's: it parents the element.
+    resolveArgs: (ctx) => ({ parent_instance_id: ctx.canvasId, element_type: "Text", paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.uiElemId = pluck(r, "mutation.output.element.instanceId"); } });
   s("ui_layout_group_add", "C", "unity_open_mcp_ui_layout_group_add", {
-    resolveArgs: (ctx) => ({ path: ctx.canvasPath, layout_type: "VerticalLayoutGroup", paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.canvasId, layout_type: "VerticalLayoutGroup", paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("ui_element_modify", "C", "unity_open_mcp_ui_element_modify", {
     resolveArgs: (ctx) => ({ instance_id: ctx.uiElemId, component_type: "Text", fields_json: JSON.stringify([{ field: "text", value: "FT" }]), paths_hint: SCENE_HINT }),
@@ -829,9 +833,9 @@ function buildSuite() {
   }, { gate: true, expect: "gate" });
   s("lod_group_configure", "C", "unity_open_mcp_lod_group_configure", {
     resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, lod_count: 2, paths_hint: SCENE_HINT }),
-  }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.lodId = pluck(r, "mutation.output.instanceId"); } });
+  }, { gate: true, expect: "gate", after: (r, ctx) => { ctx.lodId = pluck(r, "mutation.output.lodGroup.instanceId"); } });
   s("lod_add_level", "C", "unity_open_mcp_lod_add_level", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.lodId ?? ctx.sphereId, index: 1, screen_relative_transition_height: 0.3, paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.lodId, index: 1, screen_relative_transition_height: 0.3, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
 
   // --- terrain ---

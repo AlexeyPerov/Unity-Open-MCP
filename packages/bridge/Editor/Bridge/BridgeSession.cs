@@ -127,7 +127,16 @@ namespace UnityOpenMcpBridge
         //       probe_not_found / expression_not_read_only / member_not_found /
         //       member_not_readable / type_not_found / component_not_found;
         //       the `probe` wait condition; `until` read as a condition tree.
-        public const int WireContract = 13;
+        //  14 — Each gated mutating call is its own undo step, named
+        //       "MCP <tool>" (a batch: one step, "MCP batch_execute").
+        //       Component-adding domain tools return the host GameObject's id
+        //       as `instanceId` and the component's as `componentInstanceId`;
+        //       spriteatlas_create returns no instanceId. shader_graph_open
+        //       opens the graph's window: arg `window` (open / none / close),
+        //       result `shaderGraph.window`, codes editor_window_unavailable /
+        //       window_open_failed / graph_has_unsaved_changes (also from
+        //       node_add / node_connect under a window with unsaved edits).
+        public const int WireContract = 14;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
 

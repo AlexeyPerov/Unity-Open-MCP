@@ -3,7 +3,7 @@
 //
 // Four typed tools for in-editor Shader Graph authoring:
 //   - create: create a new Shader Graph asset from a template
-//   - open: open a Shader Graph in the graph editor (returns node/edge summary)
+//   - open: open a Shader Graph in its graph window (returns node/edge summary)
 //   - node_add: add a node to a graph
 //   - node_connect: connect two node ports
 //
@@ -16,8 +16,8 @@
 // fall back to manual editing in the graph window.
 //
 // create is mutating (produces a .shadergraph asset — paths_hint includes the
-// asset path). open opens an Editor window (non-mutating state change,
-// Gate = Off). node_add / node_connect mutate the graph asset (paths_hint is
+// asset path). open opens (or closes) the graph's Editor window and writes
+// no asset (Gate = Off). node_add / node_connect mutate the graph asset (paths_hint is
 // the asset path, EditorSettle lifecycle). The gate + paths_hint contract on
 // every mutating member is the documented advantage over the competitor's
 // ungated graph edits.
@@ -116,13 +116,13 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
         }
 
         // =====================================================================
-        // open (read-only window bring-up + structured summary)
+        // open (graph window + structured summary)
         // =====================================================================
 
-        // Open a Shader Graph in the graph editor window and return a
-        // structured node/edge summary. Non-mutating state change (opens a
-        // window) — Gate = Off. The summary lets an agent inspect the graph
-        // structure without a separate tool.
+        // Open a Shader Graph in its graph editor window (or focus the window
+        // already showing it) and return a structured node/edge summary.
+        // window: "none" returns the summary only; "close" closes the graph's
+        // window. Writes no asset — Gate = Off.
         [BridgeTool("unity_open_mcp_shader_graph_open",
             Title = "ShaderGraph: Open",
             IsMutating = false,
@@ -130,31 +130,67 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
             Gate = GateMode.Off,
             Lifecycle = LifecyclePolicy.None, Group = "shadergraph")]
         [System.ComponentModel.Description(
-            "Open a Shader Graph asset in the graph editor window and return a " +
-            "structured summary (node count, node ids/types/positions, edge " +
-            "count, edges). Read-only window bring-up — Gate is Off. Address " +
-            "the graph by asset_path ('Assets/.../*.shadergraph'). The summary " +
-            "is read from the graph as the Shader Graph importer loads it; use " +
-            "it to learn node ids / slot ids before node_add / node_connect. " +
-            "Requires com.unity.shadergraph.")]
-        public static string Open(string asset_path = null)
+            "Open a Shader Graph asset in its Shader Graph editor window (or " +
+            "focus the window already showing it) and return a structured " +
+            "summary (node count, node ids/types/positions/slots, edge count, " +
+            "edges) plus window {action, open, title}. window: open (default) | " +
+            "none (summary only, no window) | close (close the graph's window). " +
+            "Writes no asset — Gate is Off. Refuses editor_window_unavailable " +
+            "in batch mode (use window none) and graph_has_unsaved_changes when " +
+            "closing a window with unsaved edits. Address the graph by " +
+            "asset_path ('Assets/.../*.shadergraph'). Requires " +
+            "com.unity.shadergraph.")]
+        public static string Open(string asset_path = null, string window = "open")
         {
             if (string.IsNullOrEmpty(asset_path))
                 return ShaderGraphJson.Error("missing_parameter",
                     "'asset_path' is required ('Assets/.../*.shadergraph').");
 
+            var mode = string.IsNullOrEmpty(window) ? "open" : window.Trim().ToLowerInvariant();
+            if (mode != "open" && mode != "none" && mode != "close")
+                return ShaderGraphJson.Error("invalid_parameter",
+                    $"'window' must be open, none or close — got '{window}'.");
+
+            // A graph or a sub graph: OpenAsset on any other asset would open
+            // whatever the project opens it with (a code editor for a .shader).
             var asset = AssetDatabase.LoadAssetAtPath<Object>(asset_path);
-            if (asset == null)
+            if (asset == null ||
+                !(asset_path.EndsWith(".shadergraph", System.StringComparison.OrdinalIgnoreCase) ||
+                  asset_path.EndsWith(".shadersubgraph", System.StringComparison.OrdinalIgnoreCase)))
                 return ShaderGraphJson.Error("asset_not_found",
                     $"No Shader Graph asset found at '{asset_path}'.");
 
-            // Bring up the Shader Graph editor window for the asset. Reflection
-            // over UnityEditor.ShaderGraph (the window type name has shifted
-            // across versions). Failure to open the window is non-fatal — the
-            // summary is still returned.
-            ShaderGraphApi.TryOpenInEditor(asset_path);
+            string windowJson;
+            if (mode == "open")
+            {
+                if (!ShaderGraphApi.TryOpenWindow(asset_path, out var reused, out var opened,
+                        out var openError, out var openMessage))
+                {
+                    var hint = openError == "editor_window_unavailable"
+                        ? " Pass window: \"none\" for the summary without a window."
+                        : "";
+                    return ShaderGraphJson.Error(openError,
+                        $"Could not open '{asset_path}' in a Shader Graph window: {openMessage}{hint}");
+                }
+                windowJson = "{\"action\":" + ShaderGraphJson.Esc(reused ? "focused" : "opened") +
+                             ",\"open\":true,\"title\":" + ShaderGraphJson.Esc(opened.titleContent?.text ?? "") + "}";
+            }
+            else if (mode == "close")
+            {
+                if (!ShaderGraphApi.TryCloseWindows(asset_path, out var closed, out var closeError))
+                    return ShaderGraphJson.Error(closeError,
+                        $"The Shader Graph window of '{asset_path}' has unsaved changes; closing it would " +
+                        "ask to save them. Save or discard them in the window first.");
+                windowJson = "{\"action\":" + ShaderGraphJson.Esc(closed > 0 ? "closed" : "not_open") +
+                             ",\"open\":false,\"closed\":" + closed + "}";
+            }
+            else
+            {
+                windowJson = "{\"action\":\"none\",\"open\":" +
+                             (ShaderGraphApi.OpenWindows(asset_path).Count > 0 ? "true" : "false") + "}";
+            }
 
-            // Structured summary parsed from the serialized graph JSON.
+            // Structured summary of the graph as the importer loads it.
             ShaderGraphApi.BuildGraphSummary(asset_path,
                 out int nodeCount, out int edgeCount,
                 out string nodesJson, out string edgesJson,
@@ -163,6 +199,7 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
             var sb = new StringBuilder(512);
             sb.Append("\"shaderGraph\":{");
             sb.Append("\"assetPath\":").Append(ShaderGraphJson.Esc(asset_path)).Append(',');
+            sb.Append("\"window\":").Append(windowJson).Append(',');
             sb.Append("\"nodeCount\":").Append(nodeCount).Append(',');
             sb.Append("\"edgeCount\":").Append(edgeCount).Append(',');
             if (parseError != null)
@@ -172,6 +209,14 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
             sb.Append('}');
             return ShaderGraphJson.Ok(sb.ToString());
         }
+
+        // An edit would write the file under a graph window holding unsaved
+        // edits: they would be lost (or the window would ask about them).
+        private static string UnsavedWindowRefusal(string assetPath)
+            => ShaderGraphJson.Error("graph_has_unsaved_changes",
+                $"'{assetPath}' is open in a Shader Graph window with unsaved changes. Save or " +
+                "discard them in the window, then retry; an open window without unsaved changes " +
+                "reloads after the edit.");
 
         // =====================================================================
         // node_add
@@ -227,6 +272,8 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
                 if (addError == "asset_not_found")
                     return ShaderGraphJson.Error(addError,
                         $"No Shader Graph asset found at '{asset_path}'.");
+                if (addError == "graph_has_unsaved_changes")
+                    return UnsavedWindowRefusal(asset_path);
                 if (addError == "unknown_node_type")
                     return ShaderGraphJson.Error(addError,
                         $"No Shader Graph node type matches '{node_type}'. Use a node " +
@@ -309,6 +356,8 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
                 if (connectError == "asset_not_found")
                     return ShaderGraphJson.Error(connectError,
                         $"No Shader Graph asset found at '{asset_path}'.");
+                if (connectError == "graph_has_unsaved_changes")
+                    return UnsavedWindowRefusal(asset_path);
                 if (connectError == "node_not_found" || connectError == "slot_not_found")
                     return ShaderGraphJson.Error(connectError,
                         "A node id or slot id does not exist in the graph. Read the " +

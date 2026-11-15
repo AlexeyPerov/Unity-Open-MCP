@@ -180,7 +180,11 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             sb.Append("\"canvas\":{");
             sb.Append("\"added\":").Append(addedCanvas ? "true" : "false").Append(',');
             sb.Append("\"createdRoot\":").Append(createdRoot ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(canvas)).Append(',');
+            // instanceId is the host GameObject's (what every typed tool
+            // takes as instance_id / parent_instance_id); the Canvas
+            // component's own id is componentInstanceId.
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(canvas)).Append(',');
             sb.Append("\"name\":").Append(UIJson.Esc(host.name)).Append(',');
             sb.Append("\"path\":").Append(UIJson.Esc(UITargets.BuildPath(host))).Append(',');
             sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(host)).Append(',');
@@ -433,12 +437,12 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             sb.Append("\"layoutGroup\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
             sb.Append("\"type\":").Append(UIJson.Esc(groupType.Name)).Append(',');
-            // Either the grid group or the HV group is non-null (the other
-            // branch assigned it). Resolve the instanceId from whichever is set.
-            long instanceId = 0;
-            if (gridGroup != null) instanceId =InstanceId.Of(gridGroup);
-            else if (hvGroup != null) instanceId =InstanceId.Of(hvGroup);
-            sb.Append("\"instanceId\":").Append(instanceId).Append(',');
+            // instanceId is the host GameObject's; the group component's own
+            // id (the grid or the HV group, whichever is set) is
+            // componentInstanceId.
+            Component groupComponent = gridGroup != null ? (Component)gridGroup : hvGroup;
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(groupComponent)).Append(',');
             sb.Append("\"path\":").Append(UIJson.Esc(UITargets.BuildPath(host))).Append(',');
             sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(host));
             sb.Append('}');

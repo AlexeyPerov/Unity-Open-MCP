@@ -191,6 +191,9 @@ types so the value conversion is purpose-built for the common fields:
 Address every target by `instance_id` > `path` > `name` (same model as
 `gameobject_*` / `component_*`). For `ui_element_add`, address the **parent**
 by `parent_instance_id` > `parent_path` > `parent_name` — the parent must
-exist (uGUI elements live under a Canvas in the hierarchy). Every mutating
+exist (uGUI elements live under a Canvas in the hierarchy). The `instanceId`
+a result returns is the GameObject's (`ui_canvas_add` / `ui_layout_group_add`:
+the host; the Canvas / group component's own id is `componentInstanceId`), so
+pass it straight back as `instance_id` / `parent_instance_id`. Every mutating
 tool requires a non-empty `paths_hint` scoped to the host / new-root / parent
 scene path — the gate has no whole-project fallback.

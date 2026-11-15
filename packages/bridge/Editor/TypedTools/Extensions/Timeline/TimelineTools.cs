@@ -334,7 +334,8 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
 
             var sb = new StringBuilder(160);
             sb.Append("\"director\":{");
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(director)).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(director)).Append(',');
             sb.Append("\"gameObjectPath\":").Append(TimelineJson.Esc(TimelineTargets.BuildPath(host))).Append(',');
             sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(host)).Append(',');
             sb.Append("\"assetPath\":").Append(TimelineJson.Esc(AssetDatabase.GetAssetPath(asset))).Append(',');

@@ -181,6 +181,17 @@ reports success. Gate modes are:
 - `warn` — report issues without blocking;
 - `off` — skip the gate when explicitly supported.
 
+Each mutating call is one Editor undo step, as one user action is: the
+bridge opens an undo group per call and names it after the tool (`MCP
+gameobject_create`; Edit > Undo reads "Undo MCP gameobject_create"), so
+`editor_undo {"steps":1}` reverts exactly the last call and `editor_redo`
+re-applies it. A `batch_execute` is one step for all its commands (`MCP
+batch_execute`). Read-only and refused calls add no step. Neither does an
+edit Unity records no undo for — an asset written to disk, `prefab_create`
+connecting its source to the new prefab — nor an `in_prefab` call (`undo:
+false`: the edit is saved to the prefab asset and its contents' undo records
+are dropped with them); `editor_undo` then reverts the step before it.
+
 `enforce` fails on new errors only, so a passed gate can still carry new
 warnings. The first `agentNextSteps` line says so ("Gate passed — no new
 errors; N new warning(s) … First: …"); "no new issues detected" means the delta
@@ -1195,6 +1206,19 @@ bridge edits in place ([below](#editing-a-prefab-asset-in-place-in_prefab)).
   untitled scene adds its `name`, `{"kind":"prefab_stage","path":"Assets/…prefab"}`,
   or `{"kind":"prefab_asset",…}` for `in_prefab`) next to the unchanged `path`,
   which is canonical: relative to the prefab root for a prefab object. Component results name the host as `gameObjectPath`.
+- **Returned ids.** An `instanceId` a create / add tool returns is one the next
+  call accepts. For a scene object it is the GameObject's id — pass it as
+  `instance_id` / `parent_instance_id`. A tool that adds a component
+  (`ui_canvas_add`, `ui_layout_group_add`, `light_add`, `audio_source_add`,
+  `constraint_add`, `lod_group_configure`, `navigation_*_add`,
+  `timeline_director_bind`, `cinemachine_brain_ensure`) returns its host
+  GameObject's id as `instanceId` and the component's own id as
+  `componentInstanceId` — pass that as `component_instance_id` to
+  `component_get` / `component_modify`, or as an object-reference value. An
+  asset creator's `instanceId` is the asset's (`object_get_data`, object
+  references, the asset's own tools where they take `instance_id`).
+  `spriteatlas_create` returns none: the runtime atlas exists only once packed,
+  so address the atlas by `path`.
 - **New roots.** `gameobject_create`, `prefab_instantiate`, `ui_canvas_add` and
   the domain creators (`probuilder_create_shape`, `cinemachine_create_camera`,
   `splines_container_create`, `tilemap_create`) put a GameObject created without
@@ -1414,6 +1438,25 @@ step. `prefabConnection` in the result says what the copy is:
 - `nested_to_plain` — the source is another part of a prefab instance. The copy
   is a plain GameObject added to that instance.
 - `plain` — the source is not part of a prefab instance.
+
+### `shader_graph_open`
+
+Opens the graph in its Shader Graph window — what double-clicking the asset
+does — or focuses the window already showing it, and returns the graph summary
+(nodes with their slots, edges) plus `window`: `action` (`opened` / `focused`
+/ `closed` / `not_open` / `none`), `open` (a window shows the graph after the
+call) and `title`. `window: "none"` reads the summary without touching windows;
+`"close"` closes the graph's window. Writes no asset (gate off).
+
+- No modal dialogs. Batch mode has no windows: `window: "open"` refuses
+  `editor_window_unavailable` (use `"none"`). A window holding unsaved edits is
+  never closed or written under: `close`, `shader_graph_node_add` and
+  `shader_graph_node_connect` refuse `graph_has_unsaved_changes`. An edit made
+  while a clean window is open reloads the window from the file instead of
+  leaving it to ask "Graph has changed on disk".
+- The window stays open after the call. Close it (`window: "close"`) before
+  deleting or moving the graph: Shader Graph asks what to do in a modal dialog
+  when an open graph's file disappears.
 
 ### Unity Hub control
 

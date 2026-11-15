@@ -54,6 +54,7 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
         private static readonly Type MaterialSlotType = Resolve("UnityEditor.ShaderGraph.MaterialSlot");
         private static readonly Type TargetType = Resolve("UnityEditor.ShaderGraph.Target");
         private static readonly Type SubTargetType = Resolve("UnityEditor.ShaderGraph.SubTarget");
+        private static readonly Type GraphEditWindowType = Resolve("UnityEditor.ShaderGraph.Drawing.MaterialGraphEditWindow");
 
         private const BindingFlags AnyInstance =
             BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
@@ -255,25 +256,162 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
         // open
         // =====================================================================
 
-        // Bring up the Shader Graph editor window for the asset. Best-effort;
-        // failures are non-fatal (the summary is still returned). The window
-        // type name has shifted across versions, so resolve by reflection.
-        public static void TryOpenInEditor(string assetPath)
+        // =====================================================================
+        // graph window (the package's MaterialGraphEditWindow)
+        // =====================================================================
+
+        // A graph window shows a dialog on its own in three cases: its file
+        // changed on disk (it asks to reload), its file was deleted or moved
+        // (it asks to save elsewhere), or it is closed with unsaved changes.
+        // The tools keep the first two away from an open window — an edit
+        // reloads the window the way its "Reload" answer does, and the open
+        // tool closes a window only when it holds no unsaved changes — and
+        // they refuse rather than overwrite a window's unsaved changes.
+
+        // The Shader Graph windows showing this asset (normally at most one).
+        public static List<EditorWindow> OpenWindows(string assetPath)
         {
+            var windows = new List<EditorWindow>();
+            if (GraphEditWindowType == null || string.IsNullOrEmpty(assetPath)) return windows;
+            var guid = AssetDatabase.AssetPathToGUID(assetPath);
+            if (string.IsNullOrEmpty(guid)) return windows;
+            var selectedGuid = GraphEditWindowType.GetProperty("selectedGuid", AnyInstance);
+            // A window whose host view is gone is a leftover the Editor no
+            // longer shows (the package's own lookup skips it the same way).
+            var parent = typeof(EditorWindow).GetField("m_Parent", AnyInstance);
+            foreach (var o in Resources.FindObjectsOfTypeAll(GraphEditWindowType))
+            {
+                var w = o as EditorWindow;
+                if (w == null) continue;
+                if (parent != null && parent.GetValue(w) == null) continue;
+                if (selectedGuid?.GetValue(w) as string == guid) windows.Add(w);
+            }
+            return windows;
+        }
+
+        // Open the graph in its Shader Graph window, or focus the window that
+        // already shows it — what double-clicking the asset does
+        // (AssetDatabase.OpenAsset runs the package's OnOpenAsset handler).
+        // There are no Editor windows in batch mode, so it refuses there.
+        public static bool TryOpenWindow(string assetPath, out bool reused, out EditorWindow window,
+            out string error, out string message)
+        {
+            reused = false;
+            window = null;
+            error = null;
+            message = null;
+            if (Application.isBatchMode)
+            {
+                error = "editor_window_unavailable";
+                message = "The Editor runs in batch mode and has no windows.";
+                return false;
+            }
+            if (GraphEditWindowType == null)
+            {
+                error = "shadergraph_api_unavailable";
+                message = "The installed com.unity.shadergraph has no MaterialGraphEditWindow.";
+                return false;
+            }
+            var before = OpenWindows(assetPath);
+            reused = before.Count > 0;
             try
             {
-                var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(assetPath);
-                if (asset != null)
+                var asset = AssetDatabase.LoadMainAssetAtPath(assetPath);
+                AssetDatabase.OpenAsset(asset);
+            }
+            catch (Exception e)
+            {
+                // The graph did not load into the window. Close what the
+                // attempt left behind (it holds no graph, so it closes
+                // without a dialog).
+                foreach (var w in OpenWindows(assetPath))
+                    if (!before.Contains(w)) w.Close();
+                error = "window_open_failed";
+                message = Unwrap(e).Message;
+                return false;
+            }
+            var after = OpenWindows(assetPath);
+            if (after.Count == 0)
+            {
+                error = "window_open_failed";
+                message = "No Shader Graph window shows the graph after AssetDatabase.OpenAsset " +
+                          "(another OnOpenAsset handler in the project may have taken it).";
+                return false;
+            }
+            window = after[0];
+            return true;
+        }
+
+        // Close the graph's windows. A window with unsaved changes would ask
+        // to save them, so nothing is closed then.
+        public static bool TryCloseWindows(string assetPath, out int closed, out string error)
+        {
+            closed = 0;
+            error = null;
+            var windows = OpenWindows(assetPath);
+            foreach (var w in windows)
+            {
+                if (w.hasUnsavedChanges)
                 {
-                    // Selection + EditorApplication.ExecuteMenuItem("Window/...")
-                    // is the most stable cross-version bring-up.
-                    Selection.activeObject = asset;
-                    EditorGUIUtility.PingObject(asset);
+                    error = "graph_has_unsaved_changes";
+                    return false;
                 }
             }
-            catch
+            foreach (var w in windows)
             {
-                // Best-effort window bring-up; never fail the tool on this.
+                w.Close();
+                closed++;
+            }
+            return true;
+        }
+
+        // An edit writes the file under an open window. A window with unsaved
+        // changes would lose them (or ask about them), so the edit is refused.
+        private static bool RefuseUnsavedWindow(string assetPath, out string error)
+        {
+            foreach (var w in OpenWindows(assetPath))
+            {
+                if (w.hasUnsavedChanges)
+                {
+                    error = "graph_has_unsaved_changes";
+                    return true;
+                }
+            }
+            error = null;
+            return false;
+        }
+
+        // After an edit wrote the file: reload each open window from disk the
+        // way its own "Reload" answer to "Graph has changed on disk" does
+        // (drop the loaded graph, re-initialize from the file), so the window
+        // shows the edit and never asks.
+        private static void ReloadOpenWindows(string assetPath)
+        {
+            var windows = OpenWindows(assetPath);
+            if (windows.Count == 0) return;
+            var graphObject = GraphEditWindowType.GetProperty("graphObject", AnyInstance);
+            var selectedGuid = GraphEditWindowType.GetProperty("selectedGuid", AnyInstance);
+            var changedOnDisk = GraphEditWindowType.GetField("m_AssetMaybeChangedOnDisk", AnyInstance);
+            var initialize = GraphEditWindowType.GetMethod("Initialize", AnyInstance, null, new[] { typeof(string) }, null);
+            foreach (var w in windows)
+            {
+                try
+                {
+                    var guid = selectedGuid?.GetValue(w) as string;
+                    graphObject?.SetValue(w, null);
+                    changedOnDisk?.SetValue(w, false);
+                    if (guid != null && selectedGuid?.GetSetMethod(true) != null && initialize != null)
+                    {
+                        // What the window's Update does for a dropped graph.
+                        selectedGuid.SetValue(w, null);
+                        initialize.Invoke(w, new object[] { guid });
+                    }
+                    w.Repaint();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[unity-open-mcp] Shader Graph window reload failed: {Unwrap(e).Message}");
+                }
             }
         }
 
@@ -408,6 +546,7 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
                 return false;
             }
 
+            if (RefuseUnsavedWindow(assetPath, out error)) return false;
             if (!TryLoadGraphData(assetPath, out var graphData, out error)) return false;
 
             try
@@ -449,6 +588,7 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
             error = null;
             if (!ApiAvailable(out error)) return false;
 
+            if (RefuseUnsavedWindow(assetPath, out error)) return false;
             if (!TryLoadGraphData(assetPath, out var graphData, out error)) return false;
 
             try
@@ -575,13 +715,15 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
         }
 
         // Write the graph with the package's serializer and import it, so the
-        // compiled Shader matches the file.
+        // compiled Shader matches the file; an open window of the graph
+        // reloads it.
         private static bool WriteGraph(string assetPath, object graphData)
         {
             var write = FileUtilitiesType.GetMethod("WriteShaderGraphToDisk", AnyStatic);
             if (write == null) return false;
             if (write.Invoke(null, new[] { assetPath, graphData }) == null) return false;
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+            ReloadOpenWindows(assetPath);
             return true;
         }
 

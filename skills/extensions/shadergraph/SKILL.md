@@ -70,15 +70,18 @@ and can raise a modal preference dialog).
    answers `shader_type_unsupported`; an unknown name answers
    `unknown_shader_type`.
 
-2. **Open + inspect** — `unity_open_mcp_shader_graph_open` brings up the
-   Shader Graph editor window and returns a structured summary: node count,
-   each node's `{ id, name, type, position, slots }` (slots are
-   `{ id, name, direction }`), edge count, each edge's
-   `{ outputNodeId, outputSlot, inputNodeId, inputSlot }`. The master stack's
+2. **Open + inspect** — `unity_open_mcp_shader_graph_open` opens the graph in
+   its Shader Graph window (or focuses the window already showing it) and
+   returns a structured summary: node count, each node's
+   `{ id, name, type, position, slots }` (slots are `{ id, name, direction }`),
+   edge count, each edge's `{ outputNodeId, outputSlot, inputNodeId, inputSlot }`,
+   and `window` `{ action: opened | focused, open, title }`. The master stack's
    block nodes are listed too (`type: "BlockNode"`, names like
    `SurfaceDescription.BaseColor`) — connect into their input slot to feed the
-   output. Read-only, no `paths_hint`. **Always call this first** to learn the
-   existing node/slot ids.
+   output. Writes no asset, no `paths_hint`. **Always call this first** to learn
+   the existing node/slot ids; pass `window: "none"` to read without opening a
+   window (also the only form that works in batch mode — `"open"` refuses
+   `editor_window_unavailable` there).
 
 3. **Add nodes** — `unity_open_mcp_shader_graph_node_add` per node. `node_type`
    is a friendly name (`UV`, `Multiply`, `Sample Texture 2D`, `Add`, `Time`,
@@ -99,6 +102,20 @@ and can raise a modal preference dialog).
    `unity_open_mcp_shader_get_data` on the asset path inspects the compiled
    shader properties (the runtime-facing surface — complementary, not
    overlapping with the graph tools).
+
+## The graph window
+
+- `node_add` / `node_connect` on a graph whose window is open reload the window
+  from the file, so it shows the edit and never asks "Graph has changed on
+  disk". When the window holds unsaved edits (a human is editing), the tools
+  refuse `graph_has_unsaved_changes` and write nothing — ask the human to save
+  or discard them.
+- The window stays open after `open`. Close it with
+  `shader_graph_open {"asset_path": …, "window": "close"}` (`action: closed`,
+  or `not_open`) **before deleting or moving the graph** — Shader Graph asks
+  what to do in a modal dialog when an open graph's file disappears, and that
+  dialog blocks the Editor until a human answers. `close` refuses
+  `graph_has_unsaved_changes` instead of raising the save prompt.
 
 ## Common recipes
 
@@ -139,7 +156,7 @@ own `open` summary first.
 | Tool | Mutating | Lifecycle | Notes |
 |---|---|---|---|
 | `shader_graph_create` | yes | editor_settle | New `.shadergraph` from a template. |
-| `shader_graph_open` | no (read-only) | none | Window bring-up + structured node/edge summary. Gate = Off. |
+| `shader_graph_open` | no (writes no asset) | none | Opens / focuses (`window: open`), closes (`close`) or skips (`none`) the graph's window + structured node/edge summary. Gate = Off. |
 | `shader_graph_node_add` | yes | editor_settle | Add a node by friendly name or class name. |
 | `shader_graph_node_connect` | yes | editor_settle | Connect output slot → input slot. Idempotent. |
 

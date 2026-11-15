@@ -315,9 +315,20 @@ function buildSuite() {
   }, { ...sg, gate: true, check: expectOut((o) => o.edge?.added === true, "edge.added is not true") });
   s("shader_graph_open", "S", "unity_open_mcp_shader_graph_open", { asset_path: SHADER_GRAPH }, {
     ...sg,
-    check: expectOut((o, ctx) => o.shaderGraph?.edgeCount === 1 &&
+    check: expectOut((o, ctx) => o.shaderGraph?.window?.action === "opened" && o.shaderGraph.window.open === true &&
+      o.shaderGraph.edgeCount === 1 &&
       o.shaderGraph.edges?.[0]?.outputNodeId === ctx.sgColorNodeId &&
-      o.shaderGraph.nodes?.some((n) => n.id === ctx.sgMultiplyNodeId), "the edge / nodes do not read back"),
+      o.shaderGraph.nodes?.some((n) => n.id === ctx.sgMultiplyNodeId), "no window opened, or the edge / nodes do not read back"),
+  });
+  // An edit under the open window reloads it (no "changed on disk" dialog).
+  s("shader_graph_node_add_open_window", "S", "unity_open_mcp_shader_graph_node_add", {
+    asset_path: SHADER_GRAPH, node_type: "Time", position: "-400,200", paths_hint: [SHADER_GRAPH],
+  }, { ...sg, gate: true, check: expectOut((o) => o.node?.nodeId, "no node id") });
+  // The teardown deletes the graph: an open window would ask in a modal dialog.
+  s("shader_graph_close_window", "S", "unity_open_mcp_shader_graph_open", { asset_path: SHADER_GRAPH, window: "close" }, {
+    ...sg,
+    check: expectOut((o) => o.shaderGraph?.window?.action === "closed" && o.shaderGraph.window.open === false &&
+      o.shaderGraph.nodeCount >= 7, "the window did not close, or the added node does not read back"),
   });
 
   // =====================================================================
@@ -444,6 +455,9 @@ function teardown(project, runEnv) {
   // the shared finalize (InitTestScene*, Main dirty state) and the folder.
   // Deleting the folder makes Unity recompile, so wait for an idle Editor.
   invokeTool(project, "unity_open_mcp_scene_unload", { asset_path: FT_SCENE, paths_hint: SCENE_HINT }, 30_000, runEnv);
+  // A Shader Graph window left open on the fixture graph (a chain that failed
+  // before its close step) would ask in a modal dialog when the folder goes.
+  invokeTool(project, "unity_open_mcp_shader_graph_open", { asset_path: SHADER_GRAPH, window: "close" }, 30_000, runEnv);
   finalizeEditorState(project, runEnv, { excludeMain: true });
   cleanupViaBridge(project, runEnv, { fixtureRoot: FT, fixtureScene: FT_SCENE });
   waitForEditorSettled(project, runEnv);

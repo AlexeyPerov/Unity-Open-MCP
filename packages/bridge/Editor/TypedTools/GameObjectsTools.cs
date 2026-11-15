@@ -156,13 +156,8 @@ namespace UnityOpenMcpBridge.TypedTools
             // removed components, added GameObjects), references inside the
             // copied hierarchy point into the copy, and the copy lands under
             // the same parent in the same scene, stage or prefab contents. The
-            // duplicate records its own undo; the rename below joins it, so
-            // the call is one undo step. The group is opened here: bridge calls
-            // made without an input event in between otherwise share Unity's
-            // current group, and one undo would also revert the calls before.
-            // (In batch_execute the batch folds it into its own group.)
-            Undo.IncrementCurrentGroup();
-            var undoGroup = Undo.GetCurrentGroup();
+            // duplicate records its own undo and the rename below joins it;
+            // the dispatch folds both into the call's one undo step.
             GameObject clone = null;
             try
             {
@@ -196,8 +191,6 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("duplicate_failed", e.Message);
             }
 
-            Undo.SetCurrentGroupName("MCP Duplicate GameObject");
-            Undo.CollapseUndoOperations(undoGroup);
             EditorUtility.SetDirty(clone);
             MarkObjectSceneDirty(clone);
 

@@ -414,7 +414,11 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
             var sb = new StringBuilder(320);
             sb.Append("\"source\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(source)).Append(',');
+            // instanceId is the host GameObject's (what audio_source_modify
+            // and the other typed tools take); the AudioSource's own id is
+            // componentInstanceId.
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(source.gameObject)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(source)).Append(',');
             sb.Append("\"clip\":").Append(source.clip != null
                 ? AudioJson.Esc(source.clip.name) : "\"\"").Append(',');
             sb.Append("\"clipPath\":").Append(source.clip != null

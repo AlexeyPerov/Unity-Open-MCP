@@ -502,7 +502,8 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
                 var sbAlready = new StringBuilder(120);
                 sbAlready.Append("\"brain\":{");
                 sbAlready.Append("\"alreadyPresent\":true,");
-                sbAlready.Append("\"instanceId\":").Append(InstanceId.ToJson(existing));
+                sbAlready.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+                sbAlready.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(existing));
                 sbAlready.Append('}');
                 return CinemachineJson.Ok(sbAlready.ToString());
             }
@@ -514,7 +515,8 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             var sb = new StringBuilder(120);
             sb.Append("\"brain\":{");
             sb.Append("\"added\":true,");
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(brain));
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(brain));
             sb.Append('}');
             return CinemachineJson.Ok(sb.ToString());
         }

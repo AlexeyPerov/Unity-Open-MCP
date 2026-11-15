@@ -2,8 +2,9 @@
 
 Shader Graph typed tools (`unity_open_mcp_shader_graph_*`), embedded inside the
 bridge. Four tools for in-editor shader-graph authoring: create a Shader Graph
-asset, open it in the graph editor (with a structured node/edge summary), add
-a node, and connect two node ports.
+asset, open it in its Shader Graph window (with a structured node/edge
+summary; `window: none` reads without a window, `close` closes it), add a
+node, and connect two node ports.
 
 ## Compile gate
 
@@ -45,7 +46,11 @@ writes it with `FileUtilities.WriteShaderGraphToDisk` before importing.
 active pipeline's target and sub-target for the template, the target's active
 blocks, the default category) instead of running the `Assets/Create` menu items,
 which need an interactive rename and may raise a modal preference dialog.
-`open` summarizes the loaded graph. When reflection cannot reach a needed
+`open` summarizes the loaded graph and opens the window the way double-clicking
+the asset does (`AssetDatabase.OpenAsset`). The tools keep the window's own
+modal dialogs away: an edit reloads an open window from the file (its "Reload"
+answer to "Graph has changed on disk"), and nothing closes or writes under a
+window that holds unsaved edits (`graph_has_unsaved_changes`). When reflection cannot reach a needed
 member (version mismatch / internal rename), the tool returns a structured
 error envelope (`shadergraph_api_unavailable`, `graph_load_failed`) rather than
 throwing — the agent can fall back to manual editing in the graph window.
@@ -57,8 +62,9 @@ All four tools belong to the `shadergraph` group (M20 Plan 7). Auto-activated
 when `com.unity.shadergraph` is present; otherwise hidden from `ListTools`
 until the session activates the group via `unity_open_mcp_manage_tools`.
 Mutating members (`create` / `node_add` / `node_connect`) run the full gate
-path with `paths_hint` scoped to the `.shadergraph` asset path; `open` is a
-non-mutating window bring-up (`Gate = Off`).
+path with `paths_hint` scoped to the `.shadergraph` asset path; `open` writes
+no asset (`Gate = Off`) and refuses `editor_window_unavailable` in batch mode
+unless `window: none`.
 
 ## Relationship to the inspect surface
 

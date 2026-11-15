@@ -238,14 +238,17 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ShaderGraphExt
             Assert.IsTrue(create.Success, create.ErrorMessage ?? create.Output);
             Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<Object>(tempAssetPath));
 
-            // open (read-only) — returns a structured summary of the loaded
-            // graph. The asset exists now, so this must succeed.
+            // open without a window — returns a structured summary of the
+            // loaded graph. The asset exists now, so this must succeed. (A
+            // window left open would ask in a dialog when TearDown deletes
+            // the asset.)
             var open = BridgeToolRegistry.TryDispatch(
                 "unity_open_mcp_shader_graph_open",
-                "{\"asset_path\":\"" + tempAssetPath + "\"}");
+                "{\"asset_path\":\"" + tempAssetPath + "\",\"window\":\"none\"}");
             Assert.IsNotNull(open);
             Assert.IsTrue(open.Success, open.ErrorMessage ?? open.Output);
             StringAssert.Contains("\"status\":\"ok\"", open.Output);
+            StringAssert.Contains("\"window\":{\"action\":\"none\",\"open\":false}", open.Output);
             StringAssert.Contains("\"shaderGraph\":", open.Output);
             StringAssert.Contains("\"nodeCount\":", open.Output);
 

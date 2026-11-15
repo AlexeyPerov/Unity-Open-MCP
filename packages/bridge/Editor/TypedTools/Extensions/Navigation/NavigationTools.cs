@@ -95,7 +95,8 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             var sb = new StringBuilder(160);
             sb.Append("\"surface\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(surface)).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(surface)).Append(',');
             sb.Append("\"agentType\":").Append(NavigationJson.Esc(surface.agentTypeID.ToString())).Append(',');
             sb.Append("\"collectObjects\":").Append(NavigationJson.Esc(surface.collectObjects.ToString()));
             sb.Append('}');
@@ -248,7 +249,8 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             var sb = new StringBuilder(140);
             sb.Append("\"modifier\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(mod)).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(mod)).Append(',');
             sb.Append("\"area\":").Append(NavigationJson.Esc(area)).Append(',');
             sb.Append("\"ignoreFromBuild\":").Append(ignore ? "true" : "false").Append(',');
             sb.Append("\"overrideArea\":").Append(override_area ? "true" : "false");
@@ -300,7 +302,8 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             var sb = new StringBuilder(180);
             sb.Append("\"volume\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(vol)).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(vol)).Append(',');
             sb.Append("\"area\":").Append(NavigationJson.Esc(area)).Append(',');
             sb.Append("\"size\":").Append(Vec3(vol.size)).Append(',');
             sb.Append("\"center\":").Append(Vec3(vol.center));
@@ -362,7 +365,8 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             var sb = new StringBuilder(220);
             sb.Append("\"link\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(link)).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(link)).Append(',');
             sb.Append("\"startPosition\":").Append(Vec3(link.startPoint)).Append(',');
             sb.Append("\"endPosition\":").Append(Vec3(link.endPoint)).Append(',');
             sb.Append("\"width\":").Append(link.width.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',');
@@ -427,7 +431,8 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             var sb = new StringBuilder(220);
             sb.Append("\"agent\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(agent)).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(agent)).Append(',');
             sb.Append("\"radius\":").Append(agent.radius.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',');
             sb.Append("\"height\":").Append(agent.height.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',');
             sb.Append("\"speed\":").Append(agent.speed.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',');

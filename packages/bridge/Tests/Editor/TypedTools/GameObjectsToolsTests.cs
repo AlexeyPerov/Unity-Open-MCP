@@ -1085,10 +1085,14 @@ namespace UnityOpenMcpBridge.Tests
             {
                 instance.AddComponent<Rigidbody>();
                 var rootsBefore = instance.scene.rootCount;
-                Undo.IncrementCurrentGroup();
 
-                var result = GameObjectsTools.Duplicate("{\"instance_id\":" + InstanceId.Of(instance) + "}");
-                Assert.IsTrue(result.Success, result.ErrorMessage);
+                // Through the top-level dispatch, which makes the call (the
+                // Editor's duplicate and the rename) one undo step.
+                var result = (GateDispatchResult)typeof(BridgeHttpServer)
+                    .GetMethod("DispatchWithGateCore", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                    .Invoke(null, new object[] { "unity_open_mcp_gameobject_duplicate",
+                        "{\"instance_id\":\"" + InstanceId.Of(instance) + "\",\"paths_hint\":[\"Assets\"]}", "off", null });
+                Assert.IsTrue(result.Mutation.Success, result.Mutation.ErrorMessage);
                 var copy = CopyAfter(instance);
 
                 Undo.PerformUndo();
