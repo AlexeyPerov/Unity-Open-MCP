@@ -99,6 +99,11 @@ into `inheritedErrors` / `inheritedWarnings` / `inheritedIssues` /
 `inheritedFrom` (wire contract 10). See the
 [mutation and gate contract](mcp-tools.md#mutation-and-gate-contract).
 
+A call that names `in_prefab` (wire contract 12) writes that prefab asset during
+the call, so its gate scope is `paths_hint` plus the asset when `paths_hint` does
+not cover it, and the delta validates the saved file. See
+[Editing a prefab asset in place](mcp-tools.md#editing-a-prefab-asset-in-place-in_prefab).
+
 Two honesty rules govern the gate's response:
 
 - `gate.delta` is `null` (never a zeroed object) whenever no delta was
@@ -302,7 +307,9 @@ they are the scenes that blocked the call. On a call that ran they are the
 scenes it left dirty — dirty after the call and either clean before it or
 holding a GameObject the call resolved or created — with the open prefab stage
 listed by its prefab asset path and an untitled scene as `(unsaved scene)`;
-`null` when there are none (and for read-only calls).
+`null` when there are none (and for read-only calls). A prefab asset edited in
+place (`in_prefab`) is saved and unloaded before the call returns, so it is never
+listed.
 
 ## Published argument schemas
 

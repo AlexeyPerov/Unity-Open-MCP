@@ -16,7 +16,8 @@ namespace UnityOpenMcpBridge.TypedTools
     // TypedTargets — same addressing model as spatial-query.ts so agents can
     // pass the same handle across typed tools. Targets live in a loaded scene
     // or in the open prefab stage; prefab_open returns the stage root's path
-    // and id.
+    // and id. prefab_instantiate also nests a prefab into a prefab asset
+    // edited in place (in_prefab).
     public static class PrefabTools
     {
         public static ToolDispatchResult Instantiate(string body)
@@ -43,6 +44,26 @@ namespace UnityOpenMcpBridge.TypedTools
             // named one (scene_path / scene_name), the open prefab stage (under
             // its root), or the active scene.
             var request = TargetRequest.For(body);
+
+            // Nesting into a prefab asset edited in place (in_prefab): a
+            // prefab can neither hold itself nor a prefab that already holds
+            // it — Unity would refuse to save the cycle.
+            if (request.PrefabPath != null)
+            {
+                var host = AssetDatabase.GetAssetPath(prefab);
+                var into = request.PrefabPath;
+                bool cyclic = PrefabAssetEdits.SamePath(host, into);
+                if (!cyclic)
+                    foreach (var dep in AssetDatabase.GetDependencies(host, true))
+                        if (PrefabAssetEdits.SamePath(dep, into)) { cyclic = true; break; }
+                if (cyclic)
+                    return ToolDispatchResult.Fail("invalid_parameter",
+                        $"'{host}' cannot be nested into '{into}': " +
+                        (PrefabAssetEdits.SamePath(host, into)
+                            ? "a prefab cannot contain an instance of itself."
+                            : $"'{host}' already contains '{into}', so the nesting would be cyclic."));
+            }
+
             GameObject parentGo = null;
             TargetContainer rootContainer = null;
             if (!string.IsNullOrEmpty(parentPath))
@@ -64,7 +85,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 // never passes through (and dirties) another scene.
                 if (parentGo != null)
                     instance = PrefabUtility.InstantiatePrefab(prefab, parentGo.transform) as GameObject;
-                else if (rootContainer != null && rootContainer.Kind == TargetContainerKind.PrefabStage)
+                else if (rootContainer != null && rootContainer.IsPrefab)
                     instance = PrefabUtility.InstantiatePrefab(prefab, rootContainer.PrefabRoot.transform) as GameObject;
                 else if (rootContainer != null)
                     instance = PrefabUtility.InstantiatePrefab(prefab, rootContainer.Scene) as GameObject;

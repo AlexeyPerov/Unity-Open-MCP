@@ -6,9 +6,10 @@ import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 export const prefabInstantiate = makeTool(
   "unity_open_mcp_prefab_instantiate",
   "Instantiate a prefab at an optional position/rotation/scale, optionally parented under an existing " +
-    "GameObject path. Without parent_path the instance root goes to the container scene_path/scene_name " +
-    "names; else, while a prefab stage is open, under the prefab root (unless paths_hint names a loaded scene " +
-    "and not the prefab); else the active scene. A parent_path found in several loaded scenes resolves in the " +
+    "GameObject path. With in_prefab it nests the prefab into that prefab asset, edited in place (parent_path " +
+    "from its root). Without parent_path the instance root goes to the container in_prefab / scene_path / " +
+    "scene_name names; else, while a prefab stage is open, under the prefab root (unless paths_hint names a " +
+    "loaded scene and not the prefab); else the active scene. A parent_path found in several loaded scenes resolves in the " +
     "one scene_path / paths_hint names, then the active scene, else refuses with ambiguous_path. Mutating: " +
     "runs the full gate path. `paths_hint` should be the destination scene path plus the prefab asset path. " +
     "Returns the new instance's instanceId, name, path and container (scene or prefab stage) so the agent can " +
@@ -27,8 +28,8 @@ export const prefabInstantiate = makeTool(
           parent_path: {
             type: "string",
             description:
-              "Optional parent hierarchy path \"Root/Parent\" (in the open prefab stage: from the prefab root) " +
-              "— the parent must already exist. Omit to instantiate a root.",
+              "Optional parent hierarchy path \"Root/Parent\" (in a prefab — in_prefab or the open stage — from " +
+              "the prefab root) — the parent must already exist. Omit to instantiate a root.",
           },
           scene_path: {
             type: "string",

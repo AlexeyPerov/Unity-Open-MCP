@@ -26,7 +26,10 @@ namespace UnityOpenMcpBridge.TypedTools
     // prefab root ("Panel/Child"); the wrapper Unity adds around a UI prefab
     // ("Canvas (Environment)/Panel/Child") is accepted too. Returned paths are
     // canonical: relative to the prefab root for stage objects, from the
-    // scene root otherwise.
+    // scene root otherwise. A third kind exists only for the call that names
+    // it: in_prefab loads a prefab asset's contents for the call (see
+    // PrefabAssetEdits); it is binding like scene_path, and only it is
+    // searched — paths start at its root, instance ids must be its own.
     //
     // Which container a path resolves in. Every container is searched. A path
     // that matches in one resolves there. When it matches in several, the
@@ -124,6 +127,12 @@ namespace UnityOpenMcpBridge.TypedTools
             if (instanceId != 0)
             {
                 var byId = ResolveId(instanceId, role);
+                // A prefab asset loaded for this call (in_prefab) is the only
+                // container the call may edit: an id from anywhere else is
+                // not found there.
+                if (byId.Ok && named != null && named.Kind == TargetContainerKind.PrefabAsset &&
+                    !byId.Container.Equals(named))
+                    byId = TargetResolution.Fail(new ResolveFailure(NotFoundCode(role), "not in the prefab asset"));
                 // An id that no longer resolves falls back to the path / name
                 // (ids change on a domain reload); a refused id does not.
                 if (byId.Ok || !byId.Failure.IsNotFound) return Remember(byId);
@@ -158,13 +167,15 @@ namespace UnityOpenMcpBridge.TypedTools
             c.AppendJson(sb);
         }
 
-        /// <summary>True for the root of the open stage's prefab contents: it
-        /// cannot be destroyed, duplicated or detached inside the stage (a
-        /// prefab has exactly one root).</summary>
-        public static bool IsStageRoot(GameObject go)
+        /// <summary>The prefab container (open stage, or the prefab asset
+        /// in_prefab loaded) whose root <paramref name="go"/> is; null for any
+        /// other object. A prefab has exactly one root: it is never destroyed,
+        /// duplicated or detached inside its container.</summary>
+        public static TargetContainer PrefabRootContainer(GameObject go)
         {
-            var stage = TargetContainers.OpenStage();
-            return stage != null && go != null && go == stage.prefabContentsRoot;
+            if (go == null) return null;
+            var c = TargetContainers.Of(go);
+            return c != null && c.IsPrefab && c.PrefabRoot == go ? c : null;
         }
 
         // ------------------------------------------------------------------
@@ -201,15 +212,17 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         /// <summary>Moves a GameObject created without a parent into its
-        /// container: into the scene, or under the prefab root of the stage.
-        /// Records the container as touched by this call.</summary>
+        /// container: into the scene, or under the prefab root of the stage /
+        /// the in_prefab asset. Records the container as touched by this call.</summary>
         public static void PlaceInContainer(GameObject go, TargetContainer container)
         {
             if (go == null || container == null) return;
-            if (container.Kind == TargetContainerKind.PrefabStage)
+            if (container.IsPrefab)
             {
                 if (go.scene != container.Scene) SceneManager.MoveGameObjectToScene(go, container.Scene);
                 go.transform.SetParent(container.PrefabRoot.transform, false);
+                if (container.Kind == TargetContainerKind.PrefabAsset)
+                    PrefabAssetEdits.Current?.NoteTarget(container.PrefabRoot);
             }
             else if (go.transform.parent == null && go.scene != container.Scene)
             {
@@ -276,7 +289,12 @@ namespace UnityOpenMcpBridge.TypedTools
         private static TargetResolution Remember(TargetResolution r)
         {
             LastFailure = r.Failure;
-            if (r.Ok) TargetScope.Touch(r.Container);
+            if (r.Ok)
+            {
+                TargetScope.Touch(r.Container);
+                if (r.Container.Kind == TargetContainerKind.PrefabAsset)
+                    PrefabAssetEdits.Current?.NoteTarget(r.GameObject);
+            }
             return r;
         }
 
@@ -316,15 +334,17 @@ namespace UnityOpenMcpBridge.TypedTools
                     var steps = isPrefab
                         ? new[]
                         {
-                            "Open the prefab with unity_open_mcp_prefab_open {\"asset_path\":\"" + assetPath +
-                            "\"}; its result names the root's path and instance id. Then address the object by " +
-                            "its path from the prefab root."
+                            "Edit the prefab asset in place: pass in_prefab: \"" + assetPath + "\" and address the " +
+                            "object by its path from the prefab root (game_object_path / parent_path).",
+                            "Or open the prefab with unity_open_mcp_prefab_open {\"asset_path\":\"" + assetPath +
+                            "\"}; its result names the root's path and instance id."
                         }
                         : null;
                     return TargetResolution.Fail(new ResolveFailure(ResolveFailure.PersistentObject,
                         $"instance_id {id} is '{go.name}' inside the asset '{assetPath}' on disk, not an object of a " +
                         "loaded scene or of the open prefab stage. Typed GameObject tools do not edit assets " +
-                        "through their ids" + (isPrefab ? "; open the prefab in a stage and edit it there." : "."),
+                        "through their ids" + (isPrefab ? "; name the prefab with in_prefab and address the object " +
+                        "by its path, or open the prefab in a stage." : "."),
                         "{\"assetPath\":" + BridgeJson.EscapeString(assetPath) + "}", steps));
                 }
                 case "stage_environment":
@@ -356,7 +376,12 @@ namespace UnityOpenMcpBridge.TypedTools
             }
 
             var matches = new List<TargetResolution>();
-            foreach (var c in TargetContainers.All())
+            // A prefab asset loaded for this call (in_prefab) is searched
+            // alone; every other address looks in every visible container.
+            var containers = named != null && named.Kind == TargetContainerKind.PrefabAsset
+                ? new List<TargetContainer> { named }
+                : TargetContainers.All();
+            foreach (var c in containers)
             {
                 var go = byName ? FindNameIn(c, address) : FindPathIn(c, segments);
                 if (go != null) matches.Add(TargetResolution.Found(go, c));
@@ -444,7 +469,16 @@ namespace UnityOpenMcpBridge.TypedTools
                   .Append(", path='").Append(path).Append("', name='").Append(name).Append("').");
             }
 
-            if (named != null)
+            if (named != null && named.Kind == TargetContainerKind.PrefabAsset)
+            {
+                sb.Append(" Looked in ").Append(named.Describe()).Append(", the container in_prefab names; paths start at ")
+                  .Append("its root '").Append(named.PrefabRoot != null ? named.PrefabRoot.name : "").Append("'.");
+                if (instanceId != 0)
+                    sb.Append(" An instance id from an earlier call does not resolve here: the prefab's objects are ")
+                      .Append("loaded anew for every call, and objects of scenes or the prefab stage are not in it. ")
+                      .Append("Address the object by its path.");
+            }
+            else if (named != null)
             {
                 sb.Append(" Looked in ").Append(named.Describe()).Append(", the container scene_path / scene_name names");
                 if (elsewhere.Count > 0)
@@ -480,12 +514,12 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // A path inside a container. A scene path starts at a scene root. A
-        // stage path starts at the prefab root, or at the root of the stage
-        // scene when Unity wrapped the prefab in an environment
-        // ("Canvas (Environment)/Panel/Child").
+        // prefab path (stage or in_prefab asset) starts at the prefab root,
+        // or, in the stage, at the root of the stage scene when Unity wrapped
+        // the prefab in an environment ("Canvas (Environment)/Panel/Child").
         private static GameObject FindPathIn(TargetContainer c, string[] segments)
         {
-            if (c.Kind == TargetContainerKind.PrefabStage)
+            if (c.IsPrefab)
             {
                 var root = c.PrefabRoot;
                 if (root == null) return null;
@@ -528,7 +562,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         private static GameObject FindNameIn(TargetContainer c, string name)
         {
-            if (c.Kind == TargetContainerKind.PrefabStage)
+            if (c.IsPrefab)
                 return c.PrefabRoot == null ? null : FindInHierarchyByName(c.PrefabRoot, name);
             foreach (var root in c.Scene.GetRootGameObjects())
             {

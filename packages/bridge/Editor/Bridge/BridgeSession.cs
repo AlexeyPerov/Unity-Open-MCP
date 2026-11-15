@@ -109,7 +109,15 @@ namespace UnityOpenMcpBridge
         //       Snapshot progress adds realtimeMs, stalledMs and, for a
         //       capture series, the schedule offset as elapsedMs and
         //       progress.series (requested / captured / frames so far).
-        public const int WireContract = 11;
+        //  12 — Typed GameObject tools accept in_prefab: they edit that
+        //       prefab asset in place (load, edit, save, unload; no stage).
+        //       Container kind `prefab_asset`; results carry `prefabAsset`
+        //       (saved, variantOf, overrides, instanceIds: "ephemeral",
+        //       undo: false), batch results `prefabAssets[]`; codes
+        //       prefab_asset_not_found, prefab_asset_not_editable,
+        //       prefab_stage_unsaved, prefab_save_failed,
+        //       prefab_root_protected, in_prefab_unsupported.
+        public const int WireContract = 12;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
 

@@ -387,6 +387,11 @@ scripts may reload the domain even without a later refresh. The preflight also
 reports cross-step script-write/import hazards. Write scripts as top-level
 calls, let compilation settle, then continue with a separate batch.
 
+Steps that edit a prefab asset in place (`in_prefab`) share one load and one
+save per run of consecutive steps on the same prefab, and a failed step drops
+its run's edits; see
+[Editing a prefab asset in place](#editing-a-prefab-asset-in-place-in_prefab).
+
 A step whose **terminal result is produced by the MCP server** rather than by the
 Editor dispatch is refused with `batch_step_requires_server_poll`.
 `unity_senses_run_tests` is the case: it returns `{status: "started", runId}`
@@ -447,8 +452,9 @@ Negative instance IDs (e.g. `-4617212`) returned by creator tools
 them back verbatim to `gameobject_modify` / `component_modify` / `invoke_method`.
 If a tool ever reports `GameObject not found (instance_id=0…)`, the id changed
 across a domain reload; re-acquire it via `gameobject_find` (by name) and retry.
-Paths and ids resolve in the loaded scenes and the open prefab stage; see
-[GameObject containers](#gameobject-containers-loaded-scenes-and-the-prefab-stage)
+Paths and ids resolve in the loaded scenes and the open prefab stage, or in the
+prefab asset `in_prefab` names; see
+[GameObject containers](#gameobject-containers-loaded-scenes-the-prefab-stage-and-prefab-assets)
 for which one a path picks, `ambiguous_path`, and the ids typed tools refuse.
 
 #### `invoke_method` positional arguments
@@ -995,9 +1001,11 @@ The same data is structured as `error.didYouMean` (`types[]`: `name`,
 `candidates`; `members[]`: `type`, `member`, `closest`), and `agentNextSteps`
 points at `find_members` for anything not found.
 
-A snippet that re-implements a typed tool (reads or writes `PlayerPrefs`, sets
-`Time.timeScale`, saves a scene, calls a method or reads a private field by
-reflection, `GameObject.Find`, `AssetDatabase.FindAssets`) gets an advisory
+A snippet that re-implements a typed tool (edits a prefab through
+`PrefabUtility.LoadPrefabContents` — the typed tools' `in_prefab` —, reads or
+writes `PlayerPrefs`, sets `Time.timeScale`, saves a scene, calls a method or
+reads a private field by reflection, `GameObject.Find`,
+`AssetDatabase.FindAssets`) gets an advisory
 top-level `typedToolHints` array naming that tool (at most three). It never
 changes the result.
 
@@ -1059,15 +1067,16 @@ and every subsequent call. No tool can dismiss a modal; `bridge_status` reports
 the state as `wedged` / `main_thread_wedged` so it is not mistaken for a compile
 failure. Prefer the non-interactive API.
 
-### GameObject containers: loaded scenes and the prefab stage
+### GameObject containers: loaded scenes, the prefab stage and prefab assets
 
 Every typed tool that takes `game_object_path`, `parent_path`, `instance_id` or
 a by-name selector (`gameobject_*`, `component_*`, `prefab_*`, `selection_set`,
 `scene_focus`, object-reference values in `component_modify` / `object_modify`,
 and the embedded domains such as `ui_*`, `light_*`, `navigation_*`) resolves
 it through one resolver. A GameObject lives in a **container**: a loaded scene,
-or the open **prefab stage** (`prefab_open`), whose contents Unity keeps in a
-preview scene.
+the open **prefab stage** (`prefab_open`), whose contents Unity keeps in a
+preview scene, or a **prefab asset** the call names with `in_prefab` and the
+bridge edits in place ([below](#editing-a-prefab-asset-in-place-in_prefab)).
 
 - **Paths in the prefab stage** start at the prefab root (`Panel/Child`). The
   wrapper Unity adds around a UI prefab is accepted too
@@ -1090,15 +1099,16 @@ preview scene.
 - **Instance ids** resolve through the Unity API to a GameObject of a loaded
   scene or of the open stage's prefab contents. Other ids are refused, never
   edited: `persistent_object` (an object inside an asset on disk, e.g. a prefab
-  asset's child — open the prefab with `prefab_open` and address the stage
-  object), `preview_scene_object` (another preview scene, or the stage's
+  asset's child — pass the prefab as `in_prefab` and address the object by its
+  path, or open the prefab with `prefab_open` and address the stage object),
+  `preview_scene_object` (another preview scene, or the stage's
   environment), `not_a_gameobject` (a Component — the error names its
   GameObject's `instanceId` — or any other object type). An id that no longer
   exists falls back to the path / name, as before.
 - **Results** carry `container` (`{"kind":"scene","path":"Assets/…unity"}`, an
-  untitled scene adds its `name`, or `{"kind":"prefab_stage","path":"Assets/…prefab"}`)
-  next to the unchanged `path`, which is canonical: relative to the prefab root
-  for a stage object. Component results name the host as `gameObjectPath`.
+  untitled scene adds its `name`, `{"kind":"prefab_stage","path":"Assets/…prefab"}`,
+  or `{"kind":"prefab_asset",…}` for `in_prefab`) next to the unchanged `path`,
+  which is canonical: relative to the prefab root for a prefab object. Component results name the host as `gameObjectPath`.
 - **New roots.** `gameobject_create`, `prefab_instantiate`, `ui_canvas_add` and
   the domain creators (`probuilder_create_shape`, `cinemachine_create_camera`,
   `splines_container_create`, `tilemap_create`) put a GameObject created without
@@ -1122,6 +1132,71 @@ preview scene.
   a delta, and `agentNextSteps` says how the edit gets saved; run
   `validate_edit` on the prefab once it is. A call that also edited a scene
   validates `paths_hint` as usual and carries the same advice.
+
+#### Editing a prefab asset in place (`in_prefab`)
+
+`in_prefab: "Assets/UI/Shop.prefab"` makes one call edit that prefab asset
+without opening a stage: the bridge loads its contents
+(`PrefabUtility.LoadPrefabContents`), runs the tool against them, saves the
+asset when a mutating tool succeeded, and always unloads the contents (also
+when the tool fails or throws). It replaces the `execute_csharp` recipe
+`LoadPrefabContents` → edit → `SaveAsPrefabAsset` → `UnloadPrefabContents`.
+Accepted by `gameobject_*`, `component_*`, `prefab_instantiate` (nests a prefab
+into the asset; a prefab that would contain itself is refused with
+`invalid_parameter`), `ui_*`, and the component-level domain tools (`light_*`,
+`reflection_probe_get`, `audio_source_*`, `particle_system_*`, `constraint_add`,
+`lod_*`, `navigation_*` except the bake and play-mode tools, `splines_*`,
+`cinemachine_*` except `brain_ensure`, `tilemap_*`); the schema of each tool says
+whether it takes `in_prefab`, and any other tool refuses it
+(`in_prefab_unsupported`).
+
+- **Addressing.** The asset is the only container the call reaches (binding,
+  like `scene_path`; passing both is `invalid_parameter`). Paths start at the
+  prefab root (`Shop/Header/Title`); results report them in that form with
+  `container: {"kind":"prefab_asset","path":"Assets/UI/Shop.prefab"}`. A new
+  root-less GameObject (`gameobject_create`, `prefab_instantiate`,
+  `ui_canvas_add`, the domain creators) goes under the prefab root, and the
+  root cannot be destroyed, duplicated or reparented (`prefab_root_protected`).
+  An instance id resolves only to an object of these contents; an id from an
+  earlier call (or of a scene / stage object) is `gameobject_not_found`.
+- **Result.** A success carries `prefabAsset`: `path`, `saved` (mutating
+  calls), `variantOf` (the base prefab, for a variant), `overrides` (one entry
+  per prefab instance inside the asset that a target belongs to:
+  `instancePath`, `source` prefab, `kind` — `variant_base` for an object the
+  variant inherits, `nested_prefab` for an object of a nested prefab; the edit
+  is stored as an override on that instance in this asset and the source prefab
+  is untouched), `instanceIds: "ephemeral"` (the contents are unloaded when the
+  call returns, so the ids in the result never resolve again — address objects
+  by path), and `undo: false`. A failed mutation writes nothing: the asset stays
+  byte-identical and `error.prefabAsset.saved` is `false`.
+- **Undo.** The edit is not on the Editor undo stack (Unity drops the loaded
+  contents' undo records on unload); revert it with another edit.
+- **Refusals before loading.** `prefab_asset_not_found` (no `.prefab` asset at
+  the path), `prefab_asset_not_editable` (a model prefab, an immutable package
+  prefab, or contents that do not load), `prefab_stage_unsaved` — the prefab is
+  open in a prefab stage with unsaved changes: save or discard the stage
+  (`prefab_save` / `prefab_close`), or edit through it with `scene_path`. A
+  stage of the same prefab without unsaved changes does not block the edit;
+  Unity reloads it from the saved file on a later Editor update (its instance
+  ids change). A failed save is `prefab_save_failed` and leaves the asset as it
+  was.
+- **Gate and lifecycle.** The asset is written during the call, so the gate
+  validates it: the gate scope is `paths_hint` plus the `in_prefab` asset when
+  `paths_hint` does not already cover it. Lineage (inherited issues) works as
+  for any other write. The calls keep their `editor_settle` lifecycle and never
+  trip the dirty-scene guard. Scene instances of the prefab pick up the change
+  from the saved file; no scene is marked dirty by it, so `dirtyScenes` stays
+  null unless the call edited a scene too. `agentNextSteps` names the saved
+  asset and repeats the undo / instance-id caveats.
+- **In `batch_execute`.** Consecutive steps that name the same `in_prefab`
+  share one load and one save, after the last of them (when the next step names
+  something else, or the batch ends). A step that fails or is refused drops the
+  unsaved edits of its run — none of its steps is written, whatever
+  `fail_fast` says; under `fail_fast: false` a later step on that prefab loads
+  it again from disk. `batch.prefabAssets[]` lists every run: `path`, `steps`,
+  `saved`, and `reason` when it was not written. A dropped run counts as not
+  committed. Each step's output carries `prefabAsset` with
+  `save: "after_run"` for a mutating step.
 
 ### `unity_open_mcp_editor_status`
 

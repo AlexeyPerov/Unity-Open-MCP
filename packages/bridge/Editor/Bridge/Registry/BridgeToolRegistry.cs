@@ -247,11 +247,12 @@ namespace UnityOpenMcpBridge
         // parameter.
         private static readonly string[] TransportEnvelopeKeys =
             { "gate", "timeout_ms", "ignore_scene_dirty", "confirm_bypass",
-              // The GameObject container selector: the dispatcher's target
-              // scope reads it off the body for the shared resolver
-              // (TypedTargets), so an embedded-domain tool accepts it without
-              // declaring a parameter.
-              "scene_path", "scene_name" };
+              // The GameObject container selectors: the dispatcher's target
+              // scope reads them off the body for the shared resolver
+              // (TypedTargets) and loads an in_prefab asset around the call
+              // (PrefabAssetEdits), so an embedded-domain tool accepts them
+              // without declaring a parameter.
+              "scene_path", "scene_name", "in_prefab" };
 
         private static List<string> FindUnknownKeys(BridgeToolEntry entry, string body)
         {

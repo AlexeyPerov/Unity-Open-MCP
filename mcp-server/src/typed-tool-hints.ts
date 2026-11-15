@@ -1,9 +1,9 @@
 // Point execute_csharp callers at the typed tool that already does what their
-// snippet does. Snippets that read PlayerPrefs, set Time.timeScale, save a
-// scene, call a method by reflection or dump private fields each have a typed,
-// schema-checked equivalent that agents rarely discover on their own. The hint
-// is advisory: it rides on the result as `typedToolHints` and never changes
-// the outcome.
+// snippet does. Snippets that edit a prefab through LoadPrefabContents, read
+// PlayerPrefs, set Time.timeScale, save a scene, call a method by reflection
+// or dump private fields each have a typed, schema-checked equivalent that
+// agents rarely discover on their own. The hint is advisory: it rides on the
+// result as `typedToolHints` and never changes the outcome.
 
 interface HintRule {
   /** All patterns must match the snippet. */
@@ -12,6 +12,13 @@ interface HintRule {
 }
 
 const RULES: HintRule[] = [
+  {
+    patterns: [/\bPrefabUtility\s*\.\s*LoadPrefabContents\b/],
+    hint:
+      "Typed GameObject / component / ui_* tools edit a prefab asset in place without a snippet: pass " +
+      "in_prefab (e.g. component_modify {\"in_prefab\":\"Assets/…/X.prefab\",\"game_object_path\":\"Root/Child\",…}); " +
+      "the bridge loads, saves and unloads it (a batch_execute of steps on one prefab saves once).",
+  },
   {
     patterns: [/\bPlayerPrefs\s*\.\s*(?:GetInt|GetFloat|GetString|HasKey)\b/],
     hint: "unity_open_mcp_playerprefs_get reads PlayerPrefs keys (several at once) without a snippet.",

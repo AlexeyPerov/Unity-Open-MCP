@@ -2508,7 +2508,7 @@
     }
   },
   "unity_open_mcp_prefab_instantiate": {
-    "description": "Instantiate a prefab at an optional position/rotation/scale, optionally parented under an existing GameObject path. Without parent_path the instance root goes to the container scene_path/scene_name names; else, while a prefab stage is open, under the prefab root (unless paths_hint names a loaded scene and not the prefab); else the active scene. A parent_path found in several loaded scenes resolves in the one scene_path / paths_hint names, then the active scene, else refuses with ambiguous_path. Mutating: runs the full gate path. `paths_hint` should be the destination scene path plus the prefab asset path. Returns the new instance's instanceId, name, path and container (scene or prefab stage) so the agent can re-acquire it. Use unity_open_mcp_search_assets with t:Prefab to locate the prefab asset first.",
+    "description": "Instantiate a prefab at an optional position/rotation/scale, optionally parented under an existing GameObject path. With in_prefab it nests the prefab into that prefab asset, edited in place (parent_path from its root). Without parent_path the instance root goes to the container in_prefab / scene_path / scene_name names; else, while a prefab stage is open, under the prefab root (unless paths_hint names a loaded scene and not the prefab); else the active scene. A parent_path found in several loaded scenes resolves in the one scene_path / paths_hint names, then the active scene, else refuses with ambiguous_path. Mutating: runs the full gate path. `paths_hint` should be the destination scene path plus the prefab asset path. Returns the new instance's instanceId, name, path and container (scene or prefab stage) so the agent can re-acquire it. Use unity_open_mcp_search_assets with t:Prefab to locate the prefab asset first.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -2525,7 +2525,7 @@
           "type": "string"
         },
         "parent_path": {
-          "description": "Optional parent hierarchy path \"Root/Parent\" (in the open prefab stage: from the prefab root) — the parent must already exist. Omit to instantiate a root.",
+          "description": "Optional parent hierarchy path \"Root/Parent\" (in a prefab — in_prefab or the open stage — from the prefab root) — the parent must already exist. Omit to instantiate a root.",
           "type": "string"
         },
         "paths_hint": {
@@ -2571,6 +2571,10 @@
           "deprecated": true,
           "x-alias-for": "asset_path",
           "description": "Deprecated alias; use asset_path."
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -3091,7 +3095,7 @@
     }
   },
   "unity_open_mcp_gameobject_create": {
-    "description": "Create a new GameObject, optionally parented under an existing GameObject and pre-positioned. Pass `primitive_type` to spawn a Unity primitive (Cube/Sphere/Capsule/Cylinder/Plane/Quad) with its default renderer+collider. Without parent_path the new root goes to the container scene_path/scene_name names; else, while a prefab stage is open, under the prefab root (unless paths_hint names a loaded scene and not the prefab); else the active scene. Mutating: runs the full gate path; `paths_hint` is the destination scene path (or the prefab asset path in its stage). Returns the new instance's instanceId, name, path, container, transform, and component list so the agent can immediately chain component_add / modify / set_parent without an extra lookup.",
+    "description": "Create a new GameObject, optionally parented under an existing GameObject and pre-positioned. Pass `primitive_type` to spawn a Unity primitive (Cube/Sphere/Capsule/Cylinder/Plane/Quad) with its default renderer+collider. Without parent_path the new root goes to the container in_prefab / scene_path / scene_name names (under the prefab root for a prefab); else, while a prefab stage is open, under the prefab root (unless paths_hint names a loaded scene and not the prefab); else the active scene. Mutating: runs the full gate path; `paths_hint` is the destination scene path (or the prefab asset path). Returns the new instance's instanceId, name, path, container, transform, and component list so the agent can immediately chain component_add / modify / set_parent without an extra lookup.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -3113,7 +3117,7 @@
           "type": "string"
         },
         "parent_path": {
-          "description": "Optional parent hierarchy path \"Root/Parent\" (in the open prefab stage: from the prefab root) — the parent must already exist. Omit to create a root GameObject.",
+          "description": "Optional parent hierarchy path \"Root/Parent\" (in a prefab — in_prefab or the open stage — from the prefab root) — the parent must already exist. Omit to create a root GameObject.",
           "type": "string"
         },
         "paths_hint": {
@@ -3154,6 +3158,10 @@
         "scene_path": {
           "description": "Optional container: a loaded scene's asset path (e.g. 'Assets/Scenes/Bootstrap.unity'; load it with unity_open_mcp_scene_open Additive first) or the open prefab stage's prefab asset path. The new root GameObject goes there, and parent_path is looked up only there.",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -3203,7 +3211,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3215,6 +3223,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -3263,7 +3275,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3275,6 +3287,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -3331,7 +3347,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3343,6 +3359,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "type": "object"
@@ -3392,7 +3412,7 @@
           "type": "object"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name_target.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name_target.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -3515,6 +3535,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -3587,7 +3611,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3599,6 +3623,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -3654,7 +3682,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3666,6 +3694,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -3722,7 +3754,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3734,6 +3766,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -3836,7 +3872,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3853,6 +3889,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "type": "object"
@@ -3963,7 +4003,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -3980,6 +4020,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -6546,7 +6590,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -6558,6 +6602,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -6588,7 +6636,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -6634,6 +6682,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -6713,7 +6765,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -6769,6 +6821,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -6793,7 +6849,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -6844,6 +6900,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -6878,7 +6938,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -6934,6 +6994,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -6958,7 +7022,7 @@
           "type": "number"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -7024,6 +7088,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -7111,7 +7179,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -7142,6 +7210,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "type": "object"
@@ -7168,7 +7240,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -7214,6 +7286,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -7990,7 +8066,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -8002,6 +8078,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "type": "object"
@@ -8067,7 +8147,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -8079,6 +8159,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -8370,6 +8454,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -8384,7 +8472,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8455,6 +8543,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -8469,7 +8561,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8540,6 +8632,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -8555,7 +8651,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8615,6 +8711,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -8630,7 +8730,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8671,6 +8771,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "type": "object"
@@ -8682,7 +8786,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8718,6 +8822,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "type": "object"
@@ -8733,7 +8841,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8779,6 +8887,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -8859,7 +8971,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -8871,6 +8983,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -8893,7 +9009,7 @@
           "type": "integer"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -8983,6 +9099,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -9001,7 +9121,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -9047,6 +9167,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -9130,7 +9254,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -9161,6 +9285,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "type": "object"
@@ -9289,7 +9417,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9301,6 +9429,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -9328,7 +9460,7 @@
           "type": "number"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -9414,6 +9546,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -9565,7 +9701,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9573,6 +9709,10 @@
           "deprecated": true,
           "x-alias-for": "game_object_path",
           "description": "Deprecated alias; use game_object_path."
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -9649,6 +9789,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -9739,7 +9883,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9751,6 +9895,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -9808,7 +9956,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9820,6 +9968,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -9907,7 +10059,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9919,6 +10071,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -9987,7 +10143,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -9999,6 +10155,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -10064,7 +10224,7 @@
         },
         "game_object_path": {
           "type": "string",
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "x-wire-key": "path"
         },
         "target_path": {
@@ -10076,6 +10236,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -10948,6 +11112,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -10973,7 +11141,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -11029,6 +11197,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -11055,7 +11227,7 @@
           "type": "number"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -11104,6 +11276,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -11122,7 +11298,7 @@
           "type": "string"
         },
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -11167,6 +11343,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -11182,7 +11362,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -11231,6 +11411,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -11640,6 +11824,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -11654,7 +11842,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -11718,6 +11906,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -11733,7 +11925,7 @@
       "additionalProperties": false,
       "properties": {
         "game_object_path": {
-          "description": "GameObject hierarchy path, e.g. Root/Child (in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
+          "description": "GameObject hierarchy path, e.g. Root/Child (with in_prefab or in the open prefab stage: from the prefab root). Supply only one host selector: instance_id, game_object_path, or name.",
           "type": "string",
           "x-wire-key": "path"
         },
@@ -11803,6 +11995,10 @@
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
           "type": "string"
+        },
+        "in_prefab": {
+          "type": "string",
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [

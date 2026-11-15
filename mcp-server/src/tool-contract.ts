@@ -90,6 +90,69 @@ const NAME_SELECTOR_OVERRIDES: Record<string, string> = {
   unity_open_mcp_gameobject_modify: "name_target",
 };
 
+// Typed tools that edit a prefab asset in place when the call names it with
+// `in_prefab` (the bridge loads the contents, runs the tool, saves, unloads;
+// see PrefabAssetEdits.cs). Explicit inventory: a tool joins only once its
+// edit is known to stay inside the prefab's contents (no scene, Editor UI,
+// bake or separate-asset side effect).
+export const PREFAB_ASSET_TOOLS = new Set([
+  "unity_open_mcp_gameobject_create",
+  "unity_open_mcp_gameobject_destroy",
+  "unity_open_mcp_gameobject_duplicate",
+  "unity_open_mcp_gameobject_find",
+  "unity_open_mcp_gameobject_modify",
+  "unity_open_mcp_gameobject_set_parent",
+  "unity_open_mcp_component_add",
+  "unity_open_mcp_component_destroy",
+  "unity_open_mcp_component_get",
+  "unity_open_mcp_component_modify",
+  "unity_open_mcp_prefab_instantiate",
+  "unity_open_mcp_ui_canvas_add",
+  "unity_open_mcp_ui_element_add",
+  "unity_open_mcp_ui_layout_group_add",
+  "unity_open_mcp_ui_element_modify",
+  "unity_open_mcp_light_add",
+  "unity_open_mcp_light_set",
+  "unity_open_mcp_light_modify",
+  "unity_open_mcp_reflection_probe_get",
+  "unity_open_mcp_audio_source_add",
+  "unity_open_mcp_audio_source_modify",
+  "unity_open_mcp_particle_system_get",
+  "unity_open_mcp_particle_system_modify",
+  "unity_open_mcp_constraint_add",
+  "unity_open_mcp_lod_group_configure",
+  "unity_open_mcp_lod_add_level",
+  "unity_open_mcp_navigation_surface_add",
+  "unity_open_mcp_navigation_set_bake_settings",
+  "unity_open_mcp_navigation_modifier_add",
+  "unity_open_mcp_navigation_modifier_volume_add",
+  "unity_open_mcp_navigation_link_add",
+  "unity_open_mcp_navigation_agent_add",
+  "unity_open_mcp_navigation_get",
+  "unity_open_mcp_navigation_modify",
+  "unity_open_mcp_splines_container_create",
+  "unity_open_mcp_splines_add_knot",
+  "unity_open_mcp_splines_set_knot",
+  "unity_open_mcp_splines_set_tangent_mode",
+  "unity_open_mcp_splines_evaluate",
+  "unity_open_mcp_splines_get_knots",
+  "unity_open_mcp_splines_modify",
+  "unity_open_mcp_cinemachine_create_camera",
+  "unity_open_mcp_cinemachine_set_targets",
+  "unity_open_mcp_cinemachine_set_lens",
+  "unity_open_mcp_cinemachine_set_body",
+  "unity_open_mcp_cinemachine_set_noise",
+  "unity_open_mcp_tilemap_create",
+  "unity_open_mcp_tilemap_set_tile",
+  "unity_open_mcp_tilemap_box_fill",
+]);
+
+const IN_PREFAB_DESCRIPTION =
+  "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, " +
+  "runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths " +
+  "start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result " +
+  "do not outlive the call. Refused while the prefab is open in a stage with unsaved changes.";
+
 const SCENE_PATH_DESCRIPTION =
   "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab " +
   "asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; " +
@@ -139,7 +202,9 @@ export function canonicalSchema(name: string, input: Schema): Tool["inputSchema"
     const nameSelector = NAME_SELECTOR_OVERRIDES[name] ?? "name";
     if (nameSelector !== "name")
       schema["x-gameobject-selectors"] = DEFAULT_GAMEOBJECT_SELECTORS.map(k => k === "name" ? nameSelector : k).filter(k => props[k]);
-    const stagePaths = name.startsWith("unity_senses_") ? "" : " (in the open prefab stage: from the prefab root)";
+    const stagePaths = name.startsWith("unity_senses_") ? ""
+      : PREFAB_ASSET_TOOLS.has(name) ? " (with in_prefab or in the open prefab stage: from the prefab root)"
+      : " (in the open prefab stage: from the prefab root)";
     props.game_object_path.description = `GameObject hierarchy path, e.g. Root/Child${stagePaths}. Supply only one host selector: instance_id, game_object_path, or ${nameSelector}.`;
   }
   // One container selector for every typed tool that looks a GameObject up by
@@ -148,6 +213,9 @@ export function canonicalSchema(name: string, input: Schema): Tool["inputSchema"
   if ((props.game_object_path || props.parent_path) && !props.scene_path && !schema["x-project-command"] &&
       !name.startsWith("unity_senses_"))
     props.scene_path = { type: "string", description: SCENE_PATH_DESCRIPTION };
+  // The prefab-asset container: the bridge loads / saves / unloads around the call.
+  if (PREFAB_ASSET_TOOLS.has(name) && !props.in_prefab)
+    props.in_prefab = { type: "string", description: IN_PREFAB_DESCRIPTION };
   if (props.component_type) props.component_type.description = "Component type (full name preferred); alternative to component_instance_id.";
   widenInstanceIds(schema);
   return schema as Tool["inputSchema"];

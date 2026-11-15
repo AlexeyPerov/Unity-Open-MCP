@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ALL_TOOLS } from "./tools/index.js";
-import { validateSchema, wireArguments } from "./tool-contract.js";
+import { PREFAB_ASSET_TOOLS, validateSchema, wireArguments } from "./tool-contract.js";
 import { exampleFor, discoverTools } from "./capabilities/discovery.js";
 import { ToolSessionState } from "./tool-session-state.js";
 const tool = (suffix: string) => ALL_TOOLS.find(t => t.name === `unity_open_mcp_${suffix}` || t.name === `unity_senses_${suffix}`)!;
@@ -206,4 +206,26 @@ test("validateSchema: a waived null does not count as a supplied selector or ali
   const schema = ALL_TOOLS.find(t => t.name === "unity_open_mcp_component_get")!.inputSchema;
   assert.deepEqual(validateSchema({ game_object_path: "Root/Child", path: null, component_type: "UnityEngine.Transform" }, schema), []);
   assert.deepEqual(validateSchema({ instance_id: "12", name: null, type_name: null, component_type: "UnityEngine.Transform" }, schema), []);
+});
+
+test("in_prefab is declared exactly by the tools that edit a prefab asset in place", () => {
+  const names = new Set(ALL_TOOLS.map(t => t.name));
+  for (const name of PREFAB_ASSET_TOOLS) assert.ok(names.has(name), `${name} is not a registered tool`);
+  for (const t of ALL_TOOLS) {
+    const declared = Boolean(t.inputSchema.properties?.in_prefab);
+    assert.equal(declared, PREFAB_ASSET_TOOLS.has(t.name), t.name);
+    if (!declared) continue;
+    // A GameObject tool: its host or parent resolves inside the prefab.
+    const props = t.inputSchema.properties!;
+    assert.ok(props.game_object_path || props.parent_path, `${t.name} has no GameObject locator`);
+    assert.ok(props.scene_path, `${t.name} also takes the scene_path container`);
+  }
+  // A prefab-asset edit validates with the canonical locators.
+  const args = { in_prefab: "Assets/UI/Shop.prefab", game_object_path: "Shop/Header", component_type: "UnityEngine.RectTransform",
+    fields: [{ property_path: "m_SizeDelta", value: [100, 40] }], paths_hint: ["Assets/UI/Shop.prefab"] };
+  assert.deepEqual(validateSchema(args, tool("component_modify").inputSchema), []);
+  assert.equal(wireArguments(args, tool("component_modify").inputSchema).in_prefab, "Assets/UI/Shop.prefab");
+  // The prefab being instantiated and the prefab nested into stay distinct keys.
+  const nest = tool("prefab_instantiate").inputSchema.properties as Record<string, Record<string, unknown>>;
+  assert.ok(nest.asset_path && nest.in_prefab && nest.prefab_path?.["x-alias-for"] === "asset_path");
 });

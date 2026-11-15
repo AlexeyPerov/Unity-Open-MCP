@@ -15,14 +15,17 @@ namespace UnityOpenMcpBridge.TypedTools
     //
     // Resolve targets by instance_id (canonical) > path > name via
     // TypedTargets — same addressing model as spatial-query.ts so agents can
-    // pass the same handle across typed tools. Targets live in a loaded scene
-    // or in the open prefab stage (see TypedTargets for which container a path
-    // resolves in). Mutations register Undo and mark the owning scene (or the
-    // stage) dirty so Unity knows to save.
+    // pass the same handle across typed tools. Targets live in a loaded scene,
+    // in the open prefab stage, or in the prefab asset in_prefab names (see
+    // TypedTargets for which container a path resolves in). Mutations
+    // register Undo and mark the owning scene (or the stage) dirty so Unity
+    // knows to save; an in_prefab asset is saved around the call
+    // (PrefabAssetEdits).
     //
     // paths_hint is the path of the container that holds (or will hold) the
     // GameObject: the scene path, or the prefab asset path while editing in
-    // its stage. It also narrows a path that matches in several containers.
+    // its stage or in place. It also narrows a path that matches in several
+    // containers.
     public static class GameObjectsTools
     {
         public static ToolDispatchResult Create(string body)
@@ -100,7 +103,8 @@ namespace UnityOpenMcpBridge.TypedTools
             var resolved = ResolveInstance(body);
             if (!resolved.Ok) return resolved.Result;
             var go = resolved.GameObject;
-            if (TypedTargets.IsStageRoot(go)) return StageRootRefusal(go, "destroyed");
+            var rootOf = TypedTargets.PrefabRootContainer(go);
+            if (rootOf != null) return PrefabRootRefusal(go, rootOf, "destroyed");
 
             // B23 — capture the owning scene BEFORE the destroy: reading
             // go.scene after Undo.DestroyObjectImmediate is unreliable, so the
@@ -143,7 +147,8 @@ namespace UnityOpenMcpBridge.TypedTools
             var resolved = ResolveInstance(body);
             if (!resolved.Ok) return resolved.Result;
             var go = resolved.GameObject;
-            if (TypedTargets.IsStageRoot(go)) return StageRootRefusal(go, "duplicated");
+            var rootOf = TypedTargets.PrefabRootContainer(go);
+            if (rootOf != null) return PrefabRootRefusal(go, rootOf, "duplicated");
 
             GameObject clone;
             // Track whether the clone retained its prefab connection, so the
@@ -271,7 +276,7 @@ namespace UnityOpenMcpBridge.TypedTools
             var matches = new List<GameObject>();
             foreach (var container in containers)
             {
-                var roots = container.Kind == TargetContainerKind.PrefabStage
+                var roots = container.IsPrefab
                     ? new[] { container.PrefabRoot }
                     : container.Scene.GetRootGameObjects();
                 foreach (var root in roots)
@@ -787,25 +792,26 @@ namespace UnityOpenMcpBridge.TypedTools
                     "Pass an empty parent_path with parent_instance_id=0 to detach to scene root.");
             }
 
-            // A prefab stage holds one prefab: its root stays the root, and
-            // nothing moves between the stage and a scene (a detached object
-            // or one moved out would never be saved with the prefab).
-            if (TypedTargets.IsStageRoot(go)) return StageRootRefusal(go, "reparented");
+            // A prefab container (the stage, or an in_prefab asset) holds one
+            // prefab: its root stays the root, and nothing moves between it
+            // and a scene (a detached object or one moved out would never be
+            // saved with the prefab).
+            var rootOf = TypedTargets.PrefabRootContainer(go);
+            if (rootOf != null) return PrefabRootRefusal(go, rootOf, "reparented");
             var goContainer = TypedTargets.ContainerOf(go);
-            bool goInStage = goContainer != null && goContainer.Kind == TargetContainerKind.PrefabStage;
-            if (goInStage && detachToRoot)
+            bool goInPrefab = goContainer != null && goContainer.IsPrefab;
+            if (goInPrefab && detachToRoot)
                 return ToolDispatchResult.Fail("invalid_parameter",
-                    $"'{go.name}' is in the prefab stage of '{goContainer.AssetPath}'; detaching it to the stage " +
-                    "root would take it out of the prefab. Parent it under the prefab root instead.");
+                    $"'{go.name}' is in {goContainer.Describe()}; detaching it to the root would take it out of the " +
+                    "prefab. Parent it under the prefab root instead.");
             if (parentGo != null)
             {
                 var parentContainer = TypedTargets.ContainerOf(parentGo);
-                bool parentInStage = parentContainer != null && parentContainer.Kind == TargetContainerKind.PrefabStage;
-                if (goInStage != parentInStage)
+                if (!Equals(goContainer, parentContainer) && (goInPrefab || (parentContainer != null && parentContainer.IsPrefab)))
                     return ToolDispatchResult.Fail("invalid_parameter",
                         $"'{go.name}' is in {goContainer?.Describe() ?? "no editable container"} and the new parent " +
                         $"'{parentGo.name}' in {parentContainer?.Describe() ?? "no editable container"}; GameObjects do " +
-                        "not move between a prefab stage and a scene.");
+                        "not move between a prefab and a scene.");
             }
 
             if (parentGo != null)
@@ -883,13 +889,16 @@ namespace UnityOpenMcpBridge.TypedTools
             return new InstanceResolve { Ok = true, GameObject = go, Name = go.name, Container = target.Container };
         }
 
-        // The refusal for an edit that would leave a prefab stage without its
-        // single root.
-        internal static ToolDispatchResult StageRootRefusal(GameObject go, string verb)
+        // The refusal for an edit that would leave a prefab (in its stage, or
+        // an in_prefab asset) without its single root.
+        internal static ToolDispatchResult PrefabRootRefusal(GameObject go, TargetContainer container, string verb)
         {
-            var container = TypedTargets.ContainerOf(go);
+            if (container.Kind == TargetContainerKind.PrefabAsset)
+                return ToolDispatchResult.Fail("prefab_root_protected",
+                    $"'{go.name}' is the root of {container.Describe()}. A prefab has exactly one root, so it cannot " +
+                    $"be {verb} inside the prefab; edit its children, or the prefab's instances in a scene.");
             return ToolDispatchResult.Fail("stage_root_protected",
-                $"'{go.name}' is the root of the prefab open in {container?.Describe() ?? "the prefab stage"}. " +
+                $"'{go.name}' is the root of the prefab open in {container.Describe()}. " +
                 $"A prefab has exactly one root, so it cannot be {verb} inside its stage; edit its children, or " +
                 "close the stage (unity_open_mcp_prefab_close) and work on the prefab asset.");
         }

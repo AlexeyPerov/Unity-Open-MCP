@@ -57,7 +57,9 @@ Typed GameObject tools never resolve a host id with the helper alone: they go
 through `TypedTargets` (`packages/bridge/Editor/TypedTools/TypedTargets.cs`),
 which accepts only a GameObject of a loaded scene or of the open prefab stage
 and refuses an object inside an asset on disk, of another preview scene, or of a
-non-GameObject type.
+non-GameObject type. A call that names `in_prefab` resolves ids only inside the
+prefab contents loaded for that call; those ids die when the contents unload, so
+its results mark them `instanceIds: "ephemeral"`.
 
 ### How this shows up in the source
 

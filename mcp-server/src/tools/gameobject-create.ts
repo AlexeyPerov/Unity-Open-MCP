@@ -7,10 +7,11 @@ export const gameobjectCreate = makeTool(
   "unity_open_mcp_gameobject_create",
   "Create a new GameObject, optionally parented under an existing GameObject and pre-positioned. Pass " +
     "`primitive_type` to spawn a Unity primitive (Cube/Sphere/Capsule/Cylinder/Plane/Quad) with its default " +
-    "renderer+collider. Without parent_path the new root goes to the container scene_path/scene_name names; " +
-    "else, while a prefab stage is open, under the prefab root (unless paths_hint names a loaded scene and not " +
-    "the prefab); else the active scene. Mutating: runs the full gate path; `paths_hint` is the destination " +
-    "scene path (or the prefab asset path in its stage). Returns the new instance's instanceId, name, path, " +
+    "renderer+collider. Without parent_path the new root goes to the container in_prefab / scene_path / " +
+    "scene_name names (under the prefab root for a prefab); else, while a prefab stage is open, under the " +
+    "prefab root (unless paths_hint names a loaded scene and not the prefab); else the active scene. Mutating: " +
+    "runs the full gate path; `paths_hint` is the destination scene path (or the prefab asset path). Returns " +
+    "the new instance's instanceId, name, path, " +
     "container, transform, and component list so the agent can immediately chain component_add / modify / " +
     "set_parent without an extra lookup.",
   {
@@ -30,8 +31,8 @@ export const gameobjectCreate = makeTool(
           parent_path: {
             type: "string",
             description:
-              "Optional parent hierarchy path \"Root/Parent\" (in the open prefab stage: from the prefab root) " +
-              "— the parent must already exist. Omit to create a root GameObject.",
+              "Optional parent hierarchy path \"Root/Parent\" (in a prefab — in_prefab or the open stage — from " +
+              "the prefab root) — the parent must already exist. Omit to create a root GameObject.",
           },
           scene_path: {
             type: "string",

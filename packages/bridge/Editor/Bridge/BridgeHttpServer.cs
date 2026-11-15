@@ -1484,6 +1484,8 @@ namespace UnityOpenMcpBridge
             if (mutation == null || !(mutation.Success || mutation.PartialCommit) || result.EffectiveReadOnly) return;
             if (result.DirtyScenePaths == null)
                 result.DirtyScenePaths = MutationFootprint.Dirtied(dirtyBefore, scope.Touched);
+            var prefabAssets = PrefabAssetEdits.Advisory(scope.PrefabAssets);
+            if (prefabAssets != null) result.AgentNextSteps = AppendStep(result.AgentNextSteps, prefabAssets);
             if (result.SkippedReason == MutationFootprint.StageEditSkipReason) return;
             var stage = MutationFootprint.EditedStage(out _);
             if (stage != null)
@@ -1521,6 +1523,11 @@ namespace UnityOpenMcpBridge
             var busy = ProjectCommandJobs.Refuse(contract);
             if (busy != null) return GatePolicy.Skipped(busy, "request_rejected");
             if (contract.Refusal != null) return GatePolicy.Skipped(contract.Refusal, "request_rejected");
+            // The gate validates the prefab assets the call edits in place
+            // (in_prefab) even when paths_hint leaves them out.
+            pathsHint = PrefabAssetEdits.GateScope(pathsHint, contract.BatchPlan != null
+                ? contract.BatchPlan.Steps.ConvertAll(step => step.ParamsBody)
+                : new List<string> { body });
             if (contract.BatchPlan != null)
                 return BatchExecuteGateRunner.Execute(body, gateMode, pathsHint, contract.BatchPlan);
             bool isMutating = contract.IsMutating;
@@ -1578,11 +1585,13 @@ namespace UnityOpenMcpBridge
             if (BridgeBatchSchemas.ByTool.TryGetValue(toolName, out var wireSchema))
                 body = BatchSchemaValidator.WireArguments(body, wireSchema);
             // The call's container request (scene_path / scene_name /
-            // paths_hint; a batch step inherits what it leaves out) for the
-            // typed tools that receive parameters instead of the body, and the
-            // record of the containers this call resolved targets in.
+            // in_prefab / paths_hint; a batch step inherits what it leaves
+            // out) for the typed tools that receive parameters instead of the
+            // body, and the record of the containers this call resolved
+            // targets in. A call that names in_prefab runs against that
+            // prefab asset's contents, loaded (and saved) around it.
             using (TargetScope.Enter(body))
-                return DispatchToolCore(toolName, body);
+                return PrefabAssetEdits.Dispatch(toolName, body, () => DispatchToolCore(toolName, body));
         }
 
         private static ToolDispatchResult DispatchToolCore(string toolName, string body)

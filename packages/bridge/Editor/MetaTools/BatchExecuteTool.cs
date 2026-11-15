@@ -524,6 +524,10 @@ namespace UnityOpenMcpBridge.MetaTools
             var label = BuildRunLabel(steps);
             BridgeBatchRunHistory.BeginRun(runId, "mcp", label);
 
+            // Consecutive steps that name the same in_prefab share one load of
+            // that prefab asset and one save after the last of them; a failed
+            // step discards its run's unsaved edits (PrefabAssetEdits).
+            var prefabEdits = UnityOpenMcpBridge.TypedTools.PrefabAssetEdits.BeginBatch();
             try
             {
                 // --- Sequential dispatch loop --------------------------------
@@ -564,7 +568,9 @@ namespace UnityOpenMcpBridge.MetaTools
                         // paths_hint/gate are NOT re-enforced per step (the
                         // batch owns one gate cycle for the whole sequence —
                         // see BatchExecuteGateRunner).
-                        stepResult = BridgeHttpServer.DispatchTool(step.Tool, WithBatchScope(step.Tool, step.ParamsBody, batchScope));
+                        var stepBody = WithBatchScope(step.Tool, step.ParamsBody, batchScope);
+                        prefabEdits.BeforeStep(i, stepBody);
+                        stepResult = BridgeHttpServer.DispatchTool(step.Tool, stepBody);
                     }
                     catch (System.Exception e)
                     {
@@ -612,6 +618,29 @@ namespace UnityOpenMcpBridge.MetaTools
                     }
                 }
 
+                // Write (or drop) the prefab assets the last steps edited. A
+                // run whose edits were not written committed nothing, and a
+                // run that could not be saved fails its last step.
+                var prefabAssets = prefabEdits.Finish();
+                foreach (var outcome in prefabAssets)
+                {
+                    if (outcome.Saved || outcome.Steps == null) continue;
+                    foreach (var index in outcome.Steps)
+                        if (index >= 0 && index < results.Count && results[index].Status == "success" && steps[index].IsMutating)
+                            committedCount--;
+                    if (outcome.ErrorCode == null || outcome.Steps.Count == 0) continue;
+                    var last = outcome.Steps[outcome.Steps.Count - 1];
+                    if (last < 0 || last >= results.Count || results[last].Status != "success") continue;
+                    var failed = results[last];
+                    failed.Status = "failed";
+                    failed.Output = null;
+                    failed.ErrorCode = outcome.ErrorCode;
+                    failed.ErrorMessage = outcome.Reason;
+                    results[last] = failed;
+                    successCount--;
+                    failureCount++;
+                }
+
                 sw.Stop();
 
                 // Batch-level success = every step succeeded. A failed/skipped
@@ -633,28 +662,28 @@ namespace UnityOpenMcpBridge.MetaTools
                 // so there is nothing to health-check.
                 bool batchSuccess = failureCount == 0;
                 string batchOutput = BuildBatchOutput(
-                    batchSuccess, successCount, failureCount, failFast, results, sw.ElapsedMilliseconds);
+                    batchSuccess, successCount, failureCount, failFast, results, sw.ElapsedMilliseconds, prefabAssets);
                 if (batchSuccess)
                 {
                     return ToolDispatchResult.Ok(batchOutput);
                 }
+                var failureMessage = failureCount + " batch step(s) failed; inspect batch.results[] for per-step " +
+                    "status and error detail. Successful steps before the failure are committed " +
+                    "(v1 does not roll them back) — undo with a single editor_undo if needed.";
+                if (prefabAssets.Exists(o => !o.Saved && o.Mutating))
+                    failureMessage += " Prefab assets edited in place (in_prefab) are the exception: a run of steps " +
+                        "on one prefab is written only when none of them failed, so batch.prefabAssets[] lists " +
+                        "saved: false for the runs that were dropped.";
                 if (committedCount > 0)
                 {
-                    return ToolDispatchResult.PartialFailure(
-                        "batch_partial_failure",
-                        failureCount + " batch step(s) failed; inspect batch.results[] for per-step " +
-                        "status and error detail. Successful steps before the failure are committed " +
-                        "(v1 does not roll them back) — undo with a single editor_undo if needed.",
-                        batchOutput);
+                    return ToolDispatchResult.PartialFailure("batch_partial_failure", failureMessage, batchOutput);
                 }
-                return new ToolDispatchResult(
-                    false, batchOutput, "batch_partial_failure",
-                    failureCount + " batch step(s) failed; inspect batch.results[] for per-step " +
-                    "status and error detail. Successful steps before the failure are committed " +
-                    "(v1 does not roll them back) — undo with a single editor_undo if needed.");
+                return new ToolDispatchResult(false, batchOutput, "batch_partial_failure", failureMessage);
             }
             finally
             {
+                // Unloads (without saving) a prefab still open after an exception.
+                prefabEdits.Dispose();
                 BridgeBatchRunHistory.CompleteRun(runId);
             }
         }
@@ -716,7 +745,8 @@ namespace UnityOpenMcpBridge.MetaTools
         //   }
         private static string BuildBatchOutput(
             bool success, int successCount, int failureCount, bool failFast,
-            List<BatchStepResult> results, long durationMs)
+            List<BatchStepResult> results, long durationMs,
+            List<UnityOpenMcpBridge.TypedTools.PrefabAssetEditOutcome> prefabAssets = null)
         {
             var sb = new StringBuilder(1024);
             sb.Append("{\"batch\":{");
@@ -731,7 +761,20 @@ namespace UnityOpenMcpBridge.MetaTools
                 if (i > 0) sb.Append(',');
                 results[i].WriteJson(sb);
             }
-            sb.Append("]}}");
+            sb.Append(']');
+            // One entry per load / save cycle of a prefab asset edited in
+            // place (in_prefab): its steps, and whether it was written.
+            if (prefabAssets != null && prefabAssets.Count > 0)
+            {
+                sb.Append(",\"prefabAssets\":[");
+                for (int i = 0; i < prefabAssets.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    prefabAssets[i].AppendJson(sb);
+                }
+                sb.Append(']');
+            }
+            sb.Append("}}");
             return sb.ToString();
         }
 

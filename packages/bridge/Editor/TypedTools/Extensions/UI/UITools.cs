@@ -96,11 +96,13 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
 
             // feedback-01-08-glm §6 — optional explicit container for the new
             // Canvas root + EventSystem: scene_path / scene_name name a loaded
-            // scene, or the open prefab stage by its prefab asset path. Without
+            // scene, or the open prefab stage by its prefab asset path; the
+            // call's in_prefab names a prefab asset edited in place. Without
             // it the new root goes where every typed creator puts one (the open
             // prefab stage under its root, else the active scene), and
             // EnsureEventSystem's dedup is scoped to the canvas's scene.
-            var request = new UnityOpenMcpBridge.TypedTools.TargetRequest(scene_path, scene_name, paths_hint);
+            var request = new UnityOpenMcpBridge.TypedTools.TargetRequest(scene_path, scene_name, paths_hint)
+                .Over(UnityOpenMcpBridge.TypedTools.TargetRequest.Ambient);
             UnityOpenMcpBridge.TypedTools.TargetContainers.Named(request, out var namedFailure);
             if (namedFailure != null) return namedFailure.ToRefusalJson();
 
@@ -165,12 +167,12 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             // feedback-01-08-glm §6 — scope the dedup to the canvas's scene so a
             // stray EventSystem is not created in (or stolen from) a different
             // loaded scene, and place the new EventSystem in that scene.
-            // A prefab gets no EventSystem: in its stage one would be a second
-            // root outside the prefab contents, never saved with it.
+            // A prefab gets no EventSystem: in its stage (or its contents
+            // loaded for in_prefab) one would be a second root outside the
+            // prefab, never saved with it.
             var hostContainer = UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerOf(host);
-            bool inPrefabStage = hostContainer != null &&
-                hostContainer.Kind == UnityOpenMcpBridge.TypedTools.TargetContainerKind.PrefabStage;
-            bool addedEventSystem = !inPrefabStage && EnsureEventSystem(host.scene);
+            bool inPrefab = hostContainer != null && hostContainer.IsPrefab;
+            bool addedEventSystem = !inPrefab && EnsureEventSystem(host.scene);
 
             EditorUtility.SetDirty(host);
 

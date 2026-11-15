@@ -19,17 +19,18 @@ namespace UnityOpenMcpBridge.TypedTools
         /// preview scene. Paths are relative to the prefab root.</summary>
         PrefabStage,
 
-        // A further kind fits here without changing the resolver: a prefab
-        // asset loaded for one call through PrefabUtility.LoadPrefabContents
-        // (addressed by its asset path, no stage). It carries the same
-        // Scene + PrefabRoot + AssetPath triple as PrefabStage; only its
-        // lifecycle (load, save, unload around the call) differs.
+        /// <summary>A prefab asset edited in place without a stage: the call
+        /// names it with in_prefab, and the bridge loads its contents
+        /// (PrefabUtility.LoadPrefabContents), runs the tool, saves the asset
+        /// and unloads the contents (see <see cref="PrefabAssetEdits"/>).
+        /// Paths are relative to the prefab root.</summary>
+        PrefabAsset,
     }
 
     /// <summary>
-    /// One place GameObjects live: a loaded scene or the open prefab stage.
-    /// Equality is by kind + scene handle, so two lookups of the same scene
-    /// compare equal.
+    /// One place GameObjects live: a loaded scene, the open prefab stage, or
+    /// a prefab asset loaded for an in_prefab edit. Equality is by kind +
+    /// scene handle, so two lookups of the same scene compare equal.
     /// </summary>
     public sealed class TargetContainer : IEquatable<TargetContainer>
     {
@@ -48,14 +49,19 @@ namespace UnityOpenMcpBridge.TypedTools
         public Scene Scene { get; }
 
         /// <summary>The scene's asset path ("" for an untitled scene), or the
-        /// prefab asset path of the stage.</summary>
+        /// prefab asset path of the stage / the in_prefab asset.</summary>
         public string AssetPath { get; }
 
         /// <summary>The prefab contents root; null for a scene.</summary>
         public GameObject PrefabRoot { get; }
 
-        /// <summary>The wire token: "scene" or "prefab_stage".</summary>
-        public string KindToken => Kind == TargetContainerKind.PrefabStage ? "prefab_stage" : "scene";
+        /// <summary>True for the prefab stage and a prefab asset: the
+        /// container holds one prefab's contents under <see cref="PrefabRoot"/>.</summary>
+        public bool IsPrefab => Kind != TargetContainerKind.Scene;
+
+        /// <summary>The wire token: "scene", "prefab_stage" or "prefab_asset".</summary>
+        public string KindToken => Kind == TargetContainerKind.PrefabStage ? "prefab_stage"
+            : Kind == TargetContainerKind.PrefabAsset ? "prefab_asset" : "scene";
 
         internal static TargetContainer ForScene(Scene scene) =>
             new TargetContainer(TargetContainerKind.Scene, scene, scene.path, null);
@@ -63,11 +69,16 @@ namespace UnityOpenMcpBridge.TypedTools
         internal static TargetContainer ForStage(PrefabStage stage) =>
             new TargetContainer(TargetContainerKind.PrefabStage, stage.scene, stage.assetPath, stage.prefabContentsRoot);
 
+        internal static TargetContainer ForPrefabAsset(string assetPath, GameObject contentsRoot) =>
+            new TargetContainer(TargetContainerKind.PrefabAsset, contentsRoot.scene, assetPath, contentsRoot);
+
         /// <summary>Prose name for messages: scene 'Assets/A.unity', the
-        /// unsaved scene 'Untitled', the prefab stage of 'Assets/P.prefab'.</summary>
+        /// unsaved scene 'Untitled', the prefab stage of 'Assets/P.prefab',
+        /// the prefab asset 'Assets/P.prefab'.</summary>
         public string Describe()
         {
             if (Kind == TargetContainerKind.PrefabStage) return "the prefab stage of '" + AssetPath + "'";
+            if (Kind == TargetContainerKind.PrefabAsset) return "the prefab asset '" + AssetPath + "'";
             if (!string.IsNullOrEmpty(AssetPath)) return "scene '" + AssetPath + "'";
             return string.IsNullOrEmpty(Scene.name) ? "the untitled scene" : "the unsaved scene '" + Scene.name + "'";
         }
@@ -118,25 +129,30 @@ namespace UnityOpenMcpBridge.TypedTools
 
     /// <summary>
     /// The caller's say in which container a path resolves: the explicit
-    /// container (`scene_path` / `scene_name`) and `paths_hint`.
+    /// container (`scene_path` / `scene_name`, or `in_prefab` for a prefab
+    /// asset edited in place) and `paths_hint`.
     /// </summary>
     public sealed class TargetRequest
     {
         public static readonly TargetRequest None = new TargetRequest(null, null, null);
 
-        public TargetRequest(string scenePath, string sceneName, IReadOnlyList<string> pathsHint)
+        public TargetRequest(string scenePath, string sceneName, IReadOnlyList<string> pathsHint, string prefabPath = null)
         {
             ScenePath = string.IsNullOrWhiteSpace(scenePath) ? null : scenePath.Trim();
             SceneName = string.IsNullOrWhiteSpace(sceneName) ? null : sceneName.Trim();
+            PrefabPath = string.IsNullOrWhiteSpace(prefabPath) ? null : TargetContainer.Normalize(prefabPath);
             PathsHint = pathsHint;
         }
 
         public string ScenePath { get; }
         public string SceneName { get; }
+
+        /// <summary>The prefab asset `in_prefab` names (edited in place, no stage).</summary>
+        public string PrefabPath { get; }
         public IReadOnlyList<string> PathsHint { get; }
 
         /// <summary>True when the call named its container explicitly.</summary>
-        public bool NamesContainer => ScenePath != null || SceneName != null;
+        public bool NamesContainer => ScenePath != null || SceneName != null || PrefabPath != null;
 
         /// <summary>The request a typed tool's body carries. What the body
         /// leaves out is taken from the enclosing call (a batch step inherits
@@ -158,9 +174,11 @@ namespace UnityOpenMcpBridge.TypedTools
             if (string.IsNullOrWhiteSpace(body) || !body.TrimStart().StartsWith("{")) return None;
             var scenePath = TopString(body, "scene_path") ?? TopString(body, "scenePath");
             var sceneName = TopString(body, "scene_name") ?? TopString(body, "sceneName");
+            var prefabPath = TopString(body, PrefabAssetEdits.Key);
             var hint = JsonBody.GetStringArray(JsonBody.TopLevelField(body, "paths_hint"), "paths_hint");
-            if (scenePath == null && sceneName == null && (hint == null || hint.Length == 0)) return None;
-            return new TargetRequest(scenePath, sceneName, hint);
+            if (scenePath == null && sceneName == null && string.IsNullOrWhiteSpace(prefabPath) &&
+                (hint == null || hint.Length == 0)) return None;
+            return new TargetRequest(scenePath, sceneName, hint, prefabPath);
         }
 
         internal TargetRequest Over(TargetRequest outer)
@@ -168,8 +186,9 @@ namespace UnityOpenMcpBridge.TypedTools
             if (outer == null || ReferenceEquals(outer, None)) return this;
             var scenePath = NamesContainer ? ScenePath : outer.ScenePath;
             var sceneName = NamesContainer ? SceneName : outer.SceneName;
+            var prefabPath = NamesContainer ? PrefabPath : outer.PrefabPath;
             var hint = PathsHint != null && PathsHint.Count > 0 ? PathsHint : outer.PathsHint;
-            return new TargetRequest(scenePath, sceneName, hint);
+            return new TargetRequest(scenePath, sceneName, hint, prefabPath);
         }
 
         private static string TopString(string body, string key) =>
@@ -189,6 +208,7 @@ namespace UnityOpenMcpBridge.TypedTools
         public const string NotAGameObject = "not_a_gameobject";
         public const string SceneNotFound = "scene_not_found";
         public const string ContainerRequired = "container_required";
+        public const string InPrefabUnsupported = "in_prefab_unsupported";
 
         public ResolveFailure(string code, string message, string detailJson = null, string[] nextSteps = null)
         {
@@ -269,6 +289,7 @@ namespace UnityOpenMcpBridge.TypedTools
         private static TargetScope s_Current;
         private readonly TargetScope _outer;
         private readonly List<TargetContainer> _touched = new List<TargetContainer>();
+        private readonly List<PrefabAssetEditOutcome> _prefabAssets = new List<PrefabAssetEditOutcome>();
         private bool _disposed;
 
         private TargetScope(TargetRequest request, TargetScope outer)
@@ -282,6 +303,10 @@ namespace UnityOpenMcpBridge.TypedTools
         internal TargetRequest Request { get; }
 
         internal IReadOnlyList<TargetContainer> Touched => _touched;
+
+        /// <summary>The prefab assets this call edited in place (in_prefab),
+        /// one entry per load / save / unload cycle.</summary>
+        internal IReadOnlyList<PrefabAssetEditOutcome> PrefabAssets => _prefabAssets;
 
         internal static TargetScope Enter(string body)
         {
@@ -305,13 +330,23 @@ namespace UnityOpenMcpBridge.TypedTools
             if (!_touched.Contains(container)) _touched.Add(container);
         }
 
+        internal static void NotePrefabAsset(PrefabAssetEditOutcome outcome)
+        {
+            var scope = s_Current;
+            if (scope == null || outcome == null) return;
+            scope._prefabAssets.Add(outcome);
+        }
+
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
             if (ReferenceEquals(s_Current, this)) s_Current = _outer;
             if (_outer != null)
+            {
                 foreach (var c in _touched) _outer.Add(c);
+                _outer._prefabAssets.AddRange(_prefabAssets);
+            }
         }
     }
 
@@ -364,6 +399,8 @@ namespace UnityOpenMcpBridge.TypedTools
             if (EditorUtility.IsPersistent(go)) { reason = "persistent"; return null; }
             var scene = go.scene;
             if (!scene.IsValid()) { reason = "preview_scene"; return null; }
+            var edit = PrefabAssetEdits.Current;
+            if (edit != null && scene == edit.Container.Scene) return edit.Container;
             var stage = OpenStage();
             if (stage != null && scene == stage.scene)
             {
@@ -382,14 +419,26 @@ namespace UnityOpenMcpBridge.TypedTools
         internal static TargetContainer Of(GameObject go) => Of(go, out _);
 
         /// <summary>The container a call names with scene_path / scene_name:
-        /// a loaded scene, or the open prefab stage by its prefab asset path.
-        /// Null with <paramref name="failure"/> set when the call names one
-        /// that is not loaded / open; null without a failure when it names
-        /// none.</summary>
+        /// a loaded scene, or the open prefab stage by its prefab asset path;
+        /// or with in_prefab: the prefab asset loaded for this call. Null with
+        /// <paramref name="failure"/> set when the call names one that is not
+        /// loaded / open; null without a failure when it names none.</summary>
         internal static TargetContainer Named(TargetRequest request, out ResolveFailure failure)
         {
             failure = null;
             if (request == null || !request.NamesContainer) return null;
+
+            if (request.PrefabPath != null)
+            {
+                var edit = PrefabAssetEdits.Current;
+                if (edit != null && PrefabAssetEdits.SamePath(edit.AssetPath, request.PrefabPath))
+                    return edit.Container;
+                failure = new ResolveFailure(ResolveFailure.InPrefabUnsupported,
+                    $"in_prefab '{request.PrefabPath}' is not loaded for this call: this tool does not edit a prefab " +
+                    "asset in place. Use a tool that declares in_prefab, or open the prefab with " +
+                    "unity_open_mcp_prefab_open and address the stage object.");
+                return null;
+            }
 
             if (request.ScenePath != null)
             {
@@ -402,7 +451,8 @@ namespace UnityOpenMcpBridge.TypedTools
                 if (scene.IsValid() && scene.isLoaded) return TargetContainer.ForScene(scene);
                 failure = new ResolveFailure(ResolveFailure.SceneNotFound,
                     wanted.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase)
-                        ? $"scene_path '{wanted}' names a prefab that is not open in a prefab stage. Open it with " +
+                        ? $"scene_path '{wanted}' names a prefab that is not open in a prefab stage. To edit the " +
+                          "prefab asset in place, pass it as in_prefab instead; or open it with " +
                           "unity_open_mcp_prefab_open first, or name a loaded scene."
                         : $"Target scene not found / not loaded for scene_path '{wanted}'. Use " +
                           "unity_open_mcp_scene_open (OpenSceneMode.Additive) to load it first, or omit scene_path.",
