@@ -96,7 +96,11 @@ namespace UnityOpenMcpBridge
         //       reloadTiming ("after_response" | "after_play_mode"); until the
         //       reload starts the lock state and /ping transition read
         //       "reloading" and mutations answer 503 editor_reloading.
-        public const int WireContract = 9;
+        //  10 — The gate delta reports a copy / move / save-as destination's
+        //       issues its source already had as inherited, not new:
+        //       inheritedErrors / inheritedWarnings / inheritedIssues
+        //       (+Truncated, ByRule) / inheritedFrom.
+        public const int WireContract = 10;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
 

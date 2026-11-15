@@ -706,6 +706,12 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             var map = EmptyRefMetadata.Build(lines, refsData.DeclaredFileIDs);
             if (map.Count == 0) return;
 
+            // An empty reference the component's own settings never read (a
+            // disabled ParticleSystem module, a shape type that takes no mesh,
+            // a light-probe proxy on a renderer that does not use one) is not
+            // a missing reference: drop it before it becomes an issue.
+            UnusedEmptyRefs.Remove(lines, refsData.EmptyFileIDs, map);
+
             foreach (var empty in refsData.EmptyFileIDs)
             {
                 if (empty.Anchor == 0) continue;

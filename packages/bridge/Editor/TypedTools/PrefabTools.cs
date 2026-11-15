@@ -126,6 +126,16 @@ namespace UnityOpenMcpBridge.TypedTools
             if (lastSlash > 0)
                 MaterialTools.EnsureFolderRecursive(normalized.Substring(0, lastSlash));
 
+            // Saving the open prefab stage's root under a new path writes a copy
+            // of that prefab (with any unsaved stage edits): inside a gate, the
+            // new prefab's issues the saved prefab already had are inherited,
+            // not new. A scene instance root makes a variant, whose file does
+            // not carry the base prefab's content, so it derives nothing.
+            var openStage = PrefabStageUtility.GetCurrentPrefabStage();
+            var lineage = openStage != null && openStage.prefabContentsRoot == sourceGo
+                ? AssetLineage.Capture(openStage.assetPath, normalized, AssetDerivation.SaveAs)
+                : null;
+
             GameObject prefab;
             try
             {
@@ -140,6 +150,7 @@ namespace UnityOpenMcpBridge.TypedTools
             if (prefab == null)
                 return ToolDispatchResult.Fail("create_failed",
                     $"PrefabUtility.SaveAsPrefabAsset returned null for '{normalized}'.");
+            lineage?.Commit();
 
             var sb = new StringBuilder(192);
             sb.Append("{\"status\":\"ok\",\"path\":\"").Append(TypedTargets.Esc(normalized));

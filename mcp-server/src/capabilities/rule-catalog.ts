@@ -115,7 +115,7 @@ const MISSING_REFERENCES_ISSUES: RuleIssueDescriptor[] = [
     fixIds: [],
     rootCause: "missing_fileid_reference",
     remediation:
-      "An empty local fileID reference was serialized. Reconnect it to a valid local object, or remove it. Note: empty refs on built-in Unity/package fields that are empty-by-default (m_SelectOn*, sprite swaps, TMP material/style) are reported at Info severity and are usually benign; empty refs on user-script fields are the ones likely to be real bugs.",
+      "An empty local fileID reference was serialized. Reconnect it to a valid local object, or remove it. Note: empty refs on built-in Unity/package fields that are empty-by-default (m_SelectOn*, sprite swaps, TMP material/style) are reported at Info severity and are usually benign; empty refs on user-script fields are the ones likely to be real bugs. Slots the component's own settings never read are not reported (a ParticleSystem module that is disabled or configured for another input, a non-Mesh particle renderer's meshes, a light-probe proxy outside Proxy Volume mode); once the setting uses the slot, an empty one is reported.",
   },
   {
     code: "missing_method",

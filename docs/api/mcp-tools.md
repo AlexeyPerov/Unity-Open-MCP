@@ -189,6 +189,26 @@ glance without the ~222 KB a full prefab rebuild used to inline). What an agent
 branches on is `mutation.success` + `gate.outcome` + the counts; the full key
 list is available via `validate_edit` / `scan_paths` on the touched paths.
 
+A call that makes an asset from an existing one — `assets_copy` and
+`assets_move` (files or folders), `scene_save` to a new path, `prefab_create`
+from the open prefab stage's root — does not count the source's existing issues
+as new. The gate scans the source with its own rules just before the
+destination is made; an issue at the destination with the same rule, severity
+and code (object path, property, target GUID), its asset path mapped from the
+source — and, for a prefab file, the root GameObject's name, which follows the
+file name — is **inherited**: it is left out of `newErrors` / `newWarnings`
+and cannot fail the gate. The delta reports it in `inheritedErrors`,
+`inheritedWarnings`, a bounded `inheritedIssues` array with
+`inheritedIssuesTruncated` / `inheritedIssuesByRule`, and `inheritedFrom`
+(`[{source, destination, operation, errors, warnings}]`, `operation` one of
+`copy` / `move` / `save_as`); `agentNextSteps` names the count per source.
+These fields appear only when the call made such an asset. For a move, an
+issue the checkpoint saw at the old path that is present at the new one is not
+counted as resolved. An issue the destination has and the source did not — an
+edit made in the same call, or a different severity — is new as usual. Only
+the typed tools record this; a snippet that calls `AssetDatabase.CopyAsset`
+reports the copy's issues as new.
+
 `gate.delta` is `null` — never a zeroed object — when no delta was computed.
 Three paths land there, with different outcome tokens: a **checkpoint failure**
 reports `gate.outcome: "failed"` with `mutation.success: false`; a **mutation

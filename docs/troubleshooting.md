@@ -362,6 +362,21 @@ See [project command authoring](api/project-commands.md) and [job workflows](api
   `profile: "full"` and pass their `issueId` unchanged as `apply_fix.issue_id`.
   The encoded path is decoded internally for both gate scope and fix targeting.
 
+## A copied or moved asset reports issues
+
+- The gate result lists `gate.delta.inheritedIssues` and passes: the source
+  already had those issues, so the copy carries them. They do not count as new.
+  Fix them in the source and the copy (`validate_edit` lists them), or leave
+  them if they were accepted before.
+- The gate fails on a copy: the issues in `newIssues` are ones the source did
+  not have when the copy was made — check the source path in `inheritedFrom`
+  and what else the call changed. A copy made inside an `execute_csharp`
+  snippet is not recognised; use `assets_copy` / `assets_move`.
+- A ParticleSystem prefab no longer reports empty `m_Mesh`, `m_Sprite`,
+  `moveWithCustomTransform`, sub-emitter or light slots: `empty_local_ref`
+  skips a reference the component's settings do not read. It is reported again
+  once the setting uses it (for example a Mesh-type shape with no mesh).
+
 ## Fix refused: `rollback_unavailable`
 
 If a top-level `apply_fix` cannot back up a touched file, it refuses the fix before

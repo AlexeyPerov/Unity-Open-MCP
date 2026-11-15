@@ -205,6 +205,16 @@ namespace UnityOpenMcpBridge
         }
 
         public static DeltaData ComputeDelta(CheckpointFingerprint before, VerifyResult after)
+            => ComputeDelta(before, after, null);
+
+        // `lineage` lists the assets the mutation made from existing ones
+        // (AssetLineage). A new issue at a destination that its source already
+        // had is inherited, not new: it is moved out of NewIssueKeys into
+        // InheritedIssueKeys and not counted. For a move, an issue the
+        // checkpoint saw at the old path that is still present at the new one
+        // went with the asset, so it is not counted as resolved either.
+        public static DeltaData ComputeDelta(CheckpointFingerprint before, VerifyResult after,
+            IReadOnlyList<AssetDerivation> lineage)
         {
             if (before.RulesFailed.Length > 0 || after.HasFailedRules)
                 throw new System.InvalidOperationException("Cannot compare incomplete verification results.");
@@ -230,6 +240,46 @@ namespace UnityOpenMcpBridge
 
             var resolvedKeys = new HashSet<string>(beforeKeys);
             resolvedKeys.ExceptWith(afterKeys);
+
+            var inheritedKeys = new List<string>();
+            DerivationSummary[] summaries = null;
+            if (lineage != null && lineage.Count > 0)
+            {
+                summaries = new DerivationSummary[lineage.Count];
+                for (int i = 0; i < lineage.Count; i++)
+                    summaries[i] = new DerivationSummary
+                    {
+                        Source = lineage[i].Source,
+                        Destination = lineage[i].Destination,
+                        Operation = lineage[i].Operation
+                    };
+
+                foreach (var key in newKeys.ToArray())
+                {
+                    // Latest derivation first: in a batch that copies A to B
+                    // and then moves B to C, C's issues come from B.
+                    for (int i = lineage.Count - 1; i >= 0; i--)
+                    {
+                        if (!lineage[i].Inherits(key)) continue;
+                        newKeys.Remove(key);
+                        inheritedKeys.Add(key);
+                        var sev = key.Split('|')[1];
+                        if (sev == "ERROR") summaries[i].InheritedErrors++;
+                        else if (sev == "WARN") summaries[i].InheritedWarnings++;
+                        break;
+                    }
+                }
+
+                foreach (var key in resolvedKeys.ToArray())
+                {
+                    foreach (var derivation in lineage)
+                    {
+                        if (!derivation.CarriedTo(key, afterKeys)) continue;
+                        resolvedKeys.Remove(key);
+                        break;
+                    }
+                }
+            }
 
             // C2 quirk — count NEW issues per-KEY, exactly like the resolved
             // counters below and NewIssueKeys itself. The previous loop
@@ -263,6 +313,15 @@ namespace UnityOpenMcpBridge
                 }
             }
 
+            var inheritedErrors = 0;
+            var inheritedWarnings = 0;
+            if (summaries != null)
+                foreach (var summary in summaries)
+                {
+                    inheritedErrors += summary.InheritedErrors;
+                    inheritedWarnings += summary.InheritedWarnings;
+                }
+
             return new DeltaData
             {
                 NewErrors = newErrors,
@@ -270,7 +329,11 @@ namespace UnityOpenMcpBridge
                 ResolvedErrors = resolvedErrors,
                 ResolvedWarnings = resolvedWarnings,
                 NewIssueKeys = newKeys.ToArray(),
-                ResolvedIssueKeys = resolvedKeys.ToArray()
+                ResolvedIssueKeys = resolvedKeys.ToArray(),
+                InheritedErrors = inheritedErrors,
+                InheritedWarnings = inheritedWarnings,
+                InheritedIssueKeys = inheritedKeys.ToArray(),
+                Derivations = summaries
             };
         }
 

@@ -58,7 +58,7 @@ namespace UnityOpenMcpVerify
                 "A local (same-file) fileID is referenced but no longer declared in the file. Reconnect the reference to a valid local object, or remove it. Note: sub-asset fileIDs of the scanned asset (prefab root, embedded materials, stripped objects) are indexed, so a report here points at a truly undeclared id."),
             ["missing_references|empty_local_ref"] = new Entry(
                 "missing_fileid_reference",
-                "An empty local fileID reference ({fileID: 0}) was serialized. Reconnect it to a valid local object, or remove it."),
+                "An empty local fileID reference ({fileID: 0}) was serialized. Reconnect it to a valid local object, or remove it. A slot the component's settings do not use (e.g. a disabled ParticleSystem module's reference) is not reported."),
             ["missing_references|missing_method"] = new Entry(
                 "missing_script_class",
                 "A serialized call (e.g. UnityEvent) targets a method that no longer exists on the receiver class. Re-add the method, update the call to the new name, or clear the target."),

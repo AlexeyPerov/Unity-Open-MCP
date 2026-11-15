@@ -24,6 +24,11 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
         // The top-level anchor (fileID) of this YAML object.
         public long Anchor;
 
+        // Index of the object's `--- !u!<classId> &<anchor>` header line, so a
+        // consumer can read the object's own fields (UnusedEmptyRefs reads a
+        // ParticleSystem's module settings) without re-finding it.
+        public int HeaderLine;
+
         // Unity class id from the header `--- !u!<classId> &<anchor>`. 1 =
         // GameObject, 114 = MonoBehaviour, 224 = RectTransform, 4 = Transform,
         // etc. Used to tell MonoBehaviours (carry m_Script) from transforms
@@ -129,7 +134,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                     if (hm.Success && long.TryParse(hm.Groups[2].Value, out var anchor))
                     {
                         int.TryParse(hm.Groups[1].Value, out var classId);
-                        current = new AnchorMetadata { Anchor = anchor, ClassId = classId };
+                        current = new AnchorMetadata { Anchor = anchor, ClassId = classId, HeaderLine = i };
                         map[anchor] = current;
                         fatherSeen = false;
                         linesThisObject = 0;

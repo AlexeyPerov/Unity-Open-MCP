@@ -132,6 +132,13 @@ namespace UnityOpenMcpBridge.TypedTools
                     continue;
                 }
 
+                // Inside a gate, note what the destination is made from (and
+                // the source's issues, while a move's source is still there)
+                // so the delta reports the destination's inherited issues as
+                // inherited, not new.
+                var lineage = AssetLineage.Capture(source, dest,
+                    op == "copy" ? AssetDerivation.Copy : AssetDerivation.Move);
+
                 bool ok;
                 string errMsg = null;
                 try
@@ -159,6 +166,7 @@ namespace UnityOpenMcpBridge.TypedTools
                     errMsg = e.Message;
                 }
 
+                if (ok) lineage?.Commit();
                 if (ok) done.Add(op == "copy" ? dest : (source + " -> " + dest));
                 else errors.Add($"{op} '{source}' -> '{dest}' failed: {errMsg ?? "AssetDatabase refused the operation."}");
             }

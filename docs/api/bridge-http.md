@@ -91,6 +91,14 @@ metadata; it does not override that project default during dispatch.
 checkpoint → mutate → validate → delta flow. Changing this precedence or its
 fallback behavior is a bridge API contract change.
 
+A gated call that makes an asset from another (copy, move, scene save-as,
+prefab save-as from the open stage) records the derivation while it runs: the
+source is scanned with the gate's rules just before the destination is made,
+and the delta moves the destination's matching issues out of the new counts
+into `inheritedErrors` / `inheritedWarnings` / `inheritedIssues` /
+`inheritedFrom` (wire contract 10). See the
+[mutation and gate contract](mcp-tools.md#mutation-and-gate-contract).
+
 Two honesty rules govern the gate's response:
 
 - `gate.delta` is `null` (never a zeroed object) whenever no delta was

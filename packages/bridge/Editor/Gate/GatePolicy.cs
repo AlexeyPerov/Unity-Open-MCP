@@ -62,6 +62,14 @@ namespace UnityOpenMcpBridge
         public int ResolvedWarnings;
         public string[] NewIssueKeys;
         public string[] ResolvedIssueKeys;
+        // Issues at an asset the call made from another (copy, move, save-as)
+        // that the source already had. They are not new — the gate does not
+        // count them — but they are reported so the agent knows the new asset
+        // carries them. Derivations is null when the call derived nothing.
+        public int InheritedErrors;
+        public int InheritedWarnings;
+        public string[] InheritedIssueKeys;
+        public DerivationSummary[] Derivations;
     }
 
     public class GateDispatchResult
@@ -284,7 +292,17 @@ namespace UnityOpenMcpBridge
                 };
             }
 
-            var mutationResult = await mutation();
+            // Record what the mutation makes from existing assets (copy, move,
+            // save-as) so the delta can tell a destination's inherited issues
+            // from new ones. The recorder scans each source with the same
+            // rules the checkpoint and validation run.
+            ToolDispatchResult mutationResult;
+            AssetDerivation[] lineage;
+            using (var recorder = AssetLineage.Begin(pathsHint, VerifyGateAdapter.SelectRuleIds(pathsHint)))
+            {
+                mutationResult = await mutation();
+                lineage = recorder.Derivations.ToArray();
+            }
 
             if (!mutationResult.Success && !mutationResult.PartialCommit)
             {
@@ -409,7 +427,7 @@ namespace UnityOpenMcpBridge
             DeltaData delta;
             try
             {
-                delta = VerifyGateAdapter.ComputeDelta(checkpoint, validation);
+                delta = VerifyGateAdapter.ComputeDelta(checkpoint, validation, lineage);
             }
             catch (Exception e)
             {
@@ -509,7 +527,26 @@ namespace UnityOpenMcpBridge
                     break;
             }
 
+            AddInheritedNotes(steps, delta);
             return steps.ToArray();
+        }
+
+        // One neutral line per derivation that carried issues over: what was
+        // made from what, and how many of its issues came with it.
+        private static void AddInheritedNotes(List<string> steps, DeltaData delta)
+        {
+            if (delta?.Derivations == null) return;
+            foreach (var d in delta.Derivations)
+            {
+                var count = d.InheritedErrors + d.InheritedWarnings;
+                if (count == 0) continue;
+                var what = d.Operation == AssetDerivation.Move ? $"Moved '{d.Source}' to '{d.Destination}'"
+                    : d.Operation == AssetDerivation.SaveAs ? $"Saved '{d.Source}' as '{d.Destination}'"
+                    : $"Copied '{d.Source}' to '{d.Destination}'";
+                steps.Add($"{what}; {count} issue(s) inherited from the source " +
+                          $"({d.InheritedErrors} error(s), {d.InheritedWarnings} warning(s)) — already present there, " +
+                          "not counted as new (delta.inheritedIssues).");
+            }
         }
 
         private static void AddIssueHints(List<string> steps, string[] issueKeys, int newErrors, int newWarnings, bool isFailed)

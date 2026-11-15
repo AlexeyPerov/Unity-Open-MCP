@@ -221,6 +221,13 @@ namespace UnityOpenMcpBridge.TypedTools
             if (lastSlash > 0)
                 MaterialTools.EnsureFolderRecursive(savePath.Substring(0, lastSlash));
 
+            // A save-as writes a new scene file from an existing one: inside a
+            // gate, the new file's issues the saved scene file already had are
+            // inherited, not new.
+            var lineage = !string.IsNullOrEmpty(scene.path) && savePath != scene.path
+                ? AssetLineage.Capture(scene.path, savePath, AssetDerivation.SaveAs)
+                : null;
+
             bool saved;
             try
             {
@@ -233,6 +240,7 @@ namespace UnityOpenMcpBridge.TypedTools
             if (!saved)
                 return ToolDispatchResult.Fail("save_failed",
                     $"EditorSceneManager.SaveScene returned false for '{savePath}'.");
+            lineage?.Commit();
 
             var sb = new StringBuilder(96);
             sb.Append("{\"status\":\"ok\",\"saved\":true,\"name\":\"")

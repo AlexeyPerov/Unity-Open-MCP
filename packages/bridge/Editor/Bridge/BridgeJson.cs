@@ -483,6 +483,7 @@ namespace UnityOpenMcpBridge
                     AppendBoundedIssueArray(sb, "resolvedIssues", result.Delta.ResolvedIssueKeys);
                     AppendCountsByRule(sb, "newIssues", result.Delta.NewIssueKeys);
                     AppendCountsByRule(sb, "resolvedIssues", result.Delta.ResolvedIssueKeys);
+                    AppendInherited(sb, result.Delta);
                     sb.Append('}');
                 }
             }
@@ -720,6 +721,31 @@ namespace UnityOpenMcpBridge
                 sb.Append(kvp.Value);
             }
             sb.Append('}');
+        }
+
+        // The delta's inherited block, emitted only when the call made an asset
+        // from another (copy, move, save-as): the source's issues the new asset
+        // carries, which the gate did not count as new. `inheritedFrom` names
+        // each derivation with its own counts.
+        internal static void AppendInherited(StringBuilder sb, DeltaData delta)
+        {
+            if (delta?.Derivations == null || delta.Derivations.Length == 0) return;
+            sb.Append(",\"inheritedErrors\":").Append(delta.InheritedErrors);
+            sb.Append(",\"inheritedWarnings\":").Append(delta.InheritedWarnings);
+            AppendBoundedIssueArray(sb, "inheritedIssues", delta.InheritedIssueKeys);
+            AppendCountsByRule(sb, "inheritedIssues", delta.InheritedIssueKeys);
+            sb.Append(",\"inheritedFrom\":[");
+            for (int i = 0; i < delta.Derivations.Length; i++)
+            {
+                var d = delta.Derivations[i];
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"source\":").Append(EscapeString(d.Source ?? ""));
+                sb.Append(",\"destination\":").Append(EscapeString(d.Destination ?? ""));
+                sb.Append(",\"operation\":").Append(EscapeString(d.Operation ?? ""));
+                sb.Append(",\"errors\":").Append(d.InheritedErrors);
+                sb.Append(",\"warnings\":").Append(d.InheritedWarnings).Append('}');
+            }
+            sb.Append(']');
         }
 
         // Render the `logs` array for a captured entry list. Null/empty both
