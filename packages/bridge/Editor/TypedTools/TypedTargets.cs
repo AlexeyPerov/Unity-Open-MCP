@@ -231,6 +231,32 @@ namespace UnityOpenMcpBridge.TypedTools
             TargetScope.Touch(container);
         }
 
+        /// <summary>Marks the scene an edit changed dirty, so Unity saves it
+        /// (and Prefab Mode notices an edit in the stage). In play mode the
+        /// scenes in the Hierarchy hold no dirty state: an edit there lasts
+        /// until play mode exits, as an edit in the Editor does, and
+        /// EditorSceneManager.MarkSceneDirty throws ("This cannot be used
+        /// during play mode."). So the scene is recorded as edited by this
+        /// call instead, which makes the result say playModeOnly. A preview
+        /// scene (the open prefab stage, an in_prefab asset's contents) is
+        /// marked dirty in play mode too.</summary>
+        public static void MarkSceneDirty(Scene scene)
+        {
+            if (!scene.IsValid()) return;
+            if (InPlayMode && !UnityEditor.SceneManagement.EditorSceneManager.IsPreviewScene(scene))
+            {
+                TargetScope.Touch(TargetContainer.ForScene(scene));
+                return;
+            }
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
+        }
+
+        /// <summary>Whether the Editor is in play mode.</summary>
+        internal static bool InPlayMode => PlayModeForTest ?? EditorApplication.isPlaying;
+
+        // Test seam: an EditMode test cannot enter play mode around one call.
+        internal static bool? PlayModeForTest;
+
         // ------------------------------------------------------------------
         // Paths.
         // ------------------------------------------------------------------

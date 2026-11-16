@@ -112,6 +112,10 @@ namespace UnityOpenMcpBridge.MetaTools
             }
             if (!anyUnity) return touched;
 
+            // In play mode the loaded scenes hold no dirty state (and
+            // MarkSceneDirty throws): the file is rewritten either way.
+            if (UnityEditor.EditorApplication.isPlaying) return touched;
+
             var scenes = UnityEngine.SceneManagement.SceneManager.sceneCount;
             for (int i = 0; i < scenes; i++)
             {

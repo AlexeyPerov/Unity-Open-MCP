@@ -1,5 +1,7 @@
 #pragma warning disable CS0618
+using System.Reflection;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge.TypedTools;
 using UnityOpenMcpBridge.ObjectRefs;
@@ -8,6 +10,57 @@ namespace UnityOpenMcpBridge.Tests
 {
     public class PrefabToolsTests
     {
+        private const string UndoRoot = "Assets/Tests/BridgeFixtures/PrefabCreateUndo";
+
+        [OneTimeTearDown]
+        public void DeleteUndoFixtures()
+        {
+            var go = GameObject.Find("__MCPTest_PrefabCreateUndo");
+            if (go != null) Object.DestroyImmediate(go);
+            var before = GameObject.Find("__MCPTest_PrefabCreateUndo_Before");
+            if (before != null) Object.DestroyImmediate(before);
+            if (AssetDatabase.IsValidFolder(UndoRoot))
+            {
+                AssetDatabase.DeleteAsset(UndoRoot);
+                AssetDatabase.Refresh();
+            }
+        }
+
+        private static GateDispatchResult Dispatch(string tool, string body) => (GateDispatchResult)
+            typeof(BridgeHttpServer).GetMethod("DispatchWithGateCore", BindingFlags.NonPublic | BindingFlags.Static)
+                .Invoke(null, new object[] { tool, body, "off", new[] { UndoRoot } });
+
+        // prefab_create connects its source as one undo step of its own, as
+        // the Editor's drag-to-create-prefab does: one undo disconnects the
+        // source (the asset file stays) and leaves the call before intact.
+        [Test]
+        public void Create_Connect_IsOneUndoStep_UndoDisconnectsTheSource()
+        {
+            const string scope = "\"paths_hint\":[\"" + UndoRoot + "\"]";
+            const string assetPath = UndoRoot + "/PrefabCreateUndo.prefab";
+            var before = Dispatch("unity_open_mcp_gameobject_create", "{\"name\":\"__MCPTest_PrefabCreateUndo_Before\"," + scope + "}");
+            Assert.IsTrue(before.Mutation.Success, before.Mutation.ErrorMessage);
+            var source = Dispatch("unity_open_mcp_gameobject_create", "{\"name\":\"__MCPTest_PrefabCreateUndo\"," + scope + "}");
+            Assert.IsTrue(source.Mutation.Success, source.Mutation.ErrorMessage);
+
+            var create = Dispatch("unity_open_mcp_prefab_create",
+                "{\"path\":\"__MCPTest_PrefabCreateUndo\",\"prefab_asset_path\":\"" + assetPath + "\"," + scope + "}");
+            Assert.IsTrue(create.Mutation.Success, create.Mutation.ErrorMessage);
+            var go = GameObject.Find("__MCPTest_PrefabCreateUndo");
+            Assert.AreEqual(PrefabInstanceStatus.Connected, PrefabUtility.GetPrefabInstanceStatus(go));
+
+            Undo.PerformUndo();
+            go = GameObject.Find("__MCPTest_PrefabCreateUndo");
+            Assert.IsNotNull(go, "the undo reverts the connect, not the create before it");
+            Assert.AreEqual(PrefabInstanceStatus.NotAPrefab, PrefabUtility.GetPrefabInstanceStatus(go));
+            Assert.IsNotNull(GameObject.Find("__MCPTest_PrefabCreateUndo_Before"));
+            Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<GameObject>(assetPath), "the prefab asset stays");
+
+            Undo.PerformRedo();
+            go = GameObject.Find("__MCPTest_PrefabCreateUndo");
+            Assert.AreEqual(PrefabInstanceStatus.Connected, PrefabUtility.GetPrefabInstanceStatus(go));
+        }
+
         [Test]
         public void Instantiate_MissingPath_ReturnsMissingParameter()
         {

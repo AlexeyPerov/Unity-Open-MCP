@@ -105,7 +105,9 @@ into `inheritedErrors` / `inheritedWarnings` / `inheritedIssues` /
 
 Each gated mutating call runs in an undo group of its own, named after the tool
 (`MCP <tool>`), and a mutating `batch_execute` in one group for all its steps
-(wire contract 14), so one `editor_undo` reverts one call. See the
+(wire contract 14), so one `editor_undo` reverts one call. A call that records
+no undo leaves no group behind, and one made while there is something to redo
+keeps the redo entries unless it records something (wire contract 16). See the
 [mutation and gate contract](mcp-tools.md#mutation-and-gate-contract).
 
 A call that names `in_prefab` (wire contract 12) writes that prefab asset during
@@ -326,6 +328,14 @@ listed by its prefab asset path and an untitled scene as `(unsaved scene)`;
 `null` when there are none (and for read-only calls). A prefab asset edited in
 place (`in_prefab`) is saved and unloaded before the call returns, so it is never
 listed.
+
+`playModeOnly: true` (wire contract 16) marks a call that ran in play mode and
+changed a scene in the Hierarchy — a GameObject it resolved or created there, or
+a scene it marked edited (lighting settings): that change lasts until play mode
+exits, and an `agentNextSteps` line names the scenes. Unity keeps no dirty state
+for those scenes in play mode, so `dirtyScenes` stays `null`. The field is
+omitted otherwise; an edit in the open prefab stage or an `in_prefab` asset is
+not play-mode-only.
 
 ## Published argument schemas
 

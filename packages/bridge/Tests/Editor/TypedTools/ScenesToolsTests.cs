@@ -67,6 +67,25 @@ namespace UnityOpenMcpBridge.Tests
 
         // ----------------------- Save ------------------------------------
 
+        // In play mode the scene is never dirty and Unity saves nothing, so a
+        // "not dirty, no write" success would read as if play-mode edits were
+        // saved.
+        [Test]
+        public void Save_InPlayMode_ReturnsEditModeRequired()
+        {
+            TypedTargets.PlayModeForTest = true;
+            try
+            {
+                var result = ScenesTools.Save("{}");
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("edit_mode_required", result.ErrorCode);
+            }
+            finally
+            {
+                TypedTargets.PlayModeForTest = null;
+            }
+        }
+
         [Test]
         public void Save_BadDestinationExtension_ReturnsInvalidParameter()
         {

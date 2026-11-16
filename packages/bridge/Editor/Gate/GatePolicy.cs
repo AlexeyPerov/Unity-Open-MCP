@@ -101,6 +101,10 @@ namespace UnityOpenMcpBridge
         // M13 T4.2 — dirty-scene paths collected by SceneDirtyGuard when the
         // op was refused because of unsaved scene changes. Null when allowed.
         public string[] DirtyScenePaths;
+        // The scenes (by path) a call that ran in play mode edited: those
+        // edits last until play mode exits. Emitted as playModeOnly: true
+        // with the scenes named in agentNextSteps; null in edit mode.
+        internal string[] PlayModeScenes;
         // M22 T22.1.3 — per-call `logs`: console warnings/errors emitted
         // *during this dispatch* (checkpoint + validate + mutate). Captured as a
         // before/after delta by LogEntriesReader around DispatchWithGate. Null

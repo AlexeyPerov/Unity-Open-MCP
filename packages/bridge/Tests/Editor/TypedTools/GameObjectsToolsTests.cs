@@ -1,4 +1,5 @@
 #pragma warning disable CS0618
+using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -9,6 +10,62 @@ namespace UnityOpenMcpBridge.Tests
 {
     public class GameObjectsToolsTests
     {
+        // In play mode the scenes in the Hierarchy hold no dirty state, and
+        // EditorSceneManager.MarkSceneDirty throws "This cannot be used during
+        // play mode." after the edit was made. A typed edit there succeeds and
+        // says it lasts only until play mode exits (an EditMode test cannot
+        // enter play mode around one call, so the seam stands in for it).
+        [Test]
+        public void Create_InPlayMode_SucceedsAndReportsPlayModeOnly()
+        {
+            const string name = "__MCPTest_GO_PlayMode";
+            TypedTargets.PlayModeForTest = true;
+            try
+            {
+                var result = (GateDispatchResult)typeof(BridgeHttpServer)
+                    .GetMethod("DispatchWithGateCore", BindingFlags.NonPublic | BindingFlags.Static)
+                    .Invoke(null, new object[] { "unity_open_mcp_gameobject_create",
+                        "{\"name\":\"" + name + "\",\"paths_hint\":[\"Assets\"]}", "off", new[] { "Assets" } });
+                Assert.IsTrue(result.Mutation.Success, result.Mutation.ErrorMessage);
+                var go = GameObject.Find(name);
+                Assert.IsNotNull(go);
+                Assert.IsNotNull(result.PlayModeScenes);
+                var scenePath = string.IsNullOrEmpty(go.scene.path) ? SceneDirtyGuard.UntitledScene : go.scene.path;
+                CollectionAssert.Contains(result.PlayModeScenes, scenePath);
+                StringAssert.Contains("last only until play mode exits", string.Join("\n", result.AgentNextSteps));
+
+                var envelope = BridgeJson.BuildGateEnvelope(result, "off", LifecyclePolicy.None);
+                StringAssert.Contains("\"playModeOnly\":true", envelope);
+            }
+            finally
+            {
+                TypedTargets.PlayModeForTest = null;
+                var go = GameObject.Find(name);
+                if (go != null) Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void Create_InEditMode_DoesNotReportPlayModeOnly()
+        {
+            const string name = "__MCPTest_GO_EditMode";
+            try
+            {
+                var result = (GateDispatchResult)typeof(BridgeHttpServer)
+                    .GetMethod("DispatchWithGateCore", BindingFlags.NonPublic | BindingFlags.Static)
+                    .Invoke(null, new object[] { "unity_open_mcp_gameobject_create",
+                        "{\"name\":\"" + name + "\",\"paths_hint\":[\"Assets\"]}", "off", new[] { "Assets" } });
+                Assert.IsTrue(result.Mutation.Success, result.Mutation.ErrorMessage);
+                Assert.IsNull(result.PlayModeScenes);
+                StringAssert.DoesNotContain("playModeOnly", BridgeJson.BuildGateEnvelope(result, "off", LifecyclePolicy.None));
+            }
+            finally
+            {
+                var go = GameObject.Find(name);
+                if (go != null) Object.DestroyImmediate(go);
+            }
+        }
+
         [Test]
         public void Create_MissingName_ReturnsMissingParameter()
         {

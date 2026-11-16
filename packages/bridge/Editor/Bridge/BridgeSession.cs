@@ -152,7 +152,18 @@ namespace UnityOpenMcpBridge
         //       first write after a domain reload carries the Editor's state
         //       (playing / entering_playmode, never idle in play mode) and the
         //       last compile block (never null).
-        public const int WireContract = 15;
+        //  16 — editor_undo_history lists undo steps (what one editor_undo
+        //       reverts), not one group name: `undo` (most recent first) and
+        //       `redo` (next first) entries {steps, name}, undoTotal /
+        //       redoTotal / truncated, `granularity` steps | records | none
+        //       (+ `note`); count / total / entries are gone. A mutating call
+        //       that records nothing leaves no undo step and keeps the redo
+        //       entries. prefab_create (connect), prefab_apply, prefab_revert
+        //       and prefab_unpack are undo steps. Typed tools succeed in play
+        //       mode; a call that edited a scene there carries
+        //       `playModeOnly: true` (the edit lasts until play mode exits).
+        //       scene_save in play mode is refused with edit_mode_required.
+        public const int WireContract = 16;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
         // EditorApplication.isPlayingOrWillChangePlaymode as last refreshed.

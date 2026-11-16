@@ -186,11 +186,32 @@ bridge opens an undo group per call and names it after the tool (`MCP
 gameobject_create`; Edit > Undo reads "Undo MCP gameobject_create"), so
 `editor_undo {"steps":1}` reverts exactly the last call and `editor_redo`
 re-applies it. A `batch_execute` is one step for all its commands (`MCP
-batch_execute`). Read-only and refused calls add no step. Neither does an
-edit Unity records no undo for — an asset written to disk, `prefab_create`
-connecting its source to the new prefab — nor an `in_prefab` call (`undo:
-false`: the edit is saved to the prefab asset and its contents' undo records
-are dropped with them); `editor_undo` then reverts the step before it.
+batch_execute`). A step reads the name of its first undo record instead
+(`MCP Instantiate Prefab`) when a Unity API inside the call opens undo groups
+of its own, and when the call is made while there is something to redo
+(naming the step up front would clear the redo entries). Read-only and refused
+calls add no step, and neither does a call Unity records no undo for — an
+asset written to disk, an `in_prefab` call (`undo: false`: the edit is saved
+to the prefab asset and its contents' undo records are dropped with them);
+`editor_undo` then reverts the step before it, and the redo entries stay.
+`prefab_create` connecting its source, `prefab_apply`, `prefab_revert` and
+`prefab_unpack` are steps of their own, as in the Editor: undoing
+`prefab_create` disconnects the source and keeps the prefab asset.
+`editor_undo_history` lists the steps by name: `undo` most recent first
+(`editor_undo {"steps":n}` reverts its first n; each entry's `steps` is that
+n) and `redo` next to redo first. On an Editor that lists no undo steps it
+falls back to undo records (`granularity: "records"`, with a `note`), which
+do not map to `editor_undo` steps.
+
+Typed tools work in play mode the way edits in the Editor do: a change to a
+scene in the Hierarchy is made at runtime and lasts until play mode exits,
+while asset files the call writes (`prefab_create`, `material_create`, …)
+stay. A call that changed a scene in play mode carries `playModeOnly: true`
+next to `dirtyScenes`, and an `agentNextSteps` line names the scenes; the gate
+skips validation (`gate.skippedReason: "play_mode"`). To keep a scene change,
+stop play mode (`editor_set_state {"state":"stop"}`) and repeat the call.
+`scene_save` is refused in play mode with `edit_mode_required`, and Unity
+refuses `scene_open` / `scene_create` there.
 
 `enforce` fails on new errors only, so a passed gate can still carry new
 warnings. The first `agentNextSteps` line says so ("Gate passed — no new

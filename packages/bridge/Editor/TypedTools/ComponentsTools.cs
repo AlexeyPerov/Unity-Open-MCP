@@ -1318,7 +1318,7 @@ namespace UnityOpenMcpBridge.TypedTools
         private static void MarkActiveSceneDirty(GameObject go)
         {
             var scene = go.scene;
-            if (scene.IsValid()) UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
+            if (scene.IsValid()) TypedTargets.MarkSceneDirty(scene);
         }
     }
 }

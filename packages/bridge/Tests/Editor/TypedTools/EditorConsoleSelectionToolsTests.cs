@@ -316,26 +316,73 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
-        public void EditorUndoHistory_ReturnsRecentEntriesAndTruncationFields()
+        public void EditorUndoHistory_ReturnsStepsAndTruncationFields()
         {
-            // Create at least one undo record to make history non-empty.
+            // Create at least one undo step to make history non-empty.
+            Undo.IncrementCurrentGroup();
             var go = new GameObject("__MCPTest_UndoHistory");
             Undo.RegisterCreatedObjectUndo(go, "Create __MCPTest_UndoHistory");
+            Undo.IncrementCurrentGroup();
             try
             {
                 var result = EditorConsoleSelectionTools.EditorUndoHistory("{\"max_entries\":1}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 StringAssert.Contains("\"status\":\"ok\"", result.Output);
-                StringAssert.Contains("\"entries\":[", result.Output);
+                StringAssert.Contains("\"granularity\":\"steps\"", result.Output);
                 StringAssert.Contains("\"requested\":1", result.Output);
                 StringAssert.Contains("\"cap\":50", result.Output);
                 StringAssert.Contains("\"truncated\":", result.Output);
+                StringAssert.Contains("\"undo\":[{\"steps\":1,\"name\":\"Create __MCPTest_UndoHistory\"}]", result.Output);
+                StringAssert.Contains("\"redo\":[", result.Output);
             }
             finally
             {
                 Object.DestroyImmediate(go);
             }
         }
+
+        // Two dispatched calls are two steps, listed by name most recent
+        // first; an undo moves the last one to the redo list.
+        [Test]
+        public void EditorUndoHistory_ListsDispatchedCallsAsSteps_UndoMovesOneToRedo()
+        {
+            const string name = "__MCPTest_UndoHistoryCalls";
+            const string scope = "\"paths_hint\":[\"Assets/__UndoHistoryTest.unity\"]";
+            // Leave nothing to redo, so each call is named after its tool.
+            Undo.IncrementCurrentGroup();
+            var seed = new GameObject(name + "_Seed");
+            Undo.RegisterCreatedObjectUndo(seed, "Create seed");
+            try
+            {
+                var create = DispatchGated("unity_open_mcp_gameobject_create", "{\"name\":\"" + name + "\"," + scope + "}");
+                Assert.IsTrue(create.Mutation.Success, create.Mutation.ErrorMessage);
+                var move = DispatchGated("unity_open_mcp_gameobject_modify",
+                    "{\"path\":\"" + name + "\",\"position\":\"1,2,3\"," + scope + "}");
+                Assert.IsTrue(move.Mutation.Success, move.Mutation.ErrorMessage);
+
+                var history = EditorConsoleSelectionTools.EditorUndoHistory("{\"max_entries\":2}").Output;
+                StringAssert.Contains("\"undo\":[{\"steps\":1,\"name\":\"MCP gameobject_modify\"}," +
+                                      "{\"steps\":2,\"name\":\"MCP gameobject_create\"}]", history);
+                StringAssert.Contains("\"redo\":[]", history);
+
+                Undo.PerformUndo();
+                history = EditorConsoleSelectionTools.EditorUndoHistory("{\"max_entries\":1}").Output;
+                StringAssert.Contains("\"undo\":[{\"steps\":1,\"name\":\"MCP gameobject_create\"}]", history);
+                StringAssert.Contains("\"redo\":[{\"steps\":1,\"name\":\"MCP gameobject_modify\"}]", history);
+                StringAssert.Contains("\"redoTotal\":1", history);
+            }
+            finally
+            {
+                var go = GameObject.Find(name);
+                if (go != null) Object.DestroyImmediate(go);
+                if (seed != null) Object.DestroyImmediate(seed);
+            }
+        }
+
+        private static GateDispatchResult DispatchGated(string tool, string body) => (GateDispatchResult)
+            typeof(BridgeHttpServer).GetMethod("DispatchWithGateCore",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                .Invoke(null, new object[] { tool, body, "off", new[] { "Assets/__UndoHistoryTest.unity" } });
 
         [Test]
         public void EditorClearHistory_ClearsThenHistoryReportsEmpty()
@@ -351,8 +398,9 @@ namespace UnityOpenMcpBridge.Tests
 
             var history = EditorConsoleSelectionTools.EditorUndoHistory("{\"max_entries\":5}");
             Assert.IsTrue(history.Success, history.ErrorMessage);
-            StringAssert.Contains("\"count\":0", history.Output);
-            StringAssert.Contains("\"total\":0", history.Output);
+            StringAssert.Contains("\"undoTotal\":0", history.Output);
+            StringAssert.Contains("\"redoTotal\":0", history.Output);
+            StringAssert.Contains("\"undo\":[]", history.Output);
         }
 
         // ----------------------- editor_get_tags / layers ----------------

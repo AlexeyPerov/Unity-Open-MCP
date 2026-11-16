@@ -1442,8 +1442,9 @@ namespace UnityOpenMcpBridge
 
         // `dirtyScenes` of a call that ran (the scenes / prefab stage it left
         // with unsaved changes; a scene_dirty refusal already carries the
-        // blocking scenes), and the prefab-stage advisory when the call edited
-        // the open stage and the gate did not already say so.
+        // blocking scenes), `playModeOnly` for a call that edited a scene in
+        // play mode, and the prefab-stage advisory when the call edited the
+        // open stage and the gate did not already say so.
         private static void ReportFootprint(GateDispatchResult result, HashSet<TargetContainer> dirtyBefore,
             TargetScope scope)
         {
@@ -1451,6 +1452,13 @@ namespace UnityOpenMcpBridge
             if (mutation == null || !(mutation.Success || mutation.PartialCommit) || result.EffectiveReadOnly) return;
             if (result.DirtyScenePaths == null)
                 result.DirtyScenePaths = MutationFootprint.Dirtied(dirtyBefore, scope.Touched);
+            if (TypedTargets.InPlayMode)
+            {
+                result.PlayModeScenes = MutationFootprint.PlayModeScenes(scope.Touched);
+                if (result.PlayModeScenes != null)
+                    result.AgentNextSteps = AppendStep(result.AgentNextSteps,
+                        MutationFootprint.PlayModeAdvisory(result.PlayModeScenes));
+            }
             var prefabAssets = PrefabAssetEdits.Advisory(scope.PrefabAssets);
             if (prefabAssets != null) result.AgentNextSteps = AppendStep(result.AgentNextSteps, prefabAssets);
             if (result.SkippedReason == MutationFootprint.StageEditSkipReason) return;

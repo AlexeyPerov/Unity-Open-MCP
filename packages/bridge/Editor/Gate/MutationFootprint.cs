@@ -46,6 +46,33 @@ namespace UnityOpenMcpBridge
             return paths?.ToArray();
         }
 
+        /// <summary>The scenes in the Hierarchy a call that ran in play mode
+        /// resolved or created a target in, or marked edited: what it changed
+        /// there lasts until play mode exits. Null when none.</summary>
+        internal static string[] PlayModeScenes(IReadOnlyList<TargetContainer> touched)
+        {
+            if (touched == null) return null;
+            List<string> paths = null;
+            foreach (var c in touched)
+            {
+                if (c.Kind != TargetContainerKind.Scene) continue;
+                var path = string.IsNullOrEmpty(c.AssetPath) ? SceneDirtyGuard.UntitledScene : c.AssetPath;
+                paths ??= new List<string>();
+                if (!paths.Contains(path)) paths.Add(path);
+            }
+            return paths?.ToArray();
+        }
+
+        /// <summary>What the agent needs to know after a play-mode edit: it is
+        /// gone when play mode exits, as an edit made in the Editor is.</summary>
+        internal static string PlayModeAdvisory(string[] scenes)
+        {
+            var names = "'" + string.Join("', '", scenes) + "'";
+            return $"The Editor is in play mode: this call's changes to scene {names} last only until play mode " +
+                   "exits, as edits made in play mode in the Editor do (asset files it wrote stay). To keep them, " +
+                   "stop play mode (unity_open_mcp_editor_set_state {\"state\":\"stop\"}) and repeat the call.";
+        }
+
         /// <summary>The open prefab stage when this call edited it: a target
         /// was resolved or created in the stage and the stage has unsaved
         /// changes. <paramref name="onlyStage"/> is true when no other

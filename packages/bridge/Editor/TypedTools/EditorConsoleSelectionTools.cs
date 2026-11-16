@@ -313,9 +313,11 @@ namespace UnityOpenMcpBridge.TypedTools
             return ToolDispatchResult.Ok(BuildUndoResult("redo", steps));
         }
 
-        // Read the recent undo/redo stack entries. Uses reflection so we can
-        // consume Unity's internal record surface without locking to one exact
-        // Editor version API shape.
+        // The undo and redo stacks as undo steps (what one editor_undo /
+        // editor_redo moves through), by name: `undo` most recent first —
+        // editor_undo {"steps":n} reverts its first n — and `redo` next first.
+        // Unity exposes the stacks only internally (UndoStack); when the step
+        // list is missing the answer falls back to undo records, and says so.
         public static ToolDispatchResult EditorUndoHistory(string body)
         {
             int requested = JsonBody.GetInt(body, "max_entries", 50);
@@ -323,27 +325,82 @@ namespace UnityOpenMcpBridge.TypedTools
             const int hardCap = 50;
             int limit = requested > hardCap ? hardCap : requested;
 
-            var entries = ReadUndoRecordNames();
-            int total = entries.Count;
-            int count = total > limit ? limit : total;
-            int truncated = total > count ? total - count : 0;
+            var history = UndoHistory.Read();
+            int undoShown = System.Math.Min(limit, history.UndoEntries.Count);
+            int redoShown = System.Math.Min(limit, history.RedoEntries.Count);
+            int truncated = history.UndoEntries.Count - undoShown + history.RedoEntries.Count - redoShown;
+            bool steps = history.Granularity == UndoHistory.Steps;
 
             var sb = new StringBuilder(256);
             sb.Append("{\"status\":\"ok\"");
+            sb.Append(",\"granularity\":\"").Append(history.Granularity).Append('"');
             sb.Append(",\"requested\":").Append(requested);
             sb.Append(",\"cap\":").Append(hardCap);
-            sb.Append(",\"count\":").Append(count);
-            sb.Append(",\"total\":").Append(total);
+            sb.Append(",\"undoTotal\":").Append(history.UndoEntries.Count);
+            sb.Append(",\"redoTotal\":").Append(history.RedoEntries.Count);
             sb.Append(",\"truncated\":").Append(truncated);
-            sb.Append(",\"entries\":[");
+            AppendUndoEntries(sb, "undo", history.UndoEntries, undoShown, steps);
+            AppendUndoEntries(sb, "redo", history.RedoEntries, redoShown, steps);
+            if (history.Note != null) sb.Append(",\"note\":\"").Append(Esc(history.Note)).Append('"');
+            sb.Append('}');
+            return ToolDispatchResult.Ok(sb.ToString());
+        }
+
+        // "undo":[{"steps":1,"name":"MCP gameobject_create"},…] — `steps` is
+        // the editor_undo / editor_redo count that moves through the entry
+        // (step granularity only).
+        private static void AppendUndoEntries(StringBuilder sb, string key, List<string> entries, int count, bool steps)
+        {
+            sb.Append(",\"").Append(key).Append("\":[");
             for (int i = 0; i < count; i++)
             {
                 if (i > 0) sb.Append(',');
-                sb.Append("{\"index\":").Append(i);
-                sb.Append(",\"name\":\"").Append(Esc(entries[i])).Append("\"}");
+                sb.Append('{');
+                if (steps) sb.Append("\"steps\":").Append(i + 1).Append(',');
+                sb.Append("\"name\":\"").Append(Esc(entries[i])).Append("\"}");
             }
-            sb.Append("]}");
-            return ToolDispatchResult.Ok(sb.ToString());
+            sb.Append(']');
+        }
+
+        // Unity's undo / redo stacks, most recent (next to redo) first.
+        private sealed class UndoHistory
+        {
+            internal const string Steps = "steps";
+            internal const string Records = "records";
+            internal const string None = "none";
+
+            internal string Granularity = None;
+            internal readonly List<string> UndoEntries = new List<string>();
+            internal readonly List<string> RedoEntries = new List<string>();
+            internal string Note;
+
+            internal static UndoHistory Read()
+            {
+                var h = new UndoHistory();
+                var all = new List<string>();
+                if (UndoStack.TryReadSteps(all, out int cursor))
+                {
+                    h.Granularity = Steps;
+                    for (int i = cursor; i >= 0; i--) h.UndoEntries.Add(all[i]);
+                    for (int i = cursor + 1; i < all.Count; i++) h.RedoEntries.Add(all[i]);
+                    return h;
+                }
+                var undo = new List<string>();
+                var redo = new List<string>();
+                if (UndoStack.TryReadRecords(undo, redo))
+                {
+                    h.Granularity = Records;
+                    for (int i = undo.Count - 1; i >= 0; i--) h.UndoEntries.Add(undo[i]);
+                    // Redo records are listed as Unity keeps them.
+                    h.RedoEntries.AddRange(redo);
+                    h.Note = "This Editor exposes no undo step list, so these are undo records: one undo step is " +
+                             "one or more records, so editor_undo {\"steps\":n} does not map to the first n entries.";
+                    return h;
+                }
+                h.Note = "This Editor exposes neither the undo step list nor the undo records; the history " +
+                         "cannot be read. editor_undo / editor_redo still work.";
+                return h;
+            }
         }
 
         // Clear Undo/Redo history. Irreversible editor-state reset.
@@ -355,7 +412,8 @@ namespace UnityOpenMcpBridge.TypedTools
                     "Could not clear the Undo history in this Unity version.");
             }
 
-            var remaining = ReadUndoRecordNames().Count;
+            var after = UndoHistory.Read();
+            var remaining = after.UndoEntries.Count + after.RedoEntries.Count;
             var sb = new StringBuilder(96);
             sb.Append("{\"status\":\"ok\",\"cleared\":true");
             sb.Append(",\"remaining\":").Append(remaining);
@@ -711,73 +769,6 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(",\"activeSelection\":").Append(SerializeSelectionEntry(active));
             sb.Append('}');
             return sb.ToString();
-        }
-
-        private static List<string> ReadUndoRecordNames()
-        {
-            var names = new List<string>();
-
-            try
-            {
-                var method = typeof(Undo).GetMethod("GetRecords",
-                    System.Reflection.BindingFlags.Static |
-                    System.Reflection.BindingFlags.Public |
-                    System.Reflection.BindingFlags.NonPublic);
-                if (method != null)
-                {
-                    var raw = method.GetParameters().Length switch
-                    {
-                        0 => method.Invoke(null, null),
-                        1 => method.Invoke(null, new object[] { 50 }),
-                        _ => null,
-                    };
-                    AppendUndoRecordNames(raw, names);
-                }
-            }
-            catch
-            {
-                // Fall through to the current-group fallback.
-            }
-
-            if (names.Count == 0)
-            {
-                var current = Undo.GetCurrentGroupName();
-                if (!string.IsNullOrWhiteSpace(current))
-                    names.Add(current);
-            }
-
-            return names;
-        }
-
-        private static void AppendUndoRecordNames(object raw, List<string> names)
-        {
-            if (raw == null) return;
-            if (raw is IEnumerable<string> stringEnumerable)
-            {
-                foreach (var s in stringEnumerable)
-                    if (!string.IsNullOrWhiteSpace(s)) names.Add(s);
-                return;
-            }
-            if (raw is System.Collections.IEnumerable enumerable)
-            {
-                foreach (var item in enumerable)
-                {
-                    if (item == null) continue;
-                    if (item is string s)
-                    {
-                        if (!string.IsNullOrWhiteSpace(s)) names.Add(s);
-                        continue;
-                    }
-
-                    var t = item.GetType();
-                    var nameProp = t.GetProperty("name")
-                                   ?? t.GetProperty("Name")
-                                   ?? t.GetProperty("groupName")
-                                   ?? t.GetProperty("GroupName");
-                    var name = nameProp?.GetValue(item, null) as string;
-                    if (!string.IsNullOrWhiteSpace(name)) names.Add(name);
-                }
-            }
         }
 
         private static bool TryClearUndoHistory()

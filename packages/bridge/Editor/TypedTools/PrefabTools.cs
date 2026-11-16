@@ -157,11 +157,15 @@ namespace UnityOpenMcpBridge.TypedTools
                 ? AssetLineage.Capture(openStage.assetPath, normalized, AssetDerivation.SaveAs)
                 : null;
 
+            // InteractionMode.UserAction records the connect as an undo step,
+            // as the Editor's drag-to-create-prefab does: undo disconnects the
+            // source, and the asset file stays. (UserAction only adds undo
+            // recording to these PrefabUtility calls; it raises no dialog.)
             GameObject prefab;
             try
             {
                 prefab = connect
-                    ? PrefabUtility.SaveAsPrefabAssetAndConnect(sourceGo, normalized, InteractionMode.AutomatedAction, out _)
+                    ? PrefabUtility.SaveAsPrefabAssetAndConnect(sourceGo, normalized, InteractionMode.UserAction, out _)
                     : PrefabUtility.SaveAsPrefabAsset(sourceGo, normalized);
             }
             catch (System.Exception e)
@@ -298,7 +302,8 @@ namespace UnityOpenMcpBridge.TypedTools
             var go = resolved.GameObject;
 
             string assetPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(go);
-            try { PrefabUtility.ApplyPrefabInstance(go, InteractionMode.AutomatedAction); }
+            // UserAction: undoable as the Editor's Overrides > Apply All.
+            try { PrefabUtility.ApplyPrefabInstance(go, InteractionMode.UserAction); }
             catch (System.Exception e) { return ToolDispatchResult.Fail("apply_failed", e.Message); }
 
             MarkSceneDirty(go);
@@ -316,7 +321,8 @@ namespace UnityOpenMcpBridge.TypedTools
             if (!resolved.Ok) return resolved.Result;
             var go = resolved.GameObject;
 
-            try { PrefabUtility.RevertPrefabInstance(go, InteractionMode.AutomatedAction); }
+            // UserAction: undoable as the Editor's Overrides > Revert All.
+            try { PrefabUtility.RevertPrefabInstance(go, InteractionMode.UserAction); }
             catch (System.Exception e) { return ToolDispatchResult.Fail("revert_failed", e.Message); }
 
             MarkSceneDirty(go);
@@ -336,7 +342,8 @@ namespace UnityOpenMcpBridge.TypedTools
             var completely = JsonBody.GetBool(body, "completely", false);
             var mode = completely ? PrefabUnpackMode.Completely : PrefabUnpackMode.OutermostRoot;
 
-            try { PrefabUtility.UnpackPrefabInstance(go, mode, InteractionMode.AutomatedAction); }
+            // UserAction: undoable as the Editor's Unpack Prefab.
+            try { PrefabUtility.UnpackPrefabInstance(go, mode, InteractionMode.UserAction); }
             catch (System.Exception e) { return ToolDispatchResult.Fail("unpack_failed", e.Message); }
 
             MarkSceneDirty(go);
@@ -504,7 +511,7 @@ namespace UnityOpenMcpBridge.TypedTools
         private static void MarkSceneDirty(GameObject go)
         {
             var scene = go.scene;
-            if (scene.IsValid()) EditorSceneManager.MarkSceneDirty(scene);
+            if (scene.IsValid()) TypedTargets.MarkSceneDirty(scene);
         }
 
         // ,"path":"…","container":{…} — the instance's canonical path and the

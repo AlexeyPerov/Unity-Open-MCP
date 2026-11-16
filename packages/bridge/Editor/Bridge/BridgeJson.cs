@@ -533,6 +533,12 @@ namespace UnityOpenMcpBridge
                 sb.Append(",\"dirtyScenes\":null");
             }
 
+            // A call that edited a scene in play mode: the edit lasts until
+            // play mode exits (agentNextSteps names the scenes). Omitted
+            // otherwise.
+            if (result.PlayModeScenes != null && result.PlayModeScenes.Length > 0)
+                sb.Append(",\"playModeOnly\":true");
+
             // M22 T22.1.3 — per-call `logs`: console entries captured during
             // this dispatch. Always emitted (empty [] when none) so the field is
             // present on every tool response; agents read it inline instead of

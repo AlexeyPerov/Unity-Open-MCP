@@ -485,11 +485,11 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
             // Record the scene state for undo. RenderSettings is scene-scoped;
             // Undo.RecordObject on the active scene's RenderSettings-equivalent
             // is not directly supported, so we mark the scene dirty and let the
-            // gate checkpoint capture the change.
+            // gate checkpoint capture the change (in play mode the shared
+            // helper records a play-mode-only edit instead).
             RenderSettings.skybox = mat;
-            var activeScene = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene();
-            if (activeScene.IsValid())
-                UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(activeScene);
+            UnityOpenMcpBridge.TypedTools.TypedTargets.MarkSceneDirty(
+                UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene());
             // Refresh ambient/indirect lighting for the new skybox.
             DynamicGI.UpdateEnvironment();
 

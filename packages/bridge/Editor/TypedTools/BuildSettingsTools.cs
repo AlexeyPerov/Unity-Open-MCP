@@ -1268,11 +1268,11 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // RenderSettings is scene-scoped — writes only persist when the active
         // scene is marked dirty. MarkSceneDirty covers that without forcing a
-        // save (the agent calls scene_save when ready).
+        // save (the agent calls scene_save when ready); in play mode the shared
+        // helper records a play-mode-only edit instead.
         private static void MarkSceneDirty()
         {
-            try { UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(
-                UnityEngine.SceneManagement.SceneManager.GetActiveScene()); }
+            try { TypedTargets.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene()); }
             catch { /* best-effort — non-fatal */ }
         }
 

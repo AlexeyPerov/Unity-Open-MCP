@@ -86,7 +86,7 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_editor_set_state", 572 },
             { "unity_open_mcp_editor_status", 610 },
             { "unity_open_mcp_editor_undo", 258 },
-            { "unity_open_mcp_editor_undo_history", 122 },
+            { "unity_open_mcp_editor_undo_history", 205 },
             { "unity_open_mcp_editorprefs_delete", 149 },
             { "unity_open_mcp_editorprefs_get", 191 },
             { "unity_open_mcp_editorprefs_set", 231 },

@@ -135,6 +135,17 @@ namespace UnityOpenMcpBridge.TypedTools
 
         public static ToolDispatchResult Save(string body)
         {
+            // In play mode Unity saves no scene (EditorSceneManager.SaveScene
+            // throws) and keeps no dirty state, so "not dirty, nothing to
+            // write" would read as if the play-mode edits were on disk.
+            if (TypedTargets.InPlayMode)
+                return ToolDispatchResult.FailWithDetail("edit_mode_required",
+                    "scene_save runs in edit mode only: Unity saves no scene in play mode, and scene changes made " +
+                    "in play mode last only until it exits.",
+                    "{\"mode\":\"play\"}",
+                    new[] { "Stop play mode (unity_open_mcp_editor_set_state {\"state\":\"stop\"}), make the change " +
+                            "in edit mode, then save." });
+
             var name = JsonBody.GetString(body, "name");
             var destPath = JsonBody.GetString(body, "path");
 

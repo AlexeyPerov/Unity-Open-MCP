@@ -125,7 +125,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
 
             if (owningScene.IsValid())
-                EditorSceneManager.MarkSceneDirty(owningScene);
+                TypedTargets.MarkSceneDirty(owningScene);
             else
                 MarkActiveSceneDirty();
 
@@ -873,7 +873,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
             EditorUtility.SetDirty(go);
             if (previousScene.IsValid() && previousScene != go.scene)
-                EditorSceneManager.MarkSceneDirty(previousScene);
+                TypedTargets.MarkSceneDirty(previousScene);
             MarkObjectSceneDirty(go);
 
             return ToolDispatchResult.Ok(BuildGameObjectResult(go,
@@ -1102,7 +1102,7 @@ namespace UnityOpenMcpBridge.TypedTools
         private static void MarkActiveSceneDirty()
         {
             var scene = EditorSceneManager.GetActiveScene();
-            if (scene.IsValid()) EditorSceneManager.MarkSceneDirty(scene);
+            if (scene.IsValid()) TypedTargets.MarkSceneDirty(scene);
         }
 
         // B23 — mark the scene that actually OWNS the object dirty, not the
@@ -1118,7 +1118,7 @@ namespace UnityOpenMcpBridge.TypedTools
         {
             if (go != null && go.scene.IsValid())
             {
-                EditorSceneManager.MarkSceneDirty(go.scene);
+                TypedTargets.MarkSceneDirty(go.scene);
                 return;
             }
             MarkActiveSceneDirty();
