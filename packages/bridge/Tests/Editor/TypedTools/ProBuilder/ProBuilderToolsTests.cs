@@ -324,18 +324,20 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ProBuilderExt
         }
 
         // -----------------------------------------------------------------
-        // Minimal JSON int extractor — pulls "instanceId":<int> out of the
-        // hand-rolled JSON envelopes the tools return.
+        // Minimal JSON id extractor — pulls "instanceId":"<id>" (or a bare
+        // number) out of the hand-rolled JSON envelopes the tools return.
         // -----------------------------------------------------------------
-        private static int ExtractInt(string json, string key)
+        private static long ExtractInt(string json, string key)
         {
             var pattern = "\"" + key + "\":";
             var idx = json.IndexOf(pattern, System.StringComparison.Ordinal);
             Assert.GreaterOrEqual(idx, 0, $"Expected key '{key}' in response: {json}");
             var start = idx + pattern.Length;
+            // Instance ids are JSON strings ("12345", lossless on 8-byte EntityIds).
+            if (start < json.Length && json[start] == '"') start++;
             var end = start;
             while (end < json.Length && (char.IsDigit(json[end]) || json[end] == '-')) end++;
-            return int.Parse(json.Substring(start, end - start));
+            return long.Parse(json.Substring(start, end - start));
         }
     }
 }

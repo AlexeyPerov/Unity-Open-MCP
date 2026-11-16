@@ -47,7 +47,7 @@ gate-free.
    (`clip_path`, `volume`, `pitch`, `loop`, `play_on_awake`, `spatial_blend`,
    `spatialize`, `min_distance`, `max_distance`, `doppler_level`, `spread`).
    Each field is optional — omit to leave unchanged.
-4. **Route to a mixer group** — pass `mixer_group_path` (an `Assets/.../*.mix`
+4. **Route to a mixer group** — pass `mixer_group_path` (an `Assets/.../*.mixer`
    asset path) to `audio_source_modify` to bind
    `AudioSource.outputAudioMixerGroup` to the mixer's first group. Pass
    `clear_mixer_group: true` to unbind.
@@ -57,7 +57,7 @@ gate-free.
 `unity_open_mcp_audio_mixer_set_parameter` sets a float on an `AudioMixer`
 asset's exposed parameter:
 
-- `mixer_path` — `Assets/.../*.mix` asset path.
+- `mixer_path` — `Assets/.../*.mixer` asset path.
 - `parameter_name` — the exposed parameter name. **Expose it first** in the
   Audio Mixer window (`Edit > Project Settings > Audio` is not the same); a
   name that is not exposed returns `parameter_not_exposed`.
@@ -65,8 +65,11 @@ asset's exposed parameter:
 - `normalize` (default false) — maps a 0-1 slider onto the -80..0 dB range so a
   friendly volume level can be passed directly.
 
-The mixer asset is marked dirty — call `assets_refresh` / `scene_save` to
-commit. Read the value back with `unity_open_mcp_audio_mixer_get_parameter`
+Outside Play Mode the value is written into the mixer's current snapshot and
+the asset is saved (`appliedTo: "snapshot"`, plus the `snapshot` name) — what
+the Audio Mixer window's slider does; `AudioMixer.SetFloat` itself is refused
+while the Editor edits snapshots. In Play Mode the call is a runtime override
+(`appliedTo: "runtime"`) that is not saved. Read the value back with `unity_open_mcp_audio_mixer_get_parameter`
 (gate-free) to confirm the round-trip. This set+read-back loop is the
 documented advantage over per-source-only audio tools.
 
@@ -87,7 +90,7 @@ entering Play Mode.
    `clip_path: "Assets/Audio/music.wav"`, `volume: 0.8`, `loop: true`,
    `spatial_blend: 0` (2D), `play_on_awake: true`.
 2. (Optional) `audio_source_modify` with `mixer_group_path:
-   "Assets/Audio/MasterMixer.mix"` to route through the Master group.
+   "Assets/Audio/MasterMixer.mixer"` to route through the Master group.
 
 ### 3D positional sound
 
@@ -100,7 +103,7 @@ entering Play Mode.
 1. `audio_mixer_get_parameter` with `mixer_path`, `parameter_name: "masterVolume"`
    to confirm the param is exposed and read the current dB.
 2. `audio_mixer_set_parameter` with `value: 0.7`, `normalize: true` to set a
-   friendly volume level (0.7 → ~-2.5 dB).
+   friendly volume level (linear over -80..0 dB: 0.7 → -24 dB).
 
 ### Check listener state before Play Mode
 
@@ -122,7 +125,7 @@ entering Play Mode.
 |---|---|---|---|
 | `audio_source_add` | yes | editor_settle | Idempotent — re-using reports `added:false`. |
 | `audio_source_modify` | yes | editor_settle | Typed fields; each optional. `mixer_group_path` binds the mixer's first group. |
-| `audio_mixer_set_parameter` | yes | editor_settle | Exposed-parameter set on a `.mix` asset; `normalize` maps 0-1 → dB. |
+| `audio_mixer_set_parameter` | yes | editor_settle | Exposed-parameter set on a `.mixer` asset (snapshot write in Edit Mode, runtime override in Play Mode); `normalize` maps 0-1 → dB. |
 | `audio_listener_get` | no | none | Listener roster + `duplicateWarning` (read-only). |
 | `audio_mixer_get_parameter` | no | none | Exposed-parameter read (read-only). |
 

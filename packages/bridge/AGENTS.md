@@ -41,8 +41,10 @@ Bridge reports compiled inventory only — no MCP session state.
    `packages/extensions/`. See
    [Embedded domain model](../../docs/contributing/extensions.md#embedded-domain-model).
 2. Optional deps: self-contained sub-asmdef (`versionDefines` + matching
-   `defineConstraints` + package ref). Same `UNITY_OPEN_MCP_EXT_<DOMAIN>` on
-   source and gated tests.
+   `defineConstraints` + package ref). The domain's test asmdef repeats the
+   same `versionDefines` + `defineConstraints` exactly (a `versionDefines`
+   symbol exists only in its own asmdef) and adds no other constraint;
+   `mcp-server/src/asmdef-gates.parity.test.ts` enforces it.
 3. No runtime reflection probing (except documented version-split APIs such as
    Cinemachine). No manual Player Settings writes for `UNITY_OPEN_MCP_EXT_*`.
 4. Follow the Navigation template and the

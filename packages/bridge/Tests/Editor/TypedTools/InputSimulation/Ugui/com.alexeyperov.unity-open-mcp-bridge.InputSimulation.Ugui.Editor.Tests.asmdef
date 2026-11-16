@@ -16,19 +16,13 @@
   "precompiledReferences": [],
   "autoReferenced": true,
   "defineConstraints": [
-    "UNITY_OPEN_MCP_EXT_INPUTSIM_UGUI",
-    "UNITY_TEST_FRAMEWORK"
+    "UNITY_OPEN_MCP_EXT_INPUTSIM_UGUI"
   ],
   "versionDefines": [
     {
       "name": "com.unity.ugui",
       "expression": "1.0.0",
       "define": "UNITY_OPEN_MCP_EXT_INPUTSIM_UGUI"
-    },
-    {
-      "name": "com.unity.test-framework",
-      "expression": "1.0.0",
-      "define": "UNITY_TEST_FRAMEWORK"
     }
   ],
   "noEngineReferences": false

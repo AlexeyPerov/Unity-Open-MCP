@@ -5,8 +5,9 @@ import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 // Mutating: runs the full gate path.
 export const lightModify = makeTool(
   "unity_open_mcp_light_modify",
-  "Set one or more serialized fields on a Light component attached to a " +
-    "target GameObject. Use this when light_set does not cover a niche field; " +
+  "Set one or more public properties (or fields) on a Light component attached " +
+    "to a target GameObject, by C# member name (intensity, type, range, " +
+    "bounceIntensity, shadows, …). Use this when light_set does not cover a niche field; " +
     "otherwise prefer the typed tool. Each entry is { field, value, type? } " +
     "where type is 'int' | 'float' | 'bool' | 'string' | 'vector' | 'color' " +
     "(default inferred from the field's current type). Enum fields (LightType " +

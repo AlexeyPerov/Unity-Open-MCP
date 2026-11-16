@@ -66,12 +66,16 @@ lights, probes, and the skybox.
 
 `unity_open_mcp_reflection_probe_bake` bakes a `ReflectionProbe`. `bake_mode`:
 
-- `realtime` — `ReflectionProbe.Bake()` into the probe's runtime texture.
+- `realtime` — a quick bake of this probe alone (no GI), written next to the
+  scene like the probe Inspector's Bake button; in an unsaved scene it renders
+  the probe's runtime texture instead (`ReflectionProbe.RenderProbe`).
 - `baked` — `Lightmapping.BakeAsync()` (a full lightmap bake including baked
   reflection probes).
-- `custom` — `Lightmapping.BakeReflectionProbeSnapshot()` into a named cubemap
-  asset. Pass `target_path` (an `Assets/`-rooted `.cubemap` path); the asset is
-  created if absent.
+- `custom` — `Lightmapping.BakeReflectionProbe()` writes the cubemap to
+  `target_path`, an `Assets/`-rooted `.exr` (HDR) or `.png` (LDR) file that is
+  imported as a `Cubemap` (created or overwritten). Any other extension is
+  refused with `invalid_asset_path`; a bake that writes nothing fails with
+  `bake_failed`.
 
 The bake can take seconds. The tool routes through the gate with the
 `editor_settle` lifecycle — the dispatcher waits for the bake + asset refresh to
@@ -118,7 +122,7 @@ name, and shader.
    positioned at the surface.
 2. `reflection_probe_get` to confirm the settings (`resolution`, `hdr`).
 3. `reflection_probe_bake` with `bake_mode: "custom"`,
-   `target_path: "Assets/Lighting/SurfaceProbe.cubemap"`. Wait for the settle
+   `target_path: "Assets/Lighting/SurfaceProbe.exr"`. Wait for the settle
    window — the tool returns `baked: true` + `cubemapPath` when the bake
    finishes.
 
@@ -139,7 +143,9 @@ When `light_set` does not cover a field, use `light_modify`:
 }
 ```
 
-Each entry is `{ field, value, type? }` where `type` is
+`field` is the C# member name of a public `Light` property or field
+(`intensity`, `type`, `range`, `bounceIntensity`, `shadows`, …). Each entry is
+`{ field, value, type? }` where `type` is
 `int | float | bool | string | vector | color` (default inferred from the
 field's current type). Enum fields (`LightType` / `LightShadows` / `RenderMode`)
 accept a name or an int index. Per-field errors are accumulated — a single bad

@@ -63,7 +63,7 @@ When a typed mutator does not cover a field, use `unity_open_mcp_navigation_modi
 }
 ```
 
-Each entry is `{ field, value, type? }` where `type` is `int | float | bool | string | vector` (default inferred from the field's current type). Per-field errors are accumulated — a single bad entry does not abort the batch. Prefer the typed tools for the common cases; reach for `modify` only for fields not covered by a typed mutator.
+`field` is the C# member name of a public property or field on the component (`speed`, `angularSpeed`, `autoBraking`, …). Each entry is `{ field, value, type? }` where `type` is `int | float | bool | string | vector` (default inferred from the field's current type). Per-field errors are accumulated — a single bad entry does not abort the batch. Prefer the typed tools for the common cases; reach for `modify` only for fields not covered by a typed mutator.
 
 ## Common recipes
 

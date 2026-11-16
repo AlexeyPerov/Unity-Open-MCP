@@ -8,7 +8,7 @@ export const audioSourceModify = makeTool(
   "unity_open_mcp_audio_source_modify",
   "Set typed AudioSource fields: clip_path (Assets/-rooted AudioClip), volume (0-1), " +
     "pitch, loop, play_on_awake, spatial_blend (0=2D, 1=3D), spatialize, min_distance, " +
-    "max_distance, doppler_level, spread, and mixer_group_path (Assets/-rooted .mix — " +
+    "max_distance, doppler_level, spread, and mixer_group_path (Assets/-rooted .mixer — " +
     "assigns the first AudioMixerGroup exposed by the mixer; pass clear_mixer_group: " +
     "true to clear). Each field is optional — omit to leave unchanged. Mutating: runs " +
     "the full gate path; paths_hint is the host scene path (and the mixer asset path " +
@@ -33,7 +33,7 @@ export const audioSourceModify = makeTool(
           mixer_group_path: {
             type: "string",
             description:
-              "Assets/-rooted .mix — assigns the first AudioMixerGroup exposed by the " +
+              "Assets/-rooted .mixer — assigns the first AudioMixerGroup exposed by the " +
               "mixer to AudioSource.outputAudioMixerGroup.",
           },
           clear_mixer_group: {

@@ -667,8 +667,9 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             Gate = GateMode.Enforce,
             Lifecycle = LifecyclePolicy.EditorSettle, Group = "navigation")]
         [System.ComponentModel.Description(
-            "Set one or more serialized fields on a NavMesh component attached " +
-            "to a target GameObject. Select the component by 'component_type' " +
+            "Set one or more public properties (or fields) on a NavMesh component " +
+            "attached to a target GameObject, by C# member name (e.g. NavMeshAgent " +
+            "speed, angularSpeed, stoppingDistance). Select the component by 'component_type' " +
             "(NavMeshSurface | NavMeshAgent | NavMeshLink | NavMeshModifier | " +
             "NavMeshModifierVolume). Each entry is { field, value, type? } where " +
             "type is 'int' | 'float' | 'bool' | 'string' | 'vector' (default " +
@@ -947,22 +948,27 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             // We intentionally hand-roll the setter per component instead of
             // going through SerializedObject so the extension assembly does
             // not pull in extra Unity editor internals.
+            // The components expose their settings as public properties
+            // (NavMeshAgent.speed, …) more often than as fields: try a
+            // writable property first, then a public field.
             var t = comp.GetType();
-            var field = t.GetField(entry.Field,
-                System.Reflection.BindingFlags.Public |
-                System.Reflection.BindingFlags.Instance);
-            if (field == null)
+            var flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance;
+            var prop = t.GetProperty(entry.Field, flags);
+            var field = prop != null && prop.CanWrite ? null : t.GetField(entry.Field, flags);
+            if ((prop == null || !prop.CanWrite) && field == null)
                 return new FieldResult { Ok = false, Message = $"Unknown field '{entry.Field}' on {t.Name}." };
 
             try
             {
-                object converted = ConvertValue(field.FieldType, entry.RawValue, entry.TypeHint);
-                field.SetValue(comp, converted);
+                if (field == null)
+                    prop.SetValue(comp, ConvertValue(prop.PropertyType, entry.RawValue, entry.TypeHint));
+                else
+                    field.SetValue(comp, ConvertValue(field.FieldType, entry.RawValue, entry.TypeHint));
                 return new FieldResult { Ok = true };
             }
             catch (System.Exception e)
             {
-                return new FieldResult { Ok = false, Message = e.Message };
+                return new FieldResult { Ok = false, Message = e.InnerException?.Message ?? e.Message };
             }
         }
 

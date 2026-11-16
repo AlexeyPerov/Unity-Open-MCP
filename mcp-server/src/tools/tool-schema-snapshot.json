@@ -7326,7 +7326,7 @@
     }
   },
   "unity_open_mcp_navigation_modify": {
-    "description": "Set one or more serialized fields on a NavMesh component attached to a target GameObject. Select the component by component_type (NavMeshSurface | NavMeshAgent | NavMeshLink | NavMeshModifier | NavMeshModifierVolume). Use this when a typed mutator does not cover a niche field; otherwise prefer the typed tools (surface_add / agent_add / etc.). Each entry is { field, value, type? } where type is 'int' | 'float' | 'bool' | 'string' | 'vector' (default inferred from the field's current type). Mutating: runs the full gate path; paths_hint is the host scene path. Requires the navigation extension pack.",
+    "description": "Set one or more public properties (or fields) on a NavMesh component attached to a target GameObject, by C# member name (e.g. NavMeshAgent speed, angularSpeed, stoppingDistance). Select the component by component_type (NavMeshSurface | NavMeshAgent | NavMeshLink | NavMeshModifier | NavMeshModifierVolume). Use this when a typed mutator does not cover a niche field; otherwise prefer the typed tools (surface_add / agent_add / etc.). Each entry is { field, value, type? } where type is 'int' | 'float' | 'bool' | 'string' | 'vector' (default inferred from the field's current type). Mutating: runs the full gate path; paths_hint is the host scene path. Requires the navigation extension pack.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -7358,6 +7358,10 @@
             "off"
           ]
         },
+        "in_prefab": {
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes.",
+          "type": "string"
+        },
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
@@ -7383,19 +7387,15 @@
           },
           "type": "array"
         },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
+        },
         "target_path": {
           "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
-        },
-        "scene_path": {
-          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
-          "type": "string"
-        },
-        "in_prefab": {
-          "type": "string",
-          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -8938,12 +8938,12 @@
     }
   },
   "unity_open_mcp_splines_modify": {
-    "description": "Set one or more serialized fields on the SplineContainer component (not the Spline itself — use set_knot / set_tangent_mode for knot fields). Each entry is { field, value, type? } where type is 'int' | 'float' | 'bool' | 'string' | 'vector' (default inferred from the current value). Per-field errors are accumulated — a single bad entry does not abort the batch. Mutating: runs the full gate path; paths_hint is the host's scene path. Requires the com.unity.splines package installed in the project.",
+    "description": "Set one or more public properties (or fields) on the SplineContainer component, by C# member name (not the Spline itself — use set_knot / set_tangent_mode for knot fields). Each entry is { field, value, type? } where type is 'int' | 'float' | 'bool' | 'string' | 'vector' (default inferred from the current value). Per-field errors are accumulated — a single bad entry does not abort the batch. Mutating: runs the full gate path; paths_hint is the host's scene path. Requires the com.unity.splines package installed in the project.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "fields_json": {
-          "description": "JSON array of { field, value, type? } objects targeting SplineContainer serialized fields.",
+          "description": "JSON array of { field, value, type? } objects targeting SplineContainer public properties or fields (C# member names).",
           "type": "string"
         },
         "game_object_path": {
@@ -8958,6 +8958,10 @@
             "warn",
             "off"
           ]
+        },
+        "in_prefab": {
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes.",
+          "type": "string"
         },
         "instance_id": {
           "default": 0,
@@ -8984,19 +8988,15 @@
           },
           "type": "array"
         },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
+        },
         "target_path": {
           "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
-        },
-        "scene_path": {
-          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
-          "type": "string"
-        },
-        "in_prefab": {
-          "type": "string",
-          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -9218,7 +9218,7 @@
     }
   },
   "unity_open_mcp_light_modify": {
-    "description": "Set one or more serialized fields on a Light component attached to a target GameObject. Use this when light_set does not cover a niche field; otherwise prefer the typed tool. Each entry is { field, value, type? } where type is 'int' | 'float' | 'bool' | 'string' | 'vector' | 'color' (default inferred from the field's current type). Enum fields (LightType / LightShadows / RenderMode) accept a name or an int index. Per-field errors are accumulated — a single bad entry does not abort the batch. Mutating: runs the full gate path; paths_hint is the host scene path.",
+    "description": "Set one or more public properties (or fields) on a Light component attached to a target GameObject, by C# member name (intensity, type, range, bounceIntensity, shadows, …). Use this when light_set does not cover a niche field; otherwise prefer the typed tool. Each entry is { field, value, type? } where type is 'int' | 'float' | 'bool' | 'string' | 'vector' | 'color' (default inferred from the field's current type). Enum fields (LightType / LightShadows / RenderMode) accept a name or an int index. Per-field errors are accumulated — a single bad entry does not abort the batch. Mutating: runs the full gate path; paths_hint is the host scene path.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -9238,6 +9238,10 @@
             "warn",
             "off"
           ]
+        },
+        "in_prefab": {
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes.",
+          "type": "string"
         },
         "instance_id": {
           "default": 0,
@@ -9264,19 +9268,15 @@
           },
           "type": "array"
         },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
+        },
         "target_path": {
           "deprecated": true,
           "description": "Deprecated alias; use game_object_path.",
           "type": "string",
           "x-alias-for": "game_object_path"
-        },
-        "scene_path": {
-          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
-          "type": "string"
-        },
-        "in_prefab": {
-          "type": "string",
-          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -9287,13 +9287,13 @@
     }
   },
   "unity_open_mcp_reflection_probe_bake": {
-    "description": "Bake a ReflectionProbe. bake_mode: 'realtime' (bake into the probe's runtime texture via ReflectionProbe.Bake), 'baked' (queue a full lightmap bake incl. probes via Lightmapping.BakeAsync), or 'custom' (write a baked snapshot into a named cubemap asset path via Lightmapping.BakeReflectionProbeSnapshot — the asset is created if absent). For 'custom', pass target_path (an Assets/-rooted .cubemap path). The bake can take seconds; EditorSettle waits for completion + asset refresh before returning. Mutating: runs the full gate path; paths_hint includes the probe scene path and (for custom mode) the output cubemap asset path.",
+    "description": "Bake a ReflectionProbe. bake_mode: 'realtime' (a quick bake of this probe alone, no GI, written next to the scene like the probe Inspector's Bake button; in an unsaved scene, ReflectionProbe.RenderProbe into the probe's runtime texture), 'baked' (queue a full lightmap bake incl. probes via Lightmapping.BakeAsync), or 'custom' (Lightmapping.BakeReflectionProbe writes the cubemap to target_path, an Assets/-rooted .exr (HDR) or .png (LDR) file imported as a Cubemap; created or overwritten). The bake can take seconds; EditorSettle waits for completion + asset refresh before returning. Mutating: runs the full gate path; paths_hint includes the probe scene path and (for custom mode) the output cubemap asset path.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "bake_mode": {
           "default": "realtime",
-          "description": "'realtime' — ReflectionProbe.Bake. 'baked' — Lightmapping.BakeAsync (full lightmap bake incl. probes). 'custom' — Lightmapping.BakeReflectionProbeSnapshot into target_path.",
+          "description": "'realtime' — quick bake of this probe alone (RenderProbe in an unsaved scene). 'baked' — Lightmapping.BakeAsync (full lightmap bake incl. probes). 'custom' — Lightmapping.BakeReflectionProbe into target_path.",
           "enum": [
             "realtime",
             "baked",
@@ -9339,12 +9339,12 @@
           },
           "type": "array"
         },
-        "target_path": {
-          "description": "Assets/-rooted .cubemap path (required for bake_mode='custom'). The cubemap asset is created if absent.",
-          "type": "string"
-        },
         "scene_path": {
           "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
+        },
+        "target_path": {
+          "description": "Assets/-rooted .exr (HDR) or .png (LDR) path (required for bake_mode='custom'); the baked cubemap is written there and imported as a Cubemap.",
           "type": "string"
         }
       },
@@ -9548,7 +9548,7 @@
     }
   },
   "unity_open_mcp_audio_source_modify": {
-    "description": "Set typed AudioSource fields: clip_path (Assets/-rooted AudioClip), volume (0-1), pitch, loop, play_on_awake, spatial_blend (0=2D, 1=3D), spatialize, min_distance, max_distance, doppler_level, spread, and mixer_group_path (Assets/-rooted .mix — assigns the first AudioMixerGroup exposed by the mixer; pass clear_mixer_group: true to clear). Each field is optional — omit to leave unchanged. Mutating: runs the full gate path; paths_hint is the host scene path (and the mixer asset path when mixer_group_path is set).",
+    "description": "Set typed AudioSource fields: clip_path (Assets/-rooted AudioClip), volume (0-1), pitch, loop, play_on_awake, spatial_blend (0=2D, 1=3D), spatialize, min_distance, max_distance, doppler_level, spread, and mixer_group_path (Assets/-rooted .mixer — assigns the first AudioMixerGroup exposed by the mixer; pass clear_mixer_group: true to clear). Each field is optional — omit to leave unchanged. Mutating: runs the full gate path; paths_hint is the host scene path (and the mixer asset path when mixer_group_path is set).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -9578,6 +9578,10 @@
             "off"
           ]
         },
+        "in_prefab": {
+          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes.",
+          "type": "string"
+        },
         "instance_id": {
           "default": 0,
           "description": "Host GameObject instance ID.",
@@ -9599,7 +9603,7 @@
           "type": "number"
         },
         "mixer_group_path": {
-          "description": "Assets/-rooted .mix — assigns the first AudioMixerGroup exposed by the mixer to AudioSource.outputAudioMixerGroup.",
+          "description": "Assets/-rooted .mixer — assigns the first AudioMixerGroup exposed by the mixer to AudioSource.outputAudioMixerGroup.",
           "type": "string"
         },
         "name": {
@@ -9627,6 +9631,10 @@
           "description": "Play on awake.",
           "type": "boolean"
         },
+        "scene_path": {
+          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
+          "type": "string"
+        },
         "spatial_blend": {
           "description": "0=2D, 1=3D.",
           "type": "number"
@@ -9648,14 +9656,6 @@
         "volume": {
           "description": "Volume 0-1.",
           "type": "number"
-        },
-        "scene_path": {
-          "description": "Container to look GameObject paths up in: a loaded scene's asset path, or the open prefab stage's prefab asset path. Needed only when a path matches in several (the call refuses with ambiguous_path and lists them; paths_hint, the open prefab stage, then the active scene narrow first).",
-          "type": "string"
-        },
-        "in_prefab": {
-          "type": "string",
-          "description": "Prefab asset to edit in place, e.g. 'Assets/UI/Shop.prefab' — no prefab stage: the bridge loads its contents, runs the call, saves the asset (when a mutating call succeeds; never after a failure) and unloads it. Paths start at the prefab root and resolve only there. Not on the Editor undo stack; instance ids in the result do not outlive the call. Refused while the prefab is open in a stage with unsaved changes."
         }
       },
       "required": [
@@ -9665,7 +9665,7 @@
     }
   },
   "unity_open_mcp_audio_mixer_set_parameter": {
-    "description": "Set a float value on an AudioMixer asset's exposed parameter. mixer_path is an Assets/-rooted .mix asset path; parameter_name is the exposed parameter name; value is the raw float (dB for volume params). normalize (default false) maps a 0-1 input onto the -80..0 dB range so a friendly volume slider can be passed directly. The mixer asset is marked dirty — call assets_refresh / scene_save to commit. Mutating: runs the full gate path; paths_hint is the mixer asset path.",
+    "description": "Set a float value on an AudioMixer asset's exposed parameter. mixer_path is an Assets/-rooted .mixer asset path; parameter_name is the exposed parameter name; value is the raw float (dB for volume params). normalize (default false) maps a 0-1 input onto the -80..0 dB range so a friendly volume slider can be passed directly. Outside play mode the value is written into the mixer's current snapshot and the asset is saved (appliedTo: snapshot) — what the Audio Mixer window's slider does; in play mode it is a runtime override that is not saved (appliedTo: runtime). Mutating: runs the full gate path; paths_hint is the mixer asset path.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -9678,7 +9678,7 @@
           ]
         },
         "mixer_path": {
-          "description": "Assets/-rooted .mix asset path.",
+          "description": "Assets/-rooted .mixer asset path.",
           "type": "string"
         },
         "normalize": {
@@ -9720,12 +9720,12 @@
     }
   },
   "unity_open_mcp_audio_mixer_get_parameter": {
-    "description": "Read a float value on an AudioMixer asset's exposed parameter. mixer_path is an Assets/-rooted .mix asset path; parameter_name is the exposed parameter name. Returns the current value, or a `parameter_not_exposed` error when the name is not exposed. Read-only, gate-free.",
+    "description": "Read a float value on an AudioMixer asset's exposed parameter. mixer_path is an Assets/-rooted .mixer asset path; parameter_name is the exposed parameter name. Returns the current value, or a `parameter_not_exposed` error when the name is not exposed. Read-only, gate-free.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "mixer_path": {
-          "description": "Assets/-rooted .mix asset path.",
+          "description": "Assets/-rooted .mixer asset path.",
           "type": "string"
         },
         "parameter_name": {

@@ -508,7 +508,8 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
             Gate = GateMode.Enforce,
             Lifecycle = LifecyclePolicy.EditorSettle, Group = "splines")]
         [System.ComponentModel.Description(
-            "Set one or more serialized fields on the SplineContainer component " +
+            "Set one or more public properties (or fields) on the SplineContainer " +
+            "component, by C# member name " +
             "(not the Spline itself — use set_knot / set_tangent_mode for knot " +
             "fields). Each entry is { field, value, type? } where type is " +
             "'int' | 'float' | 'bool' | 'string' | 'vector' (default inferred " +
@@ -738,22 +739,27 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
             if (string.IsNullOrEmpty(entry.Field))
                 return new FieldResult { Ok = false, Message = "field is required" };
 
+            // SplineContainer exposes its settings as public properties more
+            // often than as fields: try a writable property first, then a
+            // public field.
             var t = comp.GetType();
-            var field = t.GetField(entry.Field,
-                System.Reflection.BindingFlags.Public |
-                System.Reflection.BindingFlags.Instance);
-            if (field == null)
+            var flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance;
+            var prop = t.GetProperty(entry.Field, flags);
+            var field = prop != null && prop.CanWrite ? null : t.GetField(entry.Field, flags);
+            if ((prop == null || !prop.CanWrite) && field == null)
                 return new FieldResult { Ok = false, Message = $"Unknown field '{entry.Field}' on {t.Name}." };
 
             try
             {
-                object converted = ConvertValue(field.FieldType, entry.RawValue, entry.TypeHint);
-                field.SetValue(comp, converted);
+                if (field == null)
+                    prop.SetValue(comp, ConvertValue(prop.PropertyType, entry.RawValue, entry.TypeHint));
+                else
+                    field.SetValue(comp, ConvertValue(field.FieldType, entry.RawValue, entry.TypeHint));
                 return new FieldResult { Ok = true };
             }
             catch (System.Exception e)
             {
-                return new FieldResult { Ok = false, Message = e.Message };
+                return new FieldResult { Ok = false, Message = e.InnerException?.Message ?? e.Message };
             }
         }
 

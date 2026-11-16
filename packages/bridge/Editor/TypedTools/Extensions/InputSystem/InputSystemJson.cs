@@ -127,17 +127,44 @@ namespace UnityOpenMcpBridge.Extensions.InputSystemExt
 
         // Serialize an InputActionAsset to JSON, guarding the InputSystem 1.x
         // bug where ToJson() throws inside WriteFileJson.FromMaps when the asset
-        // has no ActionMaps (its internal map array is null). Emits minimal
-        // valid JSON in that case.
+        // has no ActionMaps (its internal map array is null — still the case on
+        // 1.20). Writes the same file shape by hand in that case, control
+        // schemes included, so a scheme added before any map survives the save.
         //
         // Note: actionMaps is a ReadOnlyArray<InputActionMap> (a struct), so it
         // cannot be compared to null with == — check Count instead. The wrapper
         // returns an empty ReadOnlyArray when the backing field is null.
         private static string ToSafeJson(InputActionAsset asset)
         {
-            if (asset.actionMaps.Count == 0)
-                return "{\n    \"name\": \"" + asset.name + "\",\n    \"maps\": [],\n    \"controlSchemes\": []\n}";
-            return asset.ToJson();
+            if (asset.actionMaps.Count > 0)
+                return asset.ToJson();
+
+            var sb = new StringBuilder(256);
+            sb.Append("{\n    \"name\": ").Append(Esc(asset.name));
+            sb.Append(",\n    \"maps\": [],\n    \"controlSchemes\": [");
+            var schemes = asset.controlSchemes;
+            for (int i = 0; i < schemes.Count; i++)
+            {
+                var scheme = schemes[i];
+                sb.Append(i == 0 ? "\n" : ",\n");
+                sb.Append("        {\n            \"name\": ").Append(Esc(scheme.name));
+                sb.Append(",\n            \"bindingGroup\": ").Append(Esc(scheme.bindingGroup));
+                sb.Append(",\n            \"devices\": [");
+                var devices = scheme.deviceRequirements;
+                for (int d = 0; d < devices.Count; d++)
+                {
+                    var device = devices[d];
+                    sb.Append(d == 0 ? "\n" : ",\n");
+                    sb.Append("                {\n                    \"devicePath\": ").Append(Esc(device.controlPath));
+                    sb.Append(",\n                    \"isOptional\": ").Append(device.isOptional ? "true" : "false");
+                    sb.Append(",\n                    \"isOR\": ").Append(device.isOR ? "true" : "false");
+                    sb.Append("\n                }");
+                }
+                sb.Append(devices.Count > 0 ? "\n            ]" : "]");
+                sb.Append("\n        }");
+            }
+            sb.Append(schemes.Count > 0 ? "\n    ]\n}" : "]\n}");
+            return sb.ToString();
         }
     }
 }

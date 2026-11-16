@@ -7,17 +7,20 @@ import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 export const audioMixerSetParameter = makeTool(
   "unity_open_mcp_audio_mixer_set_parameter",
   "Set a float value on an AudioMixer asset's exposed parameter. mixer_path is an " +
-    "Assets/-rooted .mix asset path; parameter_name is the exposed parameter name; " +
+    "Assets/-rooted .mixer asset path; parameter_name is the exposed parameter name; " +
     "value is the raw float (dB for volume params). normalize (default false) maps a " +
     "0-1 input onto the -80..0 dB range so a friendly volume slider can be passed " +
-    "directly. The mixer asset is marked dirty — call assets_refresh / scene_save to " +
-    "commit. Mutating: runs the full gate path; paths_hint is the mixer asset path.",
+    "directly. Outside play mode the value is written into the mixer's current " +
+    "snapshot and the asset is saved (appliedTo: snapshot) — what the Audio Mixer " +
+    "window's slider does; in play mode it is a runtime override that is not saved " +
+    "(appliedTo: runtime). Mutating: runs the full gate path; paths_hint is the mixer " +
+    "asset path.",
   {
     required: ["mixer_path", "parameter_name", "paths_hint"],
         properties: {
           mixer_path: {
             type: "string",
-            description: "Assets/-rooted .mix asset path.",
+            description: "Assets/-rooted .mixer asset path.",
           },
           parameter_name: {
             type: "string",

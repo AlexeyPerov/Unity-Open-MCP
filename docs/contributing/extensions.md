@@ -105,8 +105,18 @@ When extras is absent, the tool returns `tilemap_extras_required`.
    before changing anything, and never return a top-level `error` object from a
    call that succeeded. Community packs follow the same contract.
 4. Mirror the layout for EditMode tests under
-   `packages/bridge/Tests/Editor/TypedTools/<Domain>/` with their own gated
-   test sub-asmdef.
+   `packages/bridge/Tests/Editor/TypedTools/<Domain>/` with their own test
+   sub-asmdef. The `versionDefines` rule above applies to it too: the test
+   asmdef repeats the domain sub-asmdef's `versionDefines` and
+   `defineConstraints` exactly — a `UNITY_OPEN_MCP_EXT_<DOMAIN>` constraint
+   without its own `versionDefines` entry is never satisfied, and the tests
+   silently never compile. Add no other constraint (the core
+   `Editor.Tests` asmdef has none), so the tests compile wherever the domain
+   does; an ungated domain has an ungated test asmdef. `#if` guards in the
+   test sources use the same symbols. `mcp-server/src/asmdef-gates.parity.test.ts`
+   (part of `npm test`) fails when a test asmdef's gate differs from the
+   domain asmdefs it references, or when an asmdef or a script uses a gate
+   symbol its own asmdef does not declare.
 5. Sync MCP surfaces in the same task (see below).
 
 Use Navigation (`TypedTools/Extensions/Navigation/`) as the reference
@@ -195,7 +205,8 @@ another. Tool IDs normally use
 1. Implement the bridge domain under
    `packages/bridge/Editor/TypedTools/Extensions/<SourceFolder>/`, including
    its compile/version gate where the dependency is optional. Keep the source
-   guard, sub-asmdef, and gated test asmdef aligned.
+   guard, sub-asmdef, and test asmdef gate identical (see step 4 of
+   [Wiring in a new embedded domain](#wiring-in-a-new-embedded-domain)).
 2. Use `[BridgeToolType]` and `[BridgeTool]`; embedded domains are discovered
    by the registry and do not use legacy `KnownTools` dispatch.
 3. Update `packages/bridge/Editor/UI/EmbeddedDomainCatalog.cs` and the

@@ -5,8 +5,9 @@ import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 // navigation extension pack. Mutating: runs the full gate path.
 export const navigationModify = makeTool(
   "unity_open_mcp_navigation_modify",
-  "Set one or more serialized fields on a NavMesh component attached to a " +
-    "target GameObject. Select the component by component_type (NavMeshSurface " +
+  "Set one or more public properties (or fields) on a NavMesh component attached " +
+    "to a target GameObject, by C# member name (e.g. NavMeshAgent speed, " +
+    "angularSpeed, stoppingDistance). Select the component by component_type (NavMeshSurface " +
     "| NavMeshAgent | NavMeshLink | NavMeshModifier | NavMeshModifierVolume). " +
     "Use this when a typed mutator does not cover a niche field; otherwise " +
     "prefer the typed tools (surface_add / agent_add / etc.). Each entry is " +

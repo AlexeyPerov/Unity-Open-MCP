@@ -1,6 +1,7 @@
 // Input simulation — Input System keyboard/touch device tools EditMode tests.
 //
-// Gated by UNITY_OPEN_MCP_EXT_INPUTSIM_IS via the owning test asmdef's
+// Gated by UNITY_OPEN_MCP_EXT_INPUTSYSTEM (the gate of the Input System
+// sub-asmdef that owns InputSystemDeviceTools) via the owning test asmdef's
 // defineConstraints, so the suite compiles + runs when com.unity.inputsystem
 // is present.
 //
@@ -8,7 +9,7 @@
 // Input System touch backend registration and its Touchscreen queueing (touch
 // routing itself is covered by the root Device tests). Framed delivery through
 // EditorApplication.Step needs PlayMode (manual checklist).
-#if UNITY_OPEN_MCP_EXT_INPUTSIM_IS
+#if UNITY_OPEN_MCP_EXT_INPUTSYSTEM
 using NUnit.Framework;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.Extensions.InputSimulation;

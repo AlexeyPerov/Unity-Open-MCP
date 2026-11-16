@@ -4,7 +4,7 @@
 // TreePrototype / TerrainLayer types (UnityEngine.TerrainModule +
 // UnityEngine.CoreModule) are built-in engine types present on every Unity
 // install, so the tools — and this suite — compile unconditionally. The test
-// asmdef only constrains UNITY_TEST_FRAMEWORK.
+// asmdef has no define constraints either.
 #pragma warning disable CS0618
 using NUnit.Framework;
 using UnityEditor;
@@ -417,18 +417,19 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TerrainExt
                 StringAssert.Contains("\"height\":3", result.Output);
 
                 // Read back the heightmap region — the 1.5 must clamp to 1.0
-                // and the -0.1 to 0.0.
+                // and the -0.1 to 0.0. The heightmap stores 16-bit samples, so
+                // compare within one step.
                 var td = terrain.terrainData;
                 var got = td.GetHeights(10, 20, 3, 3);
-                Assert.AreEqual(0.5f, got[0, 0]);
-                Assert.AreEqual(0.6f, got[0, 1]);
-                Assert.AreEqual(0.7f, got[0, 2]);
-                Assert.AreEqual(1.0f, got[1, 0], "1.5 should clamp to 1.0");
-                Assert.AreEqual(0.0f, got[1, 1], "-0.1 should clamp to 0.0");
-                Assert.AreEqual(0.3f, got[1, 2]);
-                Assert.AreEqual(0.2f, got[2, 0]);
-                Assert.AreEqual(0.4f, got[2, 1]);
-                Assert.AreEqual(0.8f, got[2, 2]);
+                Assert.AreEqual(0.5f, got[0, 0], HeightStep);
+                Assert.AreEqual(0.6f, got[0, 1], HeightStep);
+                Assert.AreEqual(0.7f, got[0, 2], HeightStep);
+                Assert.AreEqual(1.0f, got[1, 0], HeightStep, "1.5 should clamp to 1.0");
+                Assert.AreEqual(0.0f, got[1, 1], HeightStep, "-0.1 should clamp to 0.0");
+                Assert.AreEqual(0.3f, got[1, 2], HeightStep);
+                Assert.AreEqual(0.2f, got[2, 0], HeightStep);
+                Assert.AreEqual(0.4f, got[2, 1], HeightStep);
+                Assert.AreEqual(0.8f, got[2, 2], HeightStep);
             }
             finally
             {
@@ -454,11 +455,12 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TerrainExt
 
                 var td = terrain.terrainData;
                 Assert.AreEqual(1, td.alphamapLayers, "Should have 1 layer now.");
+                // The splatmap stores 8-bit weights: compare within one step.
                 var got = td.GetAlphamaps(0, 0, 2, 2);
-                Assert.AreEqual(1.0f, got[0, 0, 0]);
-                Assert.AreEqual(0.5f, got[0, 1, 0]);
-                Assert.AreEqual(0.25f, got[1, 0, 0]);
-                Assert.AreEqual(0.75f, got[1, 1, 0]);
+                Assert.AreEqual(1.0f, got[0, 0, 0], AlphaStep);
+                Assert.AreEqual(0.5f, got[0, 1, 0], AlphaStep);
+                Assert.AreEqual(0.25f, got[1, 0, 0], AlphaStep);
+                Assert.AreEqual(0.75f, got[1, 1, 0], AlphaStep);
             }
             finally
             {
@@ -508,6 +510,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TerrainExt
                 // Build a throwaway prefab to seed the prototype.
                 if (UnityEditor.AssetDatabase.LoadMainAssetAtPath(PrefabPath) != null)
                     UnityEditor.AssetDatabase.DeleteAsset(PrefabPath);
+                if (!UnityEditor.AssetDatabase.IsValidFolder(TmpDir))
+                    UnityEditor.AssetDatabase.CreateFolder("Assets", "TmpTerrainTests");
                 var prefabSrc = new GameObject("TreeSrc");
                 prefabSrc.AddComponent<MeshRenderer>();
                 UnityEditor.PrefabUtility.SaveAsPrefabAsset(prefabSrc, PrefabPath);
@@ -585,9 +589,14 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TerrainExt
         // We construct it directly (not via the tool) so a failure in
         // terrain_create does not cascade into the set_heights / paint_layer /
         // place_trees / set_neighbors tests.
+        // One quantisation step of the stored heightmap (16-bit) and splatmap
+        // (8-bit) samples.
+        private const float HeightStep = 1f / 32766f;
+        private const float AlphaStep = 1f / 255f;
+
         private static Terrain CreateTestTerrain(string name)
         {
-            var td = ScriptableObject.CreateInstance<TerrainData>();
+            var td = new TerrainData();
             td.heightmapResolution = 129;
             td.size = new Vector3(100, 50, 100);
             td.alphamapResolution = 129;
@@ -611,18 +620,20 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TerrainExt
 
         // Extract the instanceId from a tool output JSON envelope. Returns 0
         // when not found (the caller treats 0 as "no terrain to clean up").
-        private static int ExtractInstanceId(string output)
+        private static long ExtractInstanceId(string output)
         {
             if (string.IsNullOrEmpty(output)) return 0;
             var key = "\"instanceId\":";
             var idx = output.IndexOf(key, System.StringComparison.Ordinal);
             if (idx < 0) return 0;
             int start = idx + key.Length;
+            // Instance ids are JSON strings ("12345", lossless on 8-byte EntityIds).
+            if (start < output.Length && output[start] == '"') start++;
             int end = start;
             while (end < output.Length &&
                    (char.IsDigit(output[end]) || output[end] == '-'))
                 end++;
-            int.TryParse(output.Substring(start, end - start), out var id);
+            long.TryParse(output.Substring(start, end - start), out var id);
             return id;
         }
     }

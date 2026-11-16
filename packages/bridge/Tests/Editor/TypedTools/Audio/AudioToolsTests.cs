@@ -3,9 +3,9 @@
 // Ungated (no UNITY_OPEN_MCP_EXT_AUDIO): the AudioSource / AudioListener /
 // AudioMixer / AudioMixerGroup types are built-in engine (UnityEngine.AudioModule)
 // types present on every Unity install, so the tools — and this suite — compile
-// unconditionally. The test asmdef only constrains UNITY_TEST_FRAMEWORK.
+// unconditionally. The test asmdef has no define constraints either.
 //
-// The mixer round-trip test creates a real .mix asset via the internal
+// The mixer round-trip test creates a real .mixer asset via the internal
 // AudioMixerController.CreateMixerControllerAtPath helper (AudioMixer's public
 // ctor is not callable). When that internal API is unavailable on a future
 // Unity version, the test is Ignored rather than Failed — the rest of the
@@ -151,7 +151,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.AudioExt
         {
             var result = BridgeToolRegistry.TryDispatch(
                 "unity_open_mcp_audio_mixer_set_parameter",
-                "{\"mixer_path\":\"Assets/Tmp.mix\",\"parameter_name\":\"Volume\"}");
+                "{\"mixer_path\":\"Assets/Tmp.mixer\",\"parameter_name\":\"Volume\"}");
             AssertErrorEnvelope(result, "paths_hint_required");
         }
 
@@ -210,8 +210,19 @@ namespace UnityOpenMcpBridge.Tests.Extensions.AudioExt
         {
             var result = BridgeToolRegistry.TryDispatch(
                 "unity_open_mcp_audio_mixer_set_parameter",
-                "{\"mixer_path\":\"not/Assets/rooted.mix\",\"parameter_name\":\"Volume\"," +
-                "\"paths_hint\":[\"Assets/T.mix\"]}");
+                "{\"mixer_path\":\"not/Assets/rooted.mixer\",\"parameter_name\":\"Volume\"," +
+                "\"paths_hint\":[\"Assets/T.mixer\"]}");
+            AssertErrorEnvelope(result, "invalid_asset_path");
+        }
+
+        [Test]
+        public void Dispatch_AudioMixerSetParameter_WrongExtension_ReturnsInvalidAssetPath()
+        {
+            // AudioMixer assets are .mixer files; anything else is refused.
+            var result = BridgeToolRegistry.TryDispatch(
+                "unity_open_mcp_audio_mixer_set_parameter",
+                "{\"mixer_path\":\"Assets/Audio/Master.mix\",\"parameter_name\":\"Volume\"," +
+                "\"paths_hint\":[\"Assets/Audio/Master.mix\"]}");
             AssertErrorEnvelope(result, "invalid_asset_path");
         }
 
@@ -220,8 +231,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.AudioExt
         {
             var result = BridgeToolRegistry.TryDispatch(
                 "unity_open_mcp_audio_mixer_set_parameter",
-                "{\"mixer_path\":\"Assets/Does/NotExist.mix\",\"parameter_name\":\"Volume\"," +
-                "\"paths_hint\":[\"Assets/T.mix\"]}");
+                "{\"mixer_path\":\"Assets/Does/NotExist.mixer\",\"parameter_name\":\"Volume\"," +
+                "\"paths_hint\":[\"Assets/T.mixer\"]}");
             AssertErrorEnvelope(result, "asset_not_found");
         }
 
@@ -245,7 +256,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.AudioExt
             }
             finally
             {
-                DeleteAssetIfExists(tmpPath);
+                DeleteTmpDir();
             }
         }
 
@@ -342,6 +353,11 @@ namespace UnityOpenMcpBridge.Tests.Extensions.AudioExt
         [Test]
         public void Read_AudioListenerGet_ReportsStateAndDuplicateWarning()
         {
+            // The test scene may already hold a listener (a default Main
+            // Camera): disable the others so the counts are this test's own.
+            var others = Object.FindObjectsByType<AudioListener>(FindObjectsInactive.Exclude, FindObjectsSortMode.None)
+                .Where(l => l.enabled).ToArray();
+            foreach (var other in others) other.enabled = false;
             var a = new GameObject("ListenerA");
             var b = new GameObject("ListenerB");
             try
@@ -370,6 +386,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.AudioExt
             {
                 Object.DestroyImmediate(a);
                 Object.DestroyImmediate(b);
+                foreach (var other in others)
+                    if (other != null) other.enabled = true;
             }
         }
 
@@ -402,6 +420,10 @@ namespace UnityOpenMcpBridge.Tests.Extensions.AudioExt
                 Assert.IsTrue(setResult.Success, setResult.ErrorMessage ?? setResult.Output);
                 StringAssert.Contains("\"parameter\":\"" + ExposedVolumeParam + "\"", setResult.Output);
                 StringAssert.Contains("\"value\":-6.5", setResult.Output);
+                // Edit mode: written into the mixer's snapshot and saved.
+                StringAssert.Contains("\"appliedTo\":\"snapshot\"", setResult.Output);
+                StringAssert.Contains(": -6.5\n", System.IO.File.ReadAllText(tmpPath),
+                    "The snapshot value should be saved in the .mixer file.");
 
                 // Read it back via the read-only tool.
                 var getBody = "{\"mixer_path\":\"" + tmpPath + "\",\"parameter_name\":\"" +
@@ -414,7 +436,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.AudioExt
             }
             finally
             {
-                DeleteAssetIfExists(tmpPath);
+                DeleteTmpDir();
             }
         }
 
@@ -444,7 +466,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.AudioExt
             }
             finally
             {
-                DeleteAssetIfExists(tmpPath);
+                DeleteTmpDir();
             }
         }
 
@@ -455,25 +477,23 @@ namespace UnityOpenMcpBridge.Tests.Extensions.AudioExt
         private const string TmpDir = "Assets/TmpAudioTests";
 
         /// <summary>
-        /// Create a real .mix AudioMixer asset under TmpDir with one exposed
-        /// float parameter named "Volume". AudioMixer's public ctor is not
-        /// callable, so we use the internal
-        /// AudioMixerController.CreateMixerControllerAtPath helper via
-        /// reflection, then expose the master group's volume float via
-        /// AudioMixerController.ExposeParameters. Returns null when the
+        /// Create a real .mixer AudioMixer asset under TmpDir whose master
+        /// group volume is exposed as ExposedVolumeParam. AudioMixer's public
+        /// ctor is not callable, so the asset comes from the internal
+        /// AudioMixerController.CreateMixerControllerAtPath (what Create >
+        /// Audio Mixer calls); a new mixer exposes nothing, so the master
+        /// volume is exposed through the serialized data (what "Expose to
+        /// script" in the Audio Mixer window writes). Returns null when the
         /// internal API is unavailable (callers Assert.Ignore in that case).
         /// </summary>
         private static string CreateTmpMixerAsset()
         {
             EnsureTmpDir();
 
-            const string path = TmpDir + "/TestMixer.mix";
-            DeleteAssetIfExists(path);
+            const string path = TmpDir + "/TestMixer.mixer";
+            if (UnityEditor.AssetDatabase.LoadMainAssetAtPath(path) != null)
+                UnityEditor.AssetDatabase.DeleteAsset(path);
 
-            // AudioMixerController is the concrete editor subtype behind
-            // AudioMixer; CreateMixerControllerAtPath(string) creates a fresh
-            // mixer asset at the given path. It lives in the
-            // UnityEditor.Audio assembly.
             var controllerType = System.AppDomain.CurrentDomain
                 .GetAssemblies()
                 .Select(a => a.GetType("UnityEditor.Audio.AudioMixerController"))
@@ -496,52 +516,38 @@ namespace UnityOpenMcpBridge.Tests.Extensions.AudioExt
             }
             if (mixer == null) return null;
 
-            // CreateMixerControllerAtPath ships the master group with a volume
-            // float that is already exposed under the name "masterVolume" on
-            // most Unity versions. The set-parameter tool surfaces a clean
-            // `parameter_not_exposed` error when exposure is missing, so the
-            // round-trip test will fail loudly rather than silently if the
-            // pre-exposed name differs — no silent false positive.
-            var controller = mixer;
-            // Resolve the GUID for the exposed "masterVolume" param so the
-            // round-trip has a known starting value.
-            TrySeedExposedVolume(controller, "masterVolume");
-
+            var mixerSo = new UnityEditor.SerializedObject(mixer);
+            var master = mixerSo.FindProperty("m_MasterGroup").objectReferenceValue;
+            var volume = new UnityEditor.SerializedObject(master).FindProperty("m_Volume");
+            var exposed = mixerSo.FindProperty("m_ExposedParameters");
+            exposed.arraySize = 1;
+            var entry = exposed.GetArrayElementAtIndex(0);
+            entry.FindPropertyRelative("name").stringValue = ExposedVolumeParam;
+            var guid = entry.FindPropertyRelative("guid");
+            for (int d = 0; d < 4; d++)
+                guid.FindPropertyRelative("data[" + d + "]").longValue =
+                    volume.FindPropertyRelative("data[" + d + "]").longValue;
+            mixerSo.ApplyModifiedPropertiesWithoutUndo();
             UnityEditor.AssetDatabase.SaveAssets();
+            Assert.IsTrue(mixer.GetFloat(ExposedVolumeParam, out _),
+                "The test mixer should expose " + ExposedVolumeParam + ".");
             return path;
         }
 
-        // Best-effort: write a default value to the named exposed parameter.
-        // SetFloat returns false when the name is not exposed; we surface that
-        // (the round-trip test catches it) rather than masking it.
-        private static void TrySeedExposedVolume(AudioMixer mixer, string name)
-        {
-            try
-            {
-                mixer.SetFloat(name, 0f);
-            }
-            catch
-            {
-                // ignore — caller asserts on the actual tool result.
-            }
-        }
-
-        // The exposed-parameter name the round-trip tests target. Mirrors the
-        // pre-exposed master-volume float that CreateMixerControllerAtPath
-        // ships with on supported Unity versions.
+        // The exposed-parameter name the round-trip tests target: the master
+        // group's volume, exposed by CreateTmpMixerAsset.
         private const string ExposedVolumeParam = "masterVolume";
 
         private static void EnsureTmpDir()
         {
-            if (!UnityEditor.AssetDatabase.IsValidFolder("Assets/TmpAudioTests"))
+            if (!UnityEditor.AssetDatabase.IsValidFolder(TmpDir))
                 UnityEditor.AssetDatabase.CreateFolder("Assets", "TmpAudioTests");
         }
 
-        private static void DeleteAssetIfExists(string path)
+        private static void DeleteTmpDir()
         {
-            if (string.IsNullOrEmpty(path)) return;
-            if (UnityEditor.AssetDatabase.LoadAssetAtPath<AudioMixer>(path) != null)
-                UnityEditor.AssetDatabase.DeleteAsset(path);
+            if (UnityEditor.AssetDatabase.IsValidFolder(TmpDir))
+                UnityEditor.AssetDatabase.DeleteAsset(TmpDir);
         }
     }
 }

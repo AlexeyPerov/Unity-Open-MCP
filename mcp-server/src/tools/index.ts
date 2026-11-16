@@ -485,7 +485,7 @@ import { resourcePressure } from "./resource-pressure.js";
 // Input simulation — play-mode game-testing surface. uGUI pointer dispatch
 // (EventSystem + ExecuteEvents, compile-gated on com.unity.ugui via
 // UNITY_OPEN_MCP_EXT_INPUTSIM_UGUI) + Input System device events (keyboard +
-// touch, compile-gated on com.unity.inputsystem via UNITY_OPEN_MCP_EXT_INPUTSIM_IS).
+// touch, compile-gated on com.unity.inputsystem via UNITY_OPEN_MCP_EXT_INPUTSYSTEM).
 // The workhorse for "click/swipe/drag a named object" during play mode. All
 // three are gate-free (IsMutating=false — input writes no assets; same model as
 // editor_set_state) and play-mode-only (refuse with play_mode_required).

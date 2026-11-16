@@ -188,8 +188,9 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
             Gate = GateMode.Enforce,
             Lifecycle = LifecyclePolicy.EditorSettle, Group = "lighting")]
         [System.ComponentModel.Description(
-            "Set one or more serialized fields on a Light component attached to " +
-            "a target GameObject. Use this when light_set does not cover a niche " +
+            "Set one or more public properties (or fields) on a Light component " +
+            "attached to a target GameObject, by C# member name (intensity, type, " +
+            "range, bounceIntensity, shadows, …). Use this when light_set does not cover a niche " +
             "field; otherwise prefer the typed tool. Each entry is " +
             "{ field, value, type? } where type is 'int' | 'float' | 'bool' | " +
             "'string' | 'vector' | 'color' (default inferred from the field's " +
@@ -270,13 +271,14 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
             Gate = GateMode.Enforce,
             Lifecycle = LifecyclePolicy.EditorSettle, Group = "lighting")]
         [System.ComponentModel.Description(
-            "Bake a ReflectionProbe. bake_mode: 'realtime' (bake into the " +
-            "probe's runtime texture via ReflectionProbe.Bake), 'baked' (queue " +
-            "a full lightmap bake incl. probes via Lightmapping.BakeAsync), or " +
-            "'custom' (write a baked snapshot into a named cubemap asset path " +
-            "via Lightmapping.BakeReflectionProbeSnapshot — the asset is created " +
-            "if absent). For 'custom', pass target_path (an Assets/-rooted " +
-            ".cubemap path). The bake can take seconds; EditorSettle waits for " +
+            "Bake a ReflectionProbe. bake_mode: 'realtime' (a quick bake of this " +
+            "probe alone, no GI, written next to the scene like the probe " +
+            "Inspector's Bake button; in an unsaved scene, ReflectionProbe.RenderProbe " +
+            "into the probe's runtime texture), 'baked' " +
+            "(queue a full lightmap bake incl. probes via Lightmapping.BakeAsync), or " +
+            "'custom' (Lightmapping.BakeReflectionProbe writes the cubemap to " +
+            "target_path, an Assets/-rooted .exr (HDR) or .png (LDR) file imported " +
+            "as a Cubemap; created or overwritten). The bake can take seconds; EditorSettle waits for " +
             "completion + asset refresh before returning. Mutating: runs the " +
             "gate path; paths_hint includes the probe scene path and (for " +
             "custom mode) the output cubemap asset path.")]
@@ -322,8 +324,11 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
                     // that internal is unavailable on a future Unity version,
                     // we fall through to RenderProbe (renders the probe's
                     // runtime texture in place).
+                    // The snapshot bake writes next to the scene file: an
+                    // unsaved (untitled) scene has none, and Unity asserts.
                     Undo.RecordObject(probe, "Bake ReflectionProbe");
-                    if (!TryBakeReflectionProbeSnapshot(probe))
+                    if (string.IsNullOrEmpty(probe.gameObject.scene.path) ||
+                        !TryBakeReflectionProbeSnapshot(probe))
                     {
                         // Fallback: render into the probe's runtime texture.
                         // This is the runtime-quality render, not a baked
@@ -343,19 +348,24 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
                 {
                     if (string.IsNullOrEmpty(target_path))
                         return LightingJson.Error("missing_parameter",
-                            "'target_path' (Assets/-rooted .cubemap path) is required " +
+                            "'target_path' (Assets/-rooted .exr or .png path) is required " +
                             "for bake_mode='custom'.");
                     if (!target_path.StartsWith("Assets/") ||
-                        !target_path.EndsWith(".cubemap", System.StringComparison.OrdinalIgnoreCase))
+                        !(target_path.EndsWith(".exr", System.StringComparison.OrdinalIgnoreCase) ||
+                          target_path.EndsWith(".png", System.StringComparison.OrdinalIgnoreCase)))
                         return LightingJson.Error("invalid_asset_path",
-                            "target_path must be Assets/-rooted and end with '.cubemap'.");
+                            "target_path must be Assets/-rooted and end with '.exr' (HDR) or " +
+                            "'.png' (LDR) — the baked cubemap is written as that texture file.");
 
                     // Lightmapping.BakeReflectionProbe(probe, path) is the
-                    // public bake-to-cubemap-asset API. It creates / overwrites
-                    // the cubemap at the path — no need to pre-create it.
+                    // public bake-to-file API: it writes the cubemap as an .exr
+                    // (or .png) texture and imports it as a Cubemap, creating /
+                    // overwriting the file. Any other extension fails (false).
                     EnsureFolderFor(target_path);
                     Undo.RecordObject(probe, "Bake ReflectionProbe (custom)");
-                    Lightmapping.BakeReflectionProbe(probe, target_path);
+                    if (!Lightmapping.BakeReflectionProbe(probe, target_path))
+                        return LightingJson.Error("bake_failed",
+                            "Lightmapping.BakeReflectionProbe did not write '" + target_path + "'.");
                     bakedAssetPath = target_path;
                 }
             }
@@ -721,21 +731,28 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
             if (string.IsNullOrEmpty(entry.Field))
                 return new FieldResult { Ok = false, Message = "field is required" };
 
+            // Light exposes its settings as public properties (intensity,
+            // type, range, shadows, …), not fields: try a writable property
+            // first, then a public field.
             var t = typeof(Light);
-            var field = t.GetField(entry.Field,
-                BindingFlags.Public | BindingFlags.Instance);
-            if (field == null)
+            var prop = t.GetProperty(entry.Field, BindingFlags.Public | BindingFlags.Instance);
+            var field = prop != null && prop.CanWrite
+                ? null
+                : t.GetField(entry.Field, BindingFlags.Public | BindingFlags.Instance);
+            if ((prop == null || !prop.CanWrite) && field == null)
                 return new FieldResult { Ok = false, Message = $"Unknown field '{entry.Field}' on Light." };
 
             try
             {
-                object converted = ConvertValue(field.FieldType, entry.RawValue, entry.TypeHint);
-                field.SetValue(light, converted);
+                if (field == null)
+                    prop.SetValue(light, ConvertValue(prop.PropertyType, entry.RawValue, entry.TypeHint));
+                else
+                    field.SetValue(light, ConvertValue(field.FieldType, entry.RawValue, entry.TypeHint));
                 return new FieldResult { Ok = true };
             }
             catch (System.Exception e)
             {
-                return new FieldResult { Ok = false, Message = e.Message };
+                return new FieldResult { Ok = false, Message = e.InnerException?.Message ?? e.Message };
             }
         }
 

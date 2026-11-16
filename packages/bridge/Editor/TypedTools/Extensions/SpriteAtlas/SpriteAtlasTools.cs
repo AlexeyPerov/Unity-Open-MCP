@@ -419,15 +419,15 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
                     {
                         if (!firstApplied) applied.Append(',');
                         firstApplied = false;
-                        applied.Append("{\"field\":\"packing.").Append(SpriteAtlasJson.Esc(entry.Field));
-                        applied.Append("\",\"value\":").Append(entry.RawValue).Append('}');
+                        applied.Append("{\"field\":").Append(SpriteAtlasJson.Esc("packing." + entry.Field));
+                        applied.Append(",\"value\":").Append(entry.RawValue).Append('}');
                     }
                     else
                     {
                         if (!firstUnknown) unknown.Append(',');
                         firstUnknown = false;
-                        unknown.Append("{\"field\":\"packing.").Append(SpriteAtlasJson.Esc(entry.Field));
-                        unknown.Append("\",\"reason\":").Append(SpriteAtlasJson.Esc(entry.Reason)).Append('}');
+                        unknown.Append("{\"field\":").Append(SpriteAtlasJson.Esc("packing." + entry.Field));
+                        unknown.Append(",\"reason\":").Append(SpriteAtlasJson.Esc(entry.Reason)).Append('}');
                     }
                 }
                 if (HasAnyPackingEntry(packingJson))
@@ -463,15 +463,15 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
                     {
                         if (!firstApplied) applied.Append(',');
                         firstApplied = false;
-                        applied.Append("{\"field\":\"texture.").Append(SpriteAtlasJson.Esc(entry.Field));
-                        applied.Append("\",\"value\":").Append(entry.RawValue).Append('}');
+                        applied.Append("{\"field\":").Append(SpriteAtlasJson.Esc("texture." + entry.Field));
+                        applied.Append(",\"value\":").Append(entry.RawValue).Append('}');
                     }
                     else
                     {
                         if (!firstUnknown) unknown.Append(',');
                         firstUnknown = false;
-                        unknown.Append("{\"field\":\"texture.").Append(SpriteAtlasJson.Esc(entry.Field));
-                        unknown.Append("\",\"reason\":").Append(SpriteAtlasJson.Esc(entry.Reason)).Append('}');
+                        unknown.Append("{\"field\":").Append(SpriteAtlasJson.Esc("texture." + entry.Field));
+                        unknown.Append(",\"reason\":").Append(SpriteAtlasJson.Esc(entry.Reason)).Append('}');
                     }
                 }
                 if (HasAnyTextureEntry(textureJson))
@@ -563,10 +563,22 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
         public static string List(string folder = null)
         {
             var searchFolder = string.IsNullOrWhiteSpace(folder) ? "Assets" : folder.Trim();
-            var guids = AssetDatabase.FindAssets("t:SpriteAtlas", new[] { searchFolder });
+            // Match the file extension, not the imported type: a .spriteatlas
+            // holding the authoring SpriteAtlasAsset (what spriteatlas_create
+            // writes) is not a `t:SpriteAtlas` unless a SpriteAtlasImporter
+            // imports it, yet every atlas tool accepts it.
+            var paths = new List<string>();
+            foreach (var guid in AssetDatabase.FindAssets(string.Empty, new[] { searchFolder }))
+            {
+                var candidate = AssetDatabase.GUIDToAssetPath(guid);
+                if (candidate.EndsWith(".spriteatlas", System.StringComparison.OrdinalIgnoreCase) &&
+                    !paths.Contains(candidate))
+                    paths.Add(candidate);
+            }
+            paths.Sort(System.StringComparer.Ordinal);
             int max = 200;
-            int truncated = guids.Length > max ? guids.Length - max : 0;
-            int emit = System.Math.Min(guids.Length, max);
+            int truncated = paths.Count > max ? paths.Count - max : 0;
+            int emit = System.Math.Min(paths.Count, max);
 
             var sb = new StringBuilder(emit * 80 + 32);
             sb.Append("\"folder\":").Append(SpriteAtlasJson.Esc(searchFolder));
@@ -576,7 +588,7 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             for (int i = 0; i < emit; i++)
             {
                 if (i > 0) sb.Append(',');
-                var path = AssetDatabase.GUIDToAssetPath(guids[i]);
+                var path = paths[i];
                 var name = System.IO.Path.GetFileNameWithoutExtension(path);
                 sb.Append("{\"path\":").Append(SpriteAtlasJson.Esc(path));
                 sb.Append(",\"name\":").Append(SpriteAtlasJson.Esc(name)).Append('}');

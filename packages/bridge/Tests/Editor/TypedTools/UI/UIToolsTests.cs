@@ -1,11 +1,10 @@
 // M20 Plan 3 / T20.3.2 — UI (uGUI) embedded domain tools EditMode tests.
 //
-// Ungated (no UNITY_OPEN_MCP_EXT_UI): the Canvas / CanvasScaler /
-// GraphicRaycaster / Image / Text / Button / Slider / Toggle / InputField /
-// layout groups / EventSystem types are built-in engine (UnityEngine.UI +
-// UnityEngine.EventSystems) types present on every Unity install, so the
-// tools — and this suite — compile unconditionally. The test asmdef only
-// constrains UNITY_TEST_FRAMEWORK.
+// Gated on UNITY_OPEN_MCP_EXT_UI (com.unity.ugui, which provides the Canvas /
+// CanvasScaler / GraphicRaycaster / Image / Text / Button / Slider / Toggle /
+// InputField / layout group / EventSystem types): the test asmdef carries the
+// same versionDefines + defineConstraints as the UI sub-asmdef, so the suite
+// compiles wherever the tools do.
 //
 // TextMesh Pro (TMP_Text) is OPTIONAL — the TMP_Text tests run only when TMP
 // is installed in the test project (detected via reflection at runtime); when
@@ -23,6 +22,7 @@ using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
+using Object = UnityEngine.Object;
 
 namespace UnityOpenMcpBridge.Tests.Extensions.UIExt
 {

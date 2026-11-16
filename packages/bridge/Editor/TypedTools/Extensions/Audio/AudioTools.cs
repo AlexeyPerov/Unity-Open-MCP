@@ -120,8 +120,8 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
 
         // Typed patch on an AudioSource. Each field is optional — omit to leave
         // unchanged. mixer_group_path assigns an AudioMixerGroup from an
-        // Assets/-rooted .mix asset path (resolved via the asset's FindMatching
-        // Groups — the first group is used when the .mix exposes several).
+        // Assets/-rooted .mixer asset path (resolved via the asset's FindMatching
+        // Groups — the first group is used when the mixer exposes several).
         [BridgeTool("unity_open_mcp_audio_source_modify",
             Title = "Audio: Modify AudioSource",
             IsMutating = true,
@@ -132,7 +132,7 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
             "Set typed AudioSource fields: clip_path (Assets/-rooted AudioClip), " +
             "volume (0-1), pitch, loop, play_on_awake, spatial_blend (0=2D, 1=3D), " +
             "spatialize, min_distance, max_distance, doppler_level, spread, " +
-            "mixer_group_path (Assets/-rooted .mix — assigns the first AudioMixerGroup " +
+            "mixer_group_path (Assets/-rooted .mixer — assigns the first AudioMixerGroup " +
             "exposed by the mixer; pass null to clear), output_mixer_group via the mixer. " +
             "Each field is optional — omit to leave unchanged. Mutating: runs the gate " +
             "path; paths_hint is the host scene path (and the mixer asset path when " +
@@ -216,10 +216,14 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
         // AudioMixer — set exposed float parameter (mutating asset write)
         // =====================================================================
 
-        // Set a float value on an AudioMixer asset's exposed parameter. The
-        // mixer is an asset — LoadAssetAtPath + SetFloat + SetDirty. normalize
-        // (default false) maps a 0-1 input onto the typical -80..0 dB range so
-        // agents can pass a friendly volume slider without computing dB.
+        // Set a float value on an AudioMixer asset's exposed parameter. Outside
+        // play mode AudioMixer.SetFloat is refused (the Editor is editing the
+        // mixer's snapshots), so the value goes into the mixer's current
+        // snapshot and the asset is saved — what moving the slider in the Audio
+        // Mixer window does. In play mode it is SetFloat's runtime override,
+        // which is not saved. normalize (default false) maps a 0-1 input onto
+        // the typical -80..0 dB range so agents can pass a friendly volume
+        // slider without computing dB.
         [BridgeTool("unity_open_mcp_audio_mixer_set_parameter",
             Title = "Audio: Set Mixer Parameter",
             IsMutating = true,
@@ -228,12 +232,14 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
             Lifecycle = LifecyclePolicy.EditorSettle, Group = "audio")]
         [System.ComponentModel.Description(
             "Set a float value on an AudioMixer asset's exposed parameter. " +
-            "mixer_path is an Assets/-rooted .mix asset path; parameter_name is the " +
+            "mixer_path is an Assets/-rooted .mixer asset path; parameter_name is the " +
             "exposed parameter name; value is the raw float (dB for volume params). " +
             "normalize (default false) maps a 0-1 input onto the -80..0 dB range so a " +
-            "friendly volume slider can be passed directly. The mixer asset is marked " +
-            "dirty — call assets_refresh / scene_save to commit. Mutating: runs the gate " +
-            "path; paths_hint is the mixer asset path.")]
+            "friendly volume slider can be passed directly. Outside play mode the value " +
+            "is written into the mixer's current snapshot and the asset is saved " +
+            "(appliedTo: snapshot); in play mode it is a runtime override that is not " +
+            "saved (appliedTo: runtime). Mutating: runs the gate path; paths_hint is the " +
+            "mixer asset path.")]
         public static string AudioMixerSetParameter(
             string mixer_path = null,
             string parameter_name = null,
@@ -248,15 +254,15 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
 
             if (string.IsNullOrEmpty(mixer_path))
                 return AudioJson.Error("missing_parameter",
-                    "'mixer_path' (Assets/-rooted .mix path) is required.");
+                    "'mixer_path' (Assets/-rooted .mixer path) is required.");
             if (string.IsNullOrEmpty(parameter_name))
                 return AudioJson.Error("missing_parameter",
                     "'parameter_name' (exposed parameter name) is required.");
 
             if (!mixer_path.StartsWith("Assets/") ||
-                !mixer_path.EndsWith(".mix", System.StringComparison.OrdinalIgnoreCase))
+                !mixer_path.EndsWith(".mixer", System.StringComparison.OrdinalIgnoreCase))
                 return AudioJson.Error("invalid_asset_path",
-                    "mixer_path must be Assets/-rooted and end with '.mix'.");
+                    "mixer_path must be Assets/-rooted and end with '.mixer'.");
 
             var mixer = AssetDatabase.LoadAssetAtPath<AudioMixer>(mixer_path);
             if (mixer == null)
@@ -273,11 +279,20 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
                     "Parameter '" + parameter_name + "' is not exposed on this AudioMixer. " +
                     "Expose it in the Audio Mixer window first.");
 
-            if (!mixer.SetFloat(parameter_name, resolved))
-                return AudioJson.Error("parameter_set_failed",
-                    "SetFloat failed for '" + parameter_name + "'.");
-
-            EditorUtility.SetDirty(mixer);
+            string snapshotName = null;
+            if (EditorApplication.isPlaying)
+            {
+                if (!mixer.SetFloat(parameter_name, resolved))
+                    return AudioJson.Error("parameter_set_failed",
+                        "SetFloat failed for '" + parameter_name + "'.");
+            }
+            else
+            {
+                var writeError = WriteSnapshotValue(mixer, parameter_name, resolved, out snapshotName);
+                if (writeError != null)
+                    return AudioJson.Error("parameter_set_failed", writeError);
+                AssetDatabase.SaveAssetIfDirty(mixer);
+            }
 
             // Read back the stored value so the caller can confirm.
             mixer.GetFloat(parameter_name, out var stored);
@@ -290,7 +305,82 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
             sb.Append('}');
             sb.Append(",\"value\":").Append(Num(stored));
             sb.Append(",\"normalized\":").Append(normalize ? "true" : "false");
+            sb.Append(",\"appliedTo\":").Append(snapshotName != null ? "\"snapshot\"" : "\"runtime\"");
+            if (snapshotName != null)
+                sb.Append(",\"snapshot\":").Append(AudioJson.Esc(snapshotName));
             return AudioJson.Ok(sb.ToString());
+        }
+
+        // Write an exposed parameter's value into the mixer's current (target)
+        // snapshot through the serialized data — the public route to what the
+        // Audio Mixer window's slider does in edit mode. Returns null on
+        // success, else the reason.
+        private static string WriteSnapshotValue(AudioMixer mixer, string parameterName,
+            float value, out string snapshotName)
+        {
+            snapshotName = null;
+            var mixerSo = new SerializedObject(mixer);
+            var exposed = mixerSo.FindProperty("m_ExposedParameters");
+            SerializedProperty guid = null;
+            if (exposed != null && exposed.isArray)
+            {
+                for (int i = 0; i < exposed.arraySize; i++)
+                {
+                    var entry = exposed.GetArrayElementAtIndex(i);
+                    if (entry.FindPropertyRelative("name")?.stringValue == parameterName)
+                    {
+                        guid = entry.FindPropertyRelative("guid");
+                        break;
+                    }
+                }
+            }
+            if (guid == null)
+                return "Could not read the exposed parameter '" + parameterName + "' from the mixer asset.";
+
+            var snapshot = mixerSo.FindProperty("m_TargetSnapshot")?.objectReferenceValue;
+            if (snapshot == null)
+                snapshot = mixerSo.FindProperty("m_StartSnapshot")?.objectReferenceValue;
+            if (snapshot == null)
+                return "The mixer has no snapshot to write the value into.";
+
+            var snapshotSo = new SerializedObject(snapshot);
+            var values = snapshotSo.FindProperty("m_FloatValues");
+            if (values == null || !values.isArray)
+                return "Could not read the snapshot values of '" + snapshot.name + "'.";
+
+            SerializedProperty slot = null;
+            for (int i = 0; i < values.arraySize && slot == null; i++)
+            {
+                var pair = values.GetArrayElementAtIndex(i);
+                if (SameGuid(pair.FindPropertyRelative("first"), guid))
+                    slot = pair.FindPropertyRelative("second");
+            }
+            if (slot == null)
+            {
+                values.arraySize++;
+                var pair = values.GetArrayElementAtIndex(values.arraySize - 1);
+                var key = pair.FindPropertyRelative("first");
+                for (int d = 0; d < 4; d++)
+                    key.FindPropertyRelative("data[" + d + "]").longValue =
+                        guid.FindPropertyRelative("data[" + d + "]").longValue;
+                slot = pair.FindPropertyRelative("second");
+            }
+            slot.floatValue = value;
+            snapshotSo.ApplyModifiedProperties();
+            snapshotName = snapshot.name;
+            return null;
+        }
+
+        private static bool SameGuid(SerializedProperty a, SerializedProperty b)
+        {
+            if (a == null || b == null) return false;
+            for (int d = 0; d < 4; d++)
+            {
+                var x = a.FindPropertyRelative("data[" + d + "]");
+                var y = b.FindPropertyRelative("data[" + d + "]");
+                if (x == null || y == null || x.longValue != y.longValue) return false;
+            }
+            return true;
         }
 
         // =====================================================================
@@ -356,7 +446,7 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
             Lifecycle = LifecyclePolicy.None, Group = "audio")]
         [System.ComponentModel.Description(
             "Read a float value on an AudioMixer asset's exposed parameter. " +
-            "mixer_path is an Assets/-rooted .mix asset path; parameter_name is the " +
+            "mixer_path is an Assets/-rooted .mixer asset path; parameter_name is the " +
             "exposed parameter name. Returns the current value, or a " +
             "`parameter_not_exposed` error when the name is not exposed. Read-only, " +
             "gate-free.")]
@@ -366,7 +456,7 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
         {
             if (string.IsNullOrEmpty(mixer_path))
                 return AudioJson.Error("missing_parameter",
-                    "'mixer_path' (Assets/-rooted .mix path) is required.");
+                    "'mixer_path' (Assets/-rooted .mixer path) is required.");
             if (string.IsNullOrEmpty(parameter_name))
                 return AudioJson.Error("missing_parameter",
                     "'parameter_name' (exposed parameter name) is required.");
@@ -453,7 +543,7 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
             return AssetDatabase.LoadAssetAtPath<AudioClip>(assetPath);
         }
 
-        // Load the first AudioMixerGroup exposed by a .mix asset. AudioMixer
+        // Load the first AudioMixerGroup exposed by a .mixer asset. AudioMixer
         // assets expose their groups via FindMatchingGroups(string) — passing
         // the mixer's own name returns every top-level group; we take the first
         // (an AudioSource can only bind one group at a time anyway). Returns

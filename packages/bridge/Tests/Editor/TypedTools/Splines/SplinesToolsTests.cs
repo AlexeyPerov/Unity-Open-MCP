@@ -265,7 +265,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.SplinesExt
         // Helpers
         // -----------------------------------------------------------------
 
-        private static void AddKnot(int instanceId, string position, string hint)
+        private static void AddKnot(long instanceId, string position, string hint)
         {
             var result = BridgeToolRegistry.TryDispatch(
                 "unity_open_mcp_splines_add_knot",
@@ -278,15 +278,17 @@ namespace UnityOpenMcpBridge.Tests.Extensions.SplinesExt
 
         // Pull an integer value out of a flat JSON output by key. Mirrors the
         // helper in ProBuilderToolsTests.
-        private static int ExtractInt(string json, string key)
+        private static long ExtractInt(string json, string key)
         {
             var pattern = "\"" + key + "\":";
             var idx = json.IndexOf(pattern, System.StringComparison.Ordinal);
             Assert.GreaterOrEqual(idx, 0, $"Expected key '{key}' in output: {json}");
             var start = idx + pattern.Length;
+            // Instance ids are JSON strings ("12345", lossless on 8-byte EntityIds).
+            if (start < json.Length && json[start] == '"') start++;
             var end = start;
             while (end < json.Length && (char.IsDigit(json[end]) || json[end] == '-')) end++;
-            return int.Parse(json.Substring(start, end - start));
+            return long.Parse(json.Substring(start, end - start));
         }
     }
 }

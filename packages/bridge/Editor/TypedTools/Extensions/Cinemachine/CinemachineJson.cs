@@ -18,11 +18,15 @@
 // surface the install/upgrade guidance error rather than attempting the 2.x
 // pipeline. Per the bridge AGENTS.md §Embedded domain tools, reflection is
 // reserved for version-split APIs — Cinemachine is exactly that case.
+using System.Runtime.CompilerServices;
 using System.Text;
 using UnityEngine;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 using Object = UnityEngine.Object;
+
+// The domain tests reset the cached version detection (CinemachineVersion).
+[assembly: InternalsVisibleTo("com.alexeyperov.unity-open-mcp-bridge.Cinemachine.Editor.Tests")]
 
 namespace UnityOpenMcpBridge.Extensions.CinemachineExt
 {

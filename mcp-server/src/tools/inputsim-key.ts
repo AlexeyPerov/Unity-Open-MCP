@@ -1,6 +1,6 @@
 // Input simulation — Input System keyboard device events.
 //
-// Compile-gated on com.unity.inputsystem (UNITY_OPEN_MCP_EXT_INPUTSIM_IS).
+// Compile-gated on com.unity.inputsystem (UNITY_OPEN_MCP_EXT_INPUTSYSTEM).
 // Queues Keyboard state events through the new Input System.
 //
 // K1 fix: `tap`/`hold` accept `advance_frames` to pump N player-loop frames

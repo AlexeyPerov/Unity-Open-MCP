@@ -6,7 +6,7 @@ import { makeTool } from "./schema-fragments.js";
 export const audioMixerGetParameter = makeTool(
   "unity_open_mcp_audio_mixer_get_parameter",
   "Read a float value on an AudioMixer asset's exposed parameter. mixer_path is an " +
-    "Assets/-rooted .mix asset path; parameter_name is the exposed parameter name. " +
+    "Assets/-rooted .mixer asset path; parameter_name is the exposed parameter name. " +
     "Returns the current value, or a `parameter_not_exposed` error when the name is " +
     "not exposed. Read-only, gate-free.",
   {
@@ -14,7 +14,7 @@ export const audioMixerGetParameter = makeTool(
         properties: {
           mixer_path: {
             type: "string",
-            description: "Assets/-rooted .mix asset path.",
+            description: "Assets/-rooted .mixer asset path.",
           },
           parameter_name: {
             type: "string",

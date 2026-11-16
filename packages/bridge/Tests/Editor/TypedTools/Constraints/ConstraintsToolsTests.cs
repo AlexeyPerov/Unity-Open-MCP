@@ -5,8 +5,8 @@
 // RotationConstraint / AimConstraint / ParentConstraint / ScaleConstraint types
 // (UnityEngine.AnimationModule) and LODGroup (UnityEngine.CoreModule) are
 // built-in engine types present on every Unity install, so the tools — and
-// this suite — compile unconditionally. The test asmdef only constrains
-// UNITY_TEST_FRAMEWORK.
+// this suite — compile unconditionally. The test asmdef has no define
+// constraints either.
 #pragma warning disable CS0618
 using NUnit.Framework;
 using UnityEngine;

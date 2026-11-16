@@ -3,7 +3,7 @@
 // Ungated (no UNITY_OPEN_MCP_EXT_LIGHTING): the Light / ReflectionProbe /
 // RenderSettings / Lightmapping types are built-in engine modules present on
 // every Unity install, so the tools — and this suite — compile unconditionally.
-// The test asmdef only constrains UNITY_TEST_FRAMEWORK.
+// The test asmdef has no define constraints either.
 #pragma warning disable CS0618
 using NUnit.Framework;
 using UnityEngine;
@@ -464,6 +464,29 @@ namespace UnityOpenMcpBridge.Tests.Extensions.LightingExt
         }
 
         [Test]
+        public void Dispatch_ReflectionProbeBake_CustomCubemapExtension_ReturnsInvalidAssetPath()
+        {
+            // Lightmapping.BakeReflectionProbe writes an .exr / .png texture; a
+            // .cubemap path would leave an unreadable file behind.
+            var go = new GameObject("ProbeBakeCustomBadExt");
+            try
+            {
+                go.AddComponent<ReflectionProbe>();
+                var result = BridgeToolRegistry.TryDispatch(
+                    "unity_open_mcp_reflection_probe_bake",
+                    "{\"instance_id\":" + InstanceId.Of(go) +
+                    ",\"bake_mode\":\"custom\",\"target_path\":\"Assets/TmpLightingTests/P.cubemap\"," +
+                    "\"paths_hint\":[\"Assets/T.unity\"]}");
+                AssertErrorEnvelope(result, "invalid_asset_path");
+                Assert.IsFalse(System.IO.File.Exists("Assets/TmpLightingTests/P.cubemap"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
         public void RoundTrip_ReflectionProbeBake_Realtime_RunsAndReportsBaked()
         {
             var go = new GameObject("ProbeBakeRealtime");
@@ -488,7 +511,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.LightingExt
         public void RoundTrip_ReflectionProbeBake_Custom_WritesCubemapAsset()
         {
             const string TmpDir = "Assets/TmpLightingTests";
-            const string CubemapPath = TmpDir + "/ProbeBaked.cubemap";
+            const string CubemapPath = TmpDir + "/ProbeBaked.exr";
             var go = new GameObject("ProbeBakeCustom");
             try
             {
@@ -507,7 +530,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.LightingExt
                 StringAssert.Contains("\"cubemapPath\":\"" + CubemapPath + "\"", result.Output);
                 // The cubemap asset must exist after a custom bake.
                 var baked = UnityEditor.AssetDatabase.LoadAssetAtPath<Cubemap>(CubemapPath);
-                Assert.IsNotNull(baked, "Custom bake should create the .cubemap asset.");
+                Assert.IsNotNull(baked, "Custom bake should write the cubemap (.exr imported as a Cubemap).");
             }
             finally
             {

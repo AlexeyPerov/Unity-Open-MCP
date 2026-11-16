@@ -16,9 +16,14 @@
   "precompiledReferences": [],
   "autoReferenced": true,
   "defineConstraints": [
-    "UNITY_OPEN_MCP_EXT_PROBUILDER",
-    "UNITY_TEST_FRAMEWORK"
+    "UNITY_OPEN_MCP_EXT_PROBUILDER"
   ],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.probuilder",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_PROBUILDER"
+    }
+  ],
   "noEngineReferences": false
 }

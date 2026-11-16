@@ -69,7 +69,8 @@ knot has a **Position**, **Rotation**, **TangentIn**, **TangentOut**, and a
 
 ## Reflective mutation (niche container fields)
 
-When a typed mutator does not cover a serialized `SplineContainer` field, use
+When a typed mutator does not cover a public `SplineContainer` property or field
+(by C# member name), use
 `unity_open_mcp_splines_modify`:
 
 ```json

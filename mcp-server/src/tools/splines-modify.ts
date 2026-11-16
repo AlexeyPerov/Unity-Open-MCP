@@ -6,7 +6,8 @@ import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 // the host's scene path.
 export const splinesModify = makeTool(
   "unity_open_mcp_splines_modify",
-  "Set one or more serialized fields on the SplineContainer component (not " +
+  "Set one or more public properties (or fields) on the SplineContainer " +
+    "component, by C# member name (not " +
     "the Spline itself — use set_knot / set_tangent_mode for knot fields). Each " +
     "entry is { field, value, type? } where type is 'int' | 'float' | 'bool' | " +
     "'string' | 'vector' (default inferred from the current value). Per-field " +
@@ -23,7 +24,7 @@ export const splinesModify = makeTool(
             type: "string",
             description:
               "JSON array of { field, value, type? } objects targeting SplineContainer " +
-              "serialized fields.",
+              "public properties or fields (C# member names).",
           },
           paths_hint: { ...PATHS_HINT_TYPE, description: "Mutation scope — the host's scene path." },
           gate: { ...GATE_PROP },

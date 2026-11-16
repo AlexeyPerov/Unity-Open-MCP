@@ -16,19 +16,18 @@
   "precompiledReferences": [],
   "autoReferenced": true,
   "defineConstraints": [
-    "UNITY_OPEN_MCP_EXT_INPUTSIM_IS",
-    "UNITY_TEST_FRAMEWORK"
+    "UNITY_OPEN_MCP_EXT_INPUTSYSTEM"
   ],
   "versionDefines": [
     {
       "name": "com.unity.inputsystem",
       "expression": "1.0.0",
-      "define": "UNITY_OPEN_MCP_EXT_INPUTSIM_IS"
+      "define": "UNITY_OPEN_MCP_EXT_INPUTSYSTEM"
     },
     {
-      "name": "com.unity.test-framework",
-      "expression": "1.0.0",
-      "define": "UNITY_TEST_FRAMEWORK"
+      "name": "com.unity.inputsystem",
+      "expression": "1.1.0",
+      "define": "UNITY_OPEN_MCP_EXT_INPUTSYSTEM_1_1"
     }
   ],
   "noEngineReferences": false

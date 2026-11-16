@@ -161,11 +161,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Sprite2dExt
             AssertJsonOk(modifyOut);
             StringAssert.Contains("\"field\":\"include_in_build\"", modifyOut);
             StringAssert.Contains("\"field\":\"packing.padding\"", modifyOut);
-
-            var getAfterModify = SpriteAtlasTools.Get(AtlasPath);
-            AssertJsonOk(getAfterModify);
-            StringAssert.Contains("\"includeInBuild\":false", getAfterModify);
-            StringAssert.Contains("\"padding\":8", getAfterModify);
+            // Whether the settings persist is SpriteAtlas_Modify_PersistsSettings.
 
             var listOut = SpriteAtlasTools.List(TestFolder);
             AssertJsonOk(listOut);
@@ -182,6 +178,29 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Sprite2dExt
                 AtlasPath, paths_hint: new[] { AtlasPath });
             AssertJsonOk(deleteOut);
             StringAssert.Contains("\"deleted\":true", deleteOut);
+        }
+
+        // Fails while spriteatlas_create writes an authoring SpriteAtlasAsset
+        // into a .spriteatlas file that no SpriteAtlasImporter imports (sprite
+        // packer mode Disabled / V1): the deprecated SpriteAtlasAsset setters
+        // the modify falls back to are no-ops on Unity 6, so include_in_build
+        // and packing never change. Tracked as an open bug with
+        // spriteatlas_create.
+        [Test]
+        public void SpriteAtlas_Modify_PersistsSettings()
+        {
+            AssertJsonOk(SpriteAtlasTools.Create(
+                AtlasPath, include_in_build: true, paths_hint: new[] { AtlasPath }));
+
+            AssertJsonOk(SpriteAtlasTools.Modify(
+                AtlasPath,
+                "{\"include_in_build\":false,\"packing\":{\"padding\":8}}",
+                paths_hint: new[] { AtlasPath }));
+
+            var getAfterModify = SpriteAtlasTools.Get(AtlasPath);
+            AssertJsonOk(getAfterModify);
+            StringAssert.Contains("\"includeInBuild\":false", getAfterModify);
+            StringAssert.Contains("\"padding\":8", getAfterModify);
         }
 
         // ----------------------- Texture round-trip -----------------------
