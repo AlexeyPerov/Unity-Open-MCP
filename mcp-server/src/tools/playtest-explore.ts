@@ -16,8 +16,8 @@ export const playtestExplore = makeTool(
   "Explore the running game's UI on your behalf and report what looks wrong — no model per step. Starts a crawl as a " +
     "jobs job and returns its job_id at once: follow it with unity_open_mcp_jobs {action:\"wait\"}; jobs cancel stops it " +
     "(the result so far is kept). The crawler snapshots the uGUI until it stops changing, taps every visible, " +
-    "interactable, unoccluded button / toggle it has not tried on that screen (leaving controls such as Back / Close / " +
-    "OK last), files each screen it reaches (a screen = its visible controls and texts, numbers masked), walks the " +
+    "interactable, unoccluded button / toggle it has not tried on that screen (text fields first — it types fill_text, " +
+    "default \"Test\", into each with inputsim_text; leaving controls such as Back / Close / OK last), files each screen it reaches (a screen = its visible controls and texts, numbers masked), walks the " +
     "shortest known path back to a screen with untried controls, and restarts the game when it is stuck (restart: " +
     "play_mode = exit and re-enter play mode (default); command = a synchronous project command such as " +
     "project.<owner>.playtest.boot; none = stop). Every new screen is captured once (composed frame) and checked: text " +
@@ -35,7 +35,7 @@ export const playtestExplore = makeTool(
     "Budgets: max_steps (taps, default 60, ≤ 300), max_minutes (default 10, ≤ 60), max_screens (default 40, ≤ 200), " +
     "max_restarts (default 3). The job result: stop_reason (explored | max_steps | max_time | max_screens | " +
     "no_way_back | cancelled | play_mode_exited | tool_failures | restart_failed | session_ended), coverage, screens, " +
-    "edges, findings, denied, untried. Out of scope: sliders, text fields, scroll-to-reveal, world-space taps, UI " +
+    "edges, findings, denied, untried. Out of scope: sliders, scroll-to-reveal, world-space taps, UI " +
     "Toolkit. Requires com.unity.ugui.",
   {
     properties: {
@@ -77,6 +77,11 @@ export const playtestExplore = makeTool(
       },
       min_touch_dp: { type: "number", minimum: 0, maximum: 200, description: "Smallest acceptable control in dp (px = dp × dpi / 160); default 44, 0 turns the check off." },
       capture: { type: "boolean", description: "Capture each new screen once (default true; the frames go into the session report)." },
+      fill_inputs: {
+        type: "boolean",
+        description: "Type fill_text into each visible text field once (inputsim_text, then end_edit), before the screen's buttons — a form is filled before it is sent. Default true.",
+      },
+      fill_text: { type: "string", minLength: 1, maxLength: 100, description: "What the crawler types into text fields (default \"Test\")." },
       allow_unsandboxed: {
         type: "boolean",
         description: "Crawl although the session has no player_state snapshot and the project's playtest.begin did not run. The crawl taps through the game for real: progress, currency and saves change.",

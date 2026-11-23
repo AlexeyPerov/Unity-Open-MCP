@@ -203,12 +203,21 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "Play-mode input simulation — uGUI pointer click/drag (inputsim_pointer, " +
       "dispatch or raycast_real) + legacy Input Manager / Input System touch " +
       "(inputsim_touch) + real-time gestures (inputsim_gesture) + Input System " +
-      "keyboard (inputsim_key) + frame advance (inputsim_step) + interactable " +
+      "keyboard (inputsim_key) + text into input fields (inputsim_text) + frame advance (inputsim_step) + interactable " +
       "discovery (inputsim_probe) + 3D/legacy (inputsim_pointer3d).",
     keywords: [
       "input-simulation",
       "inputsimulation",
       "simulate-input",
+      "type-text",
+      "typing",
+      "input-field",
+      "inputfield",
+      "text-field",
+      "textfield",
+      "login-form",
+      "nickname",
+      "promo-code",
       "click",
       "clicks",
       "tap",

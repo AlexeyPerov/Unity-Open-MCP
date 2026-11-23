@@ -335,13 +335,15 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "(inputsim_touch: legacy Input Manager touches and/or Input System " +
       "Touchscreen, `backend` reported as an array) + keyframed gestures over " +
       "real frames (inputsim_gesture: hold / drag / trace for seconds; long ones " +
-      "run as jobs) + Input System keyboard (inputsim_key) + frame advance " +
+      "run as jobs) + Input System keyboard (inputsim_key) + text entry into " +
+      "uGUI / TextMeshPro input fields through their own validation " +
+      "(inputsim_text: replace / append / clear, end_edit / submit) + frame advance " +
       "(inputsim_step) + interactable discovery (inputsim_probe) + 3D / legacy " +
       "world-space pointer (inputsim_pointer3d, OnMouseDown + Physics.Raycast). " +
       "The workhorse for 'tap/swipe/drag like a finger' while testing a game in " +
       "the Editor, including polled legacy input (Input.GetTouch / " +
       "Input.mousePosition). The intended loop: probe → tap → step → screenshot. " +
-      "The uGUI tools compile when com.unity.ugui is present; touch and gesture " +
+      "The uGUI tools (pointer, probe, step, text) compile when com.unity.ugui is present; touch and gesture " +
       "compile everywhere; the keyboard tool compiles when com.unity.inputsystem " +
       "is present. All gate-free (input writes no assets — same model as " +
       "editor_set_state) and play-mode-only except probe (read-only, works in " +
@@ -1021,6 +1023,9 @@ assign("input-simulation", [
   "unity_open_mcp_inputsim_probe",
   "unity_open_mcp_inputsim_pointer3d",
   "unity_open_mcp_inputsim_gesture",
+  // Text entry into uGUI / TextMeshPro input fields (uGUI-gated; TMP adapter
+  // from the optional TextMeshPro sub-assembly).
+  "unity_open_mcp_inputsim_text",
 ]);
 
 // --- playtest (read and play the game like a tester) ------------------------

@@ -780,8 +780,11 @@ the tool.
    own. A new screen is captured once (`unity_senses_screenshot` composed, ≤ 960 px)
    and checked by the [detectors](#findings).
 3. **Tap.** The next untried control of the screen: visible, interactable,
-   uncovered `button` / `toggle` nodes not on the deny-list, in screen order, the
-   leaving ones (Back, Close, Cancel, OK, ×, …, or an unlabelled object named
+   uncovered `input` / `button` / `toggle` nodes not on the deny-list, in screen
+   order — text fields first (a form is filled before it is sent: `fill_text`,
+   default `Test`, typed with [`inputsim_text`](input-simulation.md#text-entry) and
+   `end_edit`; a field is known by its path, so typing into it keeps the screen),
+   the leaving ones (Back, Close, Cancel, OK, ×, …, or an unlabelled object named
    `*Close*` / `*Back*`) last. `inputsim_pointer {action: click, object_id}` with
    `routing` (default `dispatch`); settle; file the edge (`new_screen`,
    `known_screen`, `same_screen`).
@@ -817,6 +820,7 @@ list and the price check. Denied controls are listed in the result and the repor
 | `placeholder_pattern` | the default below | `""` turns the check off |
 | `min_touch_dp` | 44 | 0 turns the touch-size check off |
 | `capture` | true | Capture each new screen once |
+| `fill_inputs` / `fill_text` | true / `Test` | Type into each visible text field once, before the buttons; what a field refused is in the step's `typed` |
 | `allow_unsandboxed` | false | Crawl without a snapshot or `playtest.begin` |
 
 ### Result
@@ -857,8 +861,8 @@ with one mark — `Explore: N taps, M screens (<stop reason>)`, verdict `bug` /
 `suspicious` / `ok` from its findings — and the report's
 [Exploration](#report) section.
 
-Out of scope: sliders, text fields, scroll-to-reveal, world-space taps, UI
-Toolkit panels, and a model choosing taps.
+Out of scope: sliders, scroll-to-reveal, world-space taps, UI Toolkit panels,
+choosing what to type per field, and a model choosing taps.
 
 ### Findings
 

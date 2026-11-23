@@ -49,6 +49,8 @@ export function parseExploreOptions(args: Record<string, unknown>): ExploreOptio
     placeholderPattern: typeof args.placeholder_pattern === "string" ? (args.placeholder_pattern || null) : DEFAULT_PLACEHOLDER_PATTERN,
     minTouchDp: minTouch > 0 ? minTouch : null,
     capture: args.capture !== false,
+    fillInputs: args.fill_inputs !== false,
+    fillText: typeof args.fill_text === "string" && args.fill_text ? args.fill_text : EXPLORE_DEFAULTS.fill_text,
   };
 }
 

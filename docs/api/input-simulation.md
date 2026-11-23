@@ -1,7 +1,7 @@
 # Input simulation
 
-Activate the `input-simulation` group. Pointer, 3D pointer, probe, and step require
-uGUI; touch and gesture compile in every project (they route to whichever input
+Activate the `input-simulation` group. Pointer, 3D pointer, probe, step and text
+entry require uGUI; touch and gesture compile in every project (they route to whichever input
 backend the project uses); keyboard requires the Input System package. These tools
 write no assets and are gate-free. All injection and stepping tools require play
 mode; `inputsim_probe` also works in edit mode. To read the screen (texts,
@@ -263,6 +263,65 @@ in `finally`. This guarantees Update polling; it does not promise FixedUpdate
 polling or hardware-event timing. At zero frames events are processed immediately for
 callbacks, with no gameplay Update between press and release. Separate down/step/up
 calls work for held-state polling but do not promise an unconsumed press edge.
+
+## Text entry
+
+`unity_open_mcp_inputsim_text` types into a uGUI `InputField` or a TextMeshPro
+`TMP_InputField` (TextMeshPro fields when TextMeshPro is installed) the way a
+player with a keyboard does: character by character through the field's own
+public key path (`ProcessEvent` with a KeyDown carrying the character). So the
+field decides what goes in — its `onValidateInput`, character validation and
+content type (integer, decimal, alphanumeric, name, email, password, PIN), its
+`characterLimit`, its read-only flag and its line type (a single-line field drops
+`\n`, a multi-line one keeps it; uGUI also drops characters its font lacks) — and
+`onValueChanged` fires once per accepted character.
+
+| Argument | |
+|---|---|
+| `text` | What to type (≤ 1000 characters); required unless `mode: "clear"` |
+| `mode` | `replace` (default) empties the field first (`text = ""`, one `onValueChanged("")`, as select-all + delete) and types; `append` types at the end; `clear` only empties it |
+| `end` | `end_edit` (default) sends `onEndEdit` — what tapping away does; `submit` sends `onSubmit`, then `onEndEdit` — what Enter does in a single-line field; `none` leaves the edit open |
+| `target_text` (+ `under`, `index`, `text_match`), `object_id`, `target` | The field. Its label in `ui_snapshot` (role `input`) is its placeholder or current text; a label / placeholder child resolves to its field, and so does a container with exactly one field below it |
+| `secret` | The text is a secret: the answer gives lengths only and a playtest session records `[redacted N chars]` |
+
+No selection is used (a TextMeshPro selection resolves through the text mesh, which
+an unfocused field may not have built), and focus is not emulated: activation is
+deferred a frame and would select all and leave the field focused. When the game
+reacts to selecting the field (`OnSelect`, a hint), tap it with `inputsim_pointer`
+first — typing then works the same, and a focused field ends its edit through its
+own `DeactivateInputField` (`wasFocused: true`). Either way the field's label is
+redrawn after typing and after the edit ends, so a screenshot shows the text. A
+phone's on-screen keyboard never appears in the Editor.
+
+```json
+{
+  "status": "ok", "action": "append",
+  "field": { "id": "-29608", "path": "ExploreFixture/ExploreCanvas/Profile/NicknameField", "kind": "ugui",
+             "contentType": "standard", "lineType": "single_line", "characterLimit": 12,
+             "readOnly": false, "interactable": true, "focused": false },
+  "wasFocused": false, "masked": false, "textBefore": "Alex", "textAfter": "Alex12345678",
+  "typed": { "requested": 10, "accepted": 8, "transformed": 0, "rejected": 2,
+             "rejectedAt": [ { "index": 8, "reason": "limit" }, { "index": 9, "reason": "limit" } ] },
+  "events": { "value_changed": 8, "end_edit": true, "submit": true },
+  "notes": [ "2 of 10 character(s) were refused by the field (character limit), as they would be for a player." ]
+}
+```
+
+`typed.transformed` counts characters the field changed on the way in (an
+`onValidateInput` that upper-cases, a mask); `rejectedAt[].reason` is `limit` (the
+field was full) or `validation` (its validation, content type, line type or font
+refused it). `events.value_changed` is counted with a temporary listener. A
+listener that throws is reported as `exception` (`type`, `message`) and logged to
+the console as the game's own would be; the text typed so far stays. Password and
+PIN fields (content type or input type) answer `masked: true` with `lengthBefore`
+/ `lengthAfter` instead of the text. The call's `logs[]` carry what the field's
+listeners logged.
+
+Refusals: `play_mode_required`, `not_a_text_field` (find fields with
+`ui_snapshot role=input`), `field_inactive`, `field_not_interactable` (disabled, or
+a `CanvasGroup` blocks it), `field_read_only`, `field_misconfigured` (no text
+component or font), `conflicting_targets`, `ambiguous_target`, `target_not_found`,
+`object_not_found`. The field refusals carry the `field` block.
 
 ## Frame advance and supported boundary
 

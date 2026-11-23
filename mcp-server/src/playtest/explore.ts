@@ -19,7 +19,7 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { toolOutput, toolResultBody } from "../jobs/adapters.js";
 import {
-  FindingSet, actionKey, controlLabel, denyReason, findingsFromSnapshot, isBackLike, isTappable, minTouchPx,
+  FindingSet, actionKey, controlLabel, denyReason, findingsFromSnapshot, isBackLike, isFillable, isTappable, minTouchPx,
   screenSignature, screenTitle, similarity, sortFindings, truncatedDiagnostics,
   type ActionPolicy, type Finding, type SnapshotNode,
 } from "./detectors.js";
@@ -56,11 +56,15 @@ export interface ExploreOptions {
   /** null = no touch-size check. */
   minTouchDp: number | null;
   capture: boolean;
+  /** Type fillText into each visible text field once (inputsim_text, end_edit). */
+  fillInputs: boolean;
+  fillText: string;
 }
 
 export const EXPLORE_DEFAULTS = {
   max_steps: 60, max_minutes: 10, max_screens: 40, same_screen: 0.8, settle_ms: 250, max_settle_ms: 4_000,
   restart: "play_mode" as RestartMode, max_restarts: 3, routing: "dispatch" as const, min_touch_dp: 44, capture: true,
+  fill_inputs: true, fill_text: "Test",
 };
 export const EXPLORE_LIMITS = { max_steps: 300, max_minutes: 60, max_screens: 200, max_restarts: 10 };
 
@@ -121,6 +125,7 @@ interface Edge { from: string; action: string; to: string; outcome: string; step
 
 const SNAPSHOT_TOOL = "unity_open_mcp_ui_snapshot";
 const POINTER_TOOL = "unity_open_mcp_inputsim_pointer";
+const TEXT_TOOL = "unity_open_mcp_inputsim_text";
 const SCREENSHOT_TOOL = "unity_senses_screenshot";
 const MAX_CONSECUTIVE_FAILURES = 3;
 const MAX_NAV_MISSES = 2;
@@ -207,8 +212,8 @@ export class Explorer {
       this.checkBudgets();
       const next = this.nextAction(this.current);
       if (next) { await this.tap(next.action, next.node, "explore"); continue; }
-      if (!this.screens.some(s => this.untried(s).length > 0)) return "explored";
       this.reportDeadEnd(this.current);
+      if (!this.screens.some(s => this.untried(s).length > 0)) return "explored";
       const path = this.navMisses < MAX_NAV_MISSES ? this.pathToUntried(this.current) : null;
       if (path && path.length) {
         const hop = path[0];
@@ -226,19 +231,25 @@ export class Explorer {
     if (this.now() - this.startedAt >= this.options.maxMinutes * 60_000) throw new Stop("max_time");
   }
 
-  /** The next untried action of the screen that is on screen now: leaving actions last. */
+  /** A control the crawler acts on now: a tap target, or a text field it fills. */
+  private actionable(node: SnapshotNode): boolean {
+    return isTappable(node) || (this.options.fillInputs && isFillable(node));
+  }
+
+  /** The next untried action of the screen that is on screen now: text fields first (a form is filled before it is sent), leaving actions last. */
   private nextAction(screen: Screen): { action: Action; node: SnapshotNode } | null {
     const candidates: Array<{ action: Action; node: SnapshotNode; order: number }> = [];
     let order = 0;
     for (const node of this.snap.nodes) {
       order++;
-      if (!isTappable(node)) continue;
+      if (!this.actionable(node)) continue;
       const action = screen.actions.get(actionKey(node));
       if (!action || action.tried) continue;
       if (candidates.some(c => c.action === action)) continue;
       candidates.push({ action, node, order });
     }
-    candidates.sort((a, b) => Number(a.action.back) - Number(b.action.back) || a.order - b.order);
+    const rank = (a: Action) => (a.role === "input" ? 0 : a.back ? 2 : 1);
+    candidates.sort((a, b) => rank(a.action) - rank(b.action) || a.order - b.order);
     if (candidates.length) return candidates[0];
     // Nothing tappable is left on this visit: an untried control that is covered,
     // disabled or gone now gets one more visit, then is given up.
@@ -252,7 +263,7 @@ export class Explorer {
   }
 
   private nodeFor(action: Action): SnapshotNode | null {
-    return this.snap.nodes.find(n => isTappable(n) && actionKey(n) === action.key) ?? null;
+    return this.snap.nodes.find(n => this.actionable(n) && actionKey(n) === action.key) ?? null;
   }
 
   /** Shortest known path (by tried edges) from `from` to a screen with untried actions. */
@@ -287,20 +298,25 @@ export class Explorer {
   private async tap(action: Action, node: SnapshotNode, purpose: "explore" | "navigate", expect?: string): Promise<void> {
     const from = this.current;
     const before = this.snap;
-    const label = purpose === "explore"
-      ? `Tap '${action.label}' on ${from.id}`
-      : `Navigate: tap '${action.label}' on ${from.id} toward ${expect}`;
-    const step = this.begin(label, { purpose, screen: from.id, target: action.label, path: action.path });
+    const typing = action.role === "input";
+    const label = typing
+      ? `Type '${this.options.fillText}' into '${action.label}' on ${from.id}`
+      : purpose === "explore"
+        ? `Tap '${action.label}' on ${from.id}`
+        : `Navigate: tap '${action.label}' on ${from.id} toward ${expect}`;
+    const step = this.begin(label, { purpose, screen: from.id, target: action.label, path: action.path, ...(typing ? { text: this.options.fillText } : {}) });
     this.steps++;
     const logs: unknown[] = [];
-    const click = await this.deps.call(POINTER_TOOL, { action: "click", object_id: String(node.id), routing: this.options.routing });
+    const click = typing
+      ? await this.deps.call(TEXT_TOOL, { object_id: String(node.id), text: this.options.fillText, mode: "replace", end: "end_edit" })
+      : await this.deps.call(POINTER_TOOL, { action: "click", object_id: String(node.id), routing: this.options.routing });
     collectLogs(click, logs);
     const clickOut = toolOutput(click);
     if (click.isError || clickOut.error) {
-      if (purpose === "explore") { action.tried = true; action.outcome = "tap_failed"; }
+      if (purpose === "explore") { action.tried = true; action.outcome = typing ? "type_failed" : "tap_failed"; }
       const failure = (clickOut.error ?? {}) as { code?: string; message?: string };
-      step.finish({ step: { purpose, screen: from.id, target: action.label, outcome: "tap_failed", error: failure } }, logs, true);
-      this.failed(`tap '${action.label}' failed: ${failure.code ?? "error"}`);
+      step.finish({ step: { purpose, screen: from.id, target: action.label, outcome: typing ? "type_failed" : "tap_failed", error: failure } }, logs, true);
+      this.failed(`${typing ? "typing into" : "tap"} '${action.label}' failed: ${failure.code ?? "error"}`);
       return;
     }
     const after = await this.settledSnapshot(logs);
@@ -311,7 +327,7 @@ export class Explorer {
     const consoleErrors = errorLines(logs);
     for (const message of consoleErrors)
       stepFindings.push(...this.addFindings([{ kind: "console_error", severity: "bug", screen: from.id, label: clip(message, 160), step: this.steps,
-        detail: `logged while tapping '${action.label}' on ${from.id}` }]));
+        detail: `logged while ${typing ? "typing into" : "tapping"} '${action.label}' on ${from.id}` }]));
     if (purpose === "explore") {
       action.tried = true;
       action.outcome = outcome;
@@ -335,7 +351,8 @@ export class Explorer {
     this.snap = after;
     step.finish({
       step: { purpose, screen: from.id, target: action.label, outcome, to: to.id, new_screen: created,
-        ...(expect ? { expected: expect } : {}), settled: after.settled, findings: compact(stepFindings) },
+        ...(expect ? { expected: expect } : {}), ...(typing ? { typed: clickOut.typed ?? null } : {}),
+        settled: after.settled, findings: compact(stepFindings) },
       ...(frame ? { filePath: frame } : {}),
     }, logs);
     this.progress();
@@ -405,7 +422,7 @@ export class Explorer {
     if (this.screens.length >= this.options.maxScreens) throw new Stop("max_screens");
     const screen: Screen = {
       id: `S${this.screens.length + 1}`, title: screenTitle(snap.nodes), tokens: snap.tokens,
-      labels: snap.nodes.filter(n => isTappable(n)).map(controlLabel).slice(0, 8),
+      labels: snap.nodes.filter(n => this.actionable(n)).map(controlLabel).slice(0, 8),
       actions: new Map(), denied: 0, firstStep: this.steps, visits: 1, deadEnd: false,
     };
     this.screens.push(screen);
@@ -431,7 +448,7 @@ export class Explorer {
   /** Register the snapshot's tappable controls as the screen's actions (new ones only; denied ones listed). */
   private learnActions(screen: Screen, snap: Snapshot): void {
     for (const node of snap.nodes) {
-      if (!isTappable(node)) continue;
+      if (!this.actionable(node)) continue;
       const key = actionKey(node);
       if (screen.actions.has(key) || this.denied.has(`${screen.id}|${key}`)) continue;
       const reason = denyReason(node, this.options.policy);
@@ -440,7 +457,7 @@ export class Explorer {
         this.denied.set(`${screen.id}|${key}`, { screen: screen.id, label: controlLabel(node), path: node.path, reason });
         continue;
       }
-      screen.actions.set(key, { key, label: controlLabel(node), path: node.path, role: node.role, back: isBackLike(node), tried: false, misses: 0 });
+      screen.actions.set(key, { key, label: controlLabel(node), path: node.path, role: node.role, back: node.role !== "input" && isBackLike(node), tried: false, misses: 0 });
     }
   }
 

@@ -16,7 +16,10 @@ namespace UnityOpenMcpDemo.Fixtures
     //             that overflows its box (text_overflow), Close → Menu.
     //   Settings  a Vibration toggle, an unresolved-key text (placeholder_text),
     //             Help does nothing (dead_button), Report throws (console_error),
-    //             Credits → Credits, Back → Menu.
+    //             Profile → Profile, Credits → Credits, Back → Menu.
+    //   Profile   a Nickname field (12 characters; logs on end edit), a PIN field
+    //             (digits only, 4, masked), Save → Settings only once a nickname
+    //             is set (inputsim_text; the crawler fills fields first), Back.
     //   Credits   nothing to tap (dead_end).
     //   News      Close → Menu.
     // State and references are serialized so a domain reload in play mode keeps it;
@@ -25,12 +28,14 @@ namespace UnityOpenMcpDemo.Fixtures
     {
         [SerializeField] private bool built;
         [SerializeField] private string screen = "menu";
-        [SerializeField] private GameObject menu, level, pausePopup, shop, settings, credits, news, dailyPopup;
+        [SerializeField] private GameObject menu, level, pausePopup, shop, settings, credits, news, dailyPopup, profile;
         [SerializeField] private Button play, shopButton, settingsButton, buyGems, daily, newsButton, info;
         [SerializeField] private Button pause, levelBack, resume, quit;
         [SerializeField] private Button starterPack, shopClose;
         [SerializeField] private Button help, report, creditsButton, settingsBack;
         [SerializeField] private Button newsClose, claim;
+        [SerializeField] private Button profileButton, save, profileBack;
+        [SerializeField] private InputField nickname, pin;
 
         public string Screen => screen;
 
@@ -53,6 +58,7 @@ namespace UnityOpenMcpDemo.Fixtures
             settings.SetActive(next == "settings");
             credits.SetActive(next == "credits");
             news.SetActive(next == "news");
+            profile.SetActive(next == "profile");
         }
 
         private void Wire()
@@ -77,6 +83,16 @@ namespace UnityOpenMcpDemo.Fixtures
             Bind(settingsBack, () => Show("menu"));
             Bind(newsClose, () => Show("menu"));
             Bind(claim, () => { Debug.Log("[ExploreFixture] Daily reward claimed"); Show("menu"); });
+            Bind(profileButton, () => Show("profile"));
+            Bind(save, () =>
+            {
+                if (string.IsNullOrEmpty(nickname.text)) return;
+                Debug.Log("[ExploreFixture] Profile saved for " + nickname.text);
+                Show("settings");
+            });
+            Bind(profileBack, () => Show("settings"));
+            nickname.onEndEdit.RemoveAllListeners();
+            nickname.onEndEdit.AddListener(value => Debug.Log("[ExploreFixture] Nickname set to " + value));
         }
 
         private static void Bind(Button button, UnityEngine.Events.UnityAction action)
@@ -142,7 +158,18 @@ namespace UnityOpenMcpDemo.Fixtures
             help = MakeButton(settings.transform, "HelpButton", "Help", 0.56f);
             report = MakeButton(settings.transform, "ReportButton", "Report", 0.46f);
             creditsButton = MakeButton(settings.transform, "CreditsButton", "Credits", 0.36f);
+            profileButton = MakeButton(settings.transform, "ProfileButton", "Profile", 0.26f);
             settingsBack = MakeButton(settings.transform, "BackButton", "Back", 0.16f);
+
+            profile = Panel(root, "Profile", new Color(0.12f, 0.18f, 0.26f));
+            Label(profile.transform, "Title", "Profile", 0.86f, 72);
+            nickname = MakeField(profile.transform, "NicknameField", "Nickname", 0.68f);
+            nickname.characterLimit = 12;
+            pin = MakeField(profile.transform, "PinField", "PIN", 0.54f);
+            pin.contentType = InputField.ContentType.Pin;
+            pin.characterLimit = 4;
+            save = MakeButton(profile.transform, "SaveButton", "Save", 0.36f);
+            profileBack = MakeButton(profile.transform, "BackButton", "Back", 0.16f);
 
             credits = Panel(root, "Credits", new Color(0.05f, 0.05f, 0.05f));
             Label(credits.transform, "Title", "Credits", 0.80f, 72);
@@ -222,6 +249,27 @@ namespace UnityOpenMcpDemo.Fixtures
             var label = (RectTransform)Label(go.transform, "Label", text, 0.5f, height < 80 ? 28 : 48).transform;
             Stretch(label);
             return go.GetComponent<Button>();
+        }
+
+        private static InputField MakeField(Transform parent, string name, string placeholderText, float y)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(parent, false);
+            go.GetComponent<Image>().color = Color.white;
+            var rt = (RectTransform)go.transform;
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, y);
+            rt.sizeDelta = new Vector2(560, 100);
+            var text = Label(go.transform, "Text", "", 0.5f, 44, Color.black);
+            text.supportRichText = false;
+            text.alignment = TextAnchor.MiddleLeft;
+            Stretch((RectTransform)text.transform);
+            var placeholder = Label(go.transform, "Placeholder", placeholderText, 0.5f, 44, new Color(0f, 0f, 0f, 0.45f));
+            placeholder.alignment = TextAnchor.MiddleLeft;
+            Stretch((RectTransform)placeholder.transform);
+            var field = go.AddComponent<InputField>();
+            field.textComponent = text;
+            field.placeholder = placeholder;
+            return field;
         }
 
         private static Toggle MakeToggle(Transform parent, string name, string text, float y)

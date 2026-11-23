@@ -109,7 +109,8 @@ export function screenSignature(nodes: SnapshotNode[]): Set<string> {
   for (const n of nodes) {
     if (n.visible === false) continue;
     if (CONTROL_ROLES.has(n.role) || n.role === "scroll") {
-      if (!n.occluded_by) tokens.add(`c|${n.role}|${maskText(n.text)}|${maskPath(n.path)}`);
+      // A text field is known by its place, not by what is typed into it.
+      if (!n.occluded_by) tokens.add(`c|${n.role}|${n.role === "input" ? "" : maskText(n.text)}|${maskPath(n.path)}`);
     }
     else if (n.role === "text" && n.text) tokens.add(`t|${maskText(n.text)}`);
   }
@@ -198,9 +199,14 @@ export function isTappable(node: SnapshotNode): boolean {
   return TAPPABLE_ROLES.has(node.role) && node.visible !== false && node.interactable === true && !node.occluded_by;
 }
 
-/** Stable key of an action across visits: masked path + masked label (object ids change). */
+/** A text field the crawler can type into right now (before the deny-list). */
+export function isFillable(node: SnapshotNode): boolean {
+  return node.role === "input" && node.visible !== false && node.interactable === true && !node.occluded_by;
+}
+
+/** Stable key of an action across visits: masked path + masked label (object ids change; a field's text is what we typed). */
 export function actionKey(node: SnapshotNode): string {
-  return `${maskPath(node.path)}|${maskText(node.text)}`;
+  return `${maskPath(node.path)}|${node.role === "input" ? "" : maskText(node.text)}`;
 }
 
 /** How a step names a control: its label, else its object name. */

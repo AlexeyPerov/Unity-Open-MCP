@@ -493,6 +493,7 @@ import { resourcePressure } from "./resource-pressure.js";
 // manage_tools). Target-first resolution with a screen-point fallback.
 import { inputsimPointer } from "./inputsim-pointer.js";
 import { inputsimKey } from "./inputsim-key.js";
+import { inputsimText } from "./inputsim-text.js";
 import { inputsimTouch } from "./inputsim-touch.js";
 // feedback-input.md additions: frame advance (step), interactable discovery
 // (probe), and legacy/3D world-space pointer (pointer3d). step unblocks the
@@ -541,7 +542,7 @@ export const M31_PLAN3_TOOLS: Tool[] = [restartEditor, resourcePressure];
 // Manager and/or Input System backends); key compiles with
 // com.unity.inputsystem (the bridge surfaces the compiled subset via GET
 // /tools). All gate-free, play-mode-only except probe.
-export const INPUTSIM_TOOLS: Tool[] = [inputsimPointer, inputsimKey, inputsimTouch, inputsimStep, inputsimProbe, inputsimPointer3d, inputsimGesture];
+export const INPUTSIM_TOOLS: Tool[] = [inputsimPointer, inputsimKey, inputsimTouch, inputsimStep, inputsimProbe, inputsimPointer3d, inputsimGesture, inputsimText];
 
 // Playtest — tools that let an agent read and play the running game like a
 // tester: the uGUI screen snapshot (role, text, visibility, diagnostics; its

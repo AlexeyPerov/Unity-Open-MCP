@@ -111,8 +111,11 @@ player could do.
 
 1. **Read** the screen: `ui_snapshot` (compact; page if needed).
 2. **Act** like a player: `inputsim_pointer` / `inputsim_touch` with
-   `target_text: "Buy"` (`index` / `under` when the label repeats), or
-   `inputsim_gesture` for drags, swipes and holds over real frames.
+   `target_text: "Buy"` (`index` / `under` when the label repeats),
+   `inputsim_gesture` for drags, swipes and holds over real frames, or
+   `inputsim_text {"text":"Alex","target_text":"Nickname"}` for a text field
+   (its own validation decides; read `typed.rejected`; `end: "submit"` for Enter;
+   `secret: true` for a password the report must not show).
 3. **Wait** for the game, never with a loop of calls: one `playtest_wait` with a
    condition — a log line, a `ui` query (`matches: false` for "the popup closed"),
    an object, the project's own read-only predicate (`state_dump` with `field`),
@@ -178,8 +181,10 @@ the triage.
    section (screens with thumbnails, the findings table, the taps, what was never
    tapped).
 
-What it does not cover yet: sliders, text fields, scrolling to reveal more,
-world-space taps and UI Toolkit panels — drive those by hand in the same session.
+Text fields get `fill_text` (default `Test`) before the screen's buttons; pass a
+`fill_text` the forms accept, or fill a specific form by hand first. What it does
+not cover yet: sliders, scrolling to reveal more, world-space taps and UI Toolkit
+panels — drive those by hand in the same session.
 Money, destructive and leaving controls (buy, purchase, delete, reset, log out,
 rate, share, quit, prices…) are never tapped; `allow` exempts one you need.
 

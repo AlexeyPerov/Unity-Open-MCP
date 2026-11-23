@@ -144,7 +144,7 @@ test("detectors: findings from ui_snapshot diagnostics, deduplicated", () => {
 // A fake game: screens of buttons; a tap moves to another screen
 // ---------------------------------------------------------------------------
 
-interface FakeButton { label: string; role?: string; to?: string; logs?: unknown[]; exit?: boolean; path?: string }
+interface FakeButton { label: string; role?: string; to?: string; logs?: unknown[]; exit?: boolean; path?: string; requires?: string }
 interface FakeScreen { title: string; buttons: FakeButton[]; diagnostics?: Record<string, unknown>; over?: string }
 
 const GAME: Record<string, FakeScreen> = {
@@ -176,6 +176,8 @@ class FakeGame {
   mode = "play";
   clicks: string[] = [];
   calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+  /** What was typed into each text field (by label). */
+  values: Record<string, string> = {};
   private shots = 0;
   constructor(readonly screens: Record<string, FakeScreen>, readonly start = "Menu", readonly frames?: string) { this.screen = start; }
 
@@ -187,7 +189,8 @@ class FakeGame {
       { id: `${name}#title`, path: `Canvas/${name}/Title`, role: "text", text: s.title, visible: true, visibility: "on_screen" },
       ...s.buttons.map((b, i) => ({
         id: `${name}#${i}`, path: b.path ?? `Canvas/${name}/${b.label.replace(/\W/g, "") || "Icon"}Button`,
-        role: b.role ?? "button", text: b.label, visible: true, visibility: "on_screen", interactable: true,
+        role: b.role ?? "button", text: b.role === "input" ? this.values[b.label] || b.label : b.label,
+        visible: true, visibility: "on_screen", interactable: true,
         ...(coveredBy ? { occluded_by: coveredBy } : {}),
       })),
     ];
@@ -208,8 +211,15 @@ class FakeGame {
         const button = this.screens[screen].buttons[Number(index)];
         this.clicks.push(`${screen}:${button.label}`);
         if (button.exit) this.mode = "edit";
-        if (button.to) this.screen = button.to;
+        if (button.to && (!button.requires || this.values[button.requires])) this.screen = button.to;
         return ok({ status: "ok", clicked: true }, button.logs ?? []);
+      }
+      case "unity_open_mcp_inputsim_text": {
+        const [screen, index] = String(args.object_id).split("#");
+        const field = this.screens[screen].buttons[Number(index)];
+        this.clicks.push(`${screen}:type ${field.label}=${args.text}`);
+        this.values[field.label] = String(args.text);
+        return ok({ status: "ok", action: args.mode, typed: { requested: String(args.text).length, accepted: String(args.text).length, rejected: 0 }, textAfter: args.text });
       }
       case "unity_senses_screenshot": {
         const file = this.frames ? join(this.frames, `composed-${++this.shots}.png`) : `/tmp/none-${++this.shots}.png`;
@@ -322,6 +332,33 @@ test("explore: restart none stops at the dead end; budgets and cancel stop early
   assert.equal(booted.result.stop_reason, "explored");
   assert.ok(command.calls.some(c => c.tool === "unity_open_mcp_project_commands" && c.args.command_id === "project.demo.playtest.boot"));
   assert.ok(!command.calls.some(c => c.tool === "unity_open_mcp_editor_set_state"));
+});
+
+test("explore: text fields are filled before the screen's buttons; without fill_inputs the form's Save is a dead button", async () => {
+  const form = {
+    Form: { title: "Profile", buttons: [{ label: "Save", to: "Done", requires: "Nickname" }, { label: "Nickname", role: "input" }] },
+    Done: { title: "Saved", buttons: [] },
+  };
+  const filled = new FakeGame(form, "Form");
+  const run = await crawl(filled, { restart: "none" });
+  assert.deepEqual(filled.clicks, ["Form:type Nickname=Test", "Form:Save"], "the field first, then the button that needs it");
+  assert.equal(run.result.stop_reason, "explored");
+  assert.deepEqual(run.result.screens.map((x: any) => x.title), ["Profile", "Saved"]);
+  assert.ok(run.rec.labels.includes("Type 'Test' into 'Nickname' on S1"), run.rec.labels.join("\n"));
+  const typed = run.rec.outputs.find(o => (o.step as any)?.target === "Nickname") as any;
+  assert.equal(typed.step.outcome, "same_screen", "typing keeps the screen: a field is known by its place, not its text");
+  assert.equal(typed.step.typed.accepted, 4);
+  assert.ok(!run.result.findings.some((f: any) => f.kind === "dead_button"));
+  assert.ok(run.result.findings.some((f: any) => f.kind === "dead_end" && f.screen === "S2"), "a dead end found last is still reported");
+
+  const custom = new FakeGame(form, "Form");
+  await crawl(custom, { restart: "none", fill_text: "Alex" });
+  assert.equal(custom.values.Nickname, "Alex");
+
+  const untouched = new FakeGame(form, "Form");
+  const skipped = await crawl(untouched, { restart: "none", fill_inputs: false });
+  assert.deepEqual(untouched.clicks, ["Form:Save"]);
+  assert.ok(skipped.result.findings.some((f: any) => f.kind === "dead_button" && f.label === "Save"));
 });
 
 test("explore: play mode ending mid-crawl stops it; edit mode at start refuses", async () => {

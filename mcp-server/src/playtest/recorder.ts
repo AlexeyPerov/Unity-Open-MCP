@@ -60,7 +60,24 @@ export type CallKind = "input" | "wait" | "capture" | "command" | "control" | "e
 const INPUT_TOOLS = new Set([
   "unity_open_mcp_inputsim_touch", "unity_open_mcp_inputsim_pointer", "unity_open_mcp_inputsim_pointer3d",
   "unity_open_mcp_inputsim_key", "unity_open_mcp_inputsim_gesture", "unity_open_mcp_inputsim_step",
+  "unity_open_mcp_inputsim_text",
 ]);
+const TEXT_TOOL = "unity_open_mcp_inputsim_text";
+/** Words in a field's name that mark it as holding a secret: what is typed into it is never logged. */
+const SECRET_WORDS = new Set(["password", "passcode", "passphrase", "pass", "pwd", "pin", "secret", "token", "otp", "cvv", "cvc", "2fa", "mfa"]);
+const SECRET_PHRASES = /\b(?:card number|security code|verification code|auth code)\b/;
+
+/** inputsim_text's typed text, redacted when the call says it is secret or the field looks like a password / PIN / code field. */
+export function redactTypedText(tool: string, args: Record<string, unknown>): Record<string, unknown> {
+  if (tool !== TEXT_TOOL || typeof args.text !== "string" || !args.text) return args;
+  const named = [args.target, args.target_text, args.under].filter(v => typeof v === "string").join(" ");
+  // "PinField", "pin_code", "Login/Password" → words.
+  const words = named.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const secret = args.secret === true || words.some(w => SECRET_WORDS.has(w)) || SECRET_PHRASES.test(words.join(" "));
+  if (!secret) return args;
+  return { ...args, text: `[redacted ${args.text.length} chars]` };
+}
+
 const CAPTURE_TOOLS = new Set([
   "unity_senses_screenshot", "unity_senses_screenshot_window", "unity_senses_screenshot_camera",
   "unity_senses_capture_inline", "unity_senses_capture_series", "unity_senses_visual_compare",
@@ -179,6 +196,7 @@ function boundedJson(value: unknown, max: number): unknown {
 
 const SUMMARY_KEYS = [
   "action", "status", "outcome", "fired", "elapsed_ms", "realtime_ms", "backend", "target", "resolved", "targetHit", "topHit",
+  "textAfter", "masked", "typed",
   "blockedBy", "framesAdvanced", "released", "isPlaying", "isPaused", "mode", "size", "device", "settled", "capturedAt",
   "time_scale", "frames", "exception",
 ];
@@ -249,7 +267,7 @@ export class PlaytestRecorder {
     // The arguments go with the start line, so a call lost in flight still shows what it was.
     this.append(session, {
       k: "call_started", seq, tool: classified.label, kind: classified.kind, at: iso(start),
-      args: boundedJson(this.redactor.value(asSent(classified.label, args)), RECORDING_LIMITS.maxArgsChars),
+      args: boundedJson(this.redactor.value(asSent(classified.label, redactTypedText(classified.label.split(" ").pop() ?? "", args))), RECORDING_LIMITS.maxArgsChars),
     });
     return { session, seq, tool: classified.label, kind: classified.kind, start };
   }
