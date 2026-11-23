@@ -19,6 +19,7 @@ session as a report for a human. The workflow is in the
 | `unity_senses_capture_series` | Captures the composed game frame at scheduled play-mode frames (relative to the call or a condition), with an optional crop, per-frame luminance / diff metric and a labelled contact sheet | always (Unity 6; reads the play-mode view) |
 | `unity_open_mcp_player_state` | Snapshots, diffs and restores the player state a session changes — PlayerPrefs, `persistentDataPath` files, opt-in EditorPrefs — in a store outside the project; restore is edit-mode only, a dry run unless confirmed, and gated | always (macOS verified; Windows and Linux readers untested in the field) |
 | `unity_open_mcp_playtest_explore` | Explores the running game's UI on its own as a job: taps every untried button / toggle of each screen (never money, destructive or leaving controls), walks back or restarts, captures each new screen and files findings — overflow, safe area, overlaps, placeholder text, touch size, dead buttons, dead ends, console errors — into the open session | `com.unity.ugui` (server-local crawl over `ui_snapshot` and `inputsim_pointer`) |
+| `unity_open_mcp_playtest_devices` | Checks the game on several Device Simulator devices (× orientation) as a job — the current screen's detectors and a frame per device, or a crawl per device — groups the findings by the devices that show them and puts the Game view back | Unity 6 Editor (Device Simulator); `com.unity.ugui` for the checks (server-local) |
 | `unity_open_mcp_playtest_session` | Records a playtest for a human: the agent's input / wait / capture / project-command calls with their frames and console errors, step verdicts, the state diff — `end` writes a Markdown report | always (server-local; no Unity code) |
 
 `inputsim_gesture` (in `input-simulation`) takes `capture_at_ms`: a tap and the
@@ -887,6 +888,86 @@ screen; a console error per message).
 A control covered by something in front of it is behind the screen: its
 diagnostics are left to the screen it belongs to.
 
+## `unity_open_mcp_playtest_devices`
+
+Puts the running game on each device of a Device Simulator list in turn and
+checks it there, so a layout problem that only some devices have — the notch
+over a top bar, a tall phone pushing a button off, a tablet stretching a popup —
+shows up in one run with the devices named. The workflow is in the
+[Playtest guide](../playtest-guide.md#check-on-several-devices).
+
+A local tool, like [`playtest_explore`](#unity_open_mcp_playtest_explore): one call
+checks the open session (`no_open_session`) and starts a [`jobs`](jobs.md) job,
+answering with `job_id` and the `plan`; `jobs wait` until terminal, `jobs cancel`
+stops it. Whatever happens — a cancel, a failure — the Game view or Simulator
+state the run found is put back at the end (`restored`): Game view →
+`set_resolution {size_label}`, Simulator → `set_device {device, orientation}`.
+Unity 6 Editor only (the Device Simulator through [`game_view`](#unity_open_mcp_game_view));
+another Editor fails the job with `unsupported_editor_version`.
+
+### Which devices
+
+`devices` names them (an exact id from `game_view list_devices`, or a substring
+that matches one; an unknown or ambiguous name fails the job with
+`device_not_found` listing the catalog), or `preset` picks them from the
+catalog:
+
+| `preset` | Devices |
+|---|---|
+| `common` (default) | the smallest phone, the tallest phone (aspect), the phone with the deepest top inset, the smallest tablet — at most four, catalog order |
+| `phones` / `tablets` | by diagonal from the portrait size and dpi (≥ 7″ is a tablet) |
+| `notch` | the devices with a notch or cutout |
+| `all` | the whole catalog |
+
+`max_devices` (default 8, ≤ 20) caps the list. `orientations` (default
+`["portrait"]`; `portrait_upside_down`, `landscape_left`, `landscape_right`, or
+`landscape` = `landscape_left`) multiplies it. A pair the device does not support,
+or that does not settle, is listed under `skipped` (`orientation_unsupported`,
+`not_settled`, …); a rotation the game does not follow (`orientation_applied:
+false` and the size of an orientation already checked) is checked once and
+skipped with `orientation_not_applied`.
+
+### What is checked
+
+| `screens` | Per device × orientation |
+|---|---|
+| `current` (default) | The screen the game shows: the [detectors](#findings) at that device's dpi (`min_touch_dp` → px per device), console errors logged meanwhile, and one composed frame (`capture`, ≤ 960 px). Edit or play mode. One recorded session call of kind `check` per pair |
+| `explore` | A whole [crawl](#the-crawl) with the `explore` options (the `playtest_explore` arguments, budgets per device). The game is restarted before every device but the first (`explore.restart`; `none` crawls on from where the previous crawl ended). Needs what the crawler needs: isolation (`not_isolated`, or `allow_unsandboxed`) and play mode (`play_mode_required`). Each crawl records its own steps, an explore block and a mark naming the device |
+
+`placeholder_pattern` and `min_touch_dp` default as for the crawler and apply to
+the crawls too unless `explore` sets its own. `settle_timeout_ms` (default 10000)
+bounds each device switch.
+
+### Result
+
+```json
+{
+  "status": "ok", "stop_reason": "done", "screens": "current", "duration_ms": 1824, "checked": 8,
+  "devices": [ { "id": "iOS Notch Device Small (1080x2338)", "screen": [1080, 2338], "dpi": 476, "inches": 5.4, "tablet": false, "notch": true } ],
+  "entries": [
+    { "device": "iOS Notch Device Small (1080x2338)", "orientation": "portrait", "size": "1080x2338", "screen": [1080, 2338],
+      "safe_area": [0, 97, 1080, 2096], "insets": { "top": 145, "bottom": 97, "left": 0, "right": 0 }, "dpi": 476,
+      "counts": { "bug": 1, "suspicious": 1 }, "findings": [ … ], "frame": "…/screenshot-composed-….png", "frame_call": 7 }
+  ],
+  "matrix": [
+    { "kind": "outside_safe_area", "severity": "bug", "path": "ExploreFixture/ExploreCanvas/Menu/InfoButton", "label": "i",
+      "detail": "button reaches outside the safe area (top)", "on": ["iOS Notch Device Small (1080x2338) (portrait)", "iOS Notch Device Small (1080x2338) (landscape_left)"],
+      "count": 2, "of": 8 }
+  ],
+  "finding_counts": { "bug": 2, "suspicious": 25 },
+  "restored": { "restored": true, "to": { "action": "set_resolution", "size_label": "Free Aspect" } }
+}
+```
+
+Findings are per device — an element's finding on two devices is two findings,
+each with `device` and `orientation`; `matrix` groups them by kind and element
+with the devices that show them (`on`, `count` of `of` checks), bug first, then
+the widest spread. An explore entry adds `stop_reason`, `steps`, `screens` and
+`actions` (tried / total). `stop_reason`: `done`, `cancelled`, `session_ended`.
+The run adds a `devices` block and (for `current`) one mark to the session; the
+report's **Devices** section has a row per device with its frame thumbnail, then
+the findings by element, then what was skipped.
+
 ## `unity_open_mcp_playtest_session`
 
 Records a playtest so a human can review it without replaying the agent's
@@ -1013,6 +1094,11 @@ one), and writes `report.md`:
   its stop reason, taps, screens with their frame thumbnails and controls tried /
   total, the findings table, the exploring taps (from → control → to), the controls
   it never tapped (deny-list) and the ones left untried;
+- **Devices** (when a [device run](#unity_open_mcp_playtest_devices) ran): per
+  run a row per device × orientation (screen, insets, findings, frame thumbnail —
+  or the crawl's taps / screens / controls), the findings by element with the
+  devices that show them, and the skipped pairs; crawl runs are also in
+  Exploration, named by device;
 - **Screen checks** (when `check` ran): each check's frame and findings;
 - **Steps**: per mark, a table of its calls (time, tool, arguments, result,
   duration), the errors it caused and its frames — a series shows its contact
@@ -1036,7 +1122,7 @@ one), and writes `report.md`:
     "lost_in_flight": [], "running_at_end": [], "state_diff": { "identical": false, "prefs": { "added": 3, "removed": 0, "changed": 0, "unchanged": 5 } },
     "hooks": { "begin": "project.demo.playtest.begin" },
     "detector_findings": { "bug": 0, "suspicious": 0, "items": [] },
-    "explorations": []
+    "explorations": [], "device_runs": []
   },
   "agentNextSteps": [ "Hand the report to the human: …/report.md", "…" ]
 }
@@ -1111,9 +1197,10 @@ operation (`timed_out`, a stall, `play_mode_exited`) are a flat top-level
 | `editor_internals_unavailable` | `player_state` with EditorPrefs on an Editor without the internal EditorPrefs flush |
 | `restore_incomplete` | `player_state` `restore confirm:true`: some operations failed, or the re-read state still differs from the snapshot (`errors`, `residual`, `dirs_kept_not_empty`) |
 | `session_already_open` | `playtest_session` `start` while this agent has an open session (`session` names it), or `mark` / `end` / `resume` naming a different session than the open one |
-| `no_open_session` | `playtest_session` `mark` / `check` / `end` without an open session (`orphaned` lists sessions a stopped server left open); `playtest_explore` without one |
+| `no_open_session` | `playtest_session` `mark` / `check` / `end` without an open session (`orphaned` lists sessions a stopped server left open); `playtest_explore` / `playtest_devices` without one |
 | `not_isolated` | `playtest_explore`: the session has no player-state snapshot and no `*.playtest.begin` call succeeded in it (pass `allow_unsandboxed: true` to crawl anyway) |
-| `job_operation_unsupported` | `jobs start` of `unity_open_mcp_playtest_explore` — start a crawl with the tool itself |
+| `job_operation_unsupported` | `jobs start` of `unity_open_mcp_playtest_explore` / `unity_open_mcp_playtest_devices` — start them with the tool itself |
+| `device_not_found` / `no_devices` | `playtest_devices` (job error): a `devices` name matches no or several devices (the message lists the catalog) / the preset or the Simulator lists none |
 | `session_not_found` / `session_ended` | `playtest_session`: no such session for this project / it already ended (`report`) |
 | `session_owned_by_other_agent` | `playtest_session` `end` / `resume` / `mark` of a session another live agent or MCP server process owns |
 | `snapshot_failed` | `playtest_session` `start` with `snapshot: true`: the player-state snapshot failed (`snapshot_error`); no session was started |

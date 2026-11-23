@@ -194,6 +194,30 @@ mode, `playtest_session {"action":"start","name":"Explore fixture","snapshot":tr
 touch target, placeholder text, dead button and dead end; "Buy Gems", "Quit" and
 "$1.99 Starter Pack" never tapped.
 
+## Check on several devices
+
+Layout bugs live on particular devices. Instead of switching the Simulator by
+hand, let [`playtest_devices`](api/playtest.md#unity_open_mcp_playtest_devices)
+walk a list:
+
+1. Open a session (`snapshot: true` when it will crawl) and bring the game to the
+   screen to check — or to its first real screen for a crawl.
+2. `playtest_devices {}` checks the current screen on the `common` preset (the
+   smallest phone, the tallest, the deepest notch, the smallest tablet) in
+   portrait; add `"orientations":["portrait","landscape"]`, pick `preset`
+   (`phones`, `tablets`, `notch`, `all`) or name `devices`. `screens: "explore"`
+   crawls the whole UI on each device instead (`explore` takes the crawler's
+   options; the game restarts between devices). `jobs wait` the job id.
+3. Read `matrix`: each finding with the devices that show it. A finding on the
+   notch devices only is a safe-area problem; one on the small phone only is a
+   size problem; one everywhere is the screen's own. Open the device frames.
+4. `playtest_session end` — the report's Devices section has a row and a frame per
+   device. The Game view is put back by the run itself.
+
+On the demo fixture (menu screen): the "i" button sits under the notch of the
+notch phones, the menu buttons overlap in landscape on the tall foldable, and the
+small classic phone's buttons fall under 44 dp — each listed with its devices.
+
 ## Reading the report
 
 `report.md` sits in the session folder
@@ -201,7 +225,7 @@ touch target, placeholder text, dead button and dead end; "Buy Gems", "Quit" and
 with `frames/` (full-size PNGs) and `thumbs/` next to it, so the folder can be
 zipped or attached as is. In order: a header (device, snapshot, isolation hook,
 totals, verdicts), **Findings** (verdicts, detector findings, errors), the
-**Exploration** of a crawl and the **Screen checks** when they ran, one **Step** per mark (its calls with arguments,
+**Exploration** of a crawl, the **Devices** of a device run and the **Screen checks** when they ran, one **Step** per mark (its calls with arguments,
 results and durations; the errors it caused; thumbnails linking to the frames), the
 **Errors** list with stacks, the **State diff**, and the **Editor events**
 (play-mode transitions, domain reloads). Secrets in arguments, notes and console

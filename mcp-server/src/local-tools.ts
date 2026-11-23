@@ -22,6 +22,8 @@ export const LOCAL_TOOL_NAMES: ReadonlySet<string> = new Set([
   "unity_open_mcp_playtest_session",
   // The UI crawler: a server-side job over the same normal routes.
   "unity_open_mcp_playtest_explore",
+  // The device matrix: a server-side job over game_view and the playtest checks.
+  "unity_open_mcp_playtest_devices",
 ]);
 
 export function isLocalTool(name: string): boolean {

@@ -39,6 +39,9 @@ export interface Finding {
   /** Crawler step that found it. */
   step?: number;
   detail: string;
+  /** Device Simulator device and orientation it was seen on (device matrix). */
+  device?: string;
+  orientation?: string;
 }
 
 /**
@@ -273,10 +276,12 @@ export function truncatedDiagnostics(output: Record<string, any>): Record<string
  * label that overflows on every screen is one finding), the console message,
  * or — for a finding about a whole screen — the screen.
  */
-export function findingKey(finding: Pick<Finding, "kind" | "screen" | "path" | "label" | "detail">): string {
-  if (finding.kind === "console_error") return `${finding.kind}|${finding.label ?? finding.detail}`;
+export function findingKey(finding: Pick<Finding, "kind" | "screen" | "path" | "label" | "detail" | "device" | "orientation">): string {
+  // On a device matrix the same element on two devices is two findings.
+  const on = finding.device ? `${finding.device}/${finding.orientation ?? ""}#` : "";
+  if (finding.kind === "console_error") return `${on}${finding.kind}|${finding.label ?? finding.detail}`;
   const extra = finding.kind === "overlapping_controls" ? finding.detail : "";
-  return finding.path ? `${finding.kind}|${finding.path}|${extra}` : `${finding.kind}|@${finding.screen ?? ""}|${extra}`;
+  return finding.path ? `${on}${finding.kind}|${finding.path}|${extra}` : `${on}${finding.kind}|@${finding.screen ?? ""}|${extra}`;
 }
 
 /** Deduplicated findings: one per element (or console message, or screen) and kind. */

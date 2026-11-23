@@ -339,6 +339,17 @@ export const RECOMMENDED_TOOL_CHAINS: RecommendedToolChain[] = [
     ],
   },
   {
+    name: "playtest-device-matrix",
+    task: "Check a screen (or crawl the UI) on several phones and tablets at once and see which devices show which layout problem.",
+    steps: [
+      "unity_open_mcp_playtest_session (action start, name — snapshot true when the run crawls)",
+      "boot to the screen to check (play mode, the project's playtest.boot); for a crawl per device, its first real screen",
+      "unity_open_mcp_playtest_devices (preset common, or devices [...]; orientations; screens current or explore) — returns a job_id",
+      "unity_open_mcp_jobs (action wait, job_id, timeout_ms 30000) until terminal — matrix[] lists each finding with the devices that show it",
+      "open the device frames (entries[].frame), then unity_open_mcp_playtest_session (action end) — the report has a Devices section",
+    ],
+  },
+  {
     name: "device-layout-check",
     task: "Check a screen's layout on a phone (notch / safe area) or at a fixed resolution, with frames a human can compare.",
     steps: [

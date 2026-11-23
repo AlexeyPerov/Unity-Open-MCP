@@ -33,7 +33,8 @@ export interface ReportSummary {
   hooks: { begin?: string; end?: string };
   /** Findings of UI crawls and screen checks (deduplicated), bug first. */
   detector_findings: { bug: number; suspicious: number; items: Array<Record<string, unknown>> };
-  explorations: Array<{ stop_reason: string; steps: number; screens: number; bug: number; suspicious: number }>;
+  explorations: Array<{ stop_reason: string; steps: number; screens: number; bug: number; suspicious: number; device?: string }>;
+  device_runs: Array<{ screens: string; checked: number; stop_reason: string; bug: number; suspicious: number; restored: boolean }>;
   notes: string[];
 }
 
@@ -124,8 +125,12 @@ export function writeReport(input: ReportInput): ReportSummary {
   let errorsOverLimit = 0, streamGaps = 0, firstGap: string | undefined;
   const explores: Array<Record<string, any>> = [];
   const checks: Array<Record<string, any>> = [];
+  const deviceRuns: Array<Record<string, any>> = [];
   for (const entry of entries) {
     switch (entry.k) {
+      case "devices":
+        deviceRuns.push(entry);
+        break;
       case "explore":
         explores.push(entry);
         break;
@@ -285,9 +290,16 @@ export function writeReport(input: ReportInput): ReportSummary {
   };
   explores.forEach((run, i) => { for (const f of Array.isArray(run.findings) ? run.findings : []) addFinding(f, `explore run ${i + 1}`); });
   checks.forEach((check, i) => { for (const f of Array.isArray(check.findings) ? check.findings : []) addFinding(f, `check ${i + 1}`); });
+  // A crawl per device files its findings through its explore block; a current-screen run through its entries.
+  deviceRuns.forEach((run, i) => {
+    if (run.screens !== "current") return;
+    for (const entry of Array.isArray(run.entries) ? run.entries : [])
+      for (const f of Array.isArray(entry.findings) ? entry.findings : []) addFinding(f, `devices run ${i + 1}`);
+  });
   detector.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "bug" ? -1 : 1));
   const detectorCounts = { bug: detector.filter(f => f.severity === "bug").length, suspicious: detector.filter(f => f.severity !== "bug").length };
   const findingWhere = (f: Record<string, any>) => [
+    f.device ? `on ${f.device} (${f.orientation ?? ""})` : null,
     f.screen ? String(f.screen) : null, f.label ? `'${clip(String(f.label), 60)}'` : null, f.path ? code(String(f.path)) : null,
   ].filter(Boolean).join(" ");
   const frameOfCall = (seq: unknown): Record<string, any> | null => {
@@ -354,7 +366,7 @@ export function writeReport(input: ReportInput): ReportSummary {
     explores.forEach((run, i) => {
       const coverage = (run.coverage ?? {}) as Record<string, number>;
       const counts = (run.finding_counts ?? {}) as Record<string, number>;
-      md.push(`### Run ${i + 1} — ${cell(String(run.stop_reason ?? "?"))}`, "");
+      md.push(`### Run ${i + 1}${run.device ? ` on ${cell(String(run.device))} (${cell(String(run.orientation ?? ""))})` : ""} — ${cell(String(run.stop_reason ?? "?"))}`, "");
       md.push("| | |", "|---|---|");
       md.push(`| Taps | ${run.steps ?? 0} in ${duration(Number(run.duration_ms ?? 0))}${run.restarts ? `, ${run.restarts} restart(s)` : ""} |`);
       md.push(`| Screens | ${coverage.screens ?? 0} |`);
@@ -403,6 +415,49 @@ export function writeReport(input: ReportInput): ReportSummary {
         md.push("");
       }
       for (const note of Array.isArray(run.notes) ? run.notes : []) notes.push(`Exploration run ${i + 1}: ${String(note)}`);
+    });
+  }
+
+  if (deviceRuns.length) {
+    md.push("## Devices", "");
+    deviceRuns.forEach((run, i) => {
+      const counts = (run.finding_counts ?? {}) as Record<string, number>;
+      const restored = (run.restored ?? {}) as Record<string, any>;
+      md.push(`### Devices run ${i + 1} — ${run.screens === "explore" ? "a crawl per device" : "the current screen"} — ${cell(String(run.stop_reason ?? "?"))}`, "");
+      md.push(`${run.checked ?? 0} device check(s) in ${duration(Number(run.duration_ms ?? 0))}; bug ${counts.bug ?? 0} · suspicious ${counts.suspicious ?? 0}; ` +
+        `the Game view ${restored.restored ? "was put back" : `was not put back${restored.error ? ` (${cell(clip(JSON.stringify(restored.error), 120))})` : ""}`}.`, "");
+      const rows = Array.isArray(run.entries) ? run.entries : [];
+      if (rows.length) {
+        const explore = run.screens === "explore";
+        md.push(explore ? "| Device | Orientation | Screen | Insets | Taps / screens / controls | Findings |" : "| Device | Orientation | Screen | Insets | Findings | Frame |",
+          explore ? "|---|---|---|---|---|---|" : "|---|---|---|---|---|---|");
+        for (const e of rows) {
+          const insets = e.insets ? ["top", "bottom", "left", "right"].filter(k => e.insets[k]).map(k => `${k} ${e.insets[k]}`).join(", ") || "none" : "?";
+          const found = `bug ${e.counts?.bug ?? 0} · suspicious ${e.counts?.suspicious ?? 0}`;
+          const screen = Array.isArray(e.screen) ? `${e.screen[0]}×${e.screen[1]}${e.orientation_applied === false ? " (did not rotate)" : ""}` : "?";
+          if (explore) md.push(`| ${cell(String(e.device))} | ${e.orientation} | ${screen} | ${insets} | ${e.steps ?? 0} / ${e.screens ?? 0} / ${e.actions ?? ""} (${cell(String(e.stop_reason ?? ""))}) | ${found} |`);
+          else {
+            const capture = frameOfCall(e.frame_call);
+            const thumb = capture ? thumbFor(capture) : null;
+            const frame = capture ? (thumb ? `[![${cell(String(e.device))}](${thumb})](${capture.file})` : `[frame](${capture.file})`) : "—";
+            md.push(`| ${cell(String(e.device))} | ${e.orientation} | ${screen} | ${insets} | ${found} | ${frame} |`);
+          }
+        }
+        md.push("");
+      }
+      const matrix = Array.isArray(run.matrix) ? run.matrix : [];
+      if (matrix.length) {
+        md.push("Findings by element (the devices that show each):", "");
+        for (const g of matrix)
+          md.push(`- **${g.severity}** ${code(String(g.kind))} — ${[g.label ? `'${clip(String(g.label), 60)}'` : null, g.path ? code(String(g.path)) : null].filter(Boolean).join(" ") || "the screen"}: ${cell(clip(String(g.detail ?? ""), 160))} — on ${g.count} of ${g.of}: ${cell((g.on as string[]).join(", "))}`);
+        md.push("");
+      }
+      if (Array.isArray(run.skipped) && run.skipped.length) {
+        md.push("Skipped:", "");
+        for (const sk of run.skipped) md.push(`- ${cell(String(sk.device))} (${sk.orientation}) — ${cell(String(sk.reason))}${sk.note ? `: ${cell(clip(String(sk.note), 160))}` : ""}`);
+        md.push("");
+      }
+      for (const note of Array.isArray(run.notes) ? run.notes : []) notes.push(`Devices run ${i + 1}: ${String(note)}`);
     });
   }
 
@@ -545,6 +600,11 @@ export function writeReport(input: ReportInput): ReportSummary {
     explorations: explores.map(run => ({
       stop_reason: String(run.stop_reason ?? ""), steps: Number(run.steps ?? 0), screens: Number(run.coverage?.screens ?? 0),
       bug: Number(run.finding_counts?.bug ?? 0), suspicious: Number(run.finding_counts?.suspicious ?? 0),
+      ...(run.device ? { device: String(run.device) } : {}),
+    })),
+    device_runs: deviceRuns.map(run => ({
+      screens: String(run.screens ?? ""), checked: Number(run.checked ?? 0), stop_reason: String(run.stop_reason ?? ""),
+      bug: Number(run.finding_counts?.bug ?? 0), suspicious: Number(run.finding_counts?.suspicious ?? 0), restored: run.restored?.restored === true,
     })),
     notes,
   };

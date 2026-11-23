@@ -10,7 +10,7 @@ import { COMPILE_RESULT_FIRST_ERRORS, compileToAwait, foldCompileResult, foldCom
 import { lifecycleForCall } from "./capabilities/lifecycle.js";
 import { PLAYMODE_ROUTES, PLAYMODE_INLINE_GRACE_MS } from "./playmode-routes.js";
 import { routeGameView as settleGameView } from "./game-view-settle.js";
-import { JobManager, JobManagerError, type JobOwner } from "./jobs/job-manager.js";
+import { JobManager, JobManagerError, type JobOperation, type JobOwner } from "./jobs/job-manager.js";
 import { handleJobs } from "./jobs/handler.js";
 import { PROCESS_AGENT_ID, PROCESS_IDENTITY, type RequestIdentity } from "./agent-identity.js";
 import { buildEditorSearch } from "./editor-search.js";
@@ -63,7 +63,8 @@ import { secretEnvValues } from "./playtest/redact.js";
 import { sessionsRoot, type SessionOwner } from "./playtest/session-store.js";
 import { PLAYTEST_SESSION_ACTION_KEYS } from "./tools/playtest-session.js";
 import { PLAYTEST_EXPLORE_TOOL } from "./tools/playtest-explore.js";
-import { exploreOperation, parseExploreOptions, runCheck } from "./playtest/explore-job.js";
+import { devicesOperation, exploreOperation, parseDevicesOptions, parseExploreOptions, runCheck } from "./playtest/explore-job.js";
+import { PLAYTEST_DEVICES_TOOL } from "./tools/playtest-devices.js";
 import { ExploreError } from "./playtest/explore.js";
 
 // M31-optimizations Plan 1 / L14 — opt-in route-logging gate. Resolved once at
@@ -902,8 +903,8 @@ export class ToolRouter implements Router {
     const owner = this.jobOwner(identity);
     try {
       const clientFor = this.jobClient;
-      if (args.action === "start" && args.tool_or_command === PLAYTEST_EXPLORE_TOOL)
-        return localError("job_operation_unsupported", `Start a crawl with ${PLAYTEST_EXPLORE_TOOL} itself: it checks the open session, its isolation and play mode, then returns the job id.`);
+      if (args.action === "start" && (args.tool_or_command === PLAYTEST_EXPLORE_TOOL || args.tool_or_command === PLAYTEST_DEVICES_TOOL))
+        return localError("job_operation_unsupported", `Start it with ${String(args.tool_or_command)} itself: it checks the open session (and, for a crawl, isolation and play mode), then returns the job id.`);
       if (args.action === "start" && typeof args.tool_or_command === "string") {
         const name = args.tool_or_command, key = args.idempotency_key;
         if (name === "unity_senses_run_tests") {
@@ -1109,6 +1110,8 @@ export class ToolRouter implements Router {
       // UI crawler: a server-side job driving the playtest tools through this
       // same dispatch as the session owner, recording into the open session.
       [PLAYTEST_EXPLORE_TOOL, (l, a, id) => this.routePlaytestExplore(a, l, id)],
+      // Device matrix: the same kind of job, switching Device Simulator devices.
+      [PLAYTEST_DEVICES_TOOL, (l, a, id) => this.routePlaytestDevices(a, l, id)],
       // Live tool whose release lookups (npm latest, GitHub tag) run HERE so
       // the Editor main thread never blocks on the network.
       ["unity_open_mcp_upgrade", (l, a) => this.routeUpgrade(a, l)],
@@ -1409,25 +1412,73 @@ export class ToolRouter implements Router {
     if (probed.mode !== "play")
       return sourceResult({ error: { code: "play_mode_required", message: "The crawler explores the running game; the Editor is in edit mode." },
         agentNextSteps: ["editor_set_state {\"state\":\"play\"}, editor_status {\"wait_until\":\"playing\"}, boot to the first real screen, then call playtest_explore again."] }, "local", true);
+    return this.startPlaytestJob(PLAYTEST_EXPLORE_TOOL, exploreOperation({ options, call, recorder, owner, session: isolation.session }), args, identity, {
+      session: isolation.session,
+      isolation: { snapshot: isolation.snapshot, hook: isolation.hook, unsandboxed: !isolation.snapshot && !isolation.hook },
+      budgets: { max_steps: options.maxSteps, max_minutes: options.maxMinutes, max_screens: options.maxScreens, restart: options.restart, max_restarts: options.maxRestarts },
+    }, "The crawl is running.", "Do not drive the game yourself while it runs: your taps would mix into its screens.");
+  }
+
+  /**
+   * `unity_open_mcp_playtest_devices` — local route that starts a device-matrix
+   * run as a job: the current screen (or a crawl) on each Device Simulator
+   * device, recorded into the caller's open session, the view put back after.
+   * A crawl per device needs what playtest_explore needs (isolation, play mode).
+   */
+  private async routePlaytestDevices(args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity): Promise<CallToolResult> {
+    const recorder = this.playtest;
+    const owner = this.ownerOf(identity);
+    const isolation = recorder.isolation(owner);
+    if (!isolation)
+      return sourceResult({ error: { code: "no_open_session", message: "The device checks are recorded into your playtest session: start one first." },
+        agentNextSteps: ["playtest_session {\"action\":\"start\",\"name\":\"Devices\"} (snapshot:true when the run crawls), then call playtest_devices again."] }, "local", true);
+    let options;
+    try { options = parseDevicesOptions(args); }
+    catch (error) {
+      return localError(error instanceof ExploreError ? error.code : "invalid_arguments", error instanceof Error ? error.message : String(error));
+    }
+    const call = async (tool: string, toolArgs: Record<string, unknown>) => {
+      const definition = ALL_TOOLS.find(t => t.name === tool);
+      return this.routeDispatch(live, tool, definition ? withSchemaDefaults(definition, toolArgs) : toolArgs, identity);
+    };
+    if (options.screens === "explore") {
+      if (!isolation.snapshot && !isolation.hook && args.allow_unsandboxed !== true)
+        return sourceResult({ error: { code: "not_isolated", message: "A crawl per device taps through the game for real, and this session has no player-state snapshot and no playtest.begin hook run." },
+          session: isolation.session,
+          agentNextSteps: ["Invoke the project's playtest.begin, or start the session with snapshot:true — or pass allow_unsandboxed:true if the save may change."] }, "local", true);
+      const probe = await call("unity_open_mcp_ui_snapshot", { profile: "compact", page_size: 1, visible_only: true });
+      const probed = toolOutput(probe);
+      if (probe.isError || probed.error) return probe;
+      if (probed.mode !== "play")
+        return sourceResult({ error: { code: "play_mode_required", message: "A crawl per device explores the running game; the Editor is in edit mode." },
+          agentNextSteps: ["editor_set_state {\"state\":\"play\"}, editor_status {\"wait_until\":\"playing\"}, boot to the first real screen, then call playtest_devices again."] }, "local", true);
+    }
+    return this.startPlaytestJob(PLAYTEST_DEVICES_TOOL, devicesOperation({ options, call, recorder, owner, session: isolation.session }), args, identity, {
+      session: isolation.session,
+      plan: { devices: options.devices ?? `preset ${options.preset}`, orientations: options.orientations, screens: options.screens, max_devices: options.maxDevices },
+    }, "The device run is going.", "Do not change the Game view or drive the game while it runs; the view it found is put back at the end.");
+  }
+
+  /** Register a per-call playtest job operation, start it, and answer with its id once it got (or queued for) its slot. */
+  private async startPlaytestJob(name: string, operation: JobOperation, args: Record<string, unknown>, identity: RequestIdentity,
+    extra: Record<string, unknown>, running: string, hands: string): Promise<CallToolResult> {
     const jobOwner = this.jobOwner(identity);
     try {
       // Registered per call: the operation closes over this owner's route, and a
       // job keeps the operation it started with.
-      this.jobs.register(PLAYTEST_EXPLORE_TOOL, exploreOperation({ options, call, recorder, owner, session: isolation.session }), true);
-      const started = this.jobs.start(jobOwner, PLAYTEST_EXPLORE_TOOL, args);
+      this.jobs.register(name, operation, true);
+      const started = this.jobs.start(jobOwner, name, args);
       // The job is scheduled on the next turn of the loop; report whether it got its slot.
       await new Promise<void>(resolve => setImmediate(resolve));
       const job = this.jobs.status(jobOwner, started.job_id);
       return sourceResult({
         status: job.state === "queued" ? "queued" : "running",
         job_id: job.job_id,
-        session: isolation.session,
-        isolation: { snapshot: isolation.snapshot, hook: isolation.hook, unsandboxed: !isolation.snapshot && !isolation.hook },
-        budgets: { max_steps: options.maxSteps, max_minutes: options.maxMinutes, max_screens: options.maxScreens, restart: options.restart, max_restarts: options.maxRestarts },
-        note: job.state === "queued" ? "Another job of this project is running; the crawl starts when it ends." : "The crawl is running.",
+        ...extra,
+        note: job.state === "queued" ? "Another job of this project is running; this one starts when it ends." : running,
         agentNextSteps: [
-          `Call unity_open_mcp_jobs {"action":"wait","job_id":"${job.job_id}","timeout_ms":30000} until the state is terminal (progress shows steps / screens / findings); jobs cancel stops it and keeps the result so far.`,
-          "Do not drive the game yourself while it runs: your taps would mix into its screens.",
+          `Call unity_open_mcp_jobs {"action":"wait","job_id":"${job.job_id}","timeout_ms":30000} until the state is terminal (progress shows how far it got); jobs cancel stops it and keeps the result so far.`,
+          hands,
         ],
       }, "local");
     } catch (error) {

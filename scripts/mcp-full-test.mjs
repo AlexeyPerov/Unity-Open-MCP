@@ -377,6 +377,7 @@ function buildSuite() {
   // The UI crawler needs an open, isolated session and play mode; S0 has neither,
   // so it is refused before anything is tapped (the crawl itself: manual checklist).
   s("playtest_explore_no_session", "B", "unity_open_mcp_playtest_explore", {}, { expect: "tolerate", tolerate: ["no_open_session"] });
+  s("playtest_devices_no_session", "B", "unity_open_mcp_playtest_devices", {}, { expect: "tolerate", tolerate: ["no_open_session"] });
   // Typing needs play mode; S0 runs in edit mode, so the guard answers (typing: manual checklist).
   s("inputsim_text_edit_mode", "B", "unity_open_mcp_inputsim_text", { text: "s0", target_text: "Nickname" }, { expect: "tolerate", tolerate: ["play_mode_required"] });
 

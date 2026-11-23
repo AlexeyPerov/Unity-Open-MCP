@@ -70,7 +70,8 @@ definitions live in `mcp-server/src/tools/`.
   animated content (`capture_series`), sandbox the player's save around a
   session (`player_state`), record the session as a reviewable report
   (`playtest_session`, with `check` for a screen's findings) and let a crawler
-  explore every screen and button on its own (`playtest_explore`).
+  explore every screen and button on its own (`playtest_explore`), on each
+  phone and tablet of a Device Simulator list (`playtest_devices`).
 - **Discovery** — capabilities, rules, skill generation, and tool-group
   management.
 - **Unity Hub control** — editor discovery, release listing, installs, modules,

@@ -385,7 +385,10 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "untried button / toggle of each screen (deny-list for money / destructive / leaving labels), " +
       "navigates back or restarts, captures each new screen once and files findings (overflow, safe " +
       "area, overlaps, placeholders, touch size, dead buttons, dead ends, console errors) into the " +
-      "open session; requires an isolated session and play mode. ui_snapshot " +
+      "open session; requires an isolated session and play mode. playtest_devices (server-local): the " +
+      "same checks (or a crawl) on each Device Simulator device of a list or preset (common / phones / " +
+      "tablets / notch / all) × orientation, as a job; findings grouped by the devices that show them, " +
+      "the Game view put back after. ui_snapshot " +
       "compiles when com.unity.ugui is present; the compiled subset is reconciled from GET /tools.",
     defaultEnabled: false,
   },
@@ -1057,6 +1060,8 @@ assign("playtest", [
   // UI crawler: server-local job that drives the tools above through the normal
   // dispatch and records into the open session.
   "unity_open_mcp_playtest_explore",
+  // Device matrix: server-local job switching Device Simulator devices.
+  "unity_open_mcp_playtest_devices",
 ]);
 
 // ---------------------------------------------------------------------------

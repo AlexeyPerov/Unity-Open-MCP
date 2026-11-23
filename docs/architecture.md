@@ -160,7 +160,9 @@ screen model and detectors are pure functions in `mcp-server/src/playtest/`
 (no Unity code beyond `ui_snapshot`'s diagnostics), and it writes only through
 the session recorder: each tap is a recorded call of kind `explore`, and the crawl
 adds one mark and an `explore` block the report renders. Keeping the loop in the
-server keeps it independent of where the game runs.
+server keeps it independent of where the game runs. The device matrix
+(`playtest_devices`) is the same kind of job: it switches Device Simulator devices
+through `game_view`, runs the checks or a crawl on each, and puts the view back.
 
 ## Related docs
 

@@ -311,7 +311,7 @@ export class PlaytestRecorder {
    * UI crawl (`explore`) or a detector check (`check`), rendered by the report.
    * False when the owner has no open session (it ended meanwhile).
    */
-  note(owner: SessionOwner, entry: { k: "explore" | "check" } & Record<string, unknown>): boolean {
+  note(owner: SessionOwner, entry: { k: "explore" | "check" | "devices" } & Record<string, unknown>): boolean {
     const session = this.open.get(ownerKey(owner));
     if (!session) return false;
     this.settle(session);

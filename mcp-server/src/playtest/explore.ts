@@ -365,30 +365,10 @@ export class Explorer {
     const logs: unknown[] = [];
     this.restarting = true;
     try {
-      if (mode === "command") {
-        const result = await this.deps.call("unity_open_mcp_project_commands",
-          { action: "invoke", command_id: this.options.restartCommand, args: this.options.restartArgs ?? {} });
-        collectLogs(result, logs);
-        const out = toolOutput(result);
-        if (result.isError || out.error) {
-          step.finish({ step: { purpose: "restart", mode, outcome: "failed", error: out.error ?? null } }, logs, true);
-          throw new Stop("restart_failed", `The restart command ${this.options.restartCommand} failed: ${JSON.stringify(out.error ?? null).slice(0, 300)}`);
-        }
-      } else {
-        for (const [tool, args] of [
-          ["unity_open_mcp_editor_set_state", { state: "stop" }],
-          ["unity_open_mcp_editor_status", { wait_until: "edit", timeout_ms: 30_000 }],
-          ["unity_open_mcp_editor_set_state", { state: "play" }],
-          ["unity_open_mcp_editor_status", { wait_until: "playing", timeout_ms: 40_000 }],
-        ] as Array<[string, Record<string, unknown>]>) {
-          const result = await this.deps.call(tool, args);
-          collectLogs(result, logs);
-          const out = toolOutput(result);
-          if (result.isError || out.error) {
-            step.finish({ step: { purpose: "restart", mode, outcome: "failed", at: `${tool} ${JSON.stringify(args)}`, error: out.error ?? null } }, logs, true);
-            throw new Stop("restart_failed", `Restarting play mode failed at ${tool} ${JSON.stringify(args)}: ${JSON.stringify(out.error ?? null).slice(0, 300)}`);
-          }
-        }
+      const failure = await restartGame(this.deps.call, mode, this.options.restartCommand, this.options.restartArgs, logs);
+      if (failure) {
+        step.finish({ step: { purpose: "restart", mode, outcome: "failed", at: failure.at, error: failure.error } }, logs, true);
+        throw new Stop("restart_failed", failure.message);
       }
     } finally {
       this.restarting = false;
@@ -572,8 +552,39 @@ export class Explorer {
   }
 }
 
+/**
+ * Bring the game back to its start: a synchronous project command (`command`),
+ * or exit and re-enter play mode (`play_mode`). Returns why it failed, or null.
+ */
+export async function restartGame(call: ToolCaller, mode: RestartMode, command: string | undefined,
+  commandArgs: Record<string, unknown> | undefined, logs: unknown[]): Promise<{ at: string; error: unknown; message: string } | null> {
+  const steps: Array<[string, Record<string, unknown>]> = mode === "command"
+    ? [["unity_open_mcp_project_commands", { action: "invoke", command_id: command, args: commandArgs ?? {} }]]
+    : [
+      ["unity_open_mcp_editor_set_state", { state: "stop" }],
+      ["unity_open_mcp_editor_status", { wait_until: "edit", timeout_ms: 30_000 }],
+      ["unity_open_mcp_editor_set_state", { state: "play" }],
+      ["unity_open_mcp_editor_status", { wait_until: "playing", timeout_ms: 40_000 }],
+    ];
+  for (const [tool, args] of steps) {
+    const result = await call(tool, args);
+    collectLogs(result, logs);
+    const out = toolOutput(result);
+    if (result.isError || out.error) {
+      const at = `${tool} ${JSON.stringify(args)}`;
+      return {
+        at, error: out.error ?? null,
+        message: mode === "command"
+          ? `The restart command ${command} failed: ${JSON.stringify(out.error ?? null).slice(0, 300)}`
+          : `Restarting play mode failed at ${at}: ${JSON.stringify(out.error ?? null).slice(0, 300)}`,
+      };
+    }
+  }
+  return null;
+}
+
 /** Console lines a tool response carried (`logs[]` at the top of its body). */
-function collectLogs(result: CallToolResult, into: unknown[]): void {
+export function collectLogs(result: CallToolResult, into: unknown[]): void {
   const logs = toolResultBody(result).logs;
   if (Array.isArray(logs)) for (const log of logs) if (log && typeof log === "object") into.push(log);
 }

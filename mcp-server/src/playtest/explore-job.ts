@@ -15,6 +15,8 @@ import {
   truncatedDiagnostics,
 } from "./detectors.js";
 import { EXPLORE_DEFAULTS, EXPLORE_LIMITS, ExploreError, Explorer, type ExploreOptions, type ExploreRecorder, type RestartMode, type ToolCaller } from "./explore.js";
+import { DEVICE_LIMITS, DEVICE_PRESETS, DeviceMatrix, normalizeOrientations, type DeviceMatrixOptions, type DevicePreset } from "./devices.js";
+import { PLAYTEST_DEVICES_TOOL } from "../tools/playtest-devices.js";
 import { PlaytestError, type PlaytestRecorder } from "./recorder.js";
 import type { SessionOwner } from "./session-store.js";
 
@@ -59,11 +61,11 @@ function stepResult(output: Record<string, unknown>, logs: unknown[], isError: b
   return { content: [{ type: "text", text: JSON.stringify({ ...output, logs }) }], isError };
 }
 
-/** The recorder seen by the engine: each step is a call of kind `explore` in the owner's session. */
-function exploreRecorder(recorder: PlaytestRecorder, owner: SessionOwner): ExploreRecorder {
+/** The recorder seen by the engine: each step is a call of kind `explore` (or `check`) in the owner's session. */
+function exploreRecorder(recorder: PlaytestRecorder, owner: SessionOwner, kind: "explore" | "check" = "explore", tool = PLAYTEST_EXPLORE_TOOL): ExploreRecorder {
   return {
     begin(label, args) {
-      const handle = recorder.beginOwn(owner, "explore", PLAYTEST_EXPLORE_TOOL, { step: label, ...args });
+      const handle = recorder.beginOwn(owner, kind, tool, { step: label, ...args });
       if (!handle) {
         // Over the session's call limit the crawl goes on unrecorded; a closed session stops it.
         if (!recorder.isRecording(owner)) return null;
@@ -193,5 +195,118 @@ export async function runCheck(recorder: PlaytestRecorder, owner: SessionOwner, 
     agentNextSteps: findings.length
       ? ["Confirm each finding on the frame before reporting it; mark the step bug / suspicious with playtest_session {\"action\":\"mark\"} when it is real."]
       : ["No findings on this screen."],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Device matrix (unity_open_mcp_playtest_devices)
+// ---------------------------------------------------------------------------
+
+/** The tool's arguments as matrix options; invalid combinations throw invalid_arguments. */
+export function parseDevicesOptions(args: Record<string, unknown>): DeviceMatrixOptions {
+  const devices = Array.isArray(args.devices) ? args.devices.filter((d): d is string => typeof d === "string" && d.trim() !== "").map(d => d.trim()) : null;
+  const preset = (typeof args.preset === "string" ? args.preset : "common") as DevicePreset;
+  if (!(DEVICE_PRESETS as readonly string[]).includes(preset))
+    throw new ExploreError("invalid_arguments", `Unknown preset '${preset}'. Valid: ${DEVICE_PRESETS.join(", ")}.`);
+  if (devices && devices.length && typeof args.preset === "string")
+    throw new ExploreError("invalid_arguments", "Pass devices or preset, not both.");
+  const screens = args.screens === "explore" ? "explore" : "current";
+  if (screens === "current" && args.explore !== undefined)
+    throw new ExploreError("invalid_arguments", "explore options are used only with screens: \"explore\".");
+  const minTouch = num(args.min_touch_dp, DEFAULT_MIN_TOUCH_DP);
+  const placeholderPattern = typeof args.placeholder_pattern === "string" ? (args.placeholder_pattern || null) : DEFAULT_PLACEHOLDER_PATTERN;
+  const explore = parseExploreOptions((args.explore && typeof args.explore === "object" ? args.explore : {}) as Record<string, unknown>);
+  // The crawl's detectors follow the matrix's own settings unless its options set them.
+  const exploreArgs = (args.explore ?? {}) as Record<string, unknown>;
+  if (exploreArgs.placeholder_pattern === undefined) explore.placeholderPattern = placeholderPattern;
+  if (exploreArgs.min_touch_dp === undefined) explore.minTouchDp = minTouch > 0 ? minTouch : null;
+  return {
+    devices: devices && devices.length ? devices : null,
+    preset,
+    maxDevices: Math.min(num(args.max_devices, 8), DEVICE_LIMITS.max_devices),
+    orientations: normalizeOrientations(args.orientations),
+    screens,
+    explore,
+    placeholderPattern,
+    minTouchDp: minTouch > 0 ? minTouch : null,
+    capture: args.capture !== false,
+    settleTimeoutMs: Math.min(Math.max(num(args.settle_timeout_ms, 10_000), 1_000), 20_000),
+  };
+}
+
+export interface DevicesJobInput {
+  options: DeviceMatrixOptions;
+  call: ToolCaller;
+  recorder: PlaytestRecorder;
+  owner: SessionOwner;
+  session: string;
+}
+
+/** One device-matrix run as a `jobs` operation (registered per call, like the crawl). */
+export function devicesOperation(input: DevicesJobInput): JobOperation {
+  return {
+    mutating: false,
+    cancellable: true,
+    validate() { /* parsed before the job starts */ },
+    async run(_args, context) {
+      const matrix = new DeviceMatrix(input.options, {
+        call: input.call,
+        check: exploreRecorder(input.recorder, input.owner, "check", PLAYTEST_DEVICES_TOOL),
+        explore: exploreRecorder(input.recorder, input.owner),
+        onCrawl: (result, device, orientation) => {
+          const findings = (Array.isArray(result.findings) ? result.findings : []).map(f => ({ ...(f as object), device, orientation }));
+          const counts = result.finding_counts as { bug: number; suspicious: number };
+          if (input.recorder.note(input.owner, { k: "explore", ...result, findings, device, orientation })) {
+            try {
+              input.recorder.mark(input.owner, {
+                label: `Explore on ${device} (${orientation}): ${result.steps} taps, ${(result.coverage as Record<string, number>).screens} screens (${result.stop_reason})`,
+                verdict: verdictOf(counts),
+                note: counts.bug + counts.suspicious > 0
+                  ? `${counts.bug} bug / ${counts.suspicious} suspicious finding(s) on this device — see the Devices and Exploration sections.`
+                  : "No findings on this device.",
+              });
+            } catch { /* mark limit */ }
+          }
+        },
+        signal: context.signal,
+        progress: (phase, fraction, detail) => context.report({ phase, fraction, detail }),
+      });
+      let result: Record<string, unknown>;
+      try {
+        result = await matrix.run();
+      } catch (error) {
+        if (error instanceof ExploreError) return { state: "failed", error: { code: error.code, message: error.message } };
+        return { state: "failed", error: { code: "devices_failed", message: error instanceof Error ? error.message : String(error) } };
+      }
+      const counts = result.finding_counts as { bug: number; suspicious: number };
+      const recorded = input.recorder.note(input.owner, { k: "devices", ...result });
+      if (recorded && input.options.screens === "current") {
+        try {
+          input.recorder.mark(input.owner, {
+            label: `Devices: ${result.checked} checked (${(input.options.orientations).join(", ")})`,
+            verdict: verdictOf(counts),
+            note: counts.bug + counts.suspicious > 0
+              ? `${counts.bug} bug / ${counts.suspicious} suspicious finding(s) across devices — the Devices section groups them by element.`
+              : "No findings on any device.",
+          });
+        } catch { /* mark limit */ }
+      }
+      const final = {
+        ...result,
+        session: input.session,
+        agentNextSteps: [
+          counts.bug + counts.suspicious > 0
+            ? "Triage per element (matrix[]: which devices show each finding): open the device frames (entries[].frame) and confirm before you report; a finding on notch devices only is a safe-area issue."
+            : "No findings on these devices: say which devices and orientations were checked (entries[]).",
+          ...(Array.isArray(result.skipped) && result.skipped.length ? ["Some device / orientation pairs were skipped (skipped[]: reason) — check them by hand if they matter."] : []),
+          (result.restored as { restored?: boolean } | null)?.restored
+            ? "The Game view was put back as it was."
+            : "The Game view could not be put back (restored): set it with game_view.",
+          recorded ? "End the session with playtest_session {\"action\":\"end\"}: the report has a Devices section." : "The playtest session ended during the run; this result is the record.",
+        ],
+      };
+      if (context.signal.aborted && result.stop_reason === "cancelled") return { state: "cancelled", result: final };
+      return { state: "succeeded", result: final };
+    },
   };
 }

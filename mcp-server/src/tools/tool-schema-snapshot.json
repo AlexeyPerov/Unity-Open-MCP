@@ -17670,5 +17670,214 @@
       },
       "type": "object"
     }
+  },
+  "unity_open_mcp_playtest_devices": {
+    "description": "Check the game on several phones and tablets in one call: for each Device Simulator device (× orientation) it switches the view (game_view set_device, waits for the game to settle) and checks it there, then puts the view it found back. Runs as a jobs job and returns its job_id: jobs wait until terminal, jobs cancel stops it (the view is still put back). DEVICES: `devices` (ids or unique substrings from game_view list_devices) or `preset`: common (default — the smallest phone, the tallest phone, the phone with the deepest notch, the smallest tablet), phones, tablets (diagonal ≥ 7\"), notch, all; max_devices (default 8, ≤ 20). `orientations` (default [\"portrait\"]; landscape = landscape_left); a rotation the game does not follow is checked once. SCREENS: current (default) = the screen the game shows now, per device: the snapshot detectors at that device's dpi (text overflow, outside the safe area — real on notch devices —, overlapping controls, placeholder text, touch targets under min_touch_dp, zero-size controls, console errors) and one composed frame; explore = a whole UI crawl per device (the playtest_explore options go in `explore`; the game is restarted between devices; needs an isolated session and play mode). REQUIRES your open playtest_session (no_open_session); each device check is recorded into it with its frame, and the report gets a Devices section. Result: entries[] (device, orientation, screen, safe_area, insets, counts, findings, frame), matrix[] (each finding with the devices that show it: on 2 of 4 devices), skipped[] (orientation unsupported / not applied, not_settled), restored, finding_counts. Unity 6 Editor (Device Simulator).",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_unsandboxed": {
+          "description": "[screens: explore] Crawl although the session has no player-state snapshot and the project's playtest.begin did not run.",
+          "type": "boolean"
+        },
+        "capture": {
+          "description": "One composed frame per device check (default true).",
+          "type": "boolean"
+        },
+        "devices": {
+          "description": "Device ids or unique substrings (game_view list_devices). Exclusive with preset.",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "type": "array"
+        },
+        "explore": {
+          "additionalProperties": false,
+          "description": "[screens: explore] The crawl's options, as playtest_explore takes them (budgets apply per device; restart also runs between devices).",
+          "properties": {
+            "allow": {
+              "description": "Exact labels or hierarchy paths (case-insensitive) exempt from every deny rule.",
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "type": "array"
+            },
+            "capture": {
+              "description": "Capture each new screen once (default true; the frames go into the session report).",
+              "type": "boolean"
+            },
+            "default_deny": {
+              "description": "false = drop the built-in deny-list and price check (only `deny` applies). Default true.",
+              "type": "boolean"
+            },
+            "deny": {
+              "description": "More controls never to tap: case-insensitive regexes matched against the label and the hierarchy path.",
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 50,
+              "type": "array"
+            },
+            "fill_inputs": {
+              "description": "Type fill_text into each visible text field once (inputsim_text, then end_edit), before the screen's buttons — a form is filled before it is sent. Default true.",
+              "type": "boolean"
+            },
+            "fill_text": {
+              "description": "What the crawler types into text fields (default \"Test\").",
+              "maxLength": 100,
+              "minLength": 1,
+              "type": "string"
+            },
+            "max_minutes": {
+              "description": "Wall-clock budget in minutes (default 10).",
+              "maximum": 60,
+              "minimum": 0.5,
+              "type": "number"
+            },
+            "max_restarts": {
+              "description": "Restarts allowed (default 3).",
+              "maximum": 10,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "max_screens": {
+              "description": "Distinct screens to file before stopping (default 40).",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "max_settle_ms": {
+              "description": "Longest wait for a screen to stop changing before it is taken as it is (default 4000).",
+              "maximum": 20000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "max_steps": {
+              "description": "Taps the crawl may make (exploring and navigating; default 60).",
+              "maximum": 300,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "min_touch_dp": {
+              "description": "Smallest acceptable control in dp (px = dp × dpi / 160); default 44, 0 turns the check off.",
+              "maximum": 200,
+              "minimum": 0,
+              "type": "number"
+            },
+            "placeholder_pattern": {
+              "description": "Regex (.NET) for texts that look unresolved. Default: #KEY#, {key}, [KEY.part], snake_case_three_parts, UPPER_SNAKE_THREE, dotted.key.three. \"\" turns the check off.",
+              "maxLength": 500,
+              "type": "string"
+            },
+            "restart": {
+              "description": "When no known path leads to an untried control: play_mode (default) = exit and re-enter play mode; command = invoke restart_command; none = stop (stop_reason no_way_back).",
+              "enum": [
+                "play_mode",
+                "command",
+                "none"
+              ],
+              "type": "string"
+            },
+            "restart_args": {
+              "description": "[restart: command] The command's typed arguments.",
+              "type": "object"
+            },
+            "restart_command": {
+              "description": "[restart: command] A synchronous project command that brings the game back to its first real screen (e.g. project.<owner>.playtest.boot).",
+              "pattern": "^project\\.",
+              "type": "string"
+            },
+            "routing": {
+              "description": "How taps are sent (inputsim_pointer routing): dispatch (default, ExecuteEvents on the control) or raycast_real (a real touch the project's input module resolves).",
+              "enum": [
+                "dispatch",
+                "raycast_real"
+              ],
+              "type": "string"
+            },
+            "same_screen": {
+              "description": "Similarity (Jaccard over the screens' control / text sets, numbers masked) at which two snapshots are the same screen (default 0.8). Raise it when distinct screens merge; lower it when one screen splits into many.",
+              "maximum": 1,
+              "minimum": 0.5,
+              "type": "number"
+            },
+            "settle_ms": {
+              "description": "Pause between the snapshots that decide the screen stopped changing (default 250).",
+              "maximum": 2000,
+              "minimum": 50,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "max_devices": {
+          "description": "At most this many devices (default 8).",
+          "maximum": 20,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "min_touch_dp": {
+          "description": "Smallest acceptable control in dp at each device's dpi (default 44; 0 = off).",
+          "maximum": 200,
+          "minimum": 0,
+          "type": "number"
+        },
+        "orientations": {
+          "description": "Orientations per device (default [\"portrait\"]; landscape = landscape_left).",
+          "items": {
+            "enum": [
+              "portrait",
+              "portrait_upside_down",
+              "landscape_left",
+              "landscape_right",
+              "landscape"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "type": "array"
+        },
+        "placeholder_pattern": {
+          "description": "Regex (.NET) for unresolved-looking texts; default the localisation-key pattern; \"\" turns it off.",
+          "maxLength": 500,
+          "type": "string"
+        },
+        "preset": {
+          "description": "common (default) | phones | tablets | notch | all.",
+          "enum": [
+            "common",
+            "phones",
+            "tablets",
+            "notch",
+            "all"
+          ],
+          "type": "string"
+        },
+        "screens": {
+          "description": "current (default) = check the screen the game shows on each device; explore = a UI crawl per device.",
+          "enum": [
+            "current",
+            "explore"
+          ],
+          "type": "string"
+        },
+        "settle_timeout_ms": {
+          "description": "How long each device switch may take to settle (default 10000).",
+          "maximum": 20000,
+          "minimum": 1000,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
   }
 }

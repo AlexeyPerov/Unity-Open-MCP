@@ -129,7 +129,7 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "PlayerPrefs and persistentDataPath), record the session for a human (playtest_session: " +
       "steps, verdicts, frames, the errors each step caused → a Markdown report; check = the current " +
       "screen's findings) and let a crawler explore the UI on its own (playtest_explore: every screen " +
-      "and button, deny-list, findings such as overflow, safe area, overlaps, dead buttons and dead ends).",
+      "and button, deny-list, findings such as overflow, safe area, overlaps, dead buttons and dead ends) and check it across devices (playtest_devices: each Simulator device × orientation, findings by device).",
     keywords: [
       "playtest",
       "playtests",
@@ -194,6 +194,14 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "find-ui-bugs",
       "ui-bugs",
       "layout-bugs",
+      "device-matrix",
+      "devices",
+      "every-device",
+      "multiple-devices",
+      "several-devices",
+      "phones",
+      "tablets",
+      "notch-devices",
     ],
   },
   {

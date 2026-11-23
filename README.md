@@ -62,7 +62,8 @@ into a Markdown report. For menu-driven and mobile UI the agent can also hand th
 tapping to a crawler that walks every screen and button on its own (never money,
 destructive or leaving controls) and files what looks wrong: overflowing text,
 controls under the notch, overlapping or tiny buttons, untranslated keys, buttons
-that do nothing, screens with no way out and the exceptions taps cause.
+that do nothing, screens with no way out and the exceptions taps cause — on one
+device or across a list of phones and tablets, with each problem's devices named.
 
 > **User:** Smoke-test the shop on an iPhone 13.<br>
 > **Agent:** Five steps passed; tapping *Buy* threw a `NullReferenceException`.
