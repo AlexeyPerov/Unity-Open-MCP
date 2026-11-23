@@ -57,7 +57,11 @@ resolution and safe area, or as frame-scheduled series for animated content. The
 player's save (PlayerPrefs and `persistentDataPath`) is snapshotted and restored,
 so a session does not spend the developer's progress, and the whole run is
 recorded — steps, verdicts, frames and the console errors each step caused —
-into a Markdown report.
+into a Markdown report. For menu-driven and mobile UI the agent can also hand the
+tapping to a crawler that walks every screen and button on its own (never money,
+destructive or leaving controls) and files what looks wrong: overflowing text,
+controls under the notch, overlapping or tiny buttons, untranslated keys, buttons
+that do nothing, screens with no way out and the exceptions taps cause.
 
 > **User:** Smoke-test the shop on an iPhone 13.<br>
 > **Agent:** Five steps passed; tapping *Buy* threw a `NullReferenceException`.

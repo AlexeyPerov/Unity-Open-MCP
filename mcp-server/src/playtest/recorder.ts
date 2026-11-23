@@ -55,7 +55,7 @@ export const RECORDING_LIMITS = {
   maxPendingErrors: 500,
 } as const;
 
-export type CallKind = "input" | "wait" | "capture" | "command" | "control";
+export type CallKind = "input" | "wait" | "capture" | "command" | "control" | "explore" | "check";
 
 const INPUT_TOOLS = new Set([
   "unity_open_mcp_inputsim_touch", "unity_open_mcp_inputsim_pointer", "unity_open_mcp_inputsim_pointer3d",
@@ -218,10 +218,25 @@ export class PlaytestRecorder {
   // ---------------------------------------------------------------------
 
   begin(owner: SessionOwner, tool: string, args: Record<string, unknown>): CallHandle | null {
-    const session = this.open.get(ownerKey(owner));
-    if (!session) return null;
     const classified = classifyCall(tool, args);
     if (!classified) return null;
+    return this.beginCall(owner, classified);
+  }
+
+  /**
+   * A call the server makes itself on the owner's behalf — a UI-crawler step
+   * (`explore`) or a detector check (`check`) — recorded like an agent's call:
+   * its console errors by time window, the frames its output names. `finish`
+   * takes a synthetic result: the step's own summary, logs and file paths.
+   */
+  beginOwn(owner: SessionOwner, kind: "explore" | "check", tool: string, args: Record<string, unknown>): CallHandle | null {
+    return this.beginCall(owner, { kind, label: tool, args });
+  }
+
+  private beginCall(owner: SessionOwner, classified: { kind: CallKind; label: string; args: unknown }): CallHandle | null {
+    const session = this.open.get(ownerKey(owner));
+    if (!session) return null;
+    const args = classified.args as Record<string, unknown>;
     this.settle(session);
     if (session.calls >= RECORDING_LIMITS.maxCalls) {
       this.dropCall(session);
@@ -271,6 +286,48 @@ export class PlaytestRecorder {
     if (errors.length) entry.errors = errors;
     this.append(session, entry);
     this.settle(session);
+  }
+
+  /**
+   * A block the server writes into the owner's open session: the outcome of a
+   * UI crawl (`explore`) or a detector check (`check`), rendered by the report.
+   * False when the owner has no open session (it ended meanwhile).
+   */
+  note(owner: SessionOwner, entry: { k: "explore" | "check" } & Record<string, unknown>): boolean {
+    const session = this.open.get(ownerKey(owner));
+    if (!session) return false;
+    this.settle(session);
+    this.append(session, { ...this.redactor.value(entry) as Record<string, unknown>, k: entry.k, at: iso(this.now()) });
+    return true;
+  }
+
+  /**
+   * How the owner's open session isolates the player's save: its player-state
+   * snapshot, and the project's playtest.begin hook when a recorded call ran it.
+   * null when the owner has no open session.
+   */
+  isolation(owner: SessionOwner): { session: string; snapshot: string | null; hook: string | null } | null {
+    const session = this.open.get(ownerKey(owner));
+    if (!session) return null;
+    // A call line carries the result; its arguments are on its call_started line.
+    // An async hook ran as a job: it counts unless its observed job result failed.
+    const entries = this.store.readLog(session.dir);
+    const failedJobs = new Set(entries.filter(e => e.k === "call" && typeof e.of === "number" && e.status === "error").map(e => e.of as number));
+    const started = new Map<number, { tool: string; args: Record<string, unknown> }>();
+    let hook: string | null = null;
+    for (const entry of entries) {
+      if (entry.k === "call_started" && entry.kind === "command")
+        started.set(entry.seq, { tool: String(entry.tool ?? ""), args: (entry.args ?? {}) as Record<string, unknown> });
+      if (entry.k !== "call" || entry.kind !== "command" || entry.of !== undefined) continue;
+      if (entry.status !== "ok" && !(entry.status === "job_started" && !failedJobs.has(entry.seq))) continue;
+      const { tool, args } = started.get(entry.seq) ?? { tool: String(entry.tool ?? ""), args: {} };
+      const last = tool.split(" ").pop() ?? "";
+      const id = typeof args.command_id === "string" ? args.command_id
+        : typeof args.tool_or_command === "string" ? args.tool_or_command : last.startsWith("project.") ? last : "";
+      if (/(^|\.)playtest\.begin$/.test(id)) hook = id;
+      if (/(^|\.)playtest\.end$/.test(id)) hook = null;
+    }
+    return { session: session.meta.id, snapshot: session.meta.snapshot?.name ?? null, hook };
   }
 
   /** `jobs wait` / `jobs status` reached a terminal state for a job a recorded call started. */
@@ -512,6 +569,8 @@ export class PlaytestRecorder {
     const nextSteps = [`Hand the report to the human: ${summary.report}`];
     if (summary.verdicts.bug > 0 || summary.errors.unique > 0)
       nextSteps.push("Summarize the bug / suspicious steps and the first occurrence of each error from summary.findings and summary.top_errors.");
+    if (summary.detector_findings.bug + summary.detector_findings.suspicious > 0)
+      nextSteps.push(`Summarize the ${summary.detector_findings.bug} bug / ${summary.detector_findings.suspicious} suspicious detector finding(s) (summary.detector_findings; every one is in the report with its screen's frame).`);
     if (summary.hooks.begin && !summary.hooks.end)
       nextSteps.push(`The project's isolation hook ${summary.hooks.begin} ran without its end hook — invoke the matching playtest end command.`);
     if (session.meta.snapshot)
@@ -914,6 +973,8 @@ export class PlaytestRecorder {
   }
 
   private summarize(kind: CallKind, output: Record<string, any>): Record<string, unknown> | null {
+    if (kind === "explore" || kind === "check")
+      return output.step && typeof output.step === "object" ? this.redactor.value(boundedJson(output.step, 3_000)) as Record<string, unknown> : null;
     const summary: Record<string, unknown> = {};
     for (const key of SUMMARY_KEYS) {
       if (output[key] === undefined || output[key] === null) continue;

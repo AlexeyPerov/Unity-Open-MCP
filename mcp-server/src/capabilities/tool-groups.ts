@@ -355,8 +355,9 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "Playtest surface — read and judge the running game like a tester. ui_snapshot: the uGUI " +
       "screen as a flat accessibility tree (role, text from UI.Text and TextMeshPro, screen rect, " +
       "visibility on_screen / clipped / offscreen / transparent / zero_size, interactable, " +
-      "occluded_by) with diagnostics (text overflow, zero-size controls; placeholder pattern and " +
-      "minimum touch size on request); edit and play mode, read-only, paged. Its node model backs " +
+      "occluded_by) with diagnostics (text overflow, zero-size controls, controls / texts outside the " +
+      "safe area, overlapping controls; placeholder pattern and minimum touch size on request); edit " +
+      "and play mode, read-only, paged. Its node model backs " +
       "`target_text` label targeting on inputsim_pointer / inputsim_touch / inputsim_gesture, so " +
       "the loop is snapshot → tap by label → step → screenshot (pair with input-simulation and " +
       "agent-senses). game_view: read or set the Game view resolution (a reused 'Open MCP <w>x<h>' " +
@@ -377,7 +378,12 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "start → mark (verdict ok / bug / suspicious) → end records the owner's input / wait / capture / " +
       "project-command calls with redacted arguments, frames and the console errors logged during them " +
       "into an append-only log outside the project, and end writes a Markdown report with thumbnails, " +
-      "the error list and the state diff for a human. ui_snapshot " +
+      "the error list and the state diff for a human; its check action records the current screen's " +
+      "detector findings. playtest_explore (server-local): a UI crawler run as a job — taps every " +
+      "untried button / toggle of each screen (deny-list for money / destructive / leaving labels), " +
+      "navigates back or restarts, captures each new screen once and files findings (overflow, safe " +
+      "area, overlaps, placeholders, touch size, dead buttons, dead ends, console errors) into the " +
+      "open session; requires an isolated session and play mode. ui_snapshot " +
       "compiles when com.unity.ugui is present; the compiled subset is reconciled from GET /tools.",
     defaultEnabled: false,
   },
@@ -1043,6 +1049,9 @@ assign("playtest", [
   // Session recorder: server-local (no bridge tool) — the MCP server sees every
   // call, so it owns the log; frames are the files the capture tools wrote.
   "unity_open_mcp_playtest_session",
+  // UI crawler: server-local job that drives the tools above through the normal
+  // dispatch and records into the open session.
+  "unity_open_mcp_playtest_explore",
 ]);
 
 // ---------------------------------------------------------------------------

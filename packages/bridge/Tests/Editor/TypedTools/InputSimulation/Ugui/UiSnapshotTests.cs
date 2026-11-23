@@ -440,6 +440,53 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             StringAssert.Contains("\"invalid_arguments\"", UiSnapshotTools.Snapshot(min_touch_size: 0f));
         }
 
+        [Test]
+        public void Diagnostics_OverlappingControls_PartialOverlapOnly()
+        {
+            var plain = UiSnapshotTools.Snapshot(under: canvasName, page_size: 1);
+            StringAssert.Contains("\"overlapping_controls\":{\"count\":0,\"threshold\":0.25", plain);
+            StringAssert.Contains("\"outside_safe_area\":{\"count\":", plain);
+
+            var root = canvasGo.transform;
+            // Btn_A is 20..220 × 20..80: Clash covers a third of it; Badge sits inside it
+            // (layering, not a clash); Nested is Btn_A's own child.
+            Label(Button("Clash", root, 120, 40, 200, 60), "Clash");
+            Button("Badge", root, 30, 30, 20, 20);
+            Button("Nested", Node("Btn_A").Rt, 5, 35, 50, 20);
+
+            var json = UiSnapshotTools.Snapshot(under: canvasName, page_size: 1);
+            StringAssert.Contains("\"overlapping_controls\":{\"count\":1,", json);
+            StringAssert.Contains("\"with\":\"" + canvasName + "/Clash\"", json);
+            StringAssert.Contains("\"overlap\":0.33", json);
+            StringAssert.DoesNotContain(canvasName + "/Badge\"", json.Substring(json.IndexOf("\"overlapping_controls\"")));
+
+            var pairs = UiSnapshotTools.Overlaps(Nodes());
+            Assert.AreEqual(1, pairs.Count);
+            Assert.AreEqual(canvasName + "/Btn_A", pairs[0].A.Path);
+            Assert.AreEqual(canvasName + "/Clash", pairs[0].B.Path);
+            // A control covered by something in front of it (play mode: a popup's dimmer) is left out.
+            Assert.AreEqual(0, UiSnapshotTools.Overlaps(Nodes(), n => n.Path == canvasName + "/Btn_A").Count);
+        }
+
+        [Test]
+        public void Diagnostics_OutsideSafeArea_ControlsAndOwnTextsOnly()
+        {
+            var size = GameViewWindows.MainGameViewSize();
+            Assert.IsTrue(UiSnapshotTools.SafeAreaCoversScreen(new UnityEngine.Rect(0, 0, size.x, size.y), size));
+            // The top 100 px are unsafe (a notch band): Btn_A (20 px from the top) and the
+            // Coins text reach into it; Btn_A's folded label is reported as its control only.
+            var safe = new UnityEngine.Rect(0, 0, size.x, size.y - 100);
+            Assert.IsFalse(UiSnapshotTools.SafeAreaCoversScreen(safe, size));
+            Assert.IsTrue(UiSnapshotTools.OutsideSafeArea(Node("Btn_A"), safe));
+            Assert.IsTrue(UiSnapshotTools.OutsideSafeArea(Node("Coins"), safe));
+            Assert.IsFalse(UiSnapshotTools.OutsideSafeArea(Node("Btn_A/Label"), safe), "folded label");
+            Assert.IsFalse(UiSnapshotTools.OutsideSafeArea(Node("Viewport/Item2"), safe), "clipped, not visible");
+            CollectionAssert.AreEqual(new[] { "top" }, UiSnapshotTools.OutsideEdges(Node("Btn_A").VisibleRect, safe));
+            Assert.IsNull(UiSnapshotTools.OutsideEdges(new UnityEngine.Rect(10, 10, 50, 50), safe));
+            CollectionAssert.AreEqual(new[] { "bottom", "left" },
+                UiSnapshotTools.OutsideEdges(new UnityEngine.Rect(-5, -5, 50, 50), new UnityEngine.Rect(0, 0, 100, 100)));
+        }
+
         // --- playtest_wait `ui` condition probe (same node model) ---------------
 
         [Test]

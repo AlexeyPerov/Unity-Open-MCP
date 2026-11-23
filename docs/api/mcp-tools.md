@@ -63,13 +63,14 @@ definitions live in `mcp-server/src/tools/`.
   simulation (play-mode click/swipe/drag).
 - **Playtest** — put the game on a target resolution or Device Simulator device
   (`game_view`: safe area and notch insets the game sees), read the uGUI screen
-  (`ui_snapshot`: texts, visibility, overflow / placeholder / touch-size
-  diagnostics), tap controls by their on-screen label, wait until the game gets
-  somewhere (`playtest_wait`), trace values over frames into a bridge-owned
-  buffer (`playtest_probe`), capture timed frame series of animated content
-  (`capture_series`), sandbox the player's save around a session
-  (`player_state`) and record the session as a reviewable report
-  (`playtest_session`).
+  (`ui_snapshot`: texts, visibility, overflow / safe-area / overlap /
+  placeholder / touch-size diagnostics), tap controls by their on-screen label,
+  wait until the game gets somewhere (`playtest_wait`), trace values over frames
+  into a bridge-owned buffer (`playtest_probe`), capture timed frame series of
+  animated content (`capture_series`), sandbox the player's save around a
+  session (`player_state`), record the session as a reviewable report
+  (`playtest_session`, with `check` for a screen's findings) and let a crawler
+  explore every screen and button on its own (`playtest_explore`).
 - **Discovery** — capabilities, rules, skill generation, and tool-group
   management.
 - **Unity Hub control** — editor discovery, release listing, installs, modules,

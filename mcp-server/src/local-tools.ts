@@ -20,6 +20,8 @@ export const LOCAL_TOOL_NAMES: ReadonlySet<string> = new Set([
   // The playtest session log lives in the server; it reads the bridge only
   // through the normal route of the tools it records.
   "unity_open_mcp_playtest_session",
+  // The UI crawler: a server-side job over the same normal routes.
+  "unity_open_mcp_playtest_explore",
 ]);
 
 export function isLocalTool(name: string): boolean {

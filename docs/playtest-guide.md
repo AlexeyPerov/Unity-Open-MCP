@@ -4,7 +4,8 @@ How an agent runs a smoke playtest of a Unity game through Unity Open MCP the wa
 a QA engineer would — boot the game, read the screen, tap and drag like a finger,
 wait for things to happen, look at the frame on a target device — and hands back
 a report a human can review: every step, the frame it showed, the errors it
-caused and a verdict.
+caused and a verdict — or lets a crawler walk every screen and button on its own
+and report what looks wrong ([Let the crawler explore](#let-the-crawler-explore)).
 
 The tool contracts are in [Playtest tools](api/playtest.md) and
 [Input simulation](api/input-simulation.md); this page is the workflow. The same
@@ -150,13 +151,52 @@ stops a wait at the first exception instead of timing out.
 4. Hand the report path to the human, with the bug / suspicious steps and the
    errors from the summary.
 
+## Let the crawler explore
+
+For "go through the game and tell me what is wrong" on menu-driven and mobile UI,
+let [`playtest_explore`](api/playtest.md#unity_open_mcp_playtest_explore) do the
+tapping: it walks every screen and button on its own, with no model call per
+step, and files what it finds into the session. The agent's job is the setup and
+the triage.
+
+1. **Prepare** as above: the device first (`game_view set_device` — the safe-area
+   check needs a Simulator device with insets), then `playtest_session start` with
+   `snapshot: true` or the project's `playtest.begin`. The crawler refuses an
+   unisolated session (`not_isolated`): it taps through the game for real.
+2. **Boot** to the first real screen (play mode, the project's `playtest.boot`).
+3. **Crawl.** `playtest_explore {}` — or with `deny` for project-specific danger
+   (`"deny":["Prestige","Reset progress"]`), and `restart: "command"`,
+   `restart_command: "project.<owner>.playtest.boot"` when the game has a boot
+   command (faster and steadier than re-entering play mode). It returns a
+   `job_id`: `jobs wait` it until terminal; don't touch the game meanwhile.
+4. **Triage.** The result lists `screens` (with a frame each), `findings` (bug
+   first), `denied` and `untried` controls and the `stop_reason`. Open the frame
+   of every finding before calling it a bug — a `dead_button` may play a sound, a
+   `small_touch_target` may be decoration. For a screen you reach by hand,
+   `playtest_session {"action":"check"}` runs the same detectors and records them.
+5. **Finish** as above: `playtest_session end` — the report has an Exploration
+   section (screens with thumbnails, the findings table, the taps, what was never
+   tapped).
+
+What it does not cover yet: sliders, text fields, scrolling to reveal more,
+world-space taps and UI Toolkit panels — drive those by hand in the same session.
+Money, destructive and leaving controls (buy, purchase, delete, reset, log out,
+rate, share, quit, prices…) are never tapped; `allow` exempts one you need.
+
+On the demo: open `Assets/Fixtures/Playtest/ExploreFixture.unity`, enter play
+mode, `playtest_session {"action":"start","name":"Explore fixture","snapshot":true}`,
+`playtest_explore {}` → 8 screens, the planted overflow, console error, small
+touch target, placeholder text, dead button and dead end; "Buy Gems", "Quit" and
+"$1.99 Starter Pack" never tapped.
+
 ## Reading the report
 
 `report.md` sits in the session folder
 (`<app data>/unity-open-mcp/playtest-sessions/<company>/<product>/<session>/report/`)
 with `frames/` (full-size PNGs) and `thumbs/` next to it, so the folder can be
 zipped or attached as is. In order: a header (device, snapshot, isolation hook,
-totals, verdicts), **Findings**, one **Step** per mark (its calls with arguments,
+totals, verdicts), **Findings** (verdicts, detector findings, errors), the
+**Exploration** of a crawl and the **Screen checks** when they ran, one **Step** per mark (its calls with arguments,
 results and durations; the errors it caused; thumbnails linking to the frames), the
 **Errors** list with stacks, the **State diff**, and the **Editor events**
 (play-mode transitions, domain reloads). Secrets in arguments, notes and console

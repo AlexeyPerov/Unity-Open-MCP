@@ -8,7 +8,7 @@
 // writes the frames. See src/playtest/recorder.ts.
 import { makeTool } from "./schema-fragments.js";
 
-export const PLAYTEST_SESSION_ACTIONS = ["start", "mark", "status", "end", "resume", "list"] as const;
+export const PLAYTEST_SESSION_ACTIONS = ["start", "mark", "check", "status", "end", "resume", "list"] as const;
 export const PLAYTEST_VERDICTS = ["ok", "bug", "suspicious"] as const;
 const SNAPSHOT_NAME_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$";
 export const SESSION_ID_SCHEMA_PATTERN = "^[0-9]{8}-[0-9]{6}-[a-z0-9-]{1,40}$";
@@ -17,6 +17,7 @@ export const SESSION_ID_SCHEMA_PATTERN = "^[0-9]{8}-[0-9]{6}-[a-z0-9-]{1,40}$";
 export const PLAYTEST_SESSION_ACTION_KEYS: Record<(typeof PLAYTEST_SESSION_ACTIONS)[number], string[]> = {
   start: ["name", "device", "snapshot", "use_snapshot"],
   mark: ["label", "note", "verdict", "session"],
+  check: ["label", "placeholder_pattern", "min_touch_dp", "capture"],
   status: [],
   end: ["note", "diff", "session"],
   resume: ["session"],
@@ -34,7 +35,10 @@ export const playtestSession = makeTool(
     "ACTIONS: start {name, device (free-text summary; the Game view / Simulator state is read too), snapshot:true " +
     "(take a player_state snapshot now and diff it at end) or use_snapshot:<existing name>} — one open session per " +
     "agent, a second start answers session_already_open; mark {label, verdict ok|bug|suspicious (default ok), note} " +
-    "after each player-visible step — answers how many errors the step logged; status — your open session, plus " +
+    "after each player-visible step — answers how many errors the step logged; check {label, placeholder_pattern, " +
+    "min_touch_dp, capture} — snapshot the current screen and record its findings (text overflow, outside the safe " +
+    "area, overlapping controls, placeholder-looking text with a default localisation-key pattern, touch targets under " +
+    "44 dp, zero-size controls) with a frame into the session; status — your open session, plus " +
     "orphaned ones; end {note, diff (default true)} — writes report.md + full frames + thumbnails (steps with " +
     "verdicts, the error list with first occurrence and stack, the state diff) and returns its path and a compact " +
     "summary: hand the path to the human. The log is appended to disk per call in the app-data folder " +
@@ -49,7 +53,8 @@ export const playtestSession = makeTool(
         type: "string",
         enum: [...PLAYTEST_SESSION_ACTIONS],
         description:
-          "start: open a session (recording begins). mark: close a step with a verdict. status: your open session. " +
+          "start: open a session (recording begins). mark: close a step with a verdict. check: record the current " +
+          "screen's findings. status: your open session. " +
           "end: write the report. resume: re-attach a session left open by a stopped MCP server process. list: this project's sessions.",
       },
       name: {
@@ -82,7 +87,25 @@ export const playtestSession = makeTool(
         minLength: 1,
         description:
           "[mark] The step that just finished, as a tester would name it (\"Tap Start Wave\"). Keep it short: " +
-          "over 120 characters it is truncated and the full text moves to the start of note.",
+          "over 120 characters it is truncated and the full text moves to the start of note. [check] What the " +
+          "check looks at (default \"Check the current screen\").",
+      },
+      placeholder_pattern: {
+        type: "string",
+        maxLength: 500,
+        description:
+          "[check] Regex (.NET) for texts that look unresolved. Default: #KEY#, {key}, [KEY.part], " +
+          "snake_case_three_parts, UPPER_SNAKE_THREE, dotted.key.three. \"\" turns the check off.",
+      },
+      min_touch_dp: {
+        type: "number",
+        minimum: 0,
+        maximum: 200,
+        description: "[check] Smallest acceptable control in dp (px = dp × dpi / 160); default 44, 0 turns the check off.",
+      },
+      capture: {
+        type: "boolean",
+        description: "[check] Capture the screen into the session with the findings (default true).",
       },
       verdict: {
         type: "string",

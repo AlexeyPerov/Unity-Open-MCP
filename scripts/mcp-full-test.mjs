@@ -374,6 +374,9 @@ function buildSuite() {
   s("playtest_probe_start_edit_mode", "B", "unity_open_mcp_playtest_probe", {
     action: "start", id: "s0-probe", member: "UnityEngine.Time.frameCount", max_samples: 1,
   }, { expect: "tolerate", tolerate: ["play_mode_required"] });
+  // The UI crawler needs an open, isolated session and play mode; S0 has neither,
+  // so it is refused before anything is tapped (the crawl itself: manual checklist).
+  s("playtest_explore_no_session", "B", "unity_open_mcp_playtest_explore", {}, { expect: "tolerate", tolerate: ["no_open_session"] });
 
   // --- agent-senses reads (live-only, read-only) ---
   // read_console has a LogEntries reflection bug on Unity 6 (see

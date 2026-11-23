@@ -18,6 +18,7 @@ session as a report for a human. The workflow is in the
 | `unity_open_mcp_playtest_probe` | Samples a value every N play-mode frames — a field / property path or a read-only C# expression — into a bounded buffer the bridge owns, read incrementally by cursor; ends on a condition, a sample cap, repeated errors, an over-budget sample, stop or play-mode exit | always |
 | `unity_senses_capture_series` | Captures the composed game frame at scheduled play-mode frames (relative to the call or a condition), with an optional crop, per-frame luminance / diff metric and a labelled contact sheet | always (Unity 6; reads the play-mode view) |
 | `unity_open_mcp_player_state` | Snapshots, diffs and restores the player state a session changes — PlayerPrefs, `persistentDataPath` files, opt-in EditorPrefs — in a store outside the project; restore is edit-mode only, a dry run unless confirmed, and gated | always (macOS verified; Windows and Linux readers untested in the field) |
+| `unity_open_mcp_playtest_explore` | Explores the running game's UI on its own as a job: taps every untried button / toggle of each screen (never money, destructive or leaving controls), walks back or restarts, captures each new screen and files findings — overflow, safe area, overlaps, placeholder text, touch size, dead buttons, dead ends, console errors — into the open session | `com.unity.ugui` (server-local crawl over `ui_snapshot` and `inputsim_pointer`) |
 | `unity_open_mcp_playtest_session` | Records a playtest for a human: the agent's input / wait / capture / project-command calls with their frames and console errors, step verdicts, the state diff — `end` writes a Markdown report | always (server-local; no Unity code) |
 
 `inputsim_gesture` (in `input-simulation`) takes `capture_at_ms`: a tap and the
@@ -126,6 +127,8 @@ list is `{ count, items (≤ 20), truncated }`; items carry `id`, `path`,
 | `zero_size_interactables` | always | Controls with a zero-size rect |
 | `placeholder` | only with `placeholder_pattern` | Texts matching the regex (.NET, case-sensitive) — e.g. unresolved localisation keys such as `^[*#{].*[*#}]$`. There is no built-in pattern. The pattern gets 100 ms per text and 2 s per snapshot; past either the call refuses with `regex_timeout` (naming the pattern and the text) |
 | `small_touch_targets` | only with `min_touch_size` | Visible controls whose rect is narrower or shorter than `min_touch_size` screen pixels; reports `dpi` so the caller can convert from dp (`px = dp × dpi / 160`) |
+| `outside_safe_area` | always | Visible controls, and visible texts that are not part of a control's label, whose on-screen part reaches outside the safe area (under a notch, a rounded corner, the home indicator). Items add `role`, `text`, `rect` and `edges` (`top`, `bottom`, `left`, `right`); the list carries `safe_area`. Empty when the safe area is the whole screen — in the plain Game view, so check on a Device Simulator device (`game_view set_device`) |
+| `overlapping_controls` | always | Pairs of visible interactable controls, neither inside the other in the hierarchy, whose visible rects overlap by at least `threshold` (0.25) of the smaller one — short of containing it, which is layering (a button on a full-screen click catcher). In play mode a control covered by something in front of it (a popup's dimmer) is left out. Items name the first control (`id`, `path`, `text`) and the other (`with_id`, `with`, `with_text`), with the `overlap` fraction |
 
 ## `unity_open_mcp_game_view`
 
@@ -740,6 +743,146 @@ custom store, a server). Look for them first:
 5. `player_state {"action":"restore","name":"before","confirm":true,"plan":"<plan>"}`;
    check `verified: true`. `delete` the snapshot when done.
 
+## `unity_open_mcp_playtest_explore`
+
+Explores the running game's uGUI on its own and reports what looks wrong, with no
+model in the loop: the agent starts it, waits for the job and triages the
+findings. It suits menu-driven and mobile UI — every screen and every button a
+player can reach by tapping. The workflow is in the
+[Playtest guide](../playtest-guide.md#let-the-crawler-explore).
+
+A local tool. One call checks what the crawl needs and starts it as a
+[`jobs`](jobs.md) job (operation `unity_open_mcp_playtest_explore`), answering at
+once with `job_id`, `session`, `isolation` and the `budgets`; follow it with
+`jobs {"action":"wait","job_id":"…","timeout_ms":30000}` until it is terminal.
+`jobs cancel` stops it and keeps what it found. The crawl drives the bridge through
+the same routes an agent's calls take, as the caller; do not drive the game
+yourself while it runs.
+
+**Requirements.** Your open [`playtest_session`](#unity_open_mcp_playtest_session)
+(`no_open_session`), isolated from the developer's save by its player-state
+snapshot (`start {snapshot:true}`) or a successful call of the project's
+`*.playtest.begin` command (`not_isolated` otherwise, unless `allow_unsandboxed:
+true` — the crawl taps through the game for real), and play mode
+(`play_mode_required`). `jobs start` of this operation is refused: start it with
+the tool.
+
+### The crawl
+
+1. **Settle.** `ui_snapshot` (compact, visible, 200 nodes, with the detector
+   arguments) until two snapshots `settle_ms` apart show the same screen, at most
+   `max_settle_ms`.
+2. **Screen.** A screen is the set of its visible, uncovered controls (role +
+   label + path) and visible texts, numbers masked so a ticking counter is the same
+   screen; a snapshot whose set is at least `same_screen` (Jaccard) like a known
+   screen's is that screen. A control covered by something in front of it (a
+   popup's dimmer) is behind the screen, so a popup over a menu is a screen of its
+   own. A new screen is captured once (`unity_senses_screenshot` composed, ≤ 960 px)
+   and checked by the [detectors](#findings).
+3. **Tap.** The next untried control of the screen: visible, interactable,
+   uncovered `button` / `toggle` nodes not on the deny-list, in screen order, the
+   leaving ones (Back, Close, Cancel, OK, ×, …, or an unlabelled object named
+   `*Close*` / `*Back*`) last. `inputsim_pointer {action: click, object_id}` with
+   `routing` (default `dispatch`); settle; file the edge (`new_screen`,
+   `known_screen`, `same_screen`).
+4. **Move on.** When a screen has nothing left to tap, the shortest known path to
+   a screen with untried controls is replayed one tap at a time (a hop reaching
+   another screen twice gives up the path); with no path the game is restarted
+   (`restart`: `play_mode` — exit and re-enter play mode, the default; `command` —
+   `restart_command`, a synchronous project command such as
+   `project.<owner>.playtest.boot`, with `restart_args`; `none` — stop). A control
+   that is not tappable on two visits (covered, disabled, gone) is given up and
+   listed as untried.
+
+**Never tapped.** Labels matching the default deny-list — buy, purchase, pay,
+subscribe, subscription, delete, remove, reset, log out, sign out, rate, review,
+share, restore, quit, exit, unlock now, watch an ad / video — and price-like
+labels (a currency symbol or code next to a number). `deny` adds case-insensitive
+regexes matched against the label and the path; `allow` exempts exact labels or
+paths (case-insensitive) from every rule; `default_deny: false` drops the built-in
+list and the price check. Denied controls are listed in the result and the report.
+
+### Arguments
+
+| Argument | Default | |
+|---|---|---|
+| `max_steps` | 60 (≤ 300) | Taps — exploring and navigating |
+| `max_minutes` | 10 (≤ 60) | Wall-clock budget |
+| `max_screens` | 40 (≤ 200) | Distinct screens before stopping |
+| `same_screen` | 0.8 (0.5–1) | Similarity at which two snapshots are one screen; raise it when distinct screens merge, lower it when one screen splits |
+| `settle_ms` / `max_settle_ms` | 250 / 4000 | Pause between the settle snapshots / longest settle wait |
+| `restart` / `restart_command` / `restart_args` / `max_restarts` | `play_mode` / — / — / 3 (≤ 10) | How to get unstuck (above) |
+| `deny` / `allow` / `default_deny` | — / — / true | The deny-list (above) |
+| `routing` | `dispatch` | `raycast_real` sends a real touch the project's input module resolves |
+| `placeholder_pattern` | the default below | `""` turns the check off |
+| `min_touch_dp` | 44 | 0 turns the touch-size check off |
+| `capture` | true | Capture each new screen once |
+| `allow_unsandboxed` | false | Crawl without a snapshot or `playtest.begin` |
+
+### Result
+
+The job's `result`:
+
+```json
+{
+  "status": "ok", "stop_reason": "explored", "steps": 18, "restarts": 1, "duration_ms": 12568,
+  "coverage": { "screens": 8, "actions_total": 17, "actions_tried": 17, "untried": 0 },
+  "finding_counts": { "bug": 2, "suspicious": 4 },
+  "findings": [
+    { "kind": "text_overflow", "severity": "bug", "screen": "S4", "path": "ExploreFixture/ExploreCanvas/Shop/ProductName",
+      "label": "Mega Bundle of Absolutely Everything Forever", "step": 5, "detail": "text needs 1069×295 px but its box is 300×70" },
+    { "kind": "dead_button", "severity": "suspicious", "screen": "S5", "path": "ExploreFixture/ExploreCanvas/Settings/HelpButton",
+      "label": "Help", "step": 9, "detail": "tapping 'Help' changed nothing on screen and logged nothing" }
+  ],
+  "screens": [ { "id": "S1", "title": "Explore Fixture", "labels": ["Play", "Shop", "Settings", "Buy Gems", "Daily"], "visits": 7,
+                 "first_step": 0, "actions": 6, "tried": 6, "denied": 1, "frame": "…/screenshot-composed-….png", "frame_call": 1 } ],
+  "edges": [ { "from": "S1", "action": "Play", "to": "S2", "outcome": "new_screen", "step": 1 } ],
+  "denied": [ { "screen": "S1", "label": "Buy Gems", "path": "…/Menu/BuyGemsButton", "reason": "label matches the default deny-list ('Buy')" } ],
+  "untried": [],
+  "session": "20261123-161731-explore-fixture-4375",
+  "agentNextSteps": [ "Triage the 2 bug / 4 suspicious finding(s): open the screens' frames …", "End the session …" ]
+}
+```
+
+`stop_reason`: `explored` (nothing left to tap), `max_steps`, `max_time`,
+`max_screens`, `no_way_back` (stuck with `restart: none` or no restarts left),
+`cancelled`, `play_mode_exited`, `tool_failures` (three tool calls in a row
+failed), `restart_failed`, `session_ended` (the session was ended during the
+crawl). `findings` holds up to 100 (bug first; `findings_truncated` counts the
+rest), `edges` 200, `denied` and `untried` 50; `navigation_failures` lists hops
+that reached an unexpected screen; `notes` explain skipped checks. In the session
+each tap, navigation hop and restart is one recorded call of kind `explore` (with
+the console errors logged during it and the new screen's frame); the crawl ends
+with one mark — `Explore: N taps, M screens (<stop reason>)`, verdict `bug` /
+`suspicious` / `ok` from its findings — and the report's
+[Exploration](#report) section.
+
+Out of scope: sliders, text fields, scroll-to-reveal, world-space taps, UI
+Toolkit panels, and a model choosing taps.
+
+### Findings
+
+Detectors of the crawl (every new screen and tap) and of `playtest_session
+check`. A finding is `{kind, severity, screen, path, label, step, detail}`; one
+element is one finding whatever screen shows it (a screen-wide finding is per
+screen; a console error per message).
+
+| `kind` | Severity | When |
+|---|---|---|
+| `console_error` | bug | An error / exception logged while the crawler tapped |
+| `text_overflow` | bug | `ui_snapshot` diagnostics `overflow` |
+| `outside_safe_area` | bug | `outside_safe_area` |
+| `overlapping_controls` | suspicious | `overlapping_controls` |
+| `placeholder_text` | suspicious | `placeholder` — the default pattern matches `#KEY#`, `{key}`, `[KEY.part]`, `snake_case_with_three_parts`, `UPPER_SNAKE_THREE_PARTS` and `dotted.key.three` (parts starting with a letter, so `v1.2.3` is not one) |
+| `small_touch_target` | suspicious | `small_touch_targets` at `min_touch_dp` (px = dp × dpi / 160) |
+| `zero_size_control` | suspicious | `zero_size_interactables` |
+| `dead_button` | suspicious | A button tap left the screen exactly as it was and logged nothing (toggles excluded) |
+| `dead_end` | suspicious | A screen other than the first with nothing to tap that did not move on by itself |
+| `navigation_failed` | suspicious | A replayed path reached another screen twice |
+
+A control covered by something in front of it is behind the screen: its
+diagnostics are left to the screen it belongs to.
+
 ## `unity_open_mcp_playtest_session`
 
 Records a playtest so a human can review it without replaying the agent's
@@ -754,6 +897,7 @@ tool's result and never fails one.
 |---|---|---|
 | `start` | `name`, `device`, `snapshot` or `use_snapshot` | Opens a session for the calling agent and starts recording. `device` is a free-text summary for the report; the current Game view / Simulator state (`game_view get`) is recorded as well. `snapshot: true` takes a [`player_state`](#unity_open_mcp_player_state) snapshot (`playtest-<session>`) now — the start fails `snapshot_failed` rather than run unisolated; `use_snapshot` names an existing one. Either is diffed against the state at `end` |
 | `mark` | `label`, `verdict` (`ok` default, `bug`, `suspicious`), `note` | Closes a step: the recorded calls since the previous mark belong to it. Answers `since_last_mark` (`calls`, `errors`, `captures`, `failed`) — errors there are findings. A `label` over 120 characters is not refused: it is cut to 120 (ending in `…`), the full text starts the `note`, and the answer carries `labelTruncated` |
+| `check` | `label`, `placeholder_pattern`, `min_touch_dp`, `capture` (default true) | Snapshots the current screen and records its [findings](#findings) — text overflow, outside the safe area, overlapping controls, placeholder-looking text (default pattern below; `""` turns it off), touch targets under `min_touch_dp` (default 44 dp; 0 turns it off; skipped when the game reports no dpi), zero-size controls — with a frame, as one call of kind `check`. Answers `findings`, `counts`, `frame`, `min_touch_px`. Edit or play mode |
 | `status` | — | Your open session (counts so far), plus `orphaned` sessions of this project whose MCP server process is gone |
 | `end` | `note`, `diff` (default true), `session` | Writes the report and closes the session; returns the report path and a compact `summary` |
 | `resume` | `session` | Re-attaches an orphaned session after an MCP server restart; recording continues, numbering continues |
@@ -857,9 +1001,15 @@ one), and writes `report.md`:
 - a header: session, project, start / end, device, snapshot, the project isolation
   hook seen (`*.playtest.begin` / `*.playtest.end` invoked, or started as a job that
   did not fail), totals and verdicts;
-- **Findings**: `bug` / `suspicious` steps with notes, each distinct error with its
-  first occurrence (step, call, during / after), failed calls, lost calls and calls
-  still running at end;
+- **Findings**: `bug` / `suspicious` steps with notes, the detector findings of
+  crawls and checks (bug first), each distinct error with its first occurrence
+  (step, call, during / after), failed calls, lost calls and calls still running
+  at end;
+- **Exploration** (when a [crawl](#unity_open_mcp_playtest_explore) ran): per run
+  its stop reason, taps, screens with their frame thumbnails and controls tried /
+  total, the findings table, the exploring taps (from → control → to), the controls
+  it never tapped (deny-list) and the ones left untried;
+- **Screen checks** (when `check` ran): each check's frame and findings;
 - **Steps**: per mark, a table of its calls (time, tool, arguments, result,
   duration), the errors it caused and its frames — a series shows its contact
   sheet, other captures a thumbnail, the rest as links;
@@ -880,7 +1030,9 @@ one), and writes `report.md`:
     "top_errors": [ { "type": "exception", "message": "InvalidOperationException: [PlaytestFixture] Deliberate exception from the Report Bug button",
                       "first_step": 6, "first_call": 11, "relation": "during", "count": 1 } ],
     "lost_in_flight": [], "running_at_end": [], "state_diff": { "identical": false, "prefs": { "added": 3, "removed": 0, "changed": 0, "unchanged": 5 } },
-    "hooks": { "begin": "project.demo.playtest.begin" }
+    "hooks": { "begin": "project.demo.playtest.begin" },
+    "detector_findings": { "bug": 0, "suspicious": 0, "items": [] },
+    "explorations": []
   },
   "agentNextSteps": [ "Hand the report to the human: …/report.md", "…" ]
 }
@@ -926,7 +1078,7 @@ operation (`timed_out`, a stall, `play_mode_exited`) are a flat top-level
 | `unsupported_editor_version` | `game_view` on an Editor outside the verified table (Unity 6 line) |
 | `editor_internals_unavailable` | `game_view`: an internal Game view / Simulator member this Editor lacks (`detected.missing`) |
 | `batch_step_requires_server_poll` | `game_view` set_*, `playtest_wait` or `capture_series` inside `batch_execute` |
-| `play_mode_required` | `playtest_wait` / `capture_series` / `playtest_probe` `start` in edit mode |
+| `play_mode_required` | `playtest_wait` / `capture_series` / `playtest_probe` `start` / `playtest_explore` in edit mode |
 | `probe_running` / `probe_capacity` | `playtest_probe` `start`: the `id` is running / 8 probes are running |
 | `probe_not_found` | `playtest_probe` `read` / `stop` of an unknown id (a domain reload drops probes); a `probe` condition naming one |
 | `expression_not_read_only` | `playtest_probe` `start`: the expression writes or disrupts (`classification`: `writes`, `disruptive`, `opaque`, `savesscenes`) |
@@ -955,7 +1107,9 @@ operation (`timed_out`, a stall, `play_mode_exited`) are a flat top-level
 | `editor_internals_unavailable` | `player_state` with EditorPrefs on an Editor without the internal EditorPrefs flush |
 | `restore_incomplete` | `player_state` `restore confirm:true`: some operations failed, or the re-read state still differs from the snapshot (`errors`, `residual`, `dirs_kept_not_empty`) |
 | `session_already_open` | `playtest_session` `start` while this agent has an open session (`session` names it), or `mark` / `end` / `resume` naming a different session than the open one |
-| `no_open_session` | `playtest_session` `mark` / `end` without an open session (`orphaned` lists sessions a stopped server left open) |
+| `no_open_session` | `playtest_session` `mark` / `check` / `end` without an open session (`orphaned` lists sessions a stopped server left open); `playtest_explore` without one |
+| `not_isolated` | `playtest_explore`: the session has no player-state snapshot and no `*.playtest.begin` call succeeded in it (pass `allow_unsandboxed: true` to crawl anyway) |
+| `job_operation_unsupported` | `jobs start` of `unity_open_mcp_playtest_explore` — start a crawl with the tool itself |
 | `session_not_found` / `session_ended` | `playtest_session`: no such session for this project / it already ended (`report`) |
 | `session_owned_by_other_agent` | `playtest_session` `end` / `resume` / `mark` of a session another live agent or MCP server process owns |
 | `snapshot_failed` | `playtest_session` `start` with `snapshot: true`: the player-state snapshot failed (`snapshot_error`); no session was started |

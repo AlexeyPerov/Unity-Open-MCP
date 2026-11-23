@@ -126,8 +126,10 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "read-only expression, read by cursor), " +
       "capture frame-scheduled series of animated content (capture_series, gesture capture_at_ms) " +
       "sandbox the player state a session changes (player_state: snapshot / diff / restore of " +
-      "PlayerPrefs and persistentDataPath) and record the session for a human (playtest_session: " +
-      "steps, verdicts, frames, the errors each step caused → a Markdown report).",
+      "PlayerPrefs and persistentDataPath), record the session for a human (playtest_session: " +
+      "steps, verdicts, frames, the errors each step caused → a Markdown report; check = the current " +
+      "screen's findings) and let a crawler explore the UI on its own (playtest_explore: every screen " +
+      "and button, deny-list, findings such as overflow, safe area, overlaps, dead buttons and dead ends).",
     keywords: [
       "playtest",
       "playtests",
@@ -182,6 +184,16 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "test-report",
       "verdict",
       "repro-steps",
+      "explore",
+      "crawl",
+      "crawler",
+      "ui-crawler",
+      "monkey-test",
+      "dead-button",
+      "dead-end",
+      "find-ui-bugs",
+      "ui-bugs",
+      "layout-bugs",
     ],
   },
   {

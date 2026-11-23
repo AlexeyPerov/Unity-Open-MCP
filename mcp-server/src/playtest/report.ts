@@ -10,6 +10,7 @@
 // still running at end.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { findingKey, type Finding } from "./detectors.js";
 import { thumbnail } from "./png.js";
 import type { Redactor } from "./redact.js";
 import { REPORT_DIR, REPORT_FILE, THUMBS_DIR, type SessionMeta, type SessionStore } from "./session-store.js";
@@ -30,6 +31,9 @@ export interface ReportSummary {
   running_at_end: Array<{ seq: number; tool: string; at: string }>;
   state_diff: { prefs?: unknown; files?: unknown; editor_prefs?: unknown; identical?: unknown; error?: unknown } | null;
   hooks: { begin?: string; end?: string };
+  /** Findings of UI crawls and screen checks (deduplicated), bug first. */
+  detector_findings: { bug: number; suspicious: number; items: Array<Record<string, unknown>> };
+  explorations: Array<{ stop_reason: string; steps: number; screens: number; bug: number; suspicious: number }>;
   notes: string[];
 }
 
@@ -118,8 +122,16 @@ export function writeReport(input: ReportInput): ReportSummary {
   let running = new Set<number>();
   let errorRepeats: Array<{ type?: string; message?: string; count?: number }> = [];
   let errorsOverLimit = 0, streamGaps = 0, firstGap: string | undefined;
+  const explores: Array<Record<string, any>> = [];
+  const checks: Array<Record<string, any>> = [];
   for (const entry of entries) {
     switch (entry.k) {
+      case "explore":
+        explores.push(entry);
+        break;
+      case "check":
+        checks.push(entry);
+        break;
       case "call_started":
         started.set(entry.seq, entry);
         orderedEvents.push({ kind: "start", entry });
@@ -261,6 +273,28 @@ export function writeReport(input: ReportInput): ReportSummary {
     } catch { return null; }
   };
 
+  // ---- detector findings (crawls and checks) -----------------------------
+  const detector: Array<Record<string, any> & { source: string }> = [];
+  const seenFinding = new Set<string>();
+  const addFinding = (f: Record<string, any>, source: string) => {
+    // A check is its own observation; crawl runs share one list.
+    const key = `${findingKey(f as Finding)}|${source.startsWith("check") ? source : ""}`;
+    if (seenFinding.has(key)) return;
+    seenFinding.add(key);
+    detector.push({ ...f, source });
+  };
+  explores.forEach((run, i) => { for (const f of Array.isArray(run.findings) ? run.findings : []) addFinding(f, `explore run ${i + 1}`); });
+  checks.forEach((check, i) => { for (const f of Array.isArray(check.findings) ? check.findings : []) addFinding(f, `check ${i + 1}`); });
+  detector.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "bug" ? -1 : 1));
+  const detectorCounts = { bug: detector.filter(f => f.severity === "bug").length, suspicious: detector.filter(f => f.severity !== "bug").length };
+  const findingWhere = (f: Record<string, any>) => [
+    f.screen ? String(f.screen) : null, f.label ? `'${clip(String(f.label), 60)}'` : null, f.path ? code(String(f.path)) : null,
+  ].filter(Boolean).join(" ");
+  const frameOfCall = (seq: unknown): Record<string, any> | null => {
+    if (typeof seq !== "number") return null;
+    return calls.get(seq)?.captures.find(c => c.file) ?? null;
+  };
+
   // ---- markdown ----------------------------------------------------------
   const verdicts = { ok: 0, bug: 0, suspicious: 0 };
   for (const step of steps) if (step.verdict && step.verdict in verdicts) verdicts[step.verdict as keyof typeof verdicts]++;
@@ -303,14 +337,90 @@ export function writeReport(input: ReportInput): ReportSummary {
 
   md.push("## Findings", "");
   const findings = steps.filter(s => s.verdict === "bug" || s.verdict === "suspicious");
-  if (!findings.length && !errorRows.length && !lost.length && !runningAtEnd.length && !failedCalls) md.push("No bug or suspicious verdicts, no console errors, no failed calls.");
+  if (!findings.length && !errorRows.length && !lost.length && !runningAtEnd.length && !failedCalls && !detector.length) md.push("No bug or suspicious verdicts, no detector findings, no console errors, no failed calls.");
   for (const step of findings) md.push(`- **${step.verdict}** — step ${step.number}: ${cell(step.label)}${step.note ? ` — ${cell(step.note)}` : ""}`);
+  for (const f of detector.slice(0, 40))
+    md.push(`- **${f.severity}** ${code(String(f.kind))} — ${findingWhere(f) || "the screen"}: ${cell(clip(String(f.detail ?? ""), 200))} (${f.source}${typeof f.step === "number" ? `, step ${f.step}` : ""})`);
+  if (detector.length > 40) md.push(`- … ${detector.length - 40} more detector finding(s) in [Exploration](#exploration) / [Screen checks](#screen-checks).`);
   for (const row of errorRows) md.push(`- **${row.type}** ${code(clip(firstLine(row.message), 160))} — first in ${row.first_step !== null ? `step ${row.first_step}` : row.first_call !== null ? "the unmarked calls" : "the session before any call"}${row.first_call !== null ? `, call #${row.first_call} ${code(shortTool(row.first_tool ?? ""))} (${row.relation} it)` : ""}${row.count > 1 ? `, ×${row.count}` : ""} → [E${row.id}](#e${row.id})`);
   if (failedCalls) md.push(`- ${failedCalls} recorded call(s) failed (status \`error\` in the steps below).`);
   for (const l of lost) md.push(`- **Lost in flight:** call #${l.seq} ${code(shortTool(l.tool))} started at ${l.at} and never finished — the MCP server process stopped during it.`);
   for (const l of runningAtEnd) md.push(`- **Still running at end:** call #${l.seq} ${code(shortTool(l.tool))} started at ${l.at} and had not returned when the session ended.`);
   if (endNote) md.push("", `> ${cell(endNote)}`);
   md.push("");
+
+  if (explores.length) {
+    md.push("## Exploration", "");
+    explores.forEach((run, i) => {
+      const coverage = (run.coverage ?? {}) as Record<string, number>;
+      const counts = (run.finding_counts ?? {}) as Record<string, number>;
+      md.push(`### Run ${i + 1} — ${cell(String(run.stop_reason ?? "?"))}`, "");
+      md.push("| | |", "|---|---|");
+      md.push(`| Taps | ${run.steps ?? 0} in ${duration(Number(run.duration_ms ?? 0))}${run.restarts ? `, ${run.restarts} restart(s)` : ""} |`);
+      md.push(`| Screens | ${coverage.screens ?? 0} |`);
+      md.push(`| Controls | ${coverage.actions_tried ?? 0} of ${coverage.actions_total ?? 0} tried${coverage.untried ? `, ${coverage.untried} untried` : ""}${Array.isArray(run.denied) && run.denied.length ? `, ${run.denied.length} denied` : ""} |`);
+      md.push(`| Findings | bug ${counts.bug ?? 0} · suspicious ${counts.suspicious ?? 0} |`);
+      md.push("");
+      const screens = Array.isArray(run.screens) ? run.screens : [];
+      if (screens.length) {
+        md.push("| Screen | Title | Frame | Controls tried | Denied | Notes |", "|---|---|---|---|---|---|");
+        for (const screen of screens) {
+          const capture = frameOfCall(screen.frame_call);
+          const thumb = capture ? thumbFor(capture) : null;
+          const frame = capture ? (thumb ? `[![${screen.id}](${thumb})](${capture.file})` : `[frame](${capture.file})`) : "—";
+          const labels = Array.isArray(screen.labels) && screen.labels.length ? ` (${screen.labels.slice(0, 5).map((l: string) => `'${clip(l, 24)}'`).join(", ")})` : "";
+          md.push(`| ${screen.id} | ${cell(clip(String(screen.title ?? ""), 60))}${cell(labels)} | ${frame} | ${screen.tried ?? 0} / ${screen.actions ?? 0} | ${screen.denied ?? 0} | ${screen.dead_end ? "dead end" : ""}${screen.visits > 1 ? `${screen.dead_end ? ", " : ""}${screen.visits} visits` : ""} |`);
+        }
+        md.push("");
+      }
+      const runFindings = Array.isArray(run.findings) ? run.findings : [];
+      if (runFindings.length) {
+        md.push("| Severity | Kind | Screen | Element | Detail | Step |", "|---|---|---|---|---|---|");
+        for (const f of runFindings)
+          md.push(`| ${f.severity} | ${cellCode(String(f.kind))} | ${f.screen ?? ""} | ${cell([f.label ? `'${clip(String(f.label), 60)}'` : "", f.path ? code(String(f.path)) : ""].filter(Boolean).join(" "))} | ${cell(clip(String(f.detail ?? ""), 200))} | ${f.step ?? ""} |`);
+        if (run.findings_truncated) md.push(`| … | ${run.findings_truncated} more | | | | |`);
+        md.push("");
+      }
+      const edges = Array.isArray(run.edges) ? run.edges : [];
+      if (edges.length) {
+        md.push("<details><summary>Exploring taps (" + edges.length + "; navigation and restarts are in the steps below)</summary>", "", "| Step | From | Tapped | To | Outcome |", "|---|---|---|---|---|");
+        for (const e of edges) md.push(`| ${e.step} | ${e.from} | ${cell(clip(String(e.action), 60))} | ${e.to} | ${e.outcome} |`);
+        md.push("", "</details>", "");
+      }
+      if (Array.isArray(run.denied) && run.denied.length) {
+        md.push("Never tapped (deny-list):", "");
+        for (const d of run.denied) md.push(`- ${d.screen} '${cell(clip(String(d.label), 60))}' ${code(String(d.path))} — ${cell(String(d.reason))}`);
+        md.push("");
+      }
+      if (Array.isArray(run.untried) && run.untried.length) {
+        md.push("Not tried (budget or no way back):", "");
+        for (const u of run.untried) md.push(`- ${u.screen} '${cell(clip(String(u.label), 60))}' ${code(String(u.path))}`);
+        md.push("");
+      }
+      if (Array.isArray(run.navigation_failures) && run.navigation_failures.length) {
+        md.push("Navigation that did not reach the expected screen:", "");
+        for (const n of run.navigation_failures) md.push(`- step ${n.step}: '${cell(clip(String(n.action), 60))}' on ${n.from} reached ${n.reached}, expected ${n.expected}`);
+        md.push("");
+      }
+      for (const note of Array.isArray(run.notes) ? run.notes : []) notes.push(`Exploration run ${i + 1}: ${String(note)}`);
+    });
+  }
+
+  if (checks.length) {
+    md.push("## Screen checks", "");
+    checks.forEach((check, i) => {
+      const counts = (check.counts ?? {}) as Record<string, number>;
+      const capture = frameOfCall(check.call);
+      const thumb = capture ? thumbFor(capture) : null;
+      md.push(`### Check ${i + 1}: ${cell(String(check.label ?? ""))} — bug ${counts.bug ?? 0} · suspicious ${counts.suspicious ?? 0}`, "");
+      if (capture) md.push(thumb ? `[![check ${i + 1}](${thumb})](${capture.file})` : `[frame](${capture.file})`, "");
+      const list = Array.isArray(check.findings) ? check.findings : [];
+      if (!list.length) md.push("No findings.", "");
+      for (const f of list) md.push(`- **${f.severity}** ${code(String(f.kind))} — ${findingWhere(f) || "the screen"}: ${cell(clip(String(f.detail ?? ""), 200))}`);
+      if (list.length) md.push("");
+      for (const note of Array.isArray(check.notes) ? check.notes : []) notes.push(`Check ${i + 1}: ${String(note)}`);
+    });
+  }
 
   md.push("## Steps", "");
   if (!steps.length) md.push("No calls were recorded.", "");
@@ -430,7 +540,13 @@ export function writeReport(input: ReportInput): ReportSummary {
     errors: { unique: errorRows.length, total: totalErrors },
     findings: findings.slice(0, 10).map(s => ({ step: s.number ?? 0, label: s.label, verdict: s.verdict!, ...(s.note ? { note: clip(s.note, 300) } : {}) })),
     top_errors: errorRows.slice(0, 5).map(r => ({ type: r.type, message: clip(firstLine(r.message), 200), first_step: r.first_step, first_call: r.first_call, relation: r.relation, count: r.count })),
-    lost_in_flight: lost, running_at_end: runningAtEnd, state_diff: stateDiff, hooks, notes,
+    lost_in_flight: lost, running_at_end: runningAtEnd, state_diff: stateDiff, hooks,
+    detector_findings: { ...detectorCounts, items: detector.slice(0, 10).map(({ source, ...f }) => ({ ...f, source })) },
+    explorations: explores.map(run => ({
+      stop_reason: String(run.stop_reason ?? ""), steps: Number(run.steps ?? 0), screens: Number(run.coverage?.screens ?? 0),
+      bug: Number(run.finding_counts?.bug ?? 0), suspicious: Number(run.finding_counts?.suspicious ?? 0),
+    })),
+    notes,
   };
 }
 
@@ -454,6 +570,15 @@ function show(value: any): string {
 function resultText(call: CallRow): string {
   const s = call.summary ?? {};
   const parts: string[] = [];
+  if (call.kind === "explore" || call.kind === "check") {
+    if (typeof s.outcome === "string") parts.push(s.outcome);
+    if (typeof s.to === "string") parts.push(`→ ${s.to}`);
+    else if (typeof s.screen === "string" && s.purpose === "observe") parts.push(`start ${s.screen}`);
+    const found = Array.isArray(s.findings) ? s.findings.length : 0;
+    if (found) parts.push(`${found} finding(s)`);
+    if (call.captures.some(c => c.file)) parts.push("frame");
+    return ["ok", ...parts].map(p => cell(p)).join(" · ");
+  }
   if (typeof s.outcome === "string") parts.push(s.outcome);
   const fired = s.fired as Record<string, any> | undefined;
   if (fired && typeof fired === "object" && fired.type) parts.push(`fired ${fired.type}${fired.frame !== undefined ? ` @F${fired.frame}` : ""}`);

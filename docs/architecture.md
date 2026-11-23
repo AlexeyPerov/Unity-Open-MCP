@@ -152,6 +152,16 @@ report can be written with the Editor closed. See
 [Playtest guide](playtest-guide.md) and
 [`playtest_session`](api/playtest.md#unity_open_mcp_playtest_session).
 
+The UI crawler (`playtest_explore`) is server-local too: a `jobs` job that drives
+`ui_snapshot`, `inputsim_pointer`, `unity_senses_screenshot` and the play-mode /
+project-command restarts through the normal dispatch as the caller, so it gets
+the same reload waits, validation and bridge contracts as an agent's calls. Its
+screen model and detectors are pure functions in `mcp-server/src/playtest/`
+(no Unity code beyond `ui_snapshot`'s diagnostics), and it writes only through
+the session recorder: each tap is a recorded call of kind `explore`, and the crawl
+adds one mark and an `explore` block the report renders. Keeping the loop in the
+server keeps it independent of where the game runs.
+
 ## Related docs
 
 - [MCP tools API](api/mcp-tools.md)

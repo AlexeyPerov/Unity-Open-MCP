@@ -4,8 +4,9 @@
 // accessibility tree: role, text (UnityEngine.UI.Text, plus TextMeshPro when
 // it is installed), screen rect, visibility (on_screen | clipped | offscreen |
 // transparent | zero_size), interactable, occluded_by, sprite, depth — and a
-// diagnostics block (text overflow and zero-size controls always; a
-// placeholder pattern and a minimum touch size only when passed). The bridge
+// diagnostics block (text overflow, zero-size controls, controls / texts outside
+// the safe area and overlapping controls always; a placeholder pattern and a
+// minimum touch size only when passed). The bridge
 // shares the node model with `target_text` label targeting on inputsim_pointer
 // / inputsim_touch / inputsim_gesture, so the label the snapshot shows is the
 // label a tap resolves. Bridge-side paging (page_size + cursor), like
@@ -29,8 +30,11 @@ export const uiSnapshot = makeTool(
     "PROFILES: compact (default) = visible nodes that have text or are controls, labels folded into " +
     "their control, null keys omitted; balanced = every visible node (images, containers) + sprite/depth; " +
     "full = every active node in any visibility state with every key. Bound it with page_size + cursor " +
-    "(pagination.next_cursor). DIAGNOSTICS (first page): overflow (text larger than its rect) and " +
-    "zero_size_interactables always; placeholder (texts matching placeholder_pattern) and " +
+    "(pagination.next_cursor). DIAGNOSTICS (first page): overflow (text larger than its rect), " +
+    "zero_size_interactables, outside_safe_area (visible controls / texts reaching outside the safe area, with " +
+    "the edges; empty when the safe area is the whole screen) and overlapping_controls (pairs of visible " +
+    "interactable controls, neither inside the other, overlapping ≥ 25% of the smaller) always; placeholder " +
+    "(texts matching placeholder_pattern) and " +
     "small_touch_targets (controls under min_touch_size px, with Screen.dpi) only when passed. " +
     "Then tap by label: inputsim_pointer / inputsim_touch target_text, or inputsim_gesture keyframe " +
     "target_text. uGUI only (no UI Toolkit). Read-only, gate-free. Requires com.unity.ugui.",

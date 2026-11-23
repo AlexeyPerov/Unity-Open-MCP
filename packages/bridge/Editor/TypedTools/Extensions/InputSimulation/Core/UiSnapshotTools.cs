@@ -4,8 +4,9 @@
 // in edit and play mode: role, text (UI.Text; TextMeshPro when its reader is
 // compiled in), screen rect, visibility (on_screen | clipped | offscreen |
 // transparent | zero_size), interactable, occluded_by, sprite, depth — plus a
-// diagnostics block (text overflow and zero-size controls always; placeholder
-// pattern and minimum touch size on request). The node model is shared with
+// diagnostics block (text overflow, zero-size controls, controls and texts
+// outside the safe area and overlapping controls always; placeholder pattern
+// and minimum touch size on request). The node model is shared with
 // label targeting (`target_text`) so what the snapshot shows is what a tap by
 // label resolves to. inputsim_probe stays the cheap interactables-only listing.
 //
@@ -49,7 +50,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         [System.ComponentModel.Description(
             "Snapshot the visible uGUI as a flat accessibility tree: role, text (UI.Text and " +
             "TextMeshPro), screen rect, visibility, interactable, occluded_by, sprite, depth, plus " +
-            "overflow / zero-size / placeholder / touch-size diagnostics. Read-only; edit and play mode.")]
+            "overflow / zero-size / safe-area / overlap / placeholder / touch-size diagnostics. Read-only; edit and play mode.")]
         public static string Snapshot(
             string profile = "compact",
             int page_size = DefaultPageSize,
@@ -127,10 +128,11 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             int remaining = total - end;
             bool occlusion = UiOcclusion.Available;
 
+            var safeArea = ScreenSafeArea(screen);
             Diagnostics diagnostics = null;
             if (offset == 0)
             {
-                diagnostics = Diagnose(inScope, placeholder, min_touch_size);
+                diagnostics = Diagnose(inScope, placeholder, min_touch_size, screen, safeArea);
                 if (diagnostics.Placeholder != null && diagnostics.Placeholder.TimedOut)
                     return diagnostics.Placeholder.ErrorJson("", "placeholder_pattern");
             }
@@ -139,7 +141,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             sb.Append("{\"status\":\"ok\"");
             sb.Append(",\"mode\":").Append(EditorApplication.isPlaying ? "\"play\"" : "\"edit\"");
             sb.Append(",\"profile\":").Append(InputSimulationJson.Esc(profile));
-            AppendScreen(sb, screen);
+            AppendScreen(sb, screen, safeArea);
             sb.Append(",\"textSources\":[");
             var sources = UiTextReaders.Sources();
             for (int i = 0; i < sources.Count; i++)
@@ -179,7 +181,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             return n.HasText || n.Interactive;
         }
 
-        private static void AppendScreen(StringBuilder sb, Vector2 screen)
+        // The safe area the game sees, in Screen pixels (bottom-left origin).
+        internal static Rect ScreenSafeArea(Vector2 screen)
         {
             int w = Mathf.RoundToInt(screen.x), h = Mathf.RoundToInt(screen.y);
             Rect safe;
@@ -198,6 +201,12 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                             && Screen.width == w && Screen.height == h;
                 if (!fits) safe = new Rect(0, 0, w, h);
             }
+            return safe;
+        }
+
+        private static void AppendScreen(StringBuilder sb, Vector2 screen, Rect safe)
+        {
+            int w = Mathf.RoundToInt(screen.x), h = Mathf.RoundToInt(screen.y);
             sb.Append(",\"screen\":{\"w\":").Append(w).Append(",\"h\":").Append(h);
             sb.Append(",\"safe_area\":");
             AppendRect(sb, safe);
@@ -244,20 +253,40 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         {
             public readonly List<UiNode> Overflow = new List<UiNode>();
             public readonly List<UiNode> Zero = new List<UiNode>();
+            public readonly List<UiNode> OutsideSafe = new List<UiNode>();
+            public readonly List<UiOverlap> Overlaps = new List<UiOverlap>();
             public readonly List<UiNode> Placeholders = new List<UiNode>();
             public readonly List<UiNode> Small = new List<UiNode>();
             public UiRegexRun Placeholder;   // null unless placeholder_pattern was passed
+            public Rect SafeArea;
+            public bool SafeAreaIsScreen;
         }
+
+        internal struct UiOverlap
+        {
+            public UiNode A, B;
+            public float Fraction;           // intersection / the smaller visible rect
+        }
+
+        // Partial overlap of two controls a finger cannot tell apart: at least this
+        // share of the smaller one's visible rect.
+        internal const float OverlapThreshold = 0.25f;
+        // Above this share the smaller control sits inside the larger one (a button
+        // on a full-screen click catcher, a badge on a card) — layering, not a clash.
+        internal const float ContainedFraction = 0.98f;
+        private const float SafeEpsilon = 0.5f;
 
         // Stops matching the placeholder pattern at its first timeout
         // (Placeholder.TimedOut); the caller refuses with regex_timeout.
-        private static Diagnostics Diagnose(List<UiNode> nodes, Regex placeholder, float? minTouch)
+        private static Diagnostics Diagnose(List<UiNode> nodes, Regex placeholder, float? minTouch, Vector2 screen, Rect safe)
         {
-            var d = new Diagnostics { Placeholder = placeholder == null ? null : new UiRegexRun(placeholder) };
+            var d = new Diagnostics { Placeholder = placeholder == null ? null : new UiRegexRun(placeholder), SafeArea = safe };
+            d.SafeAreaIsScreen = SafeAreaCoversScreen(safe, screen);
             foreach (var n in nodes)
             {
                 if (n.OwnText.HasValue && n.OwnText.Value.Overflowing && !string.IsNullOrEmpty(n.OwnTextDisplay)) d.Overflow.Add(n);
                 if (n.Control && n.Visibility == "zero_size") d.Zero.Add(n);
+                if (!d.SafeAreaIsScreen && OutsideSafeArea(n, safe)) d.OutsideSafe.Add(n);
                 if (d.Placeholder != null && n.OwnText.HasValue && !string.IsNullOrEmpty(n.OwnTextDisplay))
                 {
                     if (d.Placeholder.IsMatch(n.OwnTextDisplay)) d.Placeholders.Add(n);
@@ -267,7 +296,67 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                     && (n.ScreenRect.width < minTouch.Value || n.ScreenRect.height < minTouch.Value))
                     d.Small.Add(n);
             }
+            d.Overlaps.AddRange(Overlaps(nodes, UiOcclusion.Available ? n => UiOcclusion.OccluderPath(n) != null : (System.Func<UiNode, bool>)null));
             return d;
+        }
+
+        internal static bool SafeAreaCoversScreen(Rect safe, Vector2 screen) =>
+            safe.xMin <= SafeEpsilon && safe.yMin <= SafeEpsilon
+            && safe.xMax >= screen.x - SafeEpsilon && safe.yMax >= screen.y - SafeEpsilon;
+
+        // A visible control, or a visible text that is not part of a control's
+        // label, whose on-screen part reaches outside the safe area (under a notch,
+        // a rounded corner or the home indicator).
+        internal static bool OutsideSafeArea(UiNode n, Rect safe)
+        {
+            if (!n.Visible || n.Folded) return false;
+            bool ownText = n.OwnText.HasValue && !string.IsNullOrEmpty(n.OwnTextDisplay);
+            if (!n.Control && !ownText) return false;
+            return OutsideEdges(n.VisibleRect, safe) != null;
+        }
+
+        // The safe-area edges the rect crosses ("top", "bottom", "left", "right"), or null.
+        internal static List<string> OutsideEdges(Rect r, Rect safe)
+        {
+            if (r.width <= 0 || r.height <= 0) return null;
+            List<string> edges = null;
+            if (r.yMax > safe.yMax + SafeEpsilon) (edges ??= new List<string>()).Add("top");
+            if (r.yMin < safe.yMin - SafeEpsilon) (edges ??= new List<string>()).Add("bottom");
+            if (r.xMin < safe.xMin - SafeEpsilon) (edges ??= new List<string>()).Add("left");
+            if (r.xMax > safe.xMax + SafeEpsilon) (edges ??= new List<string>()).Add("right");
+            return edges;
+        }
+
+        // Pairs of visible interactable controls, neither inside the other in the
+        // hierarchy, whose visible rects partly overlap (OverlapThreshold of the
+        // smaller one, short of containing it). In play mode a control covered by
+        // something in front of it (a popup's dimmer) is behind the screen the
+        // player sees and does not clash with what is on top.
+        internal static List<UiOverlap> Overlaps(List<UiNode> nodes, System.Func<UiNode, bool> covered = null)
+        {
+            var controls = new List<UiNode>();
+            foreach (var n in nodes)
+                if (n.Control && n.Interactable && n.Visible && n.VisibleRect.width > 0 && n.VisibleRect.height > 0
+                    && (covered == null || !covered(n))) controls.Add(n);
+            var found = new List<UiOverlap>();
+            for (int i = 0; i < controls.Count; i++)
+            {
+                var a = controls[i];
+                float areaA = a.VisibleRect.width * a.VisibleRect.height;
+                for (int j = i + 1; j < controls.Count; j++)
+                {
+                    var b = controls[j];
+                    if (a.Rt.IsChildOf(b.Rt) || b.Rt.IsChildOf(a.Rt)) continue;
+                    var inter = UiScreenModel.Intersect(a.VisibleRect, b.VisibleRect);
+                    if (inter.width <= 0 || inter.height <= 0) continue;
+                    float smaller = Mathf.Min(areaA, b.VisibleRect.width * b.VisibleRect.height);
+                    if (smaller <= 0) continue;
+                    float fraction = inter.width * inter.height / smaller;
+                    if (fraction < OverlapThreshold || fraction >= ContainedFraction) continue;
+                    found.Add(new UiOverlap { A = a, B = b, Fraction = fraction });
+                }
+            }
+            return found;
         }
 
         private static void AppendDiagnostics(StringBuilder sb, Diagnostics d, string pattern, float? minTouch)
@@ -293,6 +382,28 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 b.Append(",\"rect\":");
                 AppendRect(b, n.ScreenRect);
             }, null);
+            sb.Append(",\"outside_safe_area\":");
+            AppendDiagnosticList(sb, d.OutsideSafe, (b, n) =>
+            {
+                b.Append(",\"role\":").Append(InputSimulationJson.Esc(n.Role));
+                if (n.Text != null) b.Append(",\"text\":").Append(InputSimulationJson.Esc(UiText.Clip(n.Text, 80)));
+                b.Append(",\"rect\":");
+                AppendRect(b, n.VisibleRect);
+                b.Append(",\"edges\":[");
+                var edges = OutsideEdges(n.VisibleRect, d.SafeArea);
+                for (int i = 0; edges != null && i < edges.Count; i++)
+                {
+                    if (i > 0) b.Append(',');
+                    b.Append(InputSimulationJson.Esc(edges[i]));
+                }
+                b.Append(']');
+            }, b =>
+            {
+                b.Append(",\"safe_area\":");
+                AppendRect(b, d.SafeArea);
+            });
+            sb.Append(",\"overlapping_controls\":");
+            AppendOverlapList(sb, d.Overlaps);
             if (d.Placeholder != null)
             {
                 sb.Append(",\"placeholder\":");
@@ -331,6 +442,29 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 sb.Append(",\"path\":").Append(InputSimulationJson.Esc(node.Path));
                 sb.Append(",\"visibility\":").Append(InputSimulationJson.Esc(node.Visibility));
                 extra(sb, node);
+                sb.Append('}');
+            }
+            sb.Append("],\"truncated\":").Append(list.Count - n).Append('}');
+        }
+
+        private static void AppendOverlapList(StringBuilder sb, List<UiOverlap> list)
+        {
+            sb.Append("{\"count\":").Append(list.Count);
+            sb.Append(",\"threshold\":").Append(InputSimulationJson.Num(OverlapThreshold));
+            sb.Append(",\"items\":[");
+            int n = Mathf.Min(list.Count, MaxDiagnosticItems);
+            for (int i = 0; i < n; i++)
+            {
+                var o = list[i];
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"id\":").Append(InstanceId.ToJson(o.A.Go));
+                sb.Append(",\"path\":").Append(InputSimulationJson.Esc(o.A.Path));
+                sb.Append(",\"visibility\":").Append(InputSimulationJson.Esc(o.A.Visibility));
+                if (o.A.Text != null) sb.Append(",\"text\":").Append(InputSimulationJson.Esc(UiText.Clip(o.A.Text, 80)));
+                sb.Append(",\"with_id\":").Append(InstanceId.ToJson(o.B.Go));
+                sb.Append(",\"with\":").Append(InputSimulationJson.Esc(o.B.Path));
+                if (o.B.Text != null) sb.Append(",\"with_text\":").Append(InputSimulationJson.Esc(UiText.Clip(o.B.Text, 80)));
+                sb.Append(",\"overlap\":").Append(InputSimulationJson.Num(Mathf.Round(o.Fraction * 100f) / 100f));
                 sb.Append('}');
             }
             sb.Append("],\"truncated\":").Append(list.Count - n).Append('}');

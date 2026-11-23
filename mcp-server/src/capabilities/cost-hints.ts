@@ -328,6 +328,17 @@ export const RECOMMENDED_TOOL_CHAINS: RecommendedToolChain[] = [
     ],
   },
   {
+    name: "playtest-explore-ui",
+    task: "Let a crawler walk every screen and button of the game's UI and report what looks wrong — overflow, safe area, overlaps, placeholders, tiny targets, dead buttons, dead ends, console errors.",
+    steps: [
+      "unity_open_mcp_game_view (action set_device) — the phone to check on, first",
+      "unity_open_mcp_playtest_session (action start, name, snapshot true — or invoke the project's playtest.begin hook); enter play mode and boot to the first real screen",
+      "unity_open_mcp_playtest_explore (deny for project-specific dangers; restart command when the project has playtest.boot) — returns a job_id",
+      "unity_open_mcp_jobs (action wait, job_id, timeout_ms 30000) until terminal — the result lists screens, findings, denied and untried controls",
+      "triage the findings (open the screens' frames), then unity_open_mcp_playtest_session (action end) — the report has an Exploration section",
+    ],
+  },
+  {
     name: "device-layout-check",
     task: "Check a screen's layout on a phone (notch / safe area) or at a fixed resolution, with frames a human can compare.",
     steps: [

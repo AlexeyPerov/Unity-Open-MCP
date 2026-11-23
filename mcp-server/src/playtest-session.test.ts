@@ -42,7 +42,7 @@ const registry = (output: unknown, logs: unknown[] = []): CallToolResult =>
 test("playtest_session schema: actions, verdicts, no materialized defaults, per-action keys", () => {
   const p = props();
   assert.deepEqual(p.action.enum, [...PLAYTEST_SESSION_ACTIONS]);
-  assert.deepEqual([...PLAYTEST_SESSION_ACTIONS], ["start", "mark", "status", "end", "resume", "list"]);
+  assert.deepEqual([...PLAYTEST_SESSION_ACTIONS], ["start", "mark", "check", "status", "end", "resume", "list"]);
   assert.deepEqual(p.verdict.enum, [...PLAYTEST_VERDICTS]);
   assert.deepEqual([...PLAYTEST_VERDICTS], ["ok", "bug", "suspicious"]);
   assert.deepEqual(tool().inputSchema.required, ["action"]);
