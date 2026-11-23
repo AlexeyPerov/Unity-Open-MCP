@@ -44,8 +44,10 @@ Pinned exceptions:
   way while the listener is down.
 - Always local: `capabilities`, `manage_tools`, `generate_skill`,
   `bridge_status`, `restart_editor`, `resource_pressure`, `jobs`,
-  `playtest_session`, `playtest_explore` and `playtest_devices` (their bridge
-  calls go through the normal route; a crawl or a device run is a `jobs` job),
+  `playtest_session`, `playtest_explore`, `playtest_devices` and
+  `playtest_replay` (their bridge calls go through the normal route; a crawl, a
+  device run or a replay is a `jobs` job; replay's `export` / `list` / `show`
+  touch only scenario files in the project),
   `hub_*`, and
   event-pull meta-tools.
 - Always offline when transitive impact is requested: `dependencies` with

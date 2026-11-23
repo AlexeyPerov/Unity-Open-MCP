@@ -70,7 +70,10 @@ registration, transport, gate execution, and the port formula —
   session `AssetModelCache` (LRU 8).
 - The playtest session recorder (`src/playtest/`) writes a deliberate
   on-disk record (append-only log + report under platform app data), not a
-  cache; it is never read back to answer tool calls.
+  cache; it is read back only to write its report and, on an explicit
+  `playtest_replay export`, to turn a session into a scenario file. Scenario
+  files live in the Unity project (`Playtests/Scenarios/`), written only by
+  `export` and `record` runs, inside the project.
 - `src/capabilities/` mirrors verify — see
   [catalog sync](../packages/verify/AGENTS.md#capability-catalog-sync).
 

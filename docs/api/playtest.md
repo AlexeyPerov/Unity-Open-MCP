@@ -20,6 +20,7 @@ session as a report for a human. The workflow is in the
 | `unity_open_mcp_player_state` | Snapshots, diffs and restores the player state a session changes — PlayerPrefs, `persistentDataPath` files, opt-in EditorPrefs — in a store outside the project; restore is edit-mode only, a dry run unless confirmed, and gated | always (macOS verified; Windows and Linux readers untested in the field) |
 | `unity_open_mcp_playtest_explore` | Explores the running game's UI on its own as a job: taps every untried button / toggle of each screen (never money, destructive or leaving controls), walks back or restarts, captures each new screen and files findings — overflow, safe area, overlaps, placeholder text, touch size, dead buttons, dead ends, console errors — into the open session | `com.unity.ugui` (server-local crawl over `ui_snapshot` and `inputsim_pointer`) |
 | `unity_open_mcp_playtest_devices` | Checks the game on several Device Simulator devices (× orientation) as a job — the current screen's detectors and a frame per device, or a crawl per device — groups the findings by the devices that show them and puts the Game view back | Unity 6 Editor (Device Simulator); `com.unity.ugui` for the checks (server-local) |
+| `unity_open_mcp_playtest_replay` | Replays a scenario — a session's own steps or a crawl, exported as a JSON file in the project — as a job with no model: targets by path and label, the expected screen after each step, console errors and new findings; pass / fail per step, drift for tolerated changes, retries for flakiness, `record` for the baseline | `com.unity.ugui` (server-local, over the same tools an agent uses) |
 | `unity_open_mcp_playtest_session` | Records a playtest for a human: the agent's input / wait / capture / project-command calls with their frames and console errors, step verdicts, the state diff — `end` writes a Markdown report | always (server-local; no Unity code) |
 
 `inputsim_gesture` (in `input-simulation`) takes `capture_at_ms`: a tap and the
@@ -968,6 +969,174 @@ The run adds a `devices` block and (for `current`) one mark to the session; the
 report's **Devices** section has a row per device with its frame thumbnail, then
 the findings by element, then what was skipped.
 
+## `unity_open_mcp_playtest_replay`
+
+Turns a flow found once — by the [crawler](#unity_open_mcp_playtest_explore) or
+by the agent's own steps — into a scenario file that replays without a model
+after every change: pass / fail per step, what changed on screen, and whether a
+failure is flaky. The workflow is in the
+[Playtest guide](../playtest-guide.md#replay-a-flow-after-a-change).
+
+A local tool with four actions:
+
+| `action` | Does |
+|---|---|
+| `export` | Writes a scenario from a playtest session (below) — synchronous |
+| `list` | The project's scenarios (`Playtests/Scenarios/*.json`): steps, how many lack a baseline, the variables they need, problems |
+| `show` | One scenario: its start, settings, variables and steps (target, baseline yes / no, required texts) |
+| `run` (default) | Replays a scenario as a [`jobs`](jobs.md) job: answers with `job_id` and the `plan`; `jobs wait` until terminal, `jobs cancel` stops it |
+
+`run` needs what the crawler needs: the caller's open session (`no_open_session`)
+isolated by its player-state snapshot or the project's `playtest.begin`
+(`not_isolated`, or `allow_unsandboxed: true`), and play mode
+(`play_mode_required`) — unless the run starts by restarting play mode, which
+also works from edit mode. It needs the live Editor; a headless batch run is not
+supported.
+
+### Scenarios
+
+A scenario is one JSON file in the project, by default
+`Playtests/Scenarios/<name>.json` — outside `Assets/`, so Unity does not import
+it and the team versions and reviews it with the code it checks. `scenario` names
+one by name, or by a project-relative `.json` path (an absolute path is read but
+never written). Export and `record` write the same format a person can write or
+edit by hand:
+
+```json
+{
+  "format": "unity-open-mcp.playtest-scenario/1",
+  "name": "profile-save",
+  "description": "Set a nickname and PIN, save",
+  "source": { "session": "20261123-202624-replay-fixture-afe0", "kind": "calls", "exported_at": "…" },
+  "start": { "restart": "play_mode", "screen": { "title": "Explore Fixture", "signature": ["c|button|play|ExploreFixture/ExploreCanvas/Menu/PlayButton", "…"] }, "findings": [] },
+  "settings": { "same_screen": 0.8, "step_timeout_ms": 5000, "routing": "dispatch", "ignore_errors": [] },
+  "vars": { "pin": { "secret": true, "description": "a 4-digit PIN" } },
+  "steps": [
+    { "do": "tap", "target": { "path": "ExploreFixture/ExploreCanvas/Menu/SettingsButton", "text": "Settings" },
+      "expect": { "screen": { "title": "Settings", "signature": ["…"] }, "findings": ["placeholder_text|…/LanguageLabel|"] } },
+    { "do": "type", "target": { "path": "ExploreFixture/ExploreCanvas/Profile/PinField", "role": "input" }, "text": "${pin}", "end": "end_edit" },
+    { "do": "wait", "args": { "condition": { "ui": { "text_contains": "Vibration" } }, "timeout_ms": 5000 }, "expect": { "texts": ["Vibration"] } },
+    { "do": "command", "command": "project.demo.playtest.state_dump", "args": {} },
+    { "do": "check", "checkpoint": "Profile saved" }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `start.restart` | How a run (and every retry) starts: `play_mode` (exit and re-enter play mode), `command` (`start.command` + `start.args`, a synchronous project command such as `project.<owner>.playtest.boot`), `none` (the screen shown now; no retries). `start.screen` / `start.findings` are the first screen's baseline |
+| `settings` | `same_screen` (0.5–1, default 0.8), `step_timeout_ms` (500–60000, default 5000), `routing` of taps (`dispatch` or `raycast_real`), `ignore_errors` (regexes on a console message's first line that do not fail a step) |
+| `vars` | Declared `${name}` variables, filled from the run's `vars`; `secret: true` keeps the value out of the session log |
+| `steps[].do` | `tap` {`target`, `routing`}, `type` {`target`, `text`, `mode` replace / append / clear, `end` end_edit / submit / none, `secret`}, `wait` {`args`: [`playtest_wait`](#unity_open_mcp_playtest_wait) arguments, `timeout_ms` ≤ 40000}, `command` {`command`, `args`: a synchronous project command}, `input` {`tool`, `args`: another inputsim tool's arguments as sent — key, touch, gesture, step, pointer3d, a pointer drag}, `restart` (as `start` says), `check` (only looks) |
+| `target` | `path` (hierarchy path as `ui_snapshot` shows it), `text` (the control's label), `role`, `index` (which of several equal matches). Never an instance id: ids change every play session (`object_id` is refused) |
+| `expect` | `screen` {`title`, `signature`}: the screen after the step — the crawler's [screen signature](#the-crawl) (controls by role + label + masked path, plain texts, numbers masked); `texts`: visible texts that must be on screen (case-insensitive substring); `findings`: the [detector](#findings) findings of that screen, as keys `kind|path|…` |
+| `label`, `checkpoint` | How the report names the step; the session mark it ended (export) |
+
+At most 300 steps and 4 MB per file.
+
+### Export
+
+`export` reads a playtest session's log — `session` (default: the caller's open
+session, else the project's latest ended one) — and writes `scenario` (refused
+with `scenario_exists` unless `overwrite: true`). `source` is required:
+
+| `source` | Steps | Baseline |
+|---|---|---|
+| `crawl` | One [crawl](#unity_open_mcp_playtest_explore) of the session (`crawl`: 1-based, default the last): its taps, typing and restarts in order. With `to_screen` (`S5`): only the shortest path of exploring taps from the start screen to that screen, each hop preceded by the typing the crawl did on its screen first | The crawl's screens: signature and snapshot findings per screen — a crawl export replays at once |
+| `calls` | The agent's own recorded calls in order: `inputsim_pointer` clicks → `tap` by the path the bridge reported and the label used (`target_text` with an exact match), `inputsim_text` → `type` into the field the bridge reported, `playtest_wait` → `wait` (a timeout over 40 s is cut), project commands → `command`, `playtest_session check` → `check`, other inputsim calls → `input` (an `object_id` with a reported path becomes `target`; one without is kept with a warning). Failed calls, captures, Game view changes and the crawler's / replay's own steps are left out; entering play mode or a boot-like command (`*.boot`) before the first action becomes `start`; the `playtest.begin` / `.end` hooks are left out. Text the session redacted (a password, a PIN, `secret: true`) becomes a secret variable `secret_N` | None: run once with `record: true` |
+
+The answer names the file (`path`), the step count, `unbaselined`, the variables,
+a preview of the first steps and `warnings`.
+
+### A run
+
+From the scenario's start (`from: "start"`, default) or the screen shown now
+(`from: "current"`), each step:
+
+1. **Finds its target** (tap / type): snapshots until the target is on screen and
+   usable, up to `step_timeout_ms`. Same masked path and label → exact; same path,
+   another label → `label_changed`; same label (and role) at another path →
+   `path_changed`; siblings that mask alike ("Item (2)") prefer the exact path,
+   then `index`. Not found → `target_not_found` with the controls on screen
+   (`candidates`); found but covered or disabled → `target_not_tappable`.
+2. **Acts** through the same tools an agent uses (`inputsim_pointer` click,
+   `inputsim_text`, `playtest_wait`, `project_commands invoke`, the `input` tool,
+   the restart).
+3. **Looks**: snapshots until the screen matches `expect.screen` and stops
+   changing, or `step_timeout_ms` passes (without a baseline: until it stops
+   changing, ≤ 4 s). Similarity is Jaccard over the signatures; a screen whose
+   controls are the same and in the same places but relabelled (copy or
+   localisation changes) also counts as the same screen (`labels_changed`).
+4. **Checks**: the screen (`screen_changed`, with `similarity`, the expected and
+   actual title, and the controls / texts added and removed), `expect.texts`
+   (`text_missing`), console errors and exceptions logged during the step — the
+   bridge event stream by time plus the responses' `logs[]`; `ignore_errors` of
+   the scenario and of the call exempt them (`console_error`) — and the screen's
+   detector findings against `expect.findings`: a new `bug` finding fails
+   (`new_finding`), a new `suspicious` one is drift, a baseline finding gone is
+   listed as fixed.
+
+A failed step ends the attempt (the rest are `skipped`) and the failing step gets
+a composed frame (`capture`: `failures` default, `steps` = every step, `none`).
+Drift — `label_changed`, `path_changed`, `index_changed`, `labels_changed`,
+`screen_drift` (the same screen with something added or removed),
+`new_suspicious`, `fixed_finding` — passes and is listed; `strict: true` fails a
+step on the first four (`drift`).
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `from` | `start` | `start` = restart as the scenario says; `current` = once, on the screen shown now (no restart, no retries; a start screen that does not match fails step 0 and says so) |
+| `retries` | 1 (≤ 3) | Replays of a failed attempt from the start; none with `record`, `from: "current"` or `start.restart: none` |
+| `record` | false | Write what this run saw — every step's screen and findings, the start screen, the targets as resolved — into the file as the new baseline, only when every step executed (no target, action, wait, command, text or console failure); screen and findings differences are changes, not failures. Excludes `strict` |
+| `strict` | false | Fail on label / path / index drift and relabelled screens |
+| `vars` | — | Values for the scenario's variables (`missing_vars` before anything is tapped) |
+| `ignore_errors` | — | More regexes, added to `settings.ignore_errors` |
+| `step_timeout_ms`, `same_screen` | the scenario's | Override its settings |
+| `placeholder_pattern`, `min_touch_dp` | as for the crawler | The findings check |
+| `capture` | `failures` | Frames |
+| `max_minutes` | 20 (≤ 60) | Wall-clock budget for the whole run, retries included |
+| `allow_unsandboxed` | false | Replay without a snapshot or `playtest.begin` (the save changes for real) |
+
+### Result
+
+```json
+{
+  "status": "ok", "verdict": "failed", "stop_reason": "completed", "consistent": true,
+  "scenario": { "name": "explore-fixture-tour", "file": "Playtests/Scenarios/explore-fixture-tour.json", "steps": 26 },
+  "attempts": [ { "attempt": 1, "passed": false, "duration_ms": 14930, "failed_step": 11, "reason": "screen_changed" },
+                { "attempt": 2, "passed": false, "duration_ms": 14341, "failed_step": 11, "reason": "screen_changed" } ],
+  "max_attempts": 2,
+  "steps": [ { "n": 0, "do": "start", "label": "Start (restart play mode), attempt 2", "status": "passed", "similarity": 0.778, "title": "Explore Fixture", "drift": [ { "kind": "labels_changed", "detail": "…" } ], "duration_ms": 3120 }, "…" ],
+  "failure": { "n": 11, "do": "tap", "label": "Tap 'Credits' on S5", "status": "failed", "reason": "screen_changed",
+               "message": "the screen is 0% like the expected one ('Credits'), under 80%; now 'Settings'", "similarity": 0,
+               "title": "Settings", "expected_title": "Credits",
+               "diff": { "added": ["button 'credits' (Settings/CreditsButton)", "…"], "removed": ["text 'credits'", "text 'made by the demo team'"] },
+               "frame": "…/screenshot-composed-….png", "frame_call": 78, "duration_ms": 5310 },
+  "drift": [ { "step": 5, "kind": "label_changed", "detail": "'Shop' is now 'Store' (ExploreFixture/ExploreCanvas/Menu/ShopButton)" } ],
+  "findings": { "new": [], "fixed": [] },
+  "unbaselined": 0, "duration_ms": 29276, "session": "…", "agentNextSteps": [ "…" ]
+}
+```
+
+`verdict`: `passed` (the first attempt passed), `flaky` (a later attempt passed;
+`earlier_failures` lists the failures), `failed` (every attempt failed;
+`consistent: true` when at the same step for the same reason), `recorded` (a
+`record` run wrote the baseline — `baseline` {`file`, `changed_steps`}),
+`cancelled`, `incomplete` (`stop_reason` `max_time` or `session_ended`). Step
+`reason`: `target_not_found`, `target_not_tappable`, `action_failed`,
+`wait_timed_out`, `command_failed` (also an async command), `restart_failed`,
+`screen_changed`, `text_missing`, `console_error` (`errors`), `new_finding`
+(`new_findings`), `drift`, `play_mode_exited`, `snapshot_failed`. `unbaselined`
+counts steps that passed on execution alone.
+
+Each step is one recorded session call of kind `replay` (a secret's typed text as
+`[redacted N chars]`), with its frame and the console errors it caused; the run
+adds a `replay` block and one mark (`passed` / `recorded` → ok, `flaky` →
+suspicious, `failed` → bug). The report's **Replays** section has, per run, the
+scenario, file, attempts, a row per step (status, screen match, diff, drift,
+errors, frame thumbnail), the controls on screen instead of a missing target,
+drift, new and fixed findings, and the baseline written.
+
 ## `unity_open_mcp_playtest_session`
 
 Records a playtest so a human can review it without replaying the agent's
@@ -1099,6 +1268,11 @@ one), and writes `report.md`:
   or the crawl's taps / screens / controls), the findings by element with the
   devices that show them, and the skipped pairs; crawl runs are also in
   Exploration, named by device;
+- **Replays** (when a [replay](#unity_open_mcp_playtest_replay) ran): per run the
+  scenario and file, the attempts, a row per step (status, screen match, diff,
+  drift, errors, the failing step's frame thumbnail), drift, new and fixed
+  findings, the baseline written; a failed or flaky run is also a bug /
+  suspicious mark under Findings;
 - **Screen checks** (when `check` ran): each check's frame and findings;
 - **Steps**: per mark, a table of its calls (time, tool, arguments, result,
   duration), the errors it caused and its frames — a series shows its contact
@@ -1122,7 +1296,8 @@ one), and writes `report.md`:
     "lost_in_flight": [], "running_at_end": [], "state_diff": { "identical": false, "prefs": { "added": 3, "removed": 0, "changed": 0, "unchanged": 5 } },
     "hooks": { "begin": "project.demo.playtest.begin" },
     "detector_findings": { "bug": 0, "suspicious": 0, "items": [] },
-    "explorations": [], "device_runs": []
+    "explorations": [], "device_runs": [],
+    "replays": [ { "scenario": "explore-fixture-tour", "verdict": "failed", "steps": 26, "failed_step": 11, "reason": "screen_changed" } ]
   },
   "agentNextSteps": [ "Hand the report to the human: …/report.md", "…" ]
 }
@@ -1168,7 +1343,7 @@ operation (`timed_out`, a stall, `play_mode_exited`) are a flat top-level
 | `unsupported_editor_version` | `game_view` on an Editor outside the verified table (Unity 6 line) |
 | `editor_internals_unavailable` | `game_view`: an internal Game view / Simulator member this Editor lacks (`detected.missing`) |
 | `batch_step_requires_server_poll` | `game_view` set_*, `playtest_wait` or `capture_series` inside `batch_execute` |
-| `play_mode_required` | `playtest_wait` / `capture_series` / `playtest_probe` `start` / `playtest_explore` in edit mode |
+| `play_mode_required` | `playtest_wait` / `capture_series` / `playtest_probe` `start` / `playtest_explore` in edit mode; `playtest_replay` `run` in edit mode unless it starts by restarting play mode |
 | `probe_running` / `probe_capacity` | `playtest_probe` `start`: the `id` is running / 8 probes are running |
 | `probe_not_found` | `playtest_probe` `read` / `stop` of an unknown id (a domain reload drops probes); a `probe` condition naming one |
 | `expression_not_read_only` | `playtest_probe` `start`: the expression writes or disrupts (`classification`: `writes`, `disruptive`, `opaque`, `savesscenes`) |
@@ -1197,11 +1372,17 @@ operation (`timed_out`, a stall, `play_mode_exited`) are a flat top-level
 | `editor_internals_unavailable` | `player_state` with EditorPrefs on an Editor without the internal EditorPrefs flush |
 | `restore_incomplete` | `player_state` `restore confirm:true`: some operations failed, or the re-read state still differs from the snapshot (`errors`, `residual`, `dirs_kept_not_empty`) |
 | `session_already_open` | `playtest_session` `start` while this agent has an open session (`session` names it), or `mark` / `end` / `resume` naming a different session than the open one |
-| `no_open_session` | `playtest_session` `mark` / `check` / `end` without an open session (`orphaned` lists sessions a stopped server left open); `playtest_explore` / `playtest_devices` without one |
-| `not_isolated` | `playtest_explore`: the session has no player-state snapshot and no `*.playtest.begin` call succeeded in it (pass `allow_unsandboxed: true` to crawl anyway) |
-| `job_operation_unsupported` | `jobs start` of `unity_open_mcp_playtest_explore` / `unity_open_mcp_playtest_devices` — start them with the tool itself |
+| `no_open_session` | `playtest_session` `mark` / `check` / `end` without an open session (`orphaned` lists sessions a stopped server left open); `playtest_explore` / `playtest_devices` / `playtest_replay` `run` without one |
+| `not_isolated` | `playtest_explore` / `playtest_replay` `run`: the session has no player-state snapshot and no `*.playtest.begin` call succeeded in it (pass `allow_unsandboxed: true` to go on anyway) |
+| `job_operation_unsupported` | `jobs start` of `unity_open_mcp_playtest_explore` / `unity_open_mcp_playtest_devices` / `unity_open_mcp_playtest_replay` — start them with the tool itself |
+| `scenario_not_found` / `scenario_invalid` | `playtest_replay`: no file at the named path / not JSON, or not a valid scenario (`problems` lists what is wrong) |
+| `scenario_exists` | `playtest_replay` `export` to a file that exists, without `overwrite` |
+| `missing_vars` | `playtest_replay` `run`: the scenario uses `${name}` variables the call's `vars` do not give (`missing`) |
+| `nothing_to_export` / `screen_not_reached` | `playtest_replay` `export`: the session has no calls / no crawl to replay / the crawl never tapped its way to `to_screen` |
+| `no_session` | `playtest_replay` `export` without `session`, an open session or an ended one |
+| `project_unknown` | `playtest_replay`: the server has no project path (scenarios live in the project) |
 | `device_not_found` / `no_devices` | `playtest_devices` (job error): a `devices` name matches no or several devices (the message lists the catalog) / the preset or the Simulator lists none |
-| `session_not_found` / `session_ended` | `playtest_session`: no such session for this project / it already ended (`report`) |
+| `session_not_found` / `session_ended` | `playtest_session` (and `playtest_replay` `export` with `session`): no such session for this project / it already ended (`report`) |
 | `session_owned_by_other_agent` | `playtest_session` `end` / `resume` / `mark` of a session another live agent or MCP server process owns |
 | `snapshot_failed` | `playtest_session` `start` with `snapshot: true`: the player-state snapshot failed (`snapshot_error`); no session was started |
 | `identity_unavailable` | `playtest_session`: neither the Editor nor `ProjectSettings/ProjectSettings.asset` gave the company / product |

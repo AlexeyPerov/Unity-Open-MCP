@@ -388,7 +388,11 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "open session; requires an isolated session and play mode. playtest_devices (server-local): the " +
       "same checks (or a crawl) on each Device Simulator device of a list or preset (common / phones / " +
       "tablets / notch / all) × orientation, as a job; findings grouped by the devices that show them, " +
-      "the Game view put back after. ui_snapshot " +
+      "the Game view put back after. playtest_replay (server-local): export a session's own steps or a " +
+      "crawl as a scenario file in the project (Playtests/Scenarios), then replay it as a job with no " +
+      "model — targets by path and label, the expected screen after each step, console errors and new " +
+      "findings; pass / fail per step, drift for tolerated changes, retries for flakiness, record:true " +
+      "for the baseline. ui_snapshot " +
       "compiles when com.unity.ugui is present; the compiled subset is reconciled from GET /tools.",
     defaultEnabled: false,
   },
@@ -1062,6 +1066,8 @@ assign("playtest", [
   "unity_open_mcp_playtest_explore",
   // Device matrix: server-local job switching Device Simulator devices.
   "unity_open_mcp_playtest_devices",
+  // Scenario replay: server-local scenario files + a job over the same tools.
+  "unity_open_mcp_playtest_replay",
 ]);
 
 // ---------------------------------------------------------------------------

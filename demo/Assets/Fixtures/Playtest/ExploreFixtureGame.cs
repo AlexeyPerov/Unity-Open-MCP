@@ -22,6 +22,10 @@ namespace UnityOpenMcpDemo.Fixtures
     //             is set (inputsim_text; the crawler fills fields first), Back.
     //   Credits   nothing to tap (dead_end).
     //   News      Close → Menu.
+    // A regression variant for scenario replays (playtest_replay): with PlayerPrefs
+    // "ExploreFixture.Variant" = "regression" when the game starts, Shop is labelled
+    // "Store" (a replay passes it as drift) and Credits no longer opens (a replay
+    // fails there with screen_changed).
     // State and references are serialized so a domain reload in play mode keeps it;
     // listeners are re-wired in OnEnable.
     public sealed class ExploreFixtureGame : MonoBehaviour
@@ -38,6 +42,9 @@ namespace UnityOpenMcpDemo.Fixtures
         [SerializeField] private InputField nickname, pin;
 
         public string Screen => screen;
+
+        public const string VariantKey = "ExploreFixture.Variant";
+        private static bool Regression => PlayerPrefs.GetString(VariantKey, "") == "regression";
 
         private void Awake()
         {
@@ -79,7 +86,7 @@ namespace UnityOpenMcpDemo.Fixtures
             Bind(shopClose, () => Show("menu"));
             Bind(help, () => { });
             Bind(report, () => throw new System.InvalidOperationException("[ExploreFixture] Deliberate exception from the Report button"));
-            Bind(creditsButton, () => Show("credits"));
+            Bind(creditsButton, () => { if (!Regression) Show("credits"); });
             Bind(settingsBack, () => Show("menu"));
             Bind(newsClose, () => Show("menu"));
             Bind(claim, () => { Debug.Log("[ExploreFixture] Daily reward claimed"); Show("menu"); });
@@ -121,7 +128,7 @@ namespace UnityOpenMcpDemo.Fixtures
             menu = Panel(root, "Menu", new Color(0.10f, 0.20f, 0.30f));
             Label(menu.transform, "Title", "Explore Fixture", 0.86f, 80);
             play = MakeButton(menu.transform, "PlayButton", "Play", 0.72f);
-            shopButton = MakeButton(menu.transform, "ShopButton", "Shop", 0.62f);
+            shopButton = MakeButton(menu.transform, "ShopButton", Regression ? "Store" : "Shop", 0.62f);
             settingsButton = MakeButton(menu.transform, "SettingsButton", "Settings", 0.52f);
             buyGems = MakeButton(menu.transform, "BuyGemsButton", "Buy Gems", 0.42f);
             daily = MakeButton(menu.transform, "DailyButton", "Daily", 0.26f, 0.40f, 300);

@@ -129,7 +129,8 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "PlayerPrefs and persistentDataPath), record the session for a human (playtest_session: " +
       "steps, verdicts, frames, the errors each step caused → a Markdown report; check = the current " +
       "screen's findings) and let a crawler explore the UI on its own (playtest_explore: every screen " +
-      "and button, deny-list, findings such as overflow, safe area, overlaps, dead buttons and dead ends) and check it across devices (playtest_devices: each Simulator device × orientation, findings by device).",
+      "and button, deny-list, findings such as overflow, safe area, overlaps, dead buttons and dead ends) and check it across devices (playtest_devices: each Simulator device × orientation, findings by device), " +
+      "then replay a found flow as a regression check after a change (playtest_replay: export a session or a crawl as a scenario, run it with no model, pass / fail per step, flaky vs broken, record a baseline).",
     keywords: [
       "playtest",
       "playtests",
@@ -202,6 +203,13 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "phones",
       "tablets",
       "notch-devices",
+      "replay",
+      "replay-scenario",
+      "playtest-scenario",
+      "ui-regression",
+      "regression-playtest",
+      "flaky-ui",
+      "re-check-flow",
     ],
   },
   {

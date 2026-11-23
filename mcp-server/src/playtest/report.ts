@@ -35,6 +35,8 @@ export interface ReportSummary {
   detector_findings: { bug: number; suspicious: number; items: Array<Record<string, unknown>> };
   explorations: Array<{ stop_reason: string; steps: number; screens: number; bug: number; suspicious: number; device?: string }>;
   device_runs: Array<{ screens: string; checked: number; stop_reason: string; bug: number; suspicious: number; restored: boolean }>;
+  /** Scenario replays: verdict and, when it failed, the first failing step. */
+  replays: Array<{ scenario: string; verdict: string; steps: number; failed_step?: number; reason?: string }>;
   notes: string[];
 }
 
@@ -126,8 +128,12 @@ export function writeReport(input: ReportInput): ReportSummary {
   const explores: Array<Record<string, any>> = [];
   const checks: Array<Record<string, any>> = [];
   const deviceRuns: Array<Record<string, any>> = [];
+  const replays: Array<Record<string, any>> = [];
   for (const entry of entries) {
     switch (entry.k) {
+      case "replay":
+        replays.push(entry);
+        break;
       case "devices":
         deviceRuns.push(entry);
         break;
@@ -349,7 +355,8 @@ export function writeReport(input: ReportInput): ReportSummary {
 
   md.push("## Findings", "");
   const findings = steps.filter(s => s.verdict === "bug" || s.verdict === "suspicious");
-  if (!findings.length && !errorRows.length && !lost.length && !runningAtEnd.length && !failedCalls && !detector.length) md.push("No bug or suspicious verdicts, no detector findings, no console errors, no failed calls.");
+  const badReplays = replays.filter(r => r.verdict !== "passed" && r.verdict !== "recorded");
+  if (!findings.length && !errorRows.length && !lost.length && !runningAtEnd.length && !failedCalls && !detector.length && !badReplays.length) md.push("No bug or suspicious verdicts, no detector findings, no failed replays, no console errors, no failed calls.");
   for (const step of findings) md.push(`- **${step.verdict}** — step ${step.number}: ${cell(step.label)}${step.note ? ` — ${cell(step.note)}` : ""}`);
   for (const f of detector.slice(0, 40))
     md.push(`- **${f.severity}** ${code(String(f.kind))} — ${findingWhere(f) || "the screen"}: ${cell(clip(String(f.detail ?? ""), 200))} (${f.source}${typeof f.step === "number" ? `, step ${f.step}` : ""})`);
@@ -458,6 +465,62 @@ export function writeReport(input: ReportInput): ReportSummary {
         md.push("");
       }
       for (const note of Array.isArray(run.notes) ? run.notes : []) notes.push(`Devices run ${i + 1}: ${String(note)}`);
+    });
+  }
+
+  if (replays.length) {
+    md.push("## Replays", "");
+    replays.forEach((run, i) => {
+      const scenario = (run.scenario ?? {}) as Record<string, any>;
+      const attempts = Array.isArray(run.attempts) ? run.attempts as Array<Record<string, any>> : [];
+      md.push(`### Replay ${i + 1}: ${code(String(scenario.name ?? "?"))} — ${run.verdict}${run.consistent ? " (the same step failed every attempt)" : ""}`, "");
+      md.push(`${scenario.file ? `File ${code(String(scenario.file))} · ` : ""}${scenario.steps ?? 0} step(s) · ${duration(Number(run.duration_ms ?? 0))}${run.record ? " · baseline run" : ""}${run.stop_reason && run.stop_reason !== "completed" ? ` · stopped: ${run.stop_reason}` : ""}`, "");
+      if (attempts.length > 1 || attempts.some(a => !a.passed))
+        md.push(`Attempts: ${attempts.map(a => `${a.attempt} ${a.passed ? "passed" : `failed${a.failed_step !== undefined ? ` at step ${a.failed_step} (${a.reason})` : ""}`}`).join(" · ")}`, "");
+      const rows = Array.isArray(run.steps) ? run.steps as Array<Record<string, any>> : [];
+      if (rows.length) {
+        md.push("| # | Step | Status | Screen | Notes | Frame |", "|---|---|---|---|---|---|");
+        for (const st of rows) {
+          const capture = frameOfCall(st.frame_call);
+          const thumb = capture ? thumbFor(capture) : null;
+          const frame = capture ? (thumb ? `[![step ${st.n}](${thumb})](${capture.file})` : `[frame](${capture.file})`) : "";
+          const status = st.status === "failed" ? `**failed** ${cellCode(String(st.reason ?? ""))}` : String(st.status);
+          const screen = st.similarity !== undefined
+            ? `${Math.round(Number(st.similarity) * 100)}% '${cell(clip(String(st.title ?? ""), 40))}'${st.expected_title && st.similarity < 1 ? ` (expected '${cell(clip(String(st.expected_title), 40))}')` : ""}`
+            : st.title ? `'${cell(clip(String(st.title), 40))}' (no baseline)` : "";
+          const notes = [
+            st.status === "failed" && st.message ? cell(clip(String(st.message), 160)) : null,
+            st.diff ? `+${(st.diff.added ?? []).slice(0, 3).map((t: string) => cell(clip(t, 50))).join(", ")}${(st.diff.added ?? []).length > 3 ? "…" : ""} / −${(st.diff.removed ?? []).slice(0, 3).map((t: string) => cell(clip(t, 50))).join(", ")}${(st.diff.removed ?? []).length > 3 ? "…" : ""}` : null,
+            Array.isArray(st.drift) && st.drift.length ? `drift: ${st.drift.map((d: any) => `${d.kind}`).join(", ")}` : null,
+            Array.isArray(st.errors) && st.errors.length ? `errors: ${cell(clip(String(st.errors[0]), 100))}` : null,
+            st.changed ? "baseline changed" : null,
+          ].filter(Boolean).join("; ");
+          md.push(`| ${st.n} | ${cell(clip(String(st.label ?? ""), 70))} | ${status} | ${screen} | ${notes} | ${frame} |`);
+        }
+        md.push("");
+      }
+      const candidates = (run.failure as Record<string, any> | undefined)?.candidates;
+      if (Array.isArray(candidates) && candidates.length)
+        md.push(`On screen instead: ${candidates.slice(0, 8).map((c: string) => cell(clip(c, 60))).join("; ")}`, "");
+      const drift = Array.isArray(run.drift) ? run.drift as Array<Record<string, any>> : [];
+      if (drift.length) {
+        md.push("Drift (passed, but changed):", "");
+        for (const d of drift.slice(0, 20)) md.push(`- step ${d.step}: ${code(String(d.kind))} ${cell(clip(String(d.detail ?? ""), 200))}`);
+        md.push("");
+      }
+      const found = (run.findings ?? {}) as Record<string, any>;
+      if (Array.isArray(found.new) && found.new.length) {
+        md.push("New detector findings against the baseline:", "");
+        for (const f of found.new.slice(0, 20)) md.push(`- step ${f.step}: **${f.severity}** ${code(String(f.kind))} ${f.path ? code(String(f.path)) : ""} ${cell(clip(String(f.detail ?? ""), 160))}`);
+        md.push("");
+      }
+      if (Array.isArray(found.fixed) && found.fixed.length) md.push(`No longer found: ${found.fixed.slice(0, 10).map((k: string) => code(k)).join(", ")}`, "");
+      for (const e of Array.isArray(run.earlier_failures) ? run.earlier_failures : [])
+        md.push(`Attempt ${e.attempt} failed at step ${e.n} '${cell(clip(String(e.label ?? ""), 60))}': ${code(String(e.reason ?? ""))} ${cell(clip(String(e.message ?? ""), 160))}`, "");
+      const baseline = run.baseline as Record<string, any> | undefined;
+      if (baseline) md.push(baseline.error ? `The baseline could not be written to ${code(String(baseline.file))}: ${cell(String(baseline.error))}` : `Baseline written to ${code(String(baseline.file))}${Array.isArray(baseline.changed_steps) && baseline.changed_steps.length ? ` (changed steps: ${baseline.changed_steps.join(", ")})` : ""}.`, "");
+      if (Number(run.unbaselined ?? 0) > 0) notes.push(`Replay ${i + 1}: ${run.unbaselined} step(s) had no baseline and passed on execution alone.`);
+      for (const note of Array.isArray(run.notes) ? run.notes : []) notes.push(`Replay ${i + 1}: ${String(note)}`);
     });
   }
 
@@ -602,6 +665,13 @@ export function writeReport(input: ReportInput): ReportSummary {
       bug: Number(run.finding_counts?.bug ?? 0), suspicious: Number(run.finding_counts?.suspicious ?? 0),
       ...(run.device ? { device: String(run.device) } : {}),
     })),
+    replays: replays.map(run => {
+      const f = run.failure as Record<string, any> | undefined;
+      return {
+        scenario: String(run.scenario?.name ?? ""), verdict: String(run.verdict ?? ""), steps: Number(run.scenario?.steps ?? 0),
+        ...(f ? { failed_step: Number(f.n), reason: String(f.reason ?? "") } : {}),
+      };
+    }),
     device_runs: deviceRuns.map(run => ({
       screens: String(run.screens ?? ""), checked: Number(run.checked ?? 0), stop_reason: String(run.stop_reason ?? ""),
       bug: Number(run.finding_counts?.bug ?? 0), suspicious: Number(run.finding_counts?.suspicious ?? 0), restored: run.restored?.restored === true,
@@ -630,6 +700,12 @@ function show(value: any): string {
 function resultText(call: CallRow): string {
   const s = call.summary ?? {};
   const parts: string[] = [];
+  if (call.kind === "replay") {
+    if (typeof s.status === "string") parts.push(s.status === "failed" ? `failed ${s.reason ?? ""}`.trim() : s.status);
+    if (typeof s.similarity === "number") parts.push(`${Math.round(s.similarity * 100)}% '${clip(String(s.title ?? ""), 30)}'`);
+    if (call.captures.some(c => c.file)) parts.push("frame");
+    return parts.map(p => cell(p)).join(" · ") || "ok";
+  }
   if (call.kind === "explore" || call.kind === "check") {
     if (typeof s.outcome === "string") parts.push(s.outcome);
     if (typeof s.to === "string") parts.push(`→ ${s.to}`);

@@ -25,7 +25,7 @@ import { confirmBridgeReleaseTag, resolveLatestVersion, type BridgeTagConfirmati
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import { LiveClient, type PingResponse } from "./live-client.js";
-import type { BridgeEventStream } from "./event-stream.js";
+import type { BridgeEvent, BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline, dependenciesOffline } from "./offline.js";
 import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES, detectStaleLog, detectStaleAssembly, detectErrorsPredatingEdits, parseLogAuthorship, compareLogAuthorship, classifyLogCompileErrors, newestScriptAssemblyMtimeMs, statMtimeMs, type ClassifiedLogErrors, type HistoricalReason } from "./unity-log.js";
@@ -66,6 +66,9 @@ import { PLAYTEST_EXPLORE_TOOL } from "./tools/playtest-explore.js";
 import { devicesOperation, exploreOperation, parseDevicesOptions, parseExploreOptions, runCheck } from "./playtest/explore-job.js";
 import { PLAYTEST_DEVICES_TOOL } from "./tools/playtest-devices.js";
 import { ExploreError } from "./playtest/explore.js";
+import { PLAYTEST_REPLAY_ACTION_KEYS, PLAYTEST_REPLAY_TOOL } from "./tools/playtest-replay.js";
+import { exportAction, listAction, prepareReplay, replayOperation, showAction } from "./playtest/replay-job.js";
+import { ScenarioError } from "./playtest/scenario.js";
 
 // M31-optimizations Plan 1 / L14 — opt-in route-logging gate. Resolved once at
 // module load into a boolean; the per-dispatch log sites read the boolean
@@ -903,8 +906,8 @@ export class ToolRouter implements Router {
     const owner = this.jobOwner(identity);
     try {
       const clientFor = this.jobClient;
-      if (args.action === "start" && (args.tool_or_command === PLAYTEST_EXPLORE_TOOL || args.tool_or_command === PLAYTEST_DEVICES_TOOL))
-        return localError("job_operation_unsupported", `Start it with ${String(args.tool_or_command)} itself: it checks the open session (and, for a crawl, isolation and play mode), then returns the job id.`);
+      if (args.action === "start" && (args.tool_or_command === PLAYTEST_EXPLORE_TOOL || args.tool_or_command === PLAYTEST_DEVICES_TOOL || args.tool_or_command === PLAYTEST_REPLAY_TOOL))
+        return localError("job_operation_unsupported", `Start it with ${String(args.tool_or_command)} itself: it checks the open session (and, for a crawl or a replay, isolation and play mode), then returns the job id.`);
       if (args.action === "start" && typeof args.tool_or_command === "string") {
         const name = args.tool_or_command, key = args.idempotency_key;
         if (name === "unity_senses_run_tests") {
@@ -1112,6 +1115,8 @@ export class ToolRouter implements Router {
       [PLAYTEST_EXPLORE_TOOL, (l, a, id) => this.routePlaytestExplore(a, l, id)],
       // Device matrix: the same kind of job, switching Device Simulator devices.
       [PLAYTEST_DEVICES_TOOL, (l, a, id) => this.routePlaytestDevices(a, l, id)],
+      // Scenario replay: export / list / show are file actions; run is the same kind of job.
+      [PLAYTEST_REPLAY_TOOL, (l, a, id) => this.routePlaytestReplay(a, l, id)],
       // Live tool whose release lookups (npm latest, GitHub tag) run HERE so
       // the Editor main thread never blocks on the network.
       ["unity_open_mcp_upgrade", (l, a) => this.routeUpgrade(a, l)],
@@ -1457,6 +1462,66 @@ export class ToolRouter implements Router {
       session: isolation.session,
       plan: { devices: options.devices ?? `preset ${options.preset}`, orientations: options.orientations, screens: options.screens, max_devices: options.maxDevices },
     }, "The device run is going.", "Do not change the Game view or drive the game while it runs; the view it found is put back at the end.");
+  }
+
+  /**
+   * `unity_open_mcp_playtest_replay` — local route. export / list / show read
+   * and write scenario files in the project (Playtests/Scenarios); run starts a
+   * scenario replay as a job, under the same conditions as a crawl (the
+   * caller's open session, an isolated save, play mode unless the run restarts
+   * play mode), with the bridge event stream feeding it console errors.
+   */
+  private async routePlaytestReplay(args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity): Promise<CallToolResult> {
+    const action = String(args.action ?? "run") as keyof typeof PLAYTEST_REPLAY_ACTION_KEYS;
+    const allowed = PLAYTEST_REPLAY_ACTION_KEYS[action];
+    if (!allowed) return localError("invalid_arguments", `Unknown action '${action}'.`);
+    const extra = Object.keys(args).filter(key => key !== "action" && !allowed.includes(key));
+    if (extra.length) return localError("invalid_arguments", `Keys not used by ${action}: ${extra.join(", ")}.`);
+    if (!this.projectPath) return localError("project_unknown", "Scenarios live in the Unity project, and this server has no project path (set UNITY_PROJECT_PATH or start it in the project).");
+    const recorder = this.playtest;
+    const owner = this.ownerOf(identity);
+    const fail = (error: unknown): CallToolResult => {
+      if (error instanceof ScenarioError || error instanceof PlaytestError)
+        return sourceResult({ error: { code: error.code, message: error.message }, ...error.detail }, "local", true);
+      return localError("internal_error", error instanceof Error ? error.message : String(error));
+    };
+    try {
+      if (action === "list") return sourceResult(listAction(this.projectPath), "local");
+      if (action === "show") return sourceResult(showAction(this.projectPath, args), "local");
+      if (action === "export") return sourceResult(exportAction(recorder, owner, this.projectPath, args), "local");
+    } catch (error) { return fail(error); }
+
+    const isolation = recorder.isolation(owner);
+    if (!isolation)
+      return sourceResult({ error: { code: "no_open_session", message: "The replay records into your playtest session: start one first." },
+        agentNextSteps: ["playtest_session {\"action\":\"start\",\"name\":\"Replay\",\"snapshot\":true} (or invoke the project's playtest.begin), then call playtest_replay again."] }, "local", true);
+    if (!isolation.snapshot && !isolation.hook && args.allow_unsandboxed !== true)
+      return sourceResult({ error: { code: "not_isolated", message: "The replay taps through the game for real (progress, currency, saves change), and this session has no player-state snapshot and no playtest.begin hook run." },
+        session: isolation.session,
+        agentNextSteps: ["Invoke the project's playtest.begin command, or end this session and start one with snapshot:true — or pass allow_unsandboxed:true if the save may change."] }, "local", true);
+    let prepared;
+    try { prepared = prepareReplay(this.projectPath, args); } catch (error) { return fail(error); }
+    const call = async (tool: string, toolArgs: Record<string, unknown>) => {
+      const definition = ALL_TOOLS.find(t => t.name === tool);
+      return this.routeDispatch(live, tool, definition ? withSchemaDefaults(definition, toolArgs) : toolArgs, identity);
+    };
+    const probe = await call("unity_open_mcp_ui_snapshot", { profile: "compact", page_size: 1, visible_only: true });
+    const probed = toolOutput(probe);
+    if (probe.isError || probed.error) return probe;
+    const restartsFromEdit = prepared.options.from === "start" && prepared.scenario.start.restart === "play_mode";
+    if (probed.mode !== "play" && !restartsFromEdit)
+      return sourceResult({ error: { code: "play_mode_required", message: "The replay runs on the running game; the Editor is in edit mode (and this run does not restart play mode)." },
+        agentNextSteps: ["editor_set_state {\"state\":\"play\"}, editor_status {\"wait_until\":\"playing\"}, then call playtest_replay again — or replay from: \"start\" a scenario whose start restarts play mode."] }, "local", true);
+    (this.eventStream as Partial<BridgeEventStream>).ensureSubscription?.call(this.eventStream);
+    const stream = this.eventStream as Partial<BridgeEventStream>;
+    const subscribe = (feed: { onEvent(event: BridgeEvent): void }) => stream.addListener?.call(this.eventStream, event => feed.onEvent(event)) ?? (() => {});
+    const { scenario, options } = prepared;
+    return this.startPlaytestJob(PLAYTEST_REPLAY_TOOL, replayOperation({ ...prepared, projectPath: this.projectPath, call, recorder, owner, session: isolation.session, subscribe }), args, identity, {
+      session: isolation.session,
+      scenario: { name: scenario.name, steps: scenario.steps.length, start: scenario.start.restart, unbaselined: scenario.steps.filter(s => !s.expect?.screen).length },
+      plan: { from: options.from, retries: options.record ? 0 : options.retries, record: options.record, strict: options.strict, capture: options.capture },
+      isolation: { snapshot: isolation.snapshot, hook: isolation.hook, unsandboxed: !isolation.snapshot && !isolation.hook },
+    }, options.record ? "The baseline run is going." : "The replay is running.", "Do not drive the game yourself while it runs: your taps would mix into its steps.");
   }
 
   /** Register a per-call playtest job operation, start it, and answer with its id once it got (or queued for) its slot. */

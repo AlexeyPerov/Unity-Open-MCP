@@ -163,6 +163,13 @@ adds one mark and an `explore` block the report renders. Keeping the loop in the
 server keeps it independent of where the game runs. The device matrix
 (`playtest_devices`) is the same kind of job: it switches Device Simulator devices
 through `game_view`, runs the checks or a crawl on each, and puts the view back.
+Scenario replay (`playtest_replay`) is one more: it exports a session's own steps or
+a crawl as a scenario file the project keeps in `Playtests/Scenarios/` (outside
+`Assets/`, so Unity does not import it and the team versions it with the code), and
+replays it without a model — targets by hierarchy path and label, each screen
+compared with the stored baseline (the crawler's screen signature), console errors
+from the bridge event stream. Export reads the session log; it is the only reader of
+that log besides the report.
 
 ## Related docs
 

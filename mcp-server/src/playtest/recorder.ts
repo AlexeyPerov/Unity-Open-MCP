@@ -55,7 +55,7 @@ export const RECORDING_LIMITS = {
   maxPendingErrors: 500,
 } as const;
 
-export type CallKind = "input" | "wait" | "capture" | "command" | "control" | "explore" | "check";
+export type CallKind = "input" | "wait" | "capture" | "command" | "control" | "explore" | "check" | "replay";
 
 const INPUT_TOOLS = new Set([
   "unity_open_mcp_inputsim_touch", "unity_open_mcp_inputsim_pointer", "unity_open_mcp_inputsim_pointer3d",
@@ -196,7 +196,7 @@ function boundedJson(value: unknown, max: number): unknown {
 
 const SUMMARY_KEYS = [
   "action", "status", "outcome", "fired", "elapsed_ms", "realtime_ms", "backend", "target", "resolved", "targetHit", "topHit",
-  "textAfter", "masked", "typed",
+  "textAfter", "masked", "typed", "field",
   "blockedBy", "framesAdvanced", "released", "isPlaying", "isPaused", "mode", "size", "device", "settled", "capturedAt",
   "time_scale", "frames", "exception",
 ];
@@ -243,11 +243,11 @@ export class PlaytestRecorder {
 
   /**
    * A call the server makes itself on the owner's behalf — a UI-crawler step
-   * (`explore`) or a detector check (`check`) — recorded like an agent's call:
+   * (`explore`), a detector check (`check`) or a scenario step (`replay`) — recorded like an agent's call:
    * its console errors by time window, the frames its output names. `finish`
    * takes a synthetic result: the step's own summary, logs and file paths.
    */
-  beginOwn(owner: SessionOwner, kind: "explore" | "check", tool: string, args: Record<string, unknown>): CallHandle | null {
+  beginOwn(owner: SessionOwner, kind: "explore" | "check" | "replay", tool: string, args: Record<string, unknown>): CallHandle | null {
     return this.beginCall(owner, { kind, label: tool, args });
   }
 
@@ -311,7 +311,7 @@ export class PlaytestRecorder {
    * UI crawl (`explore`) or a detector check (`check`), rendered by the report.
    * False when the owner has no open session (it ended meanwhile).
    */
-  note(owner: SessionOwner, entry: { k: "explore" | "check" | "devices" } & Record<string, unknown>): boolean {
+  note(owner: SessionOwner, entry: { k: "explore" | "check" | "devices" | "replay" } & Record<string, unknown>): boolean {
     const session = this.open.get(ownerKey(owner));
     if (!session) return false;
     this.settle(session);
@@ -346,6 +346,33 @@ export class PlaytestRecorder {
       if (/(^|\.)playtest\.end$/.test(id)) hook = null;
     }
     return { session: session.meta.id, snapshot: session.meta.snapshot?.name ?? null, hook };
+  }
+
+  /**
+   * A session's log for a scenario export: the given id, else the owner's open
+   * session, else the project's latest ended one. Read-only; the open session
+   * keeps recording.
+   */
+  sessionRecord(owner: SessionOwner, id?: string): { id: string; dir: string; meta: SessionMeta; open: boolean; entries: Array<Record<string, any>> } {
+    let found: { dir: string; meta: SessionMeta } | null = null;
+    if (id) {
+      if (!SESSION_ID_PATTERN.test(id)) throw new PlaytestError("invalid_arguments", `'${id}' is not a session id.`);
+      found = this.findSession(id);
+      if (!found) throw new PlaytestError("session_not_found", `No playtest session ${id} for this project.`);
+    } else {
+      const own = this.open.get(ownerKey(owner));
+      if (own) {
+        this.settle(own);
+        found = { dir: own.dir, meta: own.meta };
+      } else {
+        const identity = this.identity ?? readProjectIdentity(this.projectPath);
+        found = identity
+          ? this.store.list(identity.company, identity.product).find(s => s.meta.project === this.projectPath && s.meta.state === "ended") ?? null
+          : null;
+        if (!found) throw new PlaytestError("no_session", "No open or ended playtest session of this project to export; pass session: <id>.");
+      }
+    }
+    return { id: found.meta.id, dir: found.dir, meta: found.meta, open: found.meta.state === "open", entries: this.store.readLog(found.dir) };
   }
 
   /** `jobs wait` / `jobs status` reached a terminal state for a job a recorded call started. */
@@ -589,6 +616,9 @@ export class PlaytestRecorder {
       nextSteps.push("Summarize the bug / suspicious steps and the first occurrence of each error from summary.findings and summary.top_errors.");
     if (summary.detector_findings.bug + summary.detector_findings.suspicious > 0)
       nextSteps.push(`Summarize the ${summary.detector_findings.bug} bug / ${summary.detector_findings.suspicious} suspicious detector finding(s) (summary.detector_findings; every one is in the report with its screen's frame).`);
+    const replays = summary.replays.filter(r => r.verdict !== "passed" && r.verdict !== "recorded");
+    if (replays.length)
+      nextSteps.push(`Report the replay results (summary.replays): ${replays.map(r => `${r.scenario} ${r.verdict}${r.failed_step !== undefined ? ` at step ${r.failed_step} (${r.reason})` : ""}`).join("; ")}.`);
     if (summary.hooks.begin && !summary.hooks.end)
       nextSteps.push(`The project's isolation hook ${summary.hooks.begin} ran without its end hook — invoke the matching playtest end command.`);
     if (session.meta.snapshot)
@@ -991,8 +1021,22 @@ export class PlaytestRecorder {
   }
 
   private summarize(kind: CallKind, output: Record<string, any>): Record<string, unknown> | null {
-    if (kind === "explore" || kind === "check")
-      return output.step && typeof output.step === "object" ? this.redactor.value(boundedJson(output.step, 3_000)) as Record<string, unknown> : null;
+    if (kind === "explore" || kind === "check" || kind === "replay") {
+      if (!output.step || typeof output.step !== "object") return null;
+      // The step's outcome fields (to, status…) outlive a long findings list: the list is cut first.
+      let step = output.step as Record<string, unknown>;
+      if (JSON.stringify(step).length > 3_000) {
+        const trimmed: Record<string, unknown> = { ...step };
+        for (const key of ["findings", "new_findings", "diff", "candidates", "drift", "errors"])
+          if (Array.isArray(trimmed[key]) || (trimmed[key] && typeof trimmed[key] === "object")) {
+            const value = trimmed[key];
+            trimmed[key] = Array.isArray(value) ? value.slice(0, 3) : value;
+            if (Array.isArray(value) && value.length > 3) trimmed[`${key}_total`] = value.length;
+          }
+        step = trimmed;
+      }
+      return this.redactor.value(boundedJson(step, 3_000)) as Record<string, unknown>;
+    }
     const summary: Record<string, unknown> = {};
     for (const key of SUMMARY_KEYS) {
       if (output[key] === undefined || output[key] === null) continue;

@@ -350,6 +350,17 @@ export const RECOMMENDED_TOOL_CHAINS: RecommendedToolChain[] = [
     ],
   },
   {
+    name: "playtest-replay-regression",
+    task: "Re-check a flow after a code change without driving it again: replay a saved scenario and see which step broke, what changed on screen, and whether a failure is flaky.",
+    steps: [
+      "once: unity_open_mcp_playtest_replay (action export, source crawl after a playtest_explore run — to_screen S5 for one path — or source calls for your own steps; scenario <name>) — writes Playtests/Scenarios/<name>.json",
+      "unity_open_mcp_playtest_session (action start, name, snapshot true — or invoke the project's playtest.begin hook)",
+      "unity_open_mcp_playtest_replay (scenario <name>; record true the first time for a calls export) — returns a job_id",
+      "unity_open_mcp_jobs (action wait, job_id, timeout_ms 30000) until terminal — verdict, failure (step, reason, diff, frame), drift",
+      "intended change → run again with record true and review the file's diff; then unity_open_mcp_playtest_session (action end) — the report has a Replays section",
+    ],
+  },
+  {
     name: "device-layout-check",
     task: "Check a screen's layout on a phone (notch / safe area) or at a fixed resolution, with frames a human can compare.",
     steps: [

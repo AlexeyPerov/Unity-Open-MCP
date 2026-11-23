@@ -522,6 +522,7 @@ import { playtestProbe } from "./playtest-probe.js";
 import { playtestSession } from "./playtest-session.js";
 import { playtestExplore } from "./playtest-explore.js";
 import { playtestDevices } from "./playtest-devices.js";
+import { playtestReplay } from "./playtest-replay.js";
 
 // M27 Plan 4 — batch_execute ships as a core meta-tool so agents can always
 // discover it. It is the agent ergonomics counterpart to the M26 headless batch
@@ -555,7 +556,7 @@ export const INPUTSIM_TOOLS: Tool[] = [inputsimPointer, inputsimKey, inputsimTou
 // sandbox (snapshot / diff / gated restore of PlayerPrefs and persistentDataPath)
 // and the session recorder (server-local: start / mark / end → report).
 // Group `playtest`; ui_snapshot compiles with com.unity.ugui, the others always.
-export const PLAYTEST_TOOLS: Tool[] = [uiSnapshot, gameView, playtestWait, playtestProbe, captureSeries, playerState, playtestSession, playtestExplore, playtestDevices];
+export const PLAYTEST_TOOLS: Tool[] = [uiSnapshot, gameView, playtestWait, playtestProbe, captureSeries, playerState, playtestSession, playtestExplore, playtestDevices, playtestReplay];
 
 export const M2_TOOLS: Tool[] = [
   ping,

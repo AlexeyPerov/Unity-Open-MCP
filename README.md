@@ -64,6 +64,9 @@ destructive or leaving controls) and files what looks wrong: overflowing text,
 controls under the notch, overlapping or tiny buttons, untranslated keys, buttons
 that do nothing, screens with no way out and the exceptions taps cause — on one
 device or across a list of phones and tablets, with each problem's devices named.
+A flow found once — by the crawler or by the agent's own steps — becomes a
+scenario file in the project that replays without a model after every change:
+pass or fail per step, what changed on screen, and whether a failure is flaky.
 
 > **User:** Smoke-test the shop on an iPhone 13.<br>
 > **Agent:** Five steps passed; tapping *Buy* threw a `NullReferenceException`.

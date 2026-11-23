@@ -14,7 +14,7 @@ import {
   DEFAULT_MIN_TOUCH_DP, DEFAULT_PLACEHOLDER_PATTERN, compilePolicy, findingsFromSnapshot, minTouchPx, sortFindings,
   truncatedDiagnostics,
 } from "./detectors.js";
-import { EXPLORE_DEFAULTS, EXPLORE_LIMITS, ExploreError, Explorer, type ExploreOptions, type ExploreRecorder, type RestartMode, type ToolCaller } from "./explore.js";
+import { EXPLORE_DEFAULTS, EXPLORE_LIMITS, ExploreError, Explorer, shownResult, type ExploreOptions, type ExploreRecorder, type RestartMode, type ToolCaller } from "./explore.js";
 import { DEVICE_LIMITS, DEVICE_PRESETS, DeviceMatrix, normalizeOrientations, type DeviceMatrixOptions, type DevicePreset } from "./devices.js";
 import { PLAYTEST_DEVICES_TOOL } from "../tools/playtest-devices.js";
 import { PlaytestError, type PlaytestRecorder } from "./recorder.js";
@@ -62,7 +62,7 @@ function stepResult(output: Record<string, unknown>, logs: unknown[], isError: b
 }
 
 /** The recorder seen by the engine: each step is a call of kind `explore` (or `check`) in the owner's session. */
-function exploreRecorder(recorder: PlaytestRecorder, owner: SessionOwner, kind: "explore" | "check" = "explore", tool = PLAYTEST_EXPLORE_TOOL): ExploreRecorder {
+export function exploreRecorder(recorder: PlaytestRecorder, owner: SessionOwner, kind: "explore" | "check" | "replay" = "explore", tool = PLAYTEST_EXPLORE_TOOL): ExploreRecorder {
   return {
     begin(label, args) {
       const handle = recorder.beginOwn(owner, kind, tool, { step: label, ...args });
@@ -123,12 +123,13 @@ export function exploreOperation(input: ExploreJobInput): JobOperation {
         } catch { /* the mark limit: the explore block still carries everything */ }
       }
       const final = {
-        ...result,
+        ...shownResult(result),
         session: input.session,
         agentNextSteps: [
           counts.bug + counts.suspicious > 0
             ? `Triage the ${counts.bug} bug / ${counts.suspicious} suspicious finding(s): open the screens' frames (screens[].frame) and confirm each one before you report it.`
             : "No findings: say which screens were covered (coverage, screens[].title) and what was not tried (denied, untried).",
+          "To re-check these screens after a change: playtest_replay {\"action\":\"export\",\"source\":\"crawl\",\"scenario\":\"<name>\"} (add to_screen: \"S5\" for one path), then playtest_replay {\"scenario\":\"<name>\"}.",
           ...(Array.isArray(result.untried) && result.untried.length ? ["Some controls stayed untried (untried[]): explore them by hand or run again with a larger budget."] : []),
           recorded
             ? "End the session with playtest_session {\"action\":\"end\"}: the report's Exploration section lists the screens with their frames and every finding."

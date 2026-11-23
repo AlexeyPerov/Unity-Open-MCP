@@ -218,6 +218,42 @@ On the demo fixture (menu screen): the "i" button sits under the notch of the
 notch phones, the menu buttons overlap in landscape on the tall foldable, and the
 small classic phone's buttons fall under 44 dp — each listed with its devices.
 
+## Replay a flow after a change
+
+A flow found once should not need a model to check again.
+[`playtest_replay`](api/playtest.md#unity_open_mcp_playtest_replay) turns it into
+a scenario file in the project and replays it as a regression check:
+
+1. **Export once.** After a crawl, `playtest_replay {"action":"export","source":"crawl","scenario":"menu-tour"}`
+   saves every tap of it — or `"to_screen":"S5"` only the shortest way to one
+   screen. The crawl's screens are the baseline. To keep a flow you drove yourself
+   (tap by label, typing, waits, project commands, checks), export
+   `"source":"calls"` from your session instead, then run it once with
+   `"record":true` to store the baseline. Passwords and PINs you typed become
+   secret variables (`vars`).
+2. **Review the file.** It is `Playtests/Scenarios/<name>.json` in the project,
+   next to `Assets/` and versioned with the code. Read it like code: steps name
+   controls by hierarchy path and label, `expect.texts` adds what must be on
+   screen, `settings.ignore_errors` exempts a known console message. Commit it so
+   the team runs the same check.
+3. **Replay after a change.** In a session with an isolated save, run
+   `playtest_replay {"scenario":"menu-tour"}` and `jobs wait` the job id. Each
+   step finds its control, taps or types like a player, waits until the screen
+   matches the expected one and checks it.
+4. **Read the verdict.** `passed`; `failed` names the step, the `reason`
+   (`target_not_found` with the controls on screen instead, `screen_changed` with
+   what was added and removed, `console_error`, `new_finding`…) and its frame;
+   `flaky` means a failure that did not repeat on the retry — report it as flaky,
+   not broken. `drift` lists changes that still passed: a renamed button, a moved
+   control, a relabelled screen.
+5. **Accept an intended change** by running again with `"record":true` (it writes
+   the new baseline into the file) and showing the file's diff in the review.
+
+On the demo fixture: export a crawl of the explore scene, replay it (it passes),
+then set PlayerPrefs `ExploreFixture.Variant` to `regression` and replay again —
+"Shop" reads "Store" (drift) and Credits no longer opens: the replay fails at that
+step with `screen_changed`, the same in both attempts.
+
 ## Reading the report
 
 `report.md` sits in the session folder
@@ -225,7 +261,7 @@ small classic phone's buttons fall under 44 dp — each listed with its devices.
 with `frames/` (full-size PNGs) and `thumbs/` next to it, so the folder can be
 zipped or attached as is. In order: a header (device, snapshot, isolation hook,
 totals, verdicts), **Findings** (verdicts, detector findings, errors), the
-**Exploration** of a crawl, the **Devices** of a device run and the **Screen checks** when they ran, one **Step** per mark (its calls with arguments,
+**Exploration** of a crawl, the **Devices** of a device run, the **Replays** (a step table per run with the failing step's frame) and the **Screen checks** when they ran, one **Step** per mark (its calls with arguments,
 results and durations; the errors it caused; thumbnails linking to the frames), the
 **Errors** list with stacks, the **State diff**, and the **Editor events**
 (play-mode transitions, domain reloads). Secrets in arguments, notes and console

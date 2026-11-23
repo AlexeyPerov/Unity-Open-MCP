@@ -24,6 +24,8 @@ export const LOCAL_TOOL_NAMES: ReadonlySet<string> = new Set([
   "unity_open_mcp_playtest_explore",
   // The device matrix: a server-side job over game_view and the playtest checks.
   "unity_open_mcp_playtest_devices",
+  // Scenario replay: scenario files in the project + a server-side job over the same routes.
+  "unity_open_mcp_playtest_replay",
 ]);
 
 export function isLocalTool(name: string): boolean {

@@ -548,8 +548,26 @@ export class Explorer {
         .map(a => ({ screen: s.id, label: a.label, path: a.path, ...(a.tried ? { reason: "never tappable when visited" } : {}) }))).slice(0, 50),
       ...(this.navFailures.length ? { navigation_failures: this.navFailures.slice(0, 20) } : {}),
       ...(this.notes.length ? { notes: [...new Set(this.notes)].slice(0, 20) } : {}),
+      // For the session log only (a replay scenario exported from this crawl): not shown to the agent.
+      signatures: Object.fromEntries(this.screens.map(s => [s.id, [...s.tokens].sort()])),
+      options: {
+        restart: this.options.restart,
+        ...(this.options.restartCommand ? { restart_command: this.options.restartCommand } : {}),
+        ...(this.options.restartArgs ? { restart_args: this.options.restartArgs } : {}),
+        routing: this.options.routing, same_screen: this.options.sameScreen, fill_text: this.options.fillText,
+      },
     };
   }
+}
+
+/** Keys of a crawl result kept for the session log (a scenario export) but not returned to the agent. */
+export const LOG_ONLY_KEYS = ["signatures", "options"] as const;
+
+/** The crawl result as the agent sees it (without the log-only keys). */
+export function shownResult(result: Record<string, unknown>): Record<string, unknown> {
+  const shown = { ...result };
+  for (const key of LOG_ONLY_KEYS) delete shown[key];
+  return shown;
 }
 
 /**

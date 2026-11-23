@@ -1,0 +1,95 @@
+{
+  "format": "unity-open-mcp.playtest-scenario/1",
+  "name": "explore-fixture-to-profile",
+  "source": {
+    "session": "20261123-202624-replay-fixture-afe0",
+    "kind": "crawl_path",
+    "exported_at": "2026-11-23T20:26:41.270Z",
+    "crawl": 1,
+    "to_screen": "S9",
+    "device": {
+      "mode": "game",
+      "size": "Free Aspect",
+      "screen": [
+        2422,
+        1483
+      ],
+      "orientation": "landscape"
+    }
+  },
+  "start": {
+    "restart": "play_mode",
+    "screen": {
+      "title": "Explore Fixture",
+      "signature": [
+        "c|button|buy gems|ExploreFixture/ExploreCanvas/Menu/BuyGemsButton",
+        "c|button|daily|ExploreFixture/ExploreCanvas/Menu/DailyButton",
+        "c|button|i|ExploreFixture/ExploreCanvas/Menu/InfoButton",
+        "c|button|news|ExploreFixture/ExploreCanvas/Menu/NewsButton",
+        "c|button|play|ExploreFixture/ExploreCanvas/Menu/PlayButton",
+        "c|button|settings|ExploreFixture/ExploreCanvas/Menu/SettingsButton",
+        "c|button|shop|ExploreFixture/ExploreCanvas/Menu/ShopButton",
+        "t|explore fixture"
+      ]
+    },
+    "findings": [
+      "small_touch_target|ExploreFixture/ExploreCanvas/Menu/InfoButton|"
+    ]
+  },
+  "settings": {
+    "same_screen": 0.8,
+    "step_timeout_ms": 5000,
+    "routing": "dispatch",
+    "ignore_errors": []
+  },
+  "vars": {},
+  "steps": [
+    {
+      "do": "tap",
+      "label": "Tap 'Settings' on S1",
+      "target": {
+        "path": "ExploreFixture/ExploreCanvas/Menu/SettingsButton",
+        "text": "Settings"
+      },
+      "expect": {
+        "screen": {
+          "title": "Settings",
+          "signature": [
+            "c|button|back|ExploreFixture/ExploreCanvas/Settings/BackButton",
+            "c|button|credits|ExploreFixture/ExploreCanvas/Settings/CreditsButton",
+            "c|button|help|ExploreFixture/ExploreCanvas/Settings/HelpButton",
+            "c|button|profile|ExploreFixture/ExploreCanvas/Settings/ProfileButton",
+            "c|button|report|ExploreFixture/ExploreCanvas/Settings/ReportButton",
+            "c|toggle|vibration|ExploreFixture/ExploreCanvas/Settings/VibrationToggle",
+            "t|settings",
+            "t|settings_language_label"
+          ]
+        },
+        "findings": [
+          "placeholder_text|ExploreFixture/ExploreCanvas/Settings/LanguageLabel|"
+        ]
+      }
+    },
+    {
+      "do": "tap",
+      "label": "Tap 'Profile' on S5",
+      "target": {
+        "path": "ExploreFixture/ExploreCanvas/Settings/ProfileButton",
+        "text": "Profile"
+      },
+      "expect": {
+        "screen": {
+          "title": "Profile",
+          "signature": [
+            "c|button|back|ExploreFixture/ExploreCanvas/Profile/BackButton",
+            "c|button|save|ExploreFixture/ExploreCanvas/Profile/SaveButton",
+            "c|input||ExploreFixture/ExploreCanvas/Profile/NicknameField",
+            "c|input||ExploreFixture/ExploreCanvas/Profile/PinField",
+            "t|profile"
+          ]
+        },
+        "findings": []
+      }
+    }
+  ]
+}
