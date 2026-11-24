@@ -173,7 +173,7 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_playtest_devices", 1752 },
             { "unity_open_mcp_playtest_explore", 1582 },
             { "unity_open_mcp_playtest_probe", 8006 },
-            { "unity_open_mcp_playtest_replay", 1627 },
+            { "unity_open_mcp_playtest_replay", 1823 },
             { "unity_open_mcp_playtest_session", 1294 },
             { "unity_open_mcp_playtest_wait", 7352 },
             { "unity_open_mcp_prefab_apply", 449 },

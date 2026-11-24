@@ -116,9 +116,13 @@ function maskEntryValue(value: unknown): unknown {
 }
 
 /** Secret-named environment variables of this process (values to mask). */
+/** Shell variables whose names look secret ("pwd" = password) but hold working directories. */
+const NOT_SECRET_ENV = new Set(["PWD", "OLDPWD"]);
+
 export function secretEnvValues(env: NodeJS.ProcessEnv = process.env): string[] {
   const out: string[] = [];
   for (const [name, value] of Object.entries(env)) {
+    if (NOT_SECRET_ENV.has(name.toUpperCase())) continue;
     if (typeof value === "string" && value.length >= 8 && isSecretKey(name)) out.push(value);
   }
   return out;

@@ -201,7 +201,7 @@ function options(overrides: Partial<ReplayOptions> = {}): ReplayOptions {
   return {
     from: "start", retries: 1, record: false, strict: false, capture: "failures", vars: {}, ignoreErrors: [],
     placeholderPattern: null, minTouchDp: null, settleMs: 250, maxSettleMs: 1000, stepTimeoutMs: 2000, sameScreen: 0.8, maxMinutes: 20,
-    ...overrides,
+    visual: null, ...overrides,
   };
 }
 

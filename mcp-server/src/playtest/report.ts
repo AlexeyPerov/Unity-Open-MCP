@@ -493,12 +493,33 @@ export function writeReport(input: ReportInput): ReportSummary {
             st.diff ? `+${(st.diff.added ?? []).slice(0, 3).map((t: string) => cell(clip(t, 50))).join(", ")}${(st.diff.added ?? []).length > 3 ? "…" : ""} / −${(st.diff.removed ?? []).slice(0, 3).map((t: string) => cell(clip(t, 50))).join(", ")}${(st.diff.removed ?? []).length > 3 ? "…" : ""}` : null,
             Array.isArray(st.drift) && st.drift.length ? `drift: ${st.drift.map((d: any) => `${d.kind}`).join(", ")}` : null,
             Array.isArray(st.errors) && st.errors.length ? `errors: ${cell(clip(String(st.errors[0]), 100))}` : null,
+            st.visual ? visualNote(st.visual) : null,
             st.changed ? "baseline changed" : null,
           ].filter(Boolean).join("; ");
           md.push(`| ${st.n} | ${cell(clip(String(st.label ?? ""), 70))} | ${status} | ${screen} | ${notes} | ${frame} |`);
         }
         md.push("");
       }
+      const visualFails = rows.filter(st => st.visual?.status === "failed");
+      if (visualFails.length) {
+        md.push("Visual differences (baseline · now · diff: red = changed pixels, yellow = regions, blue = masked):", "");
+        for (const st of visualFails) {
+          const captures = calls.get(Number(st.frame_call))?.captures ?? [];
+          // The step's frame comes first; the baseline and the diff carry their labels.
+          const shots = [["baseline", captures.find(c => c.file && c.label === "visual baseline")], ["now", captures.find(c => c.file && !c.label)],
+            ["diff", captures.find(c => c.file && c.label === "visual diff")]]
+            .map(([name, capture]) => {
+              if (!capture) return null;
+              const thumb = thumbFor(capture as Record<string, any>);
+              return thumb ? `[![${name}](${thumb})](${(capture as Record<string, any>).file})` : `[${name}](${(capture as Record<string, any>).file})`;
+            }).filter(Boolean);
+          const where = Array.isArray(st.visual.regions) ? st.visual.regions.slice(0, 3).map((r: any) => `${r.where}${Array.isArray(r.near) && r.near.length ? ` (${cell(r.near.join(", "))})` : ""}`).join("; ") : "";
+          md.push(`- step ${st.n} '${cell(clip(String(st.label ?? ""), 60))}': ${pctText(st.visual.ratio)} changed${where ? ` — ${where}` : ""}`, "");
+          if (shots.length) md.push(shots.join(" "), "");
+        }
+      }
+      const runVisual = run.visual as Record<string, any> | undefined;
+      if (runVisual) md.push(`Pictures (${code(String(runVisual.key ?? "?"))}): ${["passed", "failed", "unbaselined", "recorded", "skipped"].filter(k => Number(runVisual[k]) > 0).map(k => `${runVisual[k]} ${k}`).join(", ") || "none compared"}.`, "");
       const candidates = (run.failure as Record<string, any> | undefined)?.candidates;
       if (Array.isArray(candidates) && candidates.length)
         md.push(`On screen instead: ${candidates.slice(0, 8).map((c: string) => cell(clip(c, 60))).join("; ")}`, "");
@@ -728,4 +749,17 @@ function resultText(call: CallRow): string {
   else if (typeof s.isPlaying === "boolean") parts.push(s.isPlaying ? "playing" : "edit mode");
   if (call.captures.length && !series) parts.push(`${call.captures.length} frame(s)`);
   return ["ok", ...parts].map(p => cell(p)).join(" · ");
+}
+
+const pctText = (ratio: unknown) => `${Math.round(Number(ratio ?? 0) * 10000) / 100}%`;
+
+/** A replay step's picture check, short: "visual 0%", "visual 0.4% changed", "no visual baseline". */
+function visualNote(visual: Record<string, any>): string {
+  switch (visual.status) {
+    case "passed": return `visual ${pctText(visual.ratio)}`;
+    case "failed": return `visual ${pctText(visual.ratio)} changed`;
+    case "unbaselined": return "no visual baseline";
+    case "recorded": return visual.note ? "visual recorded (still moving)" : "visual recorded";
+    default: return `visual skipped${visual.note ? ` (${cell(clip(String(visual.note), 60))})` : ""}`;
+  }
 }

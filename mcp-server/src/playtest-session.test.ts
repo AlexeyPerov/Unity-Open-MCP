@@ -121,6 +121,8 @@ test("redaction: secret-named keys at any depth, secret fragments in text, known
   assert.equal(diff.changed[1].to.value, 2);
   assert.ok(secretEnvValues({ MY_API_TOKEN: "abcdefgh12", PATH: "/usr/bin:/bin", SHORT_TOKEN: "x" }).includes("abcdefgh12"));
   assert.equal(secretEnvValues({ PATH: "/usr/bin:/bin" }).length, 0);
+  assert.deepEqual(secretEnvValues({ PWD: "/Users/dev/Projects/game", OLDPWD: "/Users/dev/Projects/game", DB_PWD: "hunter2hunter2" }), ["hunter2hunter2"],
+    "the shell's working directories are not passwords");
 });
 
 test("redaction: Basic / Digest credentials, JWTs, flags, query keys, pass / sessionKey", () => {

@@ -25,7 +25,8 @@ namespace UnityOpenMcpDemo.Fixtures
     // A regression variant for scenario replays (playtest_replay): with PlayerPrefs
     // "ExploreFixture.Variant" = "regression" when the game starts, Shop is labelled
     // "Store" (a replay passes it as drift) and Credits no longer opens (a replay
-    // fails there with screen_changed).
+    // fails there with screen_changed); "restyle" only paints the Settings panel red —
+    // the same controls and texts, so only a visual baseline catches it.
     // State and references are serialized so a domain reload in play mode keeps it;
     // listeners are re-wired in OnEnable.
     public sealed class ExploreFixtureGame : MonoBehaviour
@@ -45,6 +46,7 @@ namespace UnityOpenMcpDemo.Fixtures
 
         public const string VariantKey = "ExploreFixture.Variant";
         private static bool Regression => PlayerPrefs.GetString(VariantKey, "") == "regression";
+        private static bool Restyle => PlayerPrefs.GetString(VariantKey, "") == "restyle";
 
         private void Awake()
         {
@@ -158,7 +160,7 @@ namespace UnityOpenMcpDemo.Fixtures
             starterPack = MakeButton(shop.transform, "StarterPackButton", "$1.99 Starter Pack", 0.50f);
             shopClose = MakeButton(shop.transform, "CloseButton", "Close", 0.20f);
 
-            settings = Panel(root, "Settings", new Color(0.20f, 0.20f, 0.24f));
+            settings = Panel(root, "Settings", Restyle ? new Color(0.40f, 0.10f, 0.10f) : new Color(0.20f, 0.20f, 0.24f));
             Label(settings.transform, "Title", "Settings", 0.86f, 72);
             MakeToggle(settings.transform, "VibrationToggle", "Vibration", 0.74f);
             Label(settings.transform, "LanguageLabel", "settings_language_label", 0.66f, 44);

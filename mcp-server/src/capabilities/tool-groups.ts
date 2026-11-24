@@ -392,7 +392,8 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "crawl as a scenario file in the project (Playtests/Scenarios), then replay it as a job with no " +
       "model — targets by path and label, the expected screen after each step, console errors and new " +
       "findings; pass / fail per step, drift for tolerated changes, retries for flakiness, record:true " +
-      "for the baseline. ui_snapshot " +
+      "for the baseline, and optional visual baselines (each screen's composed frame per device, " +
+      "compared in the server with masks and changed regions). ui_snapshot " +
       "compiles when com.unity.ugui is present; the compiled subset is reconciled from GET /tools.",
     defaultEnabled: false,
   },

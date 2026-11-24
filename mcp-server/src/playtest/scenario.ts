@@ -72,6 +72,8 @@ export interface ScenarioStep {
   /** wait: playtest_wait arguments; command: the command's arguments; input: the tool's arguments. */
   args?: Record<string, unknown>;
   expect?: StepExpectation;
+  /** false = no visual comparison for this step (an animated screen). */
+  visual?: false;
 }
 
 export interface ScenarioStart {
@@ -89,6 +91,49 @@ export interface ScenarioSettings {
   routing: "dispatch" | "raycast_real";
   /** Console messages (regex, first line) that do not fail a step. */
   ignore_errors: string[];
+  /** Present = every step is also compared as a picture with its visual baseline. */
+  visual?: VisualSettings;
+}
+
+export interface VisualSettings {
+  /** Share of compared pixels (in blocks over the noise floor) that may differ. */
+  threshold: number;
+  /** Per-channel difference a pixel may have and still match. */
+  pixel_tolerance: number;
+  /** Capture size (longest edge). */
+  max_edge: number;
+  /** Hierarchy paths / suffixes, or normalized [x, y, w, h] boxes, not compared. */
+  mask: Array<string | number[]>;
+  /** Mask visible texts with digits (counters, timers). */
+  mask_numbers: boolean;
+}
+
+export const VISUAL_SETTING_DEFAULTS: VisualSettings = { threshold: 0.0002, pixel_tolerance: 24, max_edge: 640, mask: [], mask_numbers: true };
+
+/** Normalized visual settings, or null with problems pushed. */
+export function parseVisualSettings(value: unknown, where: string, problems: string[]): VisualSettings | null {
+  if (value === true) return { ...VISUAL_SETTING_DEFAULTS, mask: [] };
+  if (!isObject(value)) { problems.push(`${where} must be an object (threshold, pixel_tolerance, max_edge, mask, mask_numbers) or true`); return null; }
+  const out: VisualSettings = { ...VISUAL_SETTING_DEFAULTS, mask: [] };
+  const range = (key: "threshold" | "pixel_tolerance" | "max_edge", min: number, max: number) => {
+    const v = value[key];
+    if (v === undefined) return;
+    if (typeof v !== "number" || !(v >= min && v <= max)) problems.push(`${where}.${key} must be ${min}..${max}`);
+    else out[key] = v;
+  };
+  range("threshold", 0, 0.5);
+  range("pixel_tolerance", 0, 255);
+  range("max_edge", 128, 2048);
+  if (value.mask_numbers !== undefined) out.mask_numbers = value.mask_numbers !== false;
+  if (value.mask !== undefined) {
+    if (!Array.isArray(value.mask)) problems.push(`${where}.mask must be an array of paths or [x, y, w, h] boxes (0–1)`);
+    else for (const m of value.mask) {
+      if (typeof m === "string" && m) out.mask.push(m);
+      else if (Array.isArray(m) && m.length === 4 && m.every(n => typeof n === "number" && n >= 0 && n <= 1)) out.mask.push(m as number[]);
+      else problems.push(`${where}.mask: ${JSON.stringify(m)} is neither a path nor a normalized [x, y, w, h]`);
+    }
+  }
+  return out;
 }
 
 export interface Scenario {
@@ -168,6 +213,7 @@ export function parseScenario(value: unknown): { scenario: Scenario | null; prob
   if (!(stepTimeout >= 500 && stepTimeout <= 60_000)) problems.push("settings.step_timeout_ms must be between 500 and 60000");
   const routing = settingsIn.routing === "raycast_real" ? "raycast_real" : "dispatch";
   const ignoreErrors = parseStrings(settingsIn.ignore_errors, "settings.ignore_errors", problems) ?? [];
+  const visual = settingsIn.visual === undefined || settingsIn.visual === false ? null : parseVisualSettings(settingsIn.visual, "settings.visual", problems);
   for (const pattern of ignoreErrors) {
     try { new RegExp(pattern); } catch { problems.push(`settings.ignore_errors: '${pattern}' is not a valid regular expression`); }
   }
@@ -241,6 +287,8 @@ export function parseScenario(value: unknown): { scenario: Scenario | null; prob
       case "check":
         break;
     }
+    if (raw.visual === false) step.visual = false;
+    else if (raw.visual !== undefined) problems.push(`${where}: visual may only be false (skip the picture check)`);
     if (raw.expect !== undefined) {
       if (!isObject(raw.expect)) problems.push(`${where}: expect must be an object`);
       else {
@@ -262,7 +310,7 @@ export function parseScenario(value: unknown): { scenario: Scenario | null; prob
     ...(typeof value.description === "string" ? { description: value.description } : {}),
     ...(isObject(value.source) ? { source: value.source } : {}),
     start,
-    settings: { same_screen: sameScreen, step_timeout_ms: stepTimeout, routing, ignore_errors: ignoreErrors },
+    settings: { same_screen: sameScreen, step_timeout_ms: stepTimeout, routing, ignore_errors: ignoreErrors, ...(visual ? { visual } : {}) },
     vars,
     steps,
   };

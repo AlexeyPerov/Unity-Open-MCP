@@ -18,7 +18,7 @@ export const PLAYTEST_REPLAY_ACTIONS = ["run", "export", "list", "show"] as cons
 export const PLAYTEST_REPLAY_ACTION_KEYS: Record<(typeof PLAYTEST_REPLAY_ACTIONS)[number], string[]> = {
   run: [
     "scenario", "from", "retries", "record", "strict", "capture", "vars", "ignore_errors", "step_timeout_ms", "same_screen",
-    "placeholder_pattern", "min_touch_dp", "max_minutes", "allow_unsandboxed",
+    "placeholder_pattern", "min_touch_dp", "max_minutes", "allow_unsandboxed", "visual",
   ],
   export: ["scenario", "session", "source", "crawl", "to_screen", "description", "overwrite"],
   list: [],
@@ -48,7 +48,11 @@ export const playtestReplay = makeTool(
     "finding; new suspicious ones and fixed ones are drift). A failed attempt is replayed from the start `retries` " +
     "times (default 1; not from: current): verdict passed | flaky (failed, then passed) | failed (consistent: same step, same reason) | " +
     "recorded | cancelled | incomplete. record:true writes what it saw (screens, findings, resolved targets) into the " +
-    "file as the new baseline — only when every step executed. REQUIRES your open playtest_session (each step is " +
+    "file as the new baseline — only when every step executed. VISUAL (settings.visual in the file, or visual:true): " +
+    "every step is also compared as a picture — a composed frame (max_edge 640) against <scenario>.visual/<key>/NN.png " +
+    "(key = platform + Simulator device / orientation or Game view size; recorded by record:true); a step whose frame " +
+    "differs over threshold (default 0.02% of pixels; stray pixels and masks — mask paths, digit texts — ignored) fails " +
+    "visual_changed with the regions and the controls there, the baseline, the current frame and a diff image. REQUIRES your open playtest_session (each step is " +
     "recorded with its frame — capture: failures (default) | steps | none — and the report gets a Replays section) " +
     "and an isolated save (start {snapshot:true} or the project's playtest.begin) unless allow_unsandboxed; play mode " +
     "unless the run restarts play mode. Needs the live Editor; requires com.unity.ugui.",
@@ -92,6 +96,10 @@ export const playtestReplay = makeTool(
       allow_unsandboxed: {
         type: "boolean",
         description: "[run] Replay although the session has no player_state snapshot and the project's playtest.begin did not run. The replay taps through the game for real: progress, currency and saves change.",
+      },
+      visual: {
+        type: "boolean",
+        description: "[run] Compare each step as a picture with its visual baseline (default: as the scenario's settings.visual says). true on a record run also turns it on in the file (default settings) and records the frames for this device; false skips it.",
       },
     },
   },

@@ -4,18 +4,22 @@
 //     job starts, then the `jobs` operation that runs one
 //     scenario for one owner, closes it with a `replay` block and a mark in the
 //     session, and writes the baseline back on a `record` run.
-import { existsSync } from "node:fs";
-import { basename } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+import { randomBytes } from "node:crypto";
 import type { JobOperation } from "../jobs/job-manager.js";
 import { DEFAULT_MIN_TOUCH_DP, DEFAULT_PLACEHOLDER_PATTERN } from "./detectors.js";
 import { exploreRecorder } from "./explore-job.js";
 import { type ToolCaller } from "./explore.js";
 import { exportScenario } from "./export.js";
 import type { PlaytestRecorder } from "./recorder.js";
-import { ConsoleErrorFeed, REPLAY_DEFAULTS, REPLAY_LIMITS, ReplayError, Replayer, defaultLabel, type ReplayOptions } from "./replay.js";
+import { ConsoleErrorFeed, REPLAY_DEFAULTS, REPLAY_LIMITS, ReplayError, Replayer, defaultLabel, type ReplayOptions, type ReplayVisualDeps } from "./replay.js";
+import { decodePng, encodePng } from "./png.js";
+import { VisualBaselines, visualDirFor, visualKeys, writeVisualBaseline } from "./visual-store.js";
 import {
-  ScenarioError, displayPath, listScenarios, readScenarioFile, resolveScenarioPath, scenarioDir, unbaselinedSteps, usedVars,
-  writeScenarioFile, type Scenario,
+  ScenarioError, VISUAL_SETTING_DEFAULTS, displayPath, listScenarios, readScenarioFile, resolveScenarioPath, scenarioDir, unbaselinedSteps, usedVars,
+  writeScenarioFile, type Scenario, type VisualSettings,
 } from "./scenario.js";
 import type { SessionOwner } from "./session-store.js";
 import { PLAYTEST_REPLAY_TOOL } from "../tools/playtest-replay.js";
@@ -66,7 +70,10 @@ export function listAction(projectPath: string): Record<string, unknown> {
   const scenarios = listScenarios(projectPath);
   return {
     status: "ok", action: "list", folder: scenarioDir(projectPath), total: scenarios.length,
-    scenarios: scenarios.map(s => ({ ...s, file: displayPath(projectPath, s.file) })),
+    scenarios: scenarios.map(s => {
+      const keys = scenarioVisualKeys(s.file);
+      return { ...s, file: displayPath(projectPath, s.file), ...(keys.length ? { visual_keys: keys } : {}) };
+    }),
     ...(scenarios.length ? {} : { agentNextSteps: ["No scenarios yet: export one from a playtest session (playtest_replay {\"action\":\"export\",\"source\":\"crawl\"|\"calls\",\"scenario\":\"<name>\"})."] }),
   };
 }
@@ -81,6 +88,7 @@ export function showAction(projectPath: string, args: Record<string, unknown>): 
     ...(scenario.source ? { source: scenario.source } : {}),
     start: { restart: scenario.start.restart, ...(scenario.start.command ? { command: scenario.start.command } : {}), baseline: !!scenario.start.screen },
     settings: scenario.settings,
+    ...(scenario.settings.visual || scenarioVisualKeys(file).length ? { visual_keys: scenarioVisualKeys(file) } : {}),
     vars: scenario.vars,
     steps: scenario.steps.map((s, i) => ({
       n: i + 1, do: s.do, label: s.label ?? defaultLabel(s),
@@ -123,6 +131,10 @@ export function prepareReplay(projectPath: string, args: Record<string, unknown>
     catch (error) { throw new ScenarioError("invalid_arguments", `ignore_errors '${pattern}' is not a valid regular expression: ${error instanceof Error ? error.message : String(error)}`); }
   }
   if (args.record === true && args.strict === true) throw new ScenarioError("invalid_arguments", "record and strict exclude each other: a record run accepts the changes it sees.");
+  // visual: the scenario's settings.visual, turned on (with defaults when it has none) or off by the call.
+  const visual: VisualSettings | null = args.visual === false ? null
+    : args.visual === true ? scenario.settings.visual ?? { ...VISUAL_SETTING_DEFAULTS, mask: [] }
+    : scenario.settings.visual ?? null;
   const minTouch = num(args.min_touch_dp, DEFAULT_MIN_TOUCH_DP);
   const options: ReplayOptions = {
     from: args.from === "current" ? "current" : "start",
@@ -139,6 +151,7 @@ export function prepareReplay(projectPath: string, args: Record<string, unknown>
     stepTimeoutMs: num(args.step_timeout_ms, scenario.settings.step_timeout_ms),
     sameScreen: num(args.same_screen, scenario.settings.same_screen),
     maxMinutes: Math.min(num(args.max_minutes, REPLAY_DEFAULTS.max_minutes), REPLAY_LIMITS.max_minutes),
+    visual,
   };
   return { file, scenario, options };
 }
@@ -167,7 +180,8 @@ export function replayOperation(input: ReplayJobInput): JobOperation {
       const feed = new ConsoleErrorFeed();
       const unsubscribe = input.subscribe?.(feed);
       const path = displayPath(input.projectPath, input.file);
-      let outcome: { result: Record<string, unknown>; recorded: Scenario | null };
+      const visualDir = visualDirFor(input.file);
+      let outcome: Awaited<ReturnType<Replayer["run"]>>;
       try {
         outcome = await new Replayer(input.scenario, input.options, {
           call: input.call,
@@ -175,6 +189,7 @@ export function replayOperation(input: ReplayJobInput): JobOperation {
           signal: context.signal,
           console: feed,
           progress: (phase, fraction, detail) => context.report({ phase, fraction, detail }),
+          ...(input.options.visual ? { visual: visualDeps(visualDir) } : {}),
         }).run();
       } catch (error) {
         if (error instanceof ReplayError) return { state: "failed", error: { code: error.code, message: error.message } };
@@ -182,13 +197,19 @@ export function replayOperation(input: ReplayJobInput): JobOperation {
       } finally {
         unsubscribe?.();
       }
-      const { result, recorded } = outcome;
+      const { result, recorded, frames } = outcome;
       const verdict = String(result.verdict);
       let written: Record<string, unknown> | null = null;
       if (recorded) {
         try {
           writeScenarioFile(input.file, recorded);
           written = { file: path, steps: recorded.steps.length, changed_steps: result.changed_steps ?? [] };
+          if (input.options.visual && frames.length) {
+            const key = frames[0].key;
+            const stored = writeVisualBaseline(visualDir, key, frames.filter(f => f.key === key), { max_edge: input.options.visual.max_edge, captured_at: frames[0].capturedAt });
+            written.visual = { key, folder: displayPath(input.projectPath, stored.folder), frames: stored.frames };
+            if (frames.some(f => f.key !== key)) written.visual_note = "The view changed during the run (another device or size); only the frames of the first were kept.";
+          }
         } catch (error) {
           written = { file: path, error: error instanceof Error ? error.message : String(error) };
         }
@@ -214,6 +235,11 @@ export function replayOperation(input: ReplayJobInput): JobOperation {
       if (verdict === "recorded") next.push(`The baseline was written to ${path}: review its diff in version control and commit it.`);
       if (verdict === "failed" && input.options.record) next.push("A record run writes the baseline only when every step executed: fix the failing step (or the scenario) and record again.");
       if (unbaselined > 0) next.push(`${unbaselined} step(s) have no baseline yet (they pass on execution alone): run once with record:true.`);
+      const visual = result.visual as Record<string, number | string> | undefined;
+      if (visual && Number(visual.unbaselined) > 0 && !input.options.record)
+        next.push(`${visual.unbaselined} step(s) have no visual baseline for ${visual.key ?? "this device"} (baselines are per platform and device / Game view size): run once with record:true on it.`);
+      if (visual && Number(visual.failed) > 0)
+        next.push("A step looks different from its visual baseline: compare failure.visual's baseline, current frame and diff (red = changed pixels; regions name the controls there). Mask dynamic areas in settings.visual.mask; an intended change → record:true.");
       if (Array.isArray(result.drift) && result.drift.length) next.push("Drift (drift[]) passed but shows what changed: renamed labels, moved controls, new suspicious or fixed findings.");
       next.push(noted ? "End the session with playtest_session {\"action\":\"end\"}: the report has a Replays section." : "The playtest session ended during the run; this result is the record.");
       const final = { ...result, scenario: scenarioInfo, ...(written ? { baseline: written } : {}), session: input.session, agentNextSteps: next };
@@ -223,3 +249,30 @@ export function replayOperation(input: ReplayJobInput): JobOperation {
   };
 }
 
+/** Baselines from <scenario>.visual/<key>/, frames decoded from the capture files, diffs written to a temp folder. */
+function visualDeps(dir: string): ReplayVisualDeps {
+  const stores = new Map<string, VisualBaselines>();
+  const diffDir = join(tmpdir(), "unity-open-mcp-replay", `${Date.now()}-${randomBytes(3).toString("hex")}`);
+  return {
+    baseline(key, n, label) {
+      if (!stores.has(key)) stores.set(key, new VisualBaselines(dir, key));
+      return stores.get(key)!.frame(n, label);
+    },
+    read(file) {
+      try { return decodePng(readFileSync(file)); } catch { return null; }
+    },
+    writeDiff(image, name) {
+      try {
+        mkdirSync(diffDir, { recursive: true });
+        const file = join(diffDir, `${name}.png`);
+        writeFileSync(file, encodePng(image));
+        return file;
+      } catch { return null; }
+    },
+  };
+}
+
+/** The visual baseline keys a scenario has recorded. */
+export function scenarioVisualKeys(file: string): string[] {
+  return visualKeys(visualDirFor(file));
+}

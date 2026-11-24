@@ -23,7 +23,9 @@ import {
   type Finding, type SnapshotNode,
 } from "./detectors.js";
 import { collectLogs, restartGame, type ExploreRecorder, type RecordedStep, type ToolCaller } from "./explore.js";
-import { fillVars, usesSecret, type Scenario, type ScenarioStep, type ScenarioTarget, type ScreenExpectation, type StepKind } from "./scenario.js";
+import { fillVars, usesSecret, type Scenario, type ScenarioStep, type ScenarioTarget, type ScreenExpectation, type StepKind, type VisualSettings } from "./scenario.js";
+import type { RgbaImage } from "./png.js";
+import { compareImages, describeRegion, diffImage, masksFor, nodesInRegion, visualKey } from "./visual.js";
 
 export interface ReplayOptions {
   from: "start" | "current";
@@ -42,6 +44,8 @@ export interface ReplayOptions {
   stepTimeoutMs: number;
   sameScreen: number;
   maxMinutes: number;
+  /** Compare every step as a picture with its visual baseline (null = off). */
+  visual: VisualSettings | null;
 }
 
 export const REPLAY_DEFAULTS = { retries: 1, settle_ms: 250, max_settle_ms: 4_000, max_minutes: 20, capture: "failures" as const };
@@ -49,7 +53,21 @@ export const REPLAY_LIMITS = { retries: 3, max_minutes: 60 };
 
 export type FailReason =
   | "target_not_found" | "target_not_tappable" | "action_failed" | "wait_timed_out" | "command_failed" | "restart_failed"
-  | "screen_changed" | "text_missing" | "console_error" | "new_finding" | "drift" | "play_mode_exited" | "snapshot_failed";
+  | "screen_changed" | "text_missing" | "console_error" | "new_finding" | "drift" | "play_mode_exited" | "snapshot_failed"
+  | "visual_changed";
+
+export interface VisualOutcome {
+  status: "passed" | "failed" | "unbaselined" | "recorded" | "skipped";
+  key?: string;
+  /** Share of compared pixels that changed (over the noise floor). */
+  ratio?: number;
+  threshold?: number;
+  regions?: Array<{ where: string; near: string[] }>;
+  baseline?: string;
+  current?: string;
+  diff?: string;
+  note?: string;
+}
 
 export interface Drift { kind: "label_changed" | "path_changed" | "index_changed" | "screen_drift" | "labels_changed" | "new_suspicious" | "fixed_finding"; detail: string }
 
@@ -75,6 +93,7 @@ export interface StepOutcome {
   frame_call?: number;
   duration_ms: number;
   candidates?: string[];
+  visual?: VisualOutcome;
 }
 
 interface Observed { screen: ScreenExpectation; findings: string[]; target?: ScenarioTarget }
@@ -86,6 +105,8 @@ interface Attempt {
   steps: StepOutcome[];
   observedStart?: Observed;
   observed: Array<Observed | undefined>;
+  /** Record runs: the frame kept for each step (n 0 = start). */
+  frames: Array<{ n: number; label: string; source: string; key: string; capturedAt?: Record<string, unknown> }>;
   duration_ms: number;
 }
 
@@ -122,6 +143,17 @@ export interface ReplayDeps {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   progress?: (phase: string, fraction: number, detail: Record<string, unknown>) => void;
+  /** Visual baselines (required when options.visual is set). */
+  visual?: ReplayVisualDeps;
+}
+
+export interface ReplayVisualDeps {
+  /** The baseline frame of step n (0 = start) for a key, or why there is none. */
+  baseline(key: string, n: number, label: string): { file: string; image: RgbaImage } | { missing: string; detail?: string };
+  /** Decode a captured frame. */
+  read(file: string): RgbaImage | null;
+  /** Write a diff image; its file, or null. */
+  writeDiff(image: RgbaImage, name: string): string | null;
 }
 
 const SNAPSHOT_TOOL = "unity_open_mcp_ui_snapshot";
@@ -236,7 +268,7 @@ export class Replayer {
   }
 
   /** Replay with retries; the result is always returned (never thrown) once the run started. */
-  async run(): Promise<{ result: Record<string, unknown>; recorded: Scenario | null }> {
+  async run(): Promise<{ result: Record<string, unknown>; recorded: Scenario | null; frames: Attempt["frames"] }> {
     this.startedAt = this.now();
     const probe = await this.snapshotOnce(false);
     if (!probe) throw new ReplayError("snapshot_failed", "ui_snapshot failed before the replay started.");
@@ -274,7 +306,7 @@ export class Replayer {
   private async attempt(number: number, restart: boolean): Promise<Attempt> {
     const t0 = this.now();
     const attempt: Attempt = {
-      attempt: number, passed: false, steps: [], observed: [], duration_ms: 0,
+      attempt: number, passed: false, steps: [], observed: [], frames: [], duration_ms: 0,
       start: { n: 0, do: "start", label: "Start", status: "skipped", drift: [], duration_ms: 0 },
     };
     this.attempts.push(attempt);
@@ -298,7 +330,7 @@ export class Replayer {
         attempt.steps.push(this.skipped(i + 1, step));
         continue;
       }
-      const { outcome, observed } = await this.runStep(i + 1, step);
+      const { outcome, observed } = await this.runStep(i + 1, step, attempt);
       attempt.steps.push(outcome);
       attempt.observed[i] = observed;
       this.progress(number, i + 1, outcome.status);
@@ -334,13 +366,14 @@ export class Replayer {
       }
       const observed = await this.observeAndCompare(outcome, { screen: start.screen, findings: start.findings }, logs);
       if (observed) attempt.observedStart = observed;
+      if (this.options.visual && (outcome.status as string) !== "failed") await this.visualCheck(outcome, 0, "start", logs, attempt);
     }
     this.stepErrors(outcome, logs, t0);
     await this.finishStep(step, outcome, logs, t0);
     return outcome;
   }
 
-  private async runStep(n: number, step: ScenarioStep): Promise<{ outcome: StepOutcome; observed?: Observed }> {
+  private async runStep(n: number, step: ScenarioStep, attempt: Attempt): Promise<{ outcome: StepOutcome; observed?: Observed }> {
     const label = step.label ?? defaultLabel(step);
     const t0 = this.now();
     const secret = step.do === "type" && (step.secret === true || usesSecret(step, this.scenario));
@@ -367,6 +400,7 @@ export class Replayer {
       const missing = (step.expect?.texts ?? []).filter(t => !this.lastTexts.some(v => v.includes(t.toLowerCase())));
       if (missing.length && (outcome.status as string) !== "failed")
         this.fail(outcome, "text_missing", `expected text not on screen: ${missing.map(t => `'${t}'`).join(", ")}`);
+      if (this.options.visual && step.visual !== false && (outcome.status as string) !== "failed") await this.visualCheck(outcome, n, label, logs, attempt);
     }
     this.stepErrors(outcome, logs, t0);
     await this.finishStep(recorded, outcome, logs, t0);
@@ -456,6 +490,8 @@ export class Replayer {
   }
 
   private lastTexts: string[] = [];
+  /** The snapshot the last step settled on (rects for masks and regions). */
+  private lastSnap: Snapshot | null = null;
 
   /**
    * Snapshot until the screen matches the expected one and stops changing (or,
@@ -481,6 +517,7 @@ export class Replayer {
       await this.sleep(this.options.settleMs);
     }
     outcome.settled = settled;
+    this.lastSnap = snap;
     outcome.title = screenTitle(snap.nodes);
     this.lastTexts = snap.nodes.filter(n => n.visible !== false && n.text).map(n => String(n.text).toLowerCase());
     const signature = [...snap.tokens].sort();
@@ -541,6 +578,79 @@ export class Replayer {
   }
 
   // -------------------------------------------------------------------------
+  // Pictures
+  // -------------------------------------------------------------------------
+
+  /**
+   * Capture the composed frame and compare it with the step's visual baseline
+   * (a record run keeps it instead, once two captures in a row match). A frame
+   * that does not match is captured again (an animation settling) before the
+   * step fails with the regions that changed and a diff image.
+   */
+  private async visualCheck(outcome: StepOutcome, n: number, label: string, logs: unknown[], attempt: Attempt): Promise<void> {
+    const settings = this.options.visual!;
+    const visual = this.deps.visual;
+    if (!visual) { outcome.visual = { status: "skipped", note: "no baseline store" }; return; }
+    const deadline = this.now() + this.options.stepTimeoutMs;
+    const snap = this.lastSnap;
+    const screen = snap?.output?.screen && Number(snap.output.screen.w) > 0 ? { w: Number(snap.output.screen.w), h: Number(snap.output.screen.h) } : null;
+    let previous: RgbaImage | null = null;
+    for (let tries = 1; ; tries++) {
+      const shot = await this.deps.call(SCREENSHOT_TOOL, { view: "composed", max_edge: settings.max_edge });
+      collectLogs(shot, logs);
+      const out = toolOutput(shot);
+      if (shot.isError || out.error || typeof out.filePath !== "string") {
+        outcome.visual = { status: "skipped", note: `the capture failed (${(out.error as { code?: string } | undefined)?.code ?? "error"})` };
+        return;
+      }
+      const file = out.filePath;
+      const capturedAt = out.capturedAt && typeof out.capturedAt === "object" ? out.capturedAt as Record<string, unknown> : undefined;
+      const key = visualKey(capturedAt);
+      const image = visual.read(file);
+      if (!image) { outcome.visual = { status: "skipped", key, note: `the frame could not be read (${file})` }; return; }
+      const masks = masksFor(snap?.nodes ?? [], screen, image, settings.mask, settings.mask_numbers);
+      const compare = (base: RgbaImage) => compareImages(base, image, { pixelTolerance: settings.pixel_tolerance, threshold: settings.threshold, masks });
+      if (this.options.record) {
+        // Keep a frame only once the picture stopped changing (two captures in a row alike).
+        const still = previous ? compare(previous) : null;
+        const settled = !!still && !("sizeMismatch" in still) && still.pass;
+        if (settled || tries >= 3 || this.now() >= deadline) {
+          attempt.frames.push({ n, label, source: file, key, ...(capturedAt ? { capturedAt } : {}) });
+          outcome.visual = { status: "recorded", key, ...(settled ? {} : { note: "the picture kept changing; the last frame was kept" }) };
+          return;
+        }
+        previous = image;
+        await this.sleep(this.options.settleMs);
+        continue;
+      }
+      const base = visual.baseline(key, n, label);
+      if ("missing" in base) {
+        outcome.visual = { status: "unbaselined", key, note: base.missing === "no_key" ? `no visual baseline for ${key}` : base.missing === "other_step" ? `the baseline frame was ${base.detail}: record again` : `${base.missing}${base.detail ? ` (${base.detail})` : ""}` };
+        return;
+      }
+      const result = compare(base.image);
+      if ("sizeMismatch" in result) {
+        outcome.visual = { status: "unbaselined", key, note: `the baseline is ${result.sizeMismatch.baseline.join("×")}, this frame ${result.sizeMismatch.current.join("×")} (max_edge changed?): record again` };
+        return;
+      }
+      const ratio = Math.round(result.ratio * 1e6) / 1e6;
+      if (result.pass) { outcome.visual = { status: "passed", key, ratio }; return; }
+      if (tries < 3 && this.now() + this.options.settleMs * 2 < deadline) { await this.sleep(this.options.settleMs * 2); continue; }
+      const regions = result.regions.slice(0, 5).map(region => ({ where: describeRegion(region, image), near: nodesInRegion(region, snap?.nodes ?? [], screen, image) }));
+      const diff = visual.writeDiff(diffImage(image, result), `step-${String(n).padStart(2, "0")}-diff`);
+      outcome.visual = {
+        status: "failed", key, ratio, threshold: settings.threshold, regions, baseline: base.file, current: file, ...(diff ? { diff } : {}),
+      };
+      outcome.frame = file;
+      const pct = (v: number) => `${Math.round(v * 10000) / 100}%`;
+      const first = regions[0];
+      this.fail(outcome, "visual_changed",
+        `the screen looks ${pct(ratio)} different from its visual baseline (over ${pct(settings.threshold)})${first ? ` ${first.where.startsWith("across") ? first.where : `at ${first.where}`}${first.near.length ? ` around ${first.near[0]}` : ""}` : ""}`);
+      return;
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Console errors
   // -------------------------------------------------------------------------
 
@@ -593,7 +703,7 @@ export class Replayer {
   }
 
   private async finishStep(step: RecordedStep, outcome: StepOutcome, logs: unknown[], t0: number): Promise<void> {
-    const shoot = this.options.capture === "steps" || (this.options.capture === "failures" && outcome.status === "failed");
+    const shoot = !outcome.frame && (this.options.capture === "steps" || (this.options.capture === "failures" && outcome.status === "failed"));
     if (shoot) {
       const shot = await this.deps.call(SCREENSHOT_TOOL, { view: "composed", max_edge: 960 });
       collectLogs(shot, logs);
@@ -603,8 +713,16 @@ export class Replayer {
         if (step.seq >= 0) outcome.frame_call = step.seq;
       }
     }
+    if (outcome.frame && outcome.frame_call === undefined && step.seq >= 0) outcome.frame_call = step.seq;
     outcome.duration_ms = this.now() - t0;
-    step.finish({ step: compactOutcome(outcome), ...(outcome.frame ? { filePath: outcome.frame } : {}) }, logs, outcome.status === "failed");
+    // The visual baseline and the diff image go into the report with the frame.
+    const visualFiles = [
+      ...(outcome.visual?.baseline ? [{ file: outcome.visual.baseline, label: "visual baseline" }] : []),
+      ...(outcome.visual?.diff ? [{ file: outcome.visual.diff, label: "visual diff" }] : []),
+    ];
+    step.finish({
+      step: compactOutcome(outcome), ...(outcome.frame ? { filePath: outcome.frame } : {}), ...(visualFiles.length ? { visual_files: visualFiles } : {}),
+    }, logs, outcome.status === "failed");
   }
 
   private begin(label: string, args: Record<string, unknown>): RecordedStep {
@@ -656,7 +774,7 @@ export class Replayer {
   // Result
   // -------------------------------------------------------------------------
 
-  private result(attempts: Attempt[], stop: ReplayStopReason, maxAttempts: number): { result: Record<string, unknown>; recorded: Scenario | null } {
+  private result(attempts: Attempt[], stop: ReplayStopReason, maxAttempts: number): { result: Record<string, unknown>; recorded: Scenario | null; frames: Attempt["frames"] } {
     const last = attempts[attempts.length - 1];
     const firstFailure = (a: Attempt) => [a.start, ...a.steps].find(s => s.status === "failed");
     const failures = attempts.filter(a => !a.passed).map(a => ({ attempt: a.attempt, failure: firstFailure(a) }));
@@ -694,15 +812,17 @@ export class Replayer {
       findings: { new: newFindings, fixed },
       ...(this.options.record ? { changed_steps: outcomes.filter(o => o.changed).map(o => o.n) } : {}),
       unbaselined: this.options.record ? 0 : unbaselined,
+      ...(this.options.visual ? { visual: visualSummary(outcomes, this.options.visual) } : {}),
       duration_ms: Math.max(0, this.now() - this.startedAt),
       ...(this.notes.length ? { notes: [...new Set(this.notes)] } : {}),
     };
-    return { result, recorded };
+    return { result, recorded, frames: this.options.record && last?.passed ? last.frames : [] };
   }
 
   /** The scenario with this attempt's observations as its expectations (and the targets as resolved). */
   private baseline(attempt: Attempt): Scenario {
     const copy = JSON.parse(JSON.stringify(this.scenario)) as Scenario;
+    if (this.options.visual) copy.settings.visual = this.options.visual;
     if (attempt.observedStart) {
       copy.start.screen = attempt.observedStart.screen;
       copy.start.findings = attempt.observedStart.findings;
@@ -759,7 +879,17 @@ function compactOutcome(o: StepOutcome): Record<string, unknown> {
     ...(o.candidates?.length ? { candidates: o.candidates } : {}),
     ...(o.changed ? { changed: true } : {}),
     ...(o.settled === false ? { settled: false } : {}),
+    ...(o.visual ? { visual: o.visual } : {}),
     ...(o.frame ? { frame: o.frame } : {}), ...(o.frame_call !== undefined ? { frame_call: o.frame_call } : {}),
     duration_ms: o.duration_ms,
   };
+}
+
+/** The run's picture checks: the key compared on, and how many steps passed, failed or had no baseline. */
+function visualSummary(outcomes: StepOutcome[], settings: VisualSettings): Record<string, unknown> {
+  const counts: Record<string, number> = { passed: 0, failed: 0, unbaselined: 0, recorded: 0, skipped: 0 };
+  let key: string | undefined;
+  for (const o of outcomes) if (o.visual) { counts[o.visual.status]++; key ??= o.visual.key; }
+  const notes = [...new Set(outcomes.map(o => o.visual?.note).filter((n): n is string => !!n))].slice(0, 5);
+  return { ...(key ? { key } : {}), threshold: settings.threshold, max_edge: settings.max_edge, ...counts, ...(notes.length ? { notes } : {}) };
 }

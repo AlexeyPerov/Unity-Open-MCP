@@ -169,7 +169,9 @@ a crawl as a scenario file the project keeps in `Playtests/Scenarios/` (outside
 replays it without a model — targets by hierarchy path and label, each screen
 compared with the stored baseline (the crawler's screen signature), console errors
 from the bridge event stream. Export reads the session log; it is the only reader of
-that log besides the report.
+that log besides the report. Visual baselines are compared in the server too (the
+PNG reader the report uses): composed frames against per-device frames stored next
+to the scenario (`<name>.visual/<key>/`), so the bridge contract stays unchanged.
 
 ## Related docs
 

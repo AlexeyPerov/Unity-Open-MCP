@@ -978,7 +978,8 @@ export class PlaytestRecorder {
         const file = obj[key];
         if (typeof file === "string" && /\.png$/i.test(file) && isAbsolute(file)) {
           found.push({
-            source: file, label: /contact_sheet/.test(path) ? "contact sheet" : undefined,
+            source: file,
+            label: /contact_sheet/.test(path) ? "contact sheet" : /visual_files/.test(path) && typeof obj.label === "string" ? obj.label : undefined,
             frame: typeof obj.frame === "number" ? obj.frame : undefined,
             width: typeof obj.width === "number" ? obj.width : undefined, height: typeof obj.height === "number" ? obj.height : undefined,
           });

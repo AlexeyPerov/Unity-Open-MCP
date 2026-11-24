@@ -20,7 +20,7 @@ session as a report for a human. The workflow is in the
 | `unity_open_mcp_player_state` | Snapshots, diffs and restores the player state a session changes — PlayerPrefs, `persistentDataPath` files, opt-in EditorPrefs — in a store outside the project; restore is edit-mode only, a dry run unless confirmed, and gated | always (macOS verified; Windows and Linux readers untested in the field) |
 | `unity_open_mcp_playtest_explore` | Explores the running game's UI on its own as a job: taps every untried button / toggle of each screen (never money, destructive or leaving controls), walks back or restarts, captures each new screen and files findings — overflow, safe area, overlaps, placeholder text, touch size, dead buttons, dead ends, console errors — into the open session | `com.unity.ugui` (server-local crawl over `ui_snapshot` and `inputsim_pointer`) |
 | `unity_open_mcp_playtest_devices` | Checks the game on several Device Simulator devices (× orientation) as a job — the current screen's detectors and a frame per device, or a crawl per device — groups the findings by the devices that show them and puts the Game view back | Unity 6 Editor (Device Simulator); `com.unity.ugui` for the checks (server-local) |
-| `unity_open_mcp_playtest_replay` | Replays a scenario — a session's own steps or a crawl, exported as a JSON file in the project — as a job with no model: targets by path and label, the expected screen after each step, console errors and new findings; pass / fail per step, drift for tolerated changes, retries for flakiness, `record` for the baseline | `com.unity.ugui` (server-local, over the same tools an agent uses) |
+| `unity_open_mcp_playtest_replay` | Replays a scenario — a session's own steps or a crawl, exported as a JSON file in the project — as a job with no model: targets by path and label, the expected screen after each step, console errors and new findings, optionally each screen as a picture against per-device frames; pass / fail per step, drift for tolerated changes, retries for flakiness, `record` for the baseline | `com.unity.ugui` (server-local, over the same tools an agent uses) |
 | `unity_open_mcp_playtest_session` | Records a playtest for a human: the agent's input / wait / capture / project-command calls with their frames and console errors, step verdicts, the state diff — `end` writes a Markdown report | always (server-local; no Unity code) |
 
 `inputsim_gesture` (in `input-simulation`) takes `capture_at_ms`: a tap and the
@@ -1025,12 +1025,13 @@ edit by hand:
 | Field | Meaning |
 |---|---|
 | `start.restart` | How a run (and every retry) starts: `play_mode` (exit and re-enter play mode), `command` (`start.command` + `start.args`, a synchronous project command such as `project.<owner>.playtest.boot`), `none` (the screen shown now; no retries). `start.screen` / `start.findings` are the first screen's baseline |
-| `settings` | `same_screen` (0.5–1, default 0.8), `step_timeout_ms` (500–60000, default 5000), `routing` of taps (`dispatch` or `raycast_real`), `ignore_errors` (regexes on a console message's first line that do not fail a step) |
+| `settings` | `same_screen` (0.5–1, default 0.8), `step_timeout_ms` (500–60000, default 5000), `routing` of taps (`dispatch` or `raycast_real`), `ignore_errors` (regexes on a console message's first line that do not fail a step), `visual` (compare every step as a picture — [Visual baselines](#visual-baselines)) |
 | `vars` | Declared `${name}` variables, filled from the run's `vars`; `secret: true` keeps the value out of the session log |
 | `steps[].do` | `tap` {`target`, `routing`}, `type` {`target`, `text`, `mode` replace / append / clear, `end` end_edit / submit / none, `secret`}, `wait` {`args`: [`playtest_wait`](#unity_open_mcp_playtest_wait) arguments, `timeout_ms` ≤ 40000}, `command` {`command`, `args`: a synchronous project command}, `input` {`tool`, `args`: another inputsim tool's arguments as sent — key, touch, gesture, step, pointer3d, a pointer drag}, `restart` (as `start` says), `check` (only looks) |
 | `target` | `path` (hierarchy path as `ui_snapshot` shows it), `text` (the control's label), `role`, `index` (which of several equal matches). Never an instance id: ids change every play session (`object_id` is refused) |
 | `expect` | `screen` {`title`, `signature`}: the screen after the step — the crawler's [screen signature](#the-crawl) (controls by role + label + masked path, plain texts, numbers masked); `texts`: visible texts that must be on screen (case-insensitive substring); `findings`: the [detector](#findings) findings of that screen, as keys `kind|path|…` |
 | `label`, `checkpoint` | How the report names the step; the session mark it ended (export) |
+| `visual` | `false` = this step is not compared as a picture |
 
 At most 300 steps and 4 MB per file.
 
@@ -1096,6 +1097,7 @@ step on the first four (`drift`).
 | `capture` | `failures` | Frames |
 | `max_minutes` | 20 (≤ 60) | Wall-clock budget for the whole run, retries included |
 | `allow_unsandboxed` | false | Replay without a snapshot or `playtest.begin` (the save changes for real) |
+| `visual` | the scenario's | `true` = compare every step as a picture (the scenario's `settings.visual`, else the defaults; on a record run it also turns them on in the file); `false` = skip |
 
 ### Result
 
@@ -1126,16 +1128,71 @@ step on the first four (`drift`).
 `reason`: `target_not_found`, `target_not_tappable`, `action_failed`,
 `wait_timed_out`, `command_failed` (also an async command), `restart_failed`,
 `screen_changed`, `text_missing`, `console_error` (`errors`), `new_finding`
-(`new_findings`), `drift`, `play_mode_exited`, `snapshot_failed`. `unbaselined`
-counts steps that passed on execution alone.
+(`new_findings`), `drift`, `play_mode_exited`, `snapshot_failed`, `visual_changed`
+(`visual`, see [Visual baselines](#visual-baselines)). `unbaselined` counts steps
+that passed on execution alone.
 
 Each step is one recorded session call of kind `replay` (a secret's typed text as
 `[redacted N chars]`), with its frame and the console errors it caused; the run
 adds a `replay` block and one mark (`passed` / `recorded` → ok, `flaky` →
 suspicious, `failed` → bug). The report's **Replays** section has, per run, the
 scenario, file, attempts, a row per step (status, screen match, diff, drift,
-errors, frame thumbnail), the controls on screen instead of a missing target,
-drift, new and fixed findings, and the baseline written.
+errors, picture check, frame thumbnail), the controls on screen instead of a
+missing target, the visual differences (baseline · now · diff thumbnails with the
+regions), drift, new and fixed findings, and the baseline written.
+
+### Visual baselines
+
+The checks above see what a screen is (its controls and texts), not how it looks.
+With `settings.visual` in the scenario — or `visual: true` on a run — every step
+(and the start) is also compared as a picture: a moved or resized control, a
+missing icon, a wrong colour, a popup under the HUD.
+
+- **Frames.** A composed capture (`unity_senses_screenshot view: composed`: every
+  camera plus overlay canvases, as the player sees them) at `max_edge` (default
+  640 px), compared in the MCP server — the bridge's `visual_compare` renders the
+  main camera only.
+- **Baselines** live next to the scenario: `<name>.visual/<key>/NN.png` (`00` = the
+  start screen) and an `index.json` naming each frame's step. `key` is what the
+  frames were taken on — platform plus the Simulator device and orientation, or
+  the Game view size (`darwin-game-2422x1483`,
+  `win32-ios-notch-device-small-1080x2338-portrait`) — because rendering differs
+  across operating systems, GPUs and sizes. A run on a key with no baseline, or a
+  step whose frame was recorded for another step label, reports the step as
+  visually unbaselined; it does not fail.
+- **Verdict.** A pixel differs when a channel moves more than `pixel_tolerance`
+  (24); a 16-px block with fewer than 4 differing pixels is noise; a step fails
+  `visual_changed` when the rest exceeds `threshold` (default 0.0002 = 0.02 % of
+  the compared pixels — about 50 px at 640 × 392). UI rendering is deterministic
+  (the same screen twice differs by 0 pixels), so the check is strict on purpose:
+  a renamed label (~0.1 %) fails it until re-recorded.
+- **Masks.** `mask`: hierarchy paths or suffixes (every visible node at or under
+  them, from the step's snapshot) and normalized `[x, y, w, h]` boxes (0–1,
+  top-left origin); `mask_numbers` (default true) masks visible texts with digits
+  — counters, timers, scores — as the screen signature does. A step's
+  `visual: false` skips it (an animated screen).
+- **Animation.** A frame that does not match is captured again (up to 3 times
+  within the step timeout) before the step fails; a `record` run keeps a frame
+  once two captures in a row match.
+- **Where.** The differing blocks are joined into regions (largest first),
+  described in percent of the screen — or "across the whole screen" — and by the
+  controls / texts they cover. The failing step carries `visual` {`ratio`,
+  `threshold`, `regions` [{`where`, `near`}], `baseline`, `current`, `diff`}; the diff
+  image is the frame in grey with changed pixels red, regions outlined yellow and
+  masked areas blue.
+
+```json
+"settings": { "visual": { "threshold": 0.0002, "pixel_tolerance": 24, "max_edge": 640, "mask": ["HUD/Ad", [0, 0, 1, 0.05]], "mask_numbers": true } }
+```
+
+`record: true` writes the frames of every step for the run's key (the key's
+folder is replaced as a whole) along with the rest of the baseline — only when
+every step executed; `record: true, visual: true` also turns `settings.visual` on
+in the file. Commit the frames with the scenario for the devices the team checks
+on. The result adds `visual` {`key`, `threshold`, `max_edge`, `passed`, `failed`,
+`unbaselined`, `recorded`, `skipped`} and, after a record, `baseline.visual`
+{`key`, `folder`, `frames`}; `list` / `show` name the recorded keys
+(`visual_keys`).
 
 ## `unity_open_mcp_playtest_session`
 

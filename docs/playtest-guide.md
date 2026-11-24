@@ -248,11 +248,23 @@ a scenario file in the project and replays it as a regression check:
    control, a relabelled screen.
 5. **Accept an intended change** by running again with `"record":true` (it writes
    the new baseline into the file) and showing the file's diff in the review.
+6. **Check how screens look, too** (optional): run once with
+   `"record":true,"visual":true` on the device the team checks on. Every step's
+   frame is stored beside the scenario (`<name>.visual/<platform-device>/`) and
+   later runs compare each screen as a picture: a moved button, a missing icon, a
+   wrong colour or a broken background fails `visual_changed` with where it
+   changed, the controls there, and a baseline · now · diff strip in the report.
+   Mask what moves on its own in `settings.visual.mask` (a banner, a particle
+   area); counters with digits are masked already. Record per platform and
+   device: a run on another one reports the pictures as unbaselined.
 
 On the demo fixture: export a crawl of the explore scene, replay it (it passes),
 then set PlayerPrefs `ExploreFixture.Variant` to `regression` and replay again —
 "Shop" reads "Store" (drift) and Credits no longer opens: the replay fails at that
-step with `screen_changed`, the same in both attempts.
+step with `screen_changed`, the same in both attempts. With a visual baseline the
+same variant fails already on the menu (0.09 % changed around "Store"), and the
+`restyle` variant — only the Settings panel repainted, the same controls and
+texts — fails at the Settings step, which only the picture check can see.
 
 ## Reading the report
 
