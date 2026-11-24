@@ -33,12 +33,13 @@ export const playtestSession = makeTool(
     "status, duration, the frames they wrote, and console errors / exceptions logged during them or right after " +
     "(matched by time from the bridge event stream). Other agents' calls are never recorded into your session. " +
     "ACTIONS: start {name, device (free-text summary; the Game view / Simulator state is read too), snapshot:true " +
-    "(take a player_state snapshot now and diff it at end) or use_snapshot:<existing name>} — one open session per " +
+    "(take a player_state snapshot now and diff it at end) or use_snapshot:<existing name>} — answers memory: the " +
+    "project's playtest notes and profile summary (playtest_memory; read them first) — one open session per " +
     "agent, a second start answers session_already_open; mark {label, verdict ok|bug|suspicious (default ok), note} " +
     "after each player-visible step — answers how many errors the step logged; check {label, placeholder_pattern, " +
     "min_touch_dp, capture} — snapshot the current screen and record its findings (text overflow, outside the safe " +
     "area, overlapping controls, placeholder-looking text with a default localisation-key pattern, touch targets under " +
-    "44 dp, zero-size controls) with a frame into the session; status — your open session, plus " +
+    "44 dp, zero-size controls; the project profile's detector settings and known findings apply) with a frame into the session; status — your open session, plus " +
     "orphaned ones; end {note, diff (default true)} — writes report.md + full frames + thumbnails (steps with " +
     "verdicts, the error list with first occurrence and stack, the state diff) and returns its path and a compact " +
     "summary: hand the path to the human. The log is appended to disk per call in the app-data folder " +

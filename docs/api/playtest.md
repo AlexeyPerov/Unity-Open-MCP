@@ -21,6 +21,7 @@ session as a report for a human. The workflow is in the
 | `unity_open_mcp_playtest_explore` | Explores the running game's UI on its own as a job: taps every untried button / toggle of each screen (never money, destructive or leaving controls), walks back or restarts, captures each new screen and files findings — overflow, safe area, overlaps, placeholder text, touch size, dead buttons, dead ends, console errors — into the open session | `com.unity.ugui` (server-local crawl over `ui_snapshot` and `inputsim_pointer`) |
 | `unity_open_mcp_playtest_devices` | Checks the game on several Device Simulator devices (× orientation) as a job — the current screen's detectors and a frame per device, or a crawl per device — groups the findings by the devices that show them and puts the Game view back | Unity 6 Editor (Device Simulator); `com.unity.ugui` for the checks (server-local) |
 | `unity_open_mcp_playtest_replay` | Replays a scenario — a session's own steps or a crawl, exported as a JSON file in the project — as a job with no model: targets by path and label, the expected screen after each step, console errors and new findings, optionally each screen as a picture against per-device frames; pass / fail per step, drift for tolerated changes, retries for flakiness, `record` for the baseline | `com.unity.ugui` (server-local, over the same tools an agent uses) |
+| `unity_open_mcp_playtest_memory` | Keeps what playtests learned in the project: `Playtests/NOTES.md` (boot, screen map, dangerous controls, known issues — session start returns it) and `Playtests/profile.json` (deny-list, devices, detector thresholds, back labels, console noise, accepted findings) that the crawler, the device matrix, the session check and the replay apply on their own | always (server-local; files only) |
 | `unity_open_mcp_playtest_session` | Records a playtest for a human: the agent's input / wait / capture / project-command calls with their frames and console errors, step verdicts, the state diff — `end` writes a Markdown report | always (server-local; no Unity code) |
 
 `inputsim_gesture` (in `input-simulation`) takes `capture_at_ms`: a tap and the
@@ -825,6 +826,15 @@ list and the price check. Denied controls are listed in the result and the repor
 | `fill_inputs` / `fill_text` | true / `Test` | Type into each visible text field once, before the buttons; what a field refused is in the step's `typed` |
 | `allow_unsandboxed` | false | Crawl without a snapshot or `playtest.begin` |
 
+An argument the call leaves out comes from the project's
+[profile](#unity_open_mcp_playtest_memory) when it has one (`explore`, then
+`detectors`); its `deny` / `allow` add to the call's. The profile's
+`back_labels` count as leaving controls (tried last), its `ignore_errors` are no
+`console_error` findings, and a finding its `known` list accepts goes to the
+result's `known[]` (with the reason) instead of `findings` — not counted, no
+effect on the verdict. The start answer and the result carry `profile: {file,
+applied}`.
+
 ### Result
 
 The job's `result`:
@@ -937,7 +947,12 @@ skipped with `orientation_not_applied`.
 
 `placeholder_pattern` and `min_touch_dp` default as for the crawler and apply to
 the crawls too unless `explore` sets its own. `settle_timeout_ms` (default 10000)
-bounds each device switch.
+bounds each device switch. The project [profile](#unity_open_mcp_playtest_memory)
+supplies `devices` / `preset`, `orientations`, `max_devices` and the detector
+settings when the call sets none, its `explore` section to a crawl per device,
+and its `known` list per device (a `device` in a known entry limits it to the
+devices whose id contains it): accepted findings are in `known[]`, not in
+`matrix`.
 
 ### Result
 
@@ -1072,10 +1087,11 @@ From the scenario's start (`from: "start"`, default) or the screen shown now
    actual title, and the controls / texts added and removed), `expect.texts`
    (`text_missing`), console errors and exceptions logged during the step — the
    bridge event stream by time plus the responses' `logs[]`; `ignore_errors` of
-   the scenario and of the call exempt them (`console_error`) — and the screen's
-   detector findings against `expect.findings`: a new `bug` finding fails
-   (`new_finding`), a new `suspicious` one is drift, a baseline finding gone is
-   listed as fixed.
+   the scenario, of the call and of the project
+   [profile](#unity_open_mcp_playtest_memory) exempt them (`console_error`) — and
+   the screen's detector findings against `expect.findings`: a new `bug` finding
+   fails (`new_finding`), a new `suspicious` one is drift, a baseline finding gone
+   is listed as fixed; a finding the profile's `known` list accepts is never new.
 
 A failed step ends the attempt (the rest are `skipped`) and the failing step gets
 a composed frame (`capture`: `failures` default, `steps` = every step, `none`).
@@ -1093,7 +1109,7 @@ step on the first four (`drift`).
 | `vars` | — | Values for the scenario's variables (`missing_vars` before anything is tapped) |
 | `ignore_errors` | — | More regexes, added to `settings.ignore_errors` |
 | `step_timeout_ms`, `same_screen` | the scenario's | Override its settings |
-| `placeholder_pattern`, `min_touch_dp` | as for the crawler | The findings check |
+| `placeholder_pattern`, `min_touch_dp` | the profile's `detectors`, else as for the crawler | The findings check |
 | `capture` | `failures` | Frames |
 | `max_minutes` | 20 (≤ 60) | Wall-clock budget for the whole run, retries included |
 | `allow_unsandboxed` | false | Replay without a snapshot or `playtest.begin` (the save changes for real) |
@@ -1194,6 +1210,76 @@ on. The result adds `visual` {`key`, `threshold`, `max_edge`, `passed`, `failed`
 {`key`, `folder`, `frames`}; `list` / `show` name the recorded keys
 (`visual_keys`).
 
+## `unity_open_mcp_playtest_memory`
+
+What earlier playtests of this project learned, kept in the project so the next
+session — or a teammate's agent — starts from it instead of re-learning boot,
+screens and dangers. The workflow is in the
+[Playtest guide](../playtest-guide.md#keep-what-a-playtest-learned).
+
+Two files next to the [scenarios](#scenarios), outside `Assets/`, versioned with
+the code, written only on request (by this tool or by hand):
+
+| File | Holds | Read by |
+|---|---|---|
+| `Playtests/NOTES.md` | Prose for the agent and the team: how to boot, the screen map, dangerous controls, known issues, flaky spots — `## ` sections of dated bullets | [`playtest_session start`](#unity_open_mcp_playtest_session) returns its first 4000 characters as `memory.notes` |
+| `Playtests/profile.json` | Settings the playtest tools apply on their own (below) | `playtest_explore`, `playtest_devices`, `playtest_session check`, `playtest_replay run`; `start` returns a summary as `memory.profile` |
+
+A local tool: files only, no bridge, no session needed (`map` reads a session
+log). It needs the server's project path (`project_unknown`).
+
+| `action` | Arguments | Does |
+|---|---|---|
+| `show` (default) | `section` | The notes (≤ 20000 characters, or one section: `section_not_found` lists them) with each section's bullet count, and the profile with its `problems` and a one-line `summary` per section |
+| `note` | `section`, `text` (≤ 2000) | Appends `- <date> — <text>` under `## <section>` (case-insensitive; created at the end when missing; the file from a template when missing). Secrets are redacted as in the session log. `Screen map` is reserved for `map` |
+| `map` | `session`, `crawl` | Writes the `## Screen map` section from a [crawl](#unity_open_mcp_playtest_explore) of a session (default your open session, else the project's latest ended one; `crawl` 1-based, default the last): every screen with the labels tapped to reach it from the start screen, the controls the deny-list skipped, dead ends, screens reached only after a restart. The next `map` replaces the section as a whole |
+| `set` | `profile` | A JSON merge patch (RFC 7386) into `profile.json`: objects merge, `null` removes a key, lists are replaced. The file is created when missing |
+| `add` | `profile` | Appends to the profile's lists — `explore.deny`, `explore.allow`, `devices.devices`, `devices.orientations`, `back_labels`, `ignore_errors`, `known` — skipping duplicates (a `known` entry by kind + path + text + device); another key is `invalid_arguments` (use `set`) |
+
+`set` and `add` validate the result before writing: on a problem nothing is
+written (`invalid_profile` with `problems`). Notes and the profile are capped at
+256 KB each (`memory_too_large`).
+
+### Profile
+
+```json
+{
+  "format": "unity-open-mcp.playtest-profile/1",
+  "explore": { "deny": ["^Reset progress$"], "restart": "command", "restart_command": "project.demo.playtest.boot", "fill_text": "Tester" },
+  "devices": { "devices": ["iPhone 13", "Tablet Small"], "orientations": ["portrait"] },
+  "detectors": { "min_touch_dp": 48 },
+  "back_labels": ["Назад", "Закрыть"],
+  "ignore_errors": ["^AdsSdk: no fill"],
+  "known": [
+    { "kind": "small_touch_target", "path": "Settings/CloseButton", "reason": "decorative; the whole header closes the panel" },
+    { "kind": "outside_safe_area", "path": "HUD/TopBar", "device": "Foldable", "reason": "the Simulator reports the hinge as an inset" }
+  ]
+}
+```
+
+| Section | Holds | Applies to |
+|---|---|---|
+| `explore` | Any [`playtest_explore` argument](#arguments) except `allow_unsandboxed` (isolation stays a per-call decision), checked against that tool's schema | `playtest_explore`; a crawl per device |
+| `devices` | `devices` or `preset`, `orientations`, `max_devices`, `settle_timeout_ms` | `playtest_devices` |
+| `detectors` | `placeholder_pattern`, `min_touch_dp` | Every detector run: crawl, device check, session `check`, replay |
+| `back_labels` | Labels (exact, case-insensitive) that leave a screen, besides the built-in English ones | The crawler tries them last |
+| `ignore_errors` | Regexes on a console message's first line | Never a `console_error` finding (crawl, devices) and never a `console_error` replay failure |
+| `known` | Accepted findings: `kind` and `reason` required, plus `path` (the element's hierarchy path or its tail, from a `/`) and / or `text` (words of the finding's label or detail), optional `device` (part of the device id) | Listed under `known[]` with the reason, not counted (crawl, devices, `check`, the report); a replay's new finding that matches is not new |
+
+**Precedence.** The call's own arguments win; then the tool's profile section;
+then `detectors`; then the built-in defaults. `deny`, `allow` and `ignore_errors`
+add up (the scenario's `settings.ignore_errors` too). The profile's
+`restart_command` / `restart_args` apply only when the run restarts by command
+and names no command itself; a call that sets `restart` to another mode takes
+none of them.
+
+**Invalid profile.** A file that is not JSON, has an unknown key, a value out of
+the tool's range, a bad regular expression, both `devices` and `preset`, or a
+`known` entry with neither `path` nor `text`: every tool that applies it refuses
+with `invalid_profile` and the `problems` — a broken deny-list must not crawl
+past "Reset progress". `playtest_session start` still opens the session and shows
+the problems in `memory.profile`.
+
 ## `unity_open_mcp_playtest_session`
 
 Records a playtest so a human can review it without replaying the agent's
@@ -1206,9 +1292,9 @@ tool's result and never fails one.
 
 | `action` | Arguments | Does |
 |---|---|---|
-| `start` | `name`, `device`, `snapshot` or `use_snapshot` | Opens a session for the calling agent and starts recording. `device` is a free-text summary for the report; the current Game view / Simulator state (`game_view get`) is recorded as well. `snapshot: true` takes a [`player_state`](#unity_open_mcp_player_state) snapshot (`playtest-<session>`) now — the start fails `snapshot_failed` rather than run unisolated; `use_snapshot` names an existing one. Either is diffed against the state at `end` |
+| `start` | `name`, `device`, `snapshot` or `use_snapshot` | Opens a session for the calling agent and starts recording, and answers `memory` — the project's [playtest notes and profile summary](#unity_open_mcp_playtest_memory) (`null` each when the project has none). `device` is a free-text summary for the report; the current Game view / Simulator state (`game_view get`) is recorded as well. `snapshot: true` takes a [`player_state`](#unity_open_mcp_player_state) snapshot (`playtest-<session>`) now — the start fails `snapshot_failed` rather than run unisolated; `use_snapshot` names an existing one. Either is diffed against the state at `end` |
 | `mark` | `label`, `verdict` (`ok` default, `bug`, `suspicious`), `note` | Closes a step: the recorded calls since the previous mark belong to it. Answers `since_last_mark` (`calls`, `errors`, `captures`, `failed`) — errors there are findings. A `label` over 120 characters is not refused: it is cut to 120 (ending in `…`), the full text starts the `note`, and the answer carries `labelTruncated` |
-| `check` | `label`, `placeholder_pattern`, `min_touch_dp`, `capture` (default true) | Snapshots the current screen and records its [findings](#findings) — text overflow, outside the safe area, overlapping controls, placeholder-looking text (default pattern below; `""` turns it off), touch targets under `min_touch_dp` (default 44 dp; 0 turns it off; skipped when the game reports no dpi), zero-size controls — with a frame, as one call of kind `check`. Answers `findings`, `counts`, `frame`, `min_touch_px`. Edit or play mode |
+| `check` | `label`, `placeholder_pattern`, `min_touch_dp`, `capture` (default true) | Snapshots the current screen and records its [findings](#findings) — text overflow, outside the safe area, overlapping controls, placeholder-looking text (default pattern below; `""` turns it off), touch targets under `min_touch_dp` (default 44 dp; 0 turns it off; skipped when the game reports no dpi), zero-size controls — with a frame, as one call of kind `check`. Answers `findings`, `counts`, `frame`, `min_touch_px`; the project profile's `detectors` fill the arguments left out and its `known` findings are answered as `known` (not counted). Edit or play mode |
 | `status` | — | Your open session (counts so far), plus `orphaned` sessions of this project whose MCP server process is gone |
 | `end` | `note`, `diff` (default true), `session` | Writes the report and closes the session; returns the report path and a compact `summary` |
 | `resume` | `session` | Re-attaches an orphaned session after an MCP server restart; recording continues, numbering continues |
@@ -1436,8 +1522,12 @@ operation (`timed_out`, a stall, `play_mode_exited`) are a flat top-level
 | `scenario_exists` | `playtest_replay` `export` to a file that exists, without `overwrite` |
 | `missing_vars` | `playtest_replay` `run`: the scenario uses `${name}` variables the call's `vars` do not give (`missing`) |
 | `nothing_to_export` / `screen_not_reached` | `playtest_replay` `export`: the session has no calls / no crawl to replay / the crawl never tapped its way to `to_screen` |
-| `no_session` | `playtest_replay` `export` without `session`, an open session or an ended one |
-| `project_unknown` | `playtest_replay`: the server has no project path (scenarios live in the project) |
+| `no_session` | `playtest_replay` `export` / `playtest_memory map` without `session`, an open session or an ended one |
+| `project_unknown` | `playtest_replay` / `playtest_memory`: the server has no project path (scenarios and the memory live in the project) |
+| `invalid_profile` | `playtest_explore` / `playtest_devices` / `playtest_session check` / `playtest_replay run`: `Playtests/profile.json` has problems (`problems`); `playtest_memory set` / `add`: the change would make it invalid (nothing written) or the file is not JSON |
+| `memory_too_large` | `playtest_memory`: `NOTES.md` or `profile.json` is over 256 KB (or a note would make it so) |
+| `section_not_found` | `playtest_memory show` with a `section` the notes do not have (the message lists them) |
+| `nothing_to_map` | `playtest_memory map`: the session has no finished crawl, or the crawl filed no screens |
 | `device_not_found` / `no_devices` | `playtest_devices` (job error): a `devices` name matches no or several devices (the message lists the catalog) / the preset or the Simulator lists none |
 | `session_not_found` / `session_ended` | `playtest_session` (and `playtest_replay` `export` with `session`): no such session for this project / it already ended (`report`) |
 | `session_owned_by_other_agent` | `playtest_session` `end` / `resume` / `mark` of a session another live agent or MCP server process owns |

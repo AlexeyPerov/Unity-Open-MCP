@@ -172,6 +172,13 @@ from the bridge event stream. Export reads the session log; it is the only reade
 that log besides the report. Visual baselines are compared in the server too (the
 PNG reader the report uses): composed frames against per-device frames stored next
 to the scenario (`<name>.visual/<key>/`), so the bridge contract stays unchanged.
+The project's playtest memory (`playtest_memory`) is two plain files beside the
+scenarios: `Playtests/NOTES.md` for prose and `Playtests/profile.json` for
+settings. The profile's sections are validated against the crawler's and the
+device matrix's own input schemas, so a new tool argument is a valid profile key
+without a second definition; the router merges it under each call's arguments
+before the engines parse them, and the engines take only its back labels,
+console noise and accepted findings directly.
 
 ## Related docs
 

@@ -98,6 +98,10 @@ A thrown exception reaches the agent as `execution_error` with the message, so
    (drop `snapshot` when the project hook isolates the save). From here every
    input / wait / capture / project-command call you make is logged with its
    frames and console errors.
+4. **Read the memory.** The start answers `memory`: the project's playtest notes
+   (how to boot, the screen map, dangerous controls, known issues) and a summary
+   of its profile — read them before you play; see
+   [Keep what a playtest learned](#keep-what-a-playtest-learned).
 
 ### 2. Boot
 
@@ -153,6 +157,8 @@ stops a wait at the first exception instead of timing out.
    the first `get`).
 4. Hand the report path to the human, with the bug / suspicious steps and the
    errors from the summary.
+5. Write back what the next session needs:
+   [Keep what a playtest learned](#keep-what-a-playtest-learned).
 
 ## Let the crawler explore
 
@@ -265,6 +271,39 @@ step with `screen_changed`, the same in both attempts. With a visual baseline th
 same variant fails already on the menu (0.09 % changed around "Store"), and the
 `restyle` variant — only the Settings panel repainted, the same controls and
 texts — fails at the Settings step, which only the picture check can see.
+
+## Keep what a playtest learned
+
+Every session otherwise starts from zero: how to boot, which screens exist, which
+buttons wipe the save, which findings the team already accepted.
+[`playtest_memory`](api/playtest.md#unity_open_mcp_playtest_memory) keeps that in
+the project, next to the scenarios, for the next session and the rest of the team:
+
+- **Notes** (`Playtests/NOTES.md`) — `playtest_session start` returns them, so
+  the next agent reads them first. Add a fact a later session can act on with
+  `playtest_memory {"action":"note","section":"Boot","text":"…"}` (sections such
+  as Boot, Dangerous controls, Known issues, Flaky spots; a date is added). After
+  a crawl, `{"action":"map"}` writes its screen map — each screen and the labels
+  tapped to reach it — as a section the next map replaces.
+- **Profile** (`Playtests/profile.json`) — settings the tools apply on their own,
+  so you stop repeating them: a project deny-list
+  (`{"action":"add","profile":{"explore":{"deny":["Reset progress"]}}}`), the boot
+  command as the crawler's restart, the team's devices, a stricter touch size,
+  localised back labels (`"back_labels":["Назад"]`), console noise to ignore, and
+  findings that are not bugs (`"known":[{"kind":"small_touch_target","path":"Settings/Close","reason":"…"}]`
+  — listed as known with the reason, not counted, and never a replay's new
+  finding). A call's own arguments still win; lists add up.
+
+Both are plain files: review and commit them with the code. A profile with a
+mistake (a bad regex, an unknown key) makes the tools refuse with
+`invalid_profile` rather than crawl without its deny-list; `set` / `add` check a
+change before they write it.
+
+On the demo: `demo/Playtests/NOTES.md` describes the fixtures (boot, the planted
+problems, the variants). Add a profile
+(`{"action":"add","profile":{"known":[{"kind":"dead_button","path":"Settings/HelpButton","reason":"planted"}]}}`)
+and crawl the explore fixture again: the dead button is listed under known, the
+counts drop by one.
 
 ## Reading the report
 

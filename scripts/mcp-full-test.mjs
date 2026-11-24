@@ -381,6 +381,8 @@ function buildSuite() {
   // Scenario files are read without a session; a run needs one (the replay itself: manual checklist).
   s("playtest_replay_list", "B", "unity_open_mcp_playtest_replay", { action: "list" });
   s("playtest_replay_no_session", "B", "unity_open_mcp_playtest_replay", { scenario: "s0-missing" }, { expect: "tolerate", tolerate: ["no_open_session"] });
+  // The project's playtest memory is read from files (no bridge, no session; writing it: manual checklist).
+  s("playtest_memory_show", "B", "unity_open_mcp_playtest_memory", { action: "show" });
   // Typing needs play mode; S0 runs in edit mode, so the guard answers (typing: manual checklist).
   s("inputsim_text_edit_mode", "B", "unity_open_mcp_inputsim_text", { text: "s0", target_text: "Nickname" }, { expect: "tolerate", tolerate: ["play_mode_required"] });
 

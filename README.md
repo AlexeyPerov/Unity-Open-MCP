@@ -67,7 +67,9 @@ device or across a list of phones and tablets, with each problem's devices named
 A flow found once — by the crawler or by the agent's own steps — becomes a
 scenario file in the project that replays without a model after every change:
 pass or fail per step, what changed on screen, and whether a failure is flaky —
-optionally down to the pixels, against per-device frames of each screen.
+optionally down to the pixels, against per-device frames of each screen. What a
+playtest learns — how to boot, the screen map, the controls never to tap, the
+findings the team accepted — stays in the project for the next session.
 
 > **User:** Smoke-test the shop on an iPhone 13.<br>
 > **Agent:** Five steps passed; tapping *Buy* threw a `NullReferenceException`.

@@ -26,6 +26,7 @@ import {
   DeviceMatrix, diagonalInches, groupAcrossDevices, isTablet, normalizeOrientations, resolveDevices, selectPreset, type DeviceInfo,
 } from "./playtest/devices.js";
 import { parseDevicesOptions } from "./playtest/explore-job.js";
+import { devicesArgsWithProfile, memoryOptions, type PlaytestProfile } from "./playtest/profile.js";
 
 const body = (result: CallToolResult) => JSON.parse((result.content.find(c => c.type === "text") as { text: string }).text);
 const ok = (output: unknown, logs: unknown[] = []): CallToolResult =>
@@ -207,6 +208,26 @@ test("devices engine: the current screen on each device, findings grouped by dev
   assert.deepEqual(result.restored, { restored: true, to: { action: "set_resolution", size_label: "Free Aspect" } });
   assert.ok(d.labels.includes("Check on iOS Classic (750x1334) (portrait)"));
   assert.ok(result.entries.every((e: any) => typeof e.frame === "string"));
+});
+
+test("devices engine: the project profile's devices, known findings per device and console noise", async () => {
+  const sim = new FakeSimulator();
+  const profile: PlaytestProfile = {
+    devices: { devices: ["Foldable", "iOS Notch Device Small"] },
+    known: [{ kind: "outside_safe_area", path: "C/Top", device: "Foldable", reason: "the foldable's hinge inset is reported wrong by the Simulator" }],
+  };
+  const { args, applied } = devicesArgsWithProfile({}, profile);
+  assert.deepEqual(applied, ["devices.devices"]);
+  const options = parseDevicesOptions(args, memoryOptions(profile));
+  assert.ok(options.memory?.known && options.explore.memory?.known, "the crawl per device gets the profile too");
+  const result = await new DeviceMatrix(options, deps(sim).deps).run() as Record<string, any>;
+  assert.deepEqual(result.entries.map((e: any) => e.device), ["Foldable Device (960x2658)", "iOS Notch Device Small (1080x2338)"]);
+  const top = result.matrix.find((g: any) => g.kind === "outside_safe_area");
+  assert.deepEqual(top.on, ["iOS Notch Device Small (1080x2338) (portrait)"], "known on the foldable only");
+  assert.deepEqual(result.known.map((k: any) => [k.kind, k.device]), [["outside_safe_area", "Foldable Device (960x2658)"]]);
+  assert.deepEqual(result.finding_counts, { bug: 1, suspicious: 0 });
+  // The call's own device list wins over the profile's.
+  assert.deepEqual(devicesArgsWithProfile({ preset: "tablets" }, profile).args, { preset: "tablets" });
 });
 
 test("devices engine: a crawl per device restarts the game between devices; cancel still puts the view back; no Simulator fails", async () => {

@@ -95,6 +95,25 @@ const errorKey = (e: Record<string, any>) => firstLine(String(e.message ?? "")).
 const SPECIFIC_TYPES = new Set(["exception", "assert"]);
 const sameMessage = (a: Record<string, any>, b: Record<string, any>) => firstLine(String(a.message ?? "")).slice(0, 200) === firstLine(String(b.message ?? "")).slice(0, 200);
 
+/** The project profile a run applied, and the findings it accepted as known (listed, not counted). */
+function profileLines(run: Record<string, any>, withKnown = true): string[] {
+  const out: string[] = [];
+  const profile = run.profile as { file?: string; applied?: string[] } | undefined;
+  if (profile && Array.isArray(profile.applied) && profile.applied.length)
+    out.push(`Project profile ${code(String(profile.file ?? "Playtests/profile.json"))}: ${cell(profile.applied.join(", "))}.`, "");
+  const known = withKnown && Array.isArray(run.known) ? run.known as Array<Record<string, any>> : [];
+  if (known.length) {
+    out.push(`Known findings (accepted in the profile, not counted): ${known.length}`, "");
+    for (const k of known.slice(0, 20)) {
+      const where = [k.label ? `'${clip(String(k.label), 60)}'` : null, k.path ? code(String(k.path)) : null].filter(Boolean).join(" ");
+      out.push(`- ${code(String(k.kind))}${where ? ` ${cell(where)}` : ""}${k.device ? ` on ${cell(String(k.device))}` : ""} — ${cell(clip(String(k.reason ?? ""), 160))}`);
+    }
+    if (known.length > 20) out.push(`- … ${known.length - 20} more`);
+    out.push("");
+  }
+  return out;
+}
+
 function duration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
@@ -378,8 +397,9 @@ export function writeReport(input: ReportInput): ReportSummary {
       md.push(`| Taps | ${run.steps ?? 0} in ${duration(Number(run.duration_ms ?? 0))}${run.restarts ? `, ${run.restarts} restart(s)` : ""} |`);
       md.push(`| Screens | ${coverage.screens ?? 0} |`);
       md.push(`| Controls | ${coverage.actions_tried ?? 0} of ${coverage.actions_total ?? 0} tried${coverage.untried ? `, ${coverage.untried} untried` : ""}${Array.isArray(run.denied) && run.denied.length ? `, ${run.denied.length} denied` : ""} |`);
-      md.push(`| Findings | bug ${counts.bug ?? 0} · suspicious ${counts.suspicious ?? 0} |`);
+      md.push(`| Findings | bug ${counts.bug ?? 0} · suspicious ${counts.suspicious ?? 0}${Array.isArray(run.known) && run.known.length ? ` · known ${run.known.length}` : ""} |`);
       md.push("");
+      md.push(...profileLines(run));
       const screens = Array.isArray(run.screens) ? run.screens : [];
       if (screens.length) {
         md.push("| Screen | Title | Frame | Controls tried | Denied | Notes |", "|---|---|---|---|---|---|");
@@ -433,6 +453,8 @@ export function writeReport(input: ReportInput): ReportSummary {
       md.push(`### Devices run ${i + 1} — ${run.screens === "explore" ? "a crawl per device" : "the current screen"} — ${cell(String(run.stop_reason ?? "?"))}`, "");
       md.push(`${run.checked ?? 0} device check(s) in ${duration(Number(run.duration_ms ?? 0))}; bug ${counts.bug ?? 0} · suspicious ${counts.suspicious ?? 0}; ` +
         `the Game view ${restored.restored ? "was put back" : `was not put back${restored.error ? ` (${cell(clip(JSON.stringify(restored.error), 120))})` : ""}`}.`, "");
+      // A crawl per device lists its known findings in its Exploration run.
+      md.push(...profileLines(run, run.screens !== "explore"));
       const rows = Array.isArray(run.entries) ? run.entries : [];
       if (rows.length) {
         const explore = run.screens === "explore";
@@ -475,6 +497,7 @@ export function writeReport(input: ReportInput): ReportSummary {
       const attempts = Array.isArray(run.attempts) ? run.attempts as Array<Record<string, any>> : [];
       md.push(`### Replay ${i + 1}: ${code(String(scenario.name ?? "?"))} — ${run.verdict}${run.consistent ? " (the same step failed every attempt)" : ""}`, "");
       md.push(`${scenario.file ? `File ${code(String(scenario.file))} · ` : ""}${scenario.steps ?? 0} step(s) · ${duration(Number(run.duration_ms ?? 0))}${run.record ? " · baseline run" : ""}${run.stop_reason && run.stop_reason !== "completed" ? ` · stopped: ${run.stop_reason}` : ""}`, "");
+      md.push(...profileLines(run, false));
       if (attempts.length > 1 || attempts.some(a => !a.passed))
         md.push(`Attempts: ${attempts.map(a => `${a.attempt} ${a.passed ? "passed" : `failed${a.failed_step !== undefined ? ` at step ${a.failed_step} (${a.reason})` : ""}`}`).join(" · ")}`, "");
       const rows = Array.isArray(run.steps) ? run.steps as Array<Record<string, any>> : [];
@@ -557,6 +580,7 @@ export function writeReport(input: ReportInput): ReportSummary {
       if (!list.length) md.push("No findings.", "");
       for (const f of list) md.push(`- **${f.severity}** ${code(String(f.kind))} — ${findingWhere(f) || "the screen"}: ${cell(clip(String(f.detail ?? ""), 200))}`);
       if (list.length) md.push("");
+      md.push(...profileLines(check));
       for (const note of Array.isArray(check.notes) ? check.notes : []) notes.push(`Check ${i + 1}: ${String(note)}`);
     });
   }

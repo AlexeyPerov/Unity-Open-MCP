@@ -130,7 +130,7 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "steps, verdicts, frames, the errors each step caused → a Markdown report; check = the current " +
       "screen's findings) and let a crawler explore the UI on its own (playtest_explore: every screen " +
       "and button, deny-list, findings such as overflow, safe area, overlaps, dead buttons and dead ends) and check it across devices (playtest_devices: each Simulator device × orientation, findings by device), " +
-      "then replay a found flow as a regression check after a change (playtest_replay: export a session or a crawl as a scenario, run it with no model, pass / fail per step, flaky vs broken, record a baseline).",
+      "then replay a found flow as a regression check after a change (playtest_replay: export a session or a crawl as a scenario, run it with no model, pass / fail per step, flaky vs broken, record a baseline), and keep what playtests learned in the project (playtest_memory: notes, screen map, deny-list, accepted findings the tools apply).",
     keywords: [
       "playtest",
       "playtests",
@@ -210,6 +210,11 @@ export const INTENT_TAGS: readonly IntentTagEntry[] = [
       "regression-playtest",
       "flaky-ui",
       "re-check-flow",
+      "playtest-memory",
+      "playtest-notes",
+      "playtest-profile",
+      "screen-map",
+      "known-findings",
     ],
   },
   {

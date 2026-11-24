@@ -32,7 +32,8 @@ export const playtestDevices = makeTool(
     "and play mode). REQUIRES your open playtest_session (no_open_session); each device check is recorded into it " +
     "with its frame, and the report gets a Devices section. Result: entries[] (device, orientation, screen, " +
     "safe_area, insets, counts, findings, frame), matrix[] (each finding with the devices that show it: on 2 of 4 " +
-    "devices), skipped[] (orientation unsupported / not applied, not_settled), restored, finding_counts. Unity 6 " +
+    "devices), known[] (findings the project profile Playtests/profile.json accepts; its devices / preset, orientations " +
+    "and detector settings apply when the call sets none), skipped[] (orientation unsupported / not applied, not_settled), restored, finding_counts. Unity 6 " +
     "Editor (Device Simulator).",
   {
     properties: {

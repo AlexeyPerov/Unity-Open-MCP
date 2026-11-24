@@ -59,7 +59,7 @@ import { lockPath, readInstanceLock, classifyInstance, isPidAlive, hasRecentPend
 import { PORT_ENV_VAR, EXPECTED_BRIDGE_WIRE_CONTRACT, BRIDGE_HOST_SAFE_TIMEOUT_CAP_MS } from "./constants.js";
 import { findUnityForProject, readProcessCommandLine } from "./running-unity.js";
 import { PlaytestRecorder, PlaytestError, PLAYTEST_SESSION_TOOL, type ToolCaller } from "./playtest/recorder.js";
-import { secretEnvValues } from "./playtest/redact.js";
+import { Redactor, secretEnvValues } from "./playtest/redact.js";
 import { sessionsRoot, type SessionOwner } from "./playtest/session-store.js";
 import { PLAYTEST_SESSION_ACTION_KEYS } from "./tools/playtest-session.js";
 import { PLAYTEST_EXPLORE_TOOL } from "./tools/playtest-explore.js";
@@ -69,6 +69,22 @@ import { ExploreError } from "./playtest/explore.js";
 import { PLAYTEST_REPLAY_ACTION_KEYS, PLAYTEST_REPLAY_TOOL } from "./tools/playtest-replay.js";
 import { exportAction, listAction, prepareReplay, replayOperation, showAction } from "./playtest/replay-job.js";
 import { ScenarioError } from "./playtest/scenario.js";
+import { PLAYTEST_MEMORY_ACTION_KEYS, PLAYTEST_MEMORY_TOOL } from "./tools/playtest-memory.js";
+import {
+  MemoryError, PROFILE_FILE, appendNote, changeProfile, detectorArgsWithProfile, devicesArgsWithProfile, exploreArgsWithProfile, memoryBlock, memoryOptions,
+  readProfile, requireProfile, showNotes, summarizeProfile, writeScreenMap, type PlaytestProfile,
+} from "./playtest/profile.js";
+
+/** What the project profile supplies to a run: its argument defaults plus the lists the engine applies itself. */
+function profileApplied(applied: string[], profile: PlaytestProfile | null, lists: Array<"back_labels" | "ignore_errors" | "known">): { file: string; applied: string[] } | undefined {
+  if (!profile) return undefined;
+  const all = [...applied];
+  for (const key of lists) {
+    const n = (profile[key] as unknown[] | undefined)?.length ?? 0;
+    if (n) all.push(`${key} (${n})`);
+  }
+  return all.length ? { file: PROFILE_FILE, applied: all } : undefined;
+}
 
 // M31-optimizations Plan 1 / L14 — opt-in route-logging gate. Resolved once at
 // module load into a boolean; the per-dispatch log sites read the boolean
@@ -1117,6 +1133,8 @@ export class ToolRouter implements Router {
       [PLAYTEST_DEVICES_TOOL, (l, a, id) => this.routePlaytestDevices(a, l, id)],
       // Scenario replay: export / list / show are file actions; run is the same kind of job.
       [PLAYTEST_REPLAY_TOOL, (l, a, id) => this.routePlaytestReplay(a, l, id)],
+      // Project playtest memory: NOTES.md + profile.json in the project (files only).
+      [PLAYTEST_MEMORY_TOOL, async (_l, a, id) => this.routePlaytestMemory(a, id)],
       // Live tool whose release lookups (npm latest, GitHub tag) run HERE so
       // the Editor main thread never blocks on the network.
       ["unity_open_mcp_upgrade", (l, a) => this.routeUpgrade(a, l)],
@@ -1367,17 +1385,17 @@ export class ToolRouter implements Router {
         (this.eventStream as Partial<BridgeEventStream>).ensureSubscription?.call(this.eventStream);
       let body: Record<string, unknown>;
       switch (action) {
-        case "start": body = await recorder.start(owner, args, call); break;
+        case "start": body = this.withMemory(await recorder.start(owner, args, call)); break;
         case "mark": body = recorder.mark(owner, args, sessionArg); break;
-        case "check": body = await runCheck(recorder, owner, args, call); break;
+        case "check": body = await runCheck(recorder, owner, args, call, requireProfile(this.projectPath)); break;
         case "status": body = recorder.status(owner); break;
         case "resume": body = recorder.resume(owner, sessionArg); break;
-        case "end": body = await recorder.end(owner, args, call); break;
+        case "end": body = this.memoryReminder(await recorder.end(owner, args, call)); break;
         default: body = recorder.list(owner, typeof args.limit === "number" ? args.limit : 10);
       }
       return sourceResult(body, "local");
     } catch (error) {
-      if (error instanceof PlaytestError)
+      if (error instanceof PlaytestError || error instanceof MemoryError)
         return sourceResult({ error: { code: error.code, message: error.message }, ...error.detail }, "local", true);
       return localError("internal_error", error instanceof Error ? error.message : String(error));
     }
@@ -1402,8 +1420,14 @@ export class ToolRouter implements Router {
         session: isolation.session,
         agentNextSteps: ["Invoke the project's playtest.begin command (project_commands list query playtest), or end this session and start one with snapshot:true — or pass allow_unsandboxed:true if the save may change."] }, "local", true);
     let options;
-    try { options = parseExploreOptions(args); }
-    catch (error) {
+    let profile: ReturnType<typeof profileApplied>;
+    try {
+      const project = requireProfile(this.projectPath);
+      const merged = exploreArgsWithProfile(args, project);
+      profile = profileApplied(merged.applied, project, ["back_labels", "ignore_errors", "known"]);
+      options = parseExploreOptions(merged.args, memoryOptions(project));
+    } catch (error) {
+      if (error instanceof MemoryError) return sourceResult({ error: { code: error.code, message: error.message }, ...error.detail }, "local", true);
       return localError(error instanceof ExploreError ? error.code : "invalid_arguments", error instanceof Error ? error.message : String(error));
     }
     const call = async (tool: string, toolArgs: Record<string, unknown>) => {
@@ -1417,8 +1441,9 @@ export class ToolRouter implements Router {
     if (probed.mode !== "play")
       return sourceResult({ error: { code: "play_mode_required", message: "The crawler explores the running game; the Editor is in edit mode." },
         agentNextSteps: ["editor_set_state {\"state\":\"play\"}, editor_status {\"wait_until\":\"playing\"}, boot to the first real screen, then call playtest_explore again."] }, "local", true);
-    return this.startPlaytestJob(PLAYTEST_EXPLORE_TOOL, exploreOperation({ options, call, recorder, owner, session: isolation.session }), args, identity, {
+    return this.startPlaytestJob(PLAYTEST_EXPLORE_TOOL, exploreOperation({ options, call, recorder, owner, session: isolation.session, ...(profile ? { profile } : {}) }), args, identity, {
       session: isolation.session,
+      ...(profile ? { profile } : {}),
       isolation: { snapshot: isolation.snapshot, hook: isolation.hook, unsandboxed: !isolation.snapshot && !isolation.hook },
       budgets: { max_steps: options.maxSteps, max_minutes: options.maxMinutes, max_screens: options.maxScreens, restart: options.restart, max_restarts: options.maxRestarts },
     }, "The crawl is running.", "Do not drive the game yourself while it runs: your taps would mix into its screens.");
@@ -1438,8 +1463,14 @@ export class ToolRouter implements Router {
       return sourceResult({ error: { code: "no_open_session", message: "The device checks are recorded into your playtest session: start one first." },
         agentNextSteps: ["playtest_session {\"action\":\"start\",\"name\":\"Devices\"} (snapshot:true when the run crawls), then call playtest_devices again."] }, "local", true);
     let options;
-    try { options = parseDevicesOptions(args); }
-    catch (error) {
+    let profile: ReturnType<typeof profileApplied>;
+    try {
+      const project = requireProfile(this.projectPath);
+      const merged = devicesArgsWithProfile(args, project);
+      profile = profileApplied(merged.applied, project, ["back_labels", "ignore_errors", "known"]);
+      options = parseDevicesOptions(merged.args, memoryOptions(project));
+    } catch (error) {
+      if (error instanceof MemoryError) return sourceResult({ error: { code: error.code, message: error.message }, ...error.detail }, "local", true);
       return localError(error instanceof ExploreError ? error.code : "invalid_arguments", error instanceof Error ? error.message : String(error));
     }
     const call = async (tool: string, toolArgs: Record<string, unknown>) => {
@@ -1458,8 +1489,9 @@ export class ToolRouter implements Router {
         return sourceResult({ error: { code: "play_mode_required", message: "A crawl per device explores the running game; the Editor is in edit mode." },
           agentNextSteps: ["editor_set_state {\"state\":\"play\"}, editor_status {\"wait_until\":\"playing\"}, boot to the first real screen, then call playtest_devices again."] }, "local", true);
     }
-    return this.startPlaytestJob(PLAYTEST_DEVICES_TOOL, devicesOperation({ options, call, recorder, owner, session: isolation.session }), args, identity, {
+    return this.startPlaytestJob(PLAYTEST_DEVICES_TOOL, devicesOperation({ options, call, recorder, owner, session: isolation.session, ...(profile ? { profile } : {}) }), args, identity, {
       session: isolation.session,
+      ...(profile ? { profile } : {}),
       plan: { devices: options.devices ?? `preset ${options.preset}`, orientations: options.orientations, screens: options.screens, max_devices: options.maxDevices },
     }, "The device run is going.", "Do not change the Game view or drive the game while it runs; the view it found is put back at the end.");
   }
@@ -1481,7 +1513,7 @@ export class ToolRouter implements Router {
     const recorder = this.playtest;
     const owner = this.ownerOf(identity);
     const fail = (error: unknown): CallToolResult => {
-      if (error instanceof ScenarioError || error instanceof PlaytestError)
+      if (error instanceof ScenarioError || error instanceof PlaytestError || error instanceof MemoryError)
         return sourceResult({ error: { code: error.code, message: error.message }, ...error.detail }, "local", true);
       return localError("internal_error", error instanceof Error ? error.message : String(error));
     };
@@ -1500,7 +1532,13 @@ export class ToolRouter implements Router {
         session: isolation.session,
         agentNextSteps: ["Invoke the project's playtest.begin command, or end this session and start one with snapshot:true — or pass allow_unsandboxed:true if the save may change."] }, "local", true);
     let prepared;
-    try { prepared = prepareReplay(this.projectPath, args); } catch (error) { return fail(error); }
+    let profile: ReturnType<typeof profileApplied>;
+    try {
+      const project = requireProfile(this.projectPath);
+      const merged = detectorArgsWithProfile(args, project);
+      profile = profileApplied(merged.applied, project, ["ignore_errors", "known"]);
+      prepared = prepareReplay(this.projectPath, merged.args, memoryOptions(project));
+    } catch (error) { return fail(error); }
     const call = async (tool: string, toolArgs: Record<string, unknown>) => {
       const definition = ALL_TOOLS.find(t => t.name === tool);
       return this.routeDispatch(live, tool, definition ? withSchemaDefaults(definition, toolArgs) : toolArgs, identity);
@@ -1516,12 +1554,94 @@ export class ToolRouter implements Router {
     const stream = this.eventStream as Partial<BridgeEventStream>;
     const subscribe = (feed: { onEvent(event: BridgeEvent): void }) => stream.addListener?.call(this.eventStream, event => feed.onEvent(event)) ?? (() => {});
     const { scenario, options } = prepared;
-    return this.startPlaytestJob(PLAYTEST_REPLAY_TOOL, replayOperation({ ...prepared, projectPath: this.projectPath, call, recorder, owner, session: isolation.session, subscribe }), args, identity, {
+    return this.startPlaytestJob(PLAYTEST_REPLAY_TOOL, replayOperation({ ...prepared, projectPath: this.projectPath, call, recorder, owner, session: isolation.session, subscribe, ...(profile ? { profile } : {}) }), args, identity, {
       session: isolation.session,
+      ...(profile ? { profile } : {}),
       scenario: { name: scenario.name, steps: scenario.steps.length, start: scenario.start.restart, unbaselined: scenario.steps.filter(s => !s.expect?.screen).length },
       plan: { from: options.from, retries: options.record ? 0 : options.retries, record: options.record, strict: options.strict, capture: options.capture },
       isolation: { snapshot: isolation.snapshot, hook: isolation.hook, unsandboxed: !isolation.snapshot && !isolation.hook },
     }, options.record ? "The baseline run is going." : "The replay is running.", "Do not drive the game yourself while it runs: your taps would mix into its steps.");
+  }
+
+  /**
+   * `unity_open_mcp_playtest_memory` — local route over two files in the
+   * project (Playtests/NOTES.md, Playtests/profile.json); map reads a session
+   * log through the recorder. No bridge.
+   */
+  private routePlaytestMemory(args: Record<string, unknown>, identity: RequestIdentity): CallToolResult {
+    const action = String(args.action ?? "show") as keyof typeof PLAYTEST_MEMORY_ACTION_KEYS;
+    const allowed = PLAYTEST_MEMORY_ACTION_KEYS[action];
+    if (!allowed) return localError("invalid_arguments", `Unknown action '${action}'.`);
+    const extra = Object.keys(args).filter(key => key !== "action" && !allowed.includes(key));
+    if (extra.length) return localError("invalid_arguments", `Keys not used by ${action}: ${extra.join(", ")}.`);
+    if (!this.projectPath) return localError("project_unknown", "The playtest memory lives in the Unity project, and this server has no project path (set UNITY_PROJECT_PATH or start it in the project).");
+    const project = this.projectPath;
+    const redactor = new Redactor([resolveAuthToken(project), ...secretEnvValues()]);
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+      switch (action) {
+        case "note": {
+          if (typeof args.section !== "string" || typeof args.text !== "string")
+            return localError("invalid_arguments", "note needs section (a heading such as Boot, Dangerous controls, Known issues, Flaky spots) and text.");
+          const written = appendNote(project, args.section, redactor.text(args.text), today);
+          return sourceResult({ status: "ok", action, ...written }, "local");
+        }
+        case "map": {
+          const record = this.playtest.sessionRecord(this.ownerOf(identity), typeof args.session === "string" ? args.session : undefined);
+          const written = writeScreenMap(project, record.entries, record.id, typeof args.crawl === "number" ? args.crawl : undefined, today, t => redactor.text(t));
+          return sourceResult({
+            status: "ok", action, ...written,
+            agentNextSteps: ["Add what the map cannot say — which screen needs a boot step, which controls are dangerous, what is flaky — with playtest_memory {\"action\":\"note\",\"section\":\"…\",\"text\":\"…\"}."],
+          }, "local");
+        }
+        case "set":
+        case "add": {
+          const written = changeProfile(project, action, args.profile);
+          return sourceResult({ status: "ok", action, ...written }, "local");
+        }
+        default: {
+          const notes = showNotes(project, typeof args.section === "string" ? args.section : undefined);
+          const read = readProfile(project);
+          const profile = !read.exists ? null
+            : { file: PROFILE_FILE, ...(read.problems.length ? { problems: read.problems } : {}), value: read.raw, ...(read.profile ? { summary: summarizeProfile(read.profile) } : {}) };
+          return sourceResult({
+            status: "ok", action: "show", notes, profile,
+            ...(!notes && !profile ? {
+              agentNextSteps: [
+                "This project has no playtest memory yet. After a playtest, record what a later session needs: playtest_memory {\"action\":\"note\",\"section\":\"Boot\",\"text\":\"…\"}, the screen map of a crawl ({\"action\":\"map\"}), and settings the tools should apply ({\"action\":\"add\",\"profile\":{\"explore\":{\"deny\":[\"…\"]}}}).",
+              ],
+            } : {}),
+          }, "local");
+        }
+      }
+    } catch (error) {
+      if (error instanceof MemoryError || error instanceof PlaytestError)
+        return sourceResult({ error: { code: error.code, message: error.message }, ...error.detail }, "local", true);
+      return localError("internal_error", error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** playtest_session start: what the project's playtest memory holds (never fails the start). */
+  private withMemory(body: Record<string, unknown>): Record<string, unknown> {
+    let memory: Record<string, unknown>;
+    try { memory = memoryBlock(this.projectPath); } catch { return body; }
+    const steps = Array.isArray(body.agentNextSteps) ? [...body.agentNextSteps as string[]] : [];
+    if (memory.notes || memory.profile) {
+      steps.unshift("Read memory first: the project's playtest notes (how to boot, screens, dangerous controls, known issues) and the profile the crawler / devices / replay apply on their own.");
+      if ((memory.profile as { problems?: unknown } | null)?.problems)
+        steps.unshift(`${PROFILE_FILE} has problems (memory.profile.problems): playtest_explore / devices / replay / check refuse until it is fixed (playtest_memory set, or edit the file).`);
+    } else {
+      steps.push("This project has no playtest memory yet (Playtests/NOTES.md, Playtests/profile.json): at the end, write what a later session needs with playtest_memory.");
+    }
+    return { ...body, memory, agentNextSteps: steps };
+  }
+
+  /** playtest_session end: remind the agent to write back what it learned. */
+  private memoryReminder(body: Record<string, unknown>): Record<string, unknown> {
+    if (!this.projectPath) return body;
+    const steps = Array.isArray(body.agentNextSteps) ? [...body.agentNextSteps as string[]] : [];
+    steps.push("Keep what this session learned for the next one: playtest_memory note (boot steps, dangerous controls, known issues, flaky spots), map (the screen map of a crawl), add (deny-list entries, findings that are not bugs as known).");
+    return { ...body, agentNextSteps: steps };
   }
 
   /** Register a per-call playtest job operation, start it, and answer with its id once it got (or queued for) its slot. */

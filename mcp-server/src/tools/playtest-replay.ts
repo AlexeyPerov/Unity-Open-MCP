@@ -52,7 +52,8 @@ export const playtestReplay = makeTool(
     "every step is also compared as a picture — a composed frame (max_edge 640) against <scenario>.visual/<key>/NN.png " +
     "(key = platform + Simulator device / orientation or Game view size; recorded by record:true); a step whose frame " +
     "differs over threshold (default 0.02% of pixels; stray pixels and masks — mask paths, digit texts — ignored) fails " +
-    "visual_changed with the regions and the controls there, the baseline, the current frame and a diff image. REQUIRES your open playtest_session (each step is " +
+    "visual_changed with the regions and the controls there, the baseline, the current frame and a diff image. The " +
+    "project profile (Playtests/profile.json) adds its detector settings, ignore_errors and known findings. REQUIRES your open playtest_session (each step is " +
     "recorded with its frame — capture: failures (default) | steps | none — and the report gets a Replays section) " +
     "and an isolated save (start {snapshot:true} or the project's playtest.begin) unless allow_unsandboxed; play mode " +
     "unless the run restarts play mode. Needs the live Editor; requires com.unity.ugui.",

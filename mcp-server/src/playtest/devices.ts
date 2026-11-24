@@ -18,7 +18,7 @@ import {
   Explorer, ExploreError, collectLogs, restartGame,
   type ExploreOptions, type ExploreRecorder, type RecordedStep, type ToolCaller,
 } from "./explore.js";
-
+import { knownEntry, type MemoryOptions } from "./profile.js";
 import { DEVICE_ORIENTATIONS, DEVICE_PRESETS } from "../tools/playtest-devices.js";
 
 export { DEVICE_ORIENTATIONS, DEVICE_PRESETS };
@@ -137,6 +137,8 @@ export interface DeviceMatrixOptions {
   minTouchDp: number | null;
   capture: boolean;
   settleTimeoutMs: number;
+  /** The project profile's accepted findings and console noise (the crawl takes its own from `explore.memory`). */
+  memory?: MemoryOptions;
 }
 
 export interface DeviceMatrixDeps {
@@ -161,6 +163,8 @@ export class DeviceMatrix {
   private readonly entries: Array<Record<string, unknown>> = [];
   private readonly skipped: Array<Record<string, unknown>> = [];
   private readonly findings: DeviceFinding[] = [];
+  /** Findings the project profile accepts (listed, not counted). */
+  private readonly known: Array<Record<string, unknown>> = [];
   private readonly notes: string[] = [];
   private startedAt = 0;
 
@@ -293,8 +297,9 @@ export class DeviceMatrix {
       this.skipped.push({ device: base.device, orientation: base.orientation, reason: String((out.error as { code?: string } | undefined)?.code ?? "snapshot_failed") });
       return;
     }
-    const found: DeviceFinding[] = findingsFromSnapshot(out).map(f => ({ ...f, device: base.device, orientation: base.orientation }));
-    for (const line of errorMessages(logs))
+    let found: DeviceFinding[] = findingsFromSnapshot(out).map(f => ({ ...f, device: base.device, orientation: base.orientation }));
+    const ignored = this.options.memory?.ignoreErrors ?? [];
+    for (const line of errorMessages(logs).filter(l => !ignored.some(r => r.test(l))))
       found.push({ kind: "console_error", severity: "bug", label: line, detail: "logged while checking this device", device: base.device, orientation: base.orientation });
     let frame: string | undefined;
     if (this.options.capture) {
@@ -308,6 +313,12 @@ export class DeviceMatrix {
     if (Object.keys(truncated).length)
       this.notes.push(`${base.device} (${base.orientation}): diagnostics listed only their first 20 items (${Object.entries(truncated).map(([k, v]) => `${k} +${v}`).join(", ")}).`);
     if (px === null && this.options.minTouchDp !== null) this.notes.push(`${base.device}: no dpi, the touch-size check was skipped.`);
+    const known = this.options.memory?.known;
+    if (known) {
+      const split = known.split(found);
+      found = split.kept;
+      this.known.push(...split.known.map(knownEntry));
+    }
     this.findings.push(...found);
     const counts = countOf(found);
     this.entries.push({ ...base, mode: out.mode, counts, findings: sortFindings(found).slice(0, 30), ...(frame ? { frame, frame_call: step.seq } : {}) });
@@ -345,6 +356,8 @@ export class DeviceMatrix {
     const found: DeviceFinding[] = (Array.isArray(result.findings) ? result.findings as Finding[] : [])
       .map(f => ({ ...f, device: base.device, orientation: base.orientation }));
     this.findings.push(...found);
+    for (const k of Array.isArray(result.known) ? result.known as Array<Record<string, unknown>> : [])
+      this.known.push({ ...k, device: base.device, orientation: base.orientation });
     this.deps.onCrawl?.(result, base.device, base.orientation);
     const coverage = (result.coverage ?? {}) as Record<string, number>;
     this.entries.push({
@@ -386,6 +399,7 @@ export class DeviceMatrix {
       finding_counts: counts,
       entries: this.entries,
       matrix: groupAcrossDevices(this.findings, checked).slice(0, 100),
+      ...(this.known.length ? { known: this.known.slice(0, 50) } : {}),
       ...(this.skipped.length ? { skipped: this.skipped } : {}),
       restored,
       ...(this.notes.length ? { notes: [...new Set(this.notes)].slice(0, 20) } : {}),

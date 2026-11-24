@@ -75,6 +75,14 @@ registration, transport, gate execution, and the port formula —
   files and their visual baselines (`<name>.visual/<key>/`) live in the Unity
   project (`Playtests/Scenarios/`), written only by `export` and `record` runs,
   inside the project; diff images go to the OS temp folder and into the report.
+- The project's playtest memory (`Playtests/NOTES.md`, `Playtests/profile.json`)
+  is written only by `playtest_memory` actions (or by hand); no tool writes it as
+  a side effect. Profile sections are validated against the crawler's and the
+  device matrix's input schemas (`src/playtest/profile.ts`), so a new
+  `playtest_explore` / `playtest_devices` argument is a profile key at once —
+  exclude it there (as `allow_unsandboxed` is) when a project file must not set
+  it. A broken profile refuses the tools that apply it (`invalid_profile`); never
+  fall back to running without it.
 - `src/capabilities/` mirrors verify — see
   [catalog sync](../packages/verify/AGENTS.md#capability-catalog-sync).
 

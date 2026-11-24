@@ -19,11 +19,14 @@ import { DEVICE_LIMITS, DEVICE_PRESETS, DeviceMatrix, normalizeOrientations, typ
 import { PLAYTEST_DEVICES_TOOL } from "../tools/playtest-devices.js";
 import { PlaytestError, type PlaytestRecorder } from "./recorder.js";
 import type { SessionOwner } from "./session-store.js";
+import {
+  NO_MEMORY, PROFILE_FILE, detectorArgsWithProfile, knownEntry, memoryOptions, type MemoryOptions, type PlaytestProfile,
+} from "./profile.js";
 
 const num = (value: unknown, fallback: number) => (typeof value === "number" && Number.isFinite(value) ? value : fallback);
 
 /** The tool's arguments as engine options; invalid combinations throw invalid_arguments. */
-export function parseExploreOptions(args: Record<string, unknown>): ExploreOptions {
+export function parseExploreOptions(args: Record<string, unknown>, memory: MemoryOptions = NO_MEMORY): ExploreOptions {
   const restart = (typeof args.restart === "string" ? args.restart : EXPLORE_DEFAULTS.restart) as RestartMode;
   const restartCommand = typeof args.restart_command === "string" ? args.restart_command : undefined;
   if (restart === "command" && !restartCommand)
@@ -53,6 +56,7 @@ export function parseExploreOptions(args: Record<string, unknown>): ExploreOptio
     capture: args.capture !== false,
     fillInputs: args.fill_inputs !== false,
     fillText: typeof args.fill_text === "string" && args.fill_text ? args.fill_text : EXPLORE_DEFAULTS.fill_text,
+    ...(memory !== NO_MEMORY ? { memory } : {}),
   };
 }
 
@@ -80,12 +84,16 @@ function verdictOf(counts: { bug: number; suspicious: number }): "ok" | "bug" | 
   return counts.bug > 0 ? "bug" : counts.suspicious > 0 ? "suspicious" : "ok";
 }
 
+/** What the project profile supplied to a run (shown to the agent and in the report). */
+export interface ProfileApplied { file: string; applied: string[] }
+
 export interface ExploreJobInput {
   options: ExploreOptions;
   call: ToolCaller;
   recorder: PlaytestRecorder;
   owner: SessionOwner;
   session: string;
+  profile?: ProfileApplied;
 }
 
 /** One crawl as a `jobs` operation (registered per call: it closes over the owner's route). */
@@ -104,6 +112,7 @@ export function exploreOperation(input: ExploreJobInput): JobOperation {
       let result: Record<string, unknown>;
       try {
         result = await explorer.run();
+        if (input.profile) result.profile = input.profile;
       } catch (error) {
         if (error instanceof ExploreError) return { state: "failed", error: { code: error.code, message: error.message } };
         return { state: "failed", error: { code: "explore_failed", message: error instanceof Error ? error.message : String(error) } };
@@ -129,6 +138,9 @@ export function exploreOperation(input: ExploreJobInput): JobOperation {
           counts.bug + counts.suspicious > 0
             ? `Triage the ${counts.bug} bug / ${counts.suspicious} suspicious finding(s): open the screens' frames (screens[].frame) and confirm each one before you report it.`
             : "No findings: say which screens were covered (coverage, screens[].title) and what was not tried (denied, untried).",
+          ...(Array.isArray(result.known) && result.known.length
+            ? [`${result.known.length} finding(s) matched the project profile's known list (known[]: with the reason) and are not counted.`] : []),
+          "Write what this crawl taught into the project memory: playtest_memory {\"action\":\"map\"} (the screen map into Playtests/NOTES.md); a finding that is not a bug → playtest_memory {\"action\":\"add\",\"profile\":{\"known\":[{\"kind\":\"…\",\"path\":\"…\",\"reason\":\"…\"}]}}; a control that must never be tapped → playtest_memory {\"action\":\"add\",\"profile\":{\"explore\":{\"deny\":[\"…\"]}}}.",
           "To re-check these screens after a change: playtest_replay {\"action\":\"export\",\"source\":\"crawl\",\"scenario\":\"<name>\"} (add to_screen: \"S5\" for one path), then playtest_replay {\"scenario\":\"<name>\"}.",
           ...(Array.isArray(result.untried) && result.untried.length ? ["Some controls stayed untried (untried[]): explore them by hand or run again with a larger budget."] : []),
           recorded
@@ -143,9 +155,12 @@ export function exploreOperation(input: ExploreJobInput): JobOperation {
 }
 
 /** playtest_session {action: "check"}: the current screen's detector findings, recorded with a frame. */
-export async function runCheck(recorder: PlaytestRecorder, owner: SessionOwner, args: Record<string, unknown>, call: ToolCaller): Promise<Record<string, unknown>> {
+export async function runCheck(recorder: PlaytestRecorder, owner: SessionOwner, callArgs: Record<string, unknown>, call: ToolCaller,
+  profile: PlaytestProfile | null = null): Promise<Record<string, unknown>> {
   if (!recorder.isRecording(owner))
     throw new PlaytestError("no_open_session", "This agent has no open playtest session; start one first.");
+  const { args, applied } = detectorArgsWithProfile(callArgs, profile);
+  const memory = memoryOptions(profile);
   const label = typeof args.label === "string" && args.label.trim() ? args.label.trim().slice(0, 120) : "Check the current screen";
   const pattern = typeof args.placeholder_pattern === "string" ? (args.placeholder_pattern || null) : DEFAULT_PLACEHOLDER_PATTERN;
   const dp = num(args.min_touch_dp, DEFAULT_MIN_TOUCH_DP);
@@ -175,7 +190,9 @@ export async function runCheck(recorder: PlaytestRecorder, owner: SessionOwner, 
     throw new PlaytestError(String((out.error as { code?: string } | undefined)?.code ?? "snapshot_failed"),
       `ui_snapshot failed: ${String((out.error as { message?: string } | undefined)?.message ?? "no detail")}`);
   }
-  const findings = sortFindings(findingsFromSnapshot(out));
+  const split = memory.known ? memory.known.split(findingsFromSnapshot(out)) : { kept: findingsFromSnapshot(out), known: [] };
+  const findings = sortFindings(split.kept);
+  const known = split.known.map(knownEntry);
   let frame: string | undefined;
   if (args.capture !== false) {
     const shot = await call("unity_senses_screenshot", { view: out.mode === "play" ? "composed" : "game", max_edge: 960 });
@@ -188,9 +205,13 @@ export async function runCheck(recorder: PlaytestRecorder, owner: SessionOwner, 
   if (dp > 0 && px === null) notes.push("The touch-size check was skipped: the game reports no screen dpi.");
   if (Object.keys(truncated).length) notes.push(`Diagnostics listed only their first 20 items (${Object.entries(truncated).map(([k, v]) => `${k} +${v}`).join(", ")}).`);
   finish({ step: { label, mode: out.mode, findings: findings.slice(0, 20), counts }, ...(frame ? { filePath: frame } : {}) }, false);
-  recorder.note(owner, { k: "check", label, mode: out.mode, findings, counts, ...(handle ? { call: handle.seq } : {}), ...(notes.length ? { notes } : {}) });
+  const profileInfo = applied.length || known.length ? { file: PROFILE_FILE, applied: [...applied, ...(known.length ? ["known"] : [])] } : null;
+  recorder.note(owner, {
+    k: "check", label, mode: out.mode, findings, counts, ...(known.length ? { known } : {}), ...(profileInfo ? { profile: profileInfo } : {}),
+    ...(handle ? { call: handle.seq } : {}), ...(notes.length ? { notes } : {}),
+  });
   return {
-    status: "ok", action: "check", label, mode: out.mode, counts, findings,
+    status: "ok", action: "check", label, mode: out.mode, counts, findings, ...(known.length ? { known } : {}), ...(profileInfo ? { profile: profileInfo } : {}),
     ...(frame ? { frame } : {}), ...(notes.length ? { notes } : {}),
     ...(px !== null ? { min_touch_px: px } : {}),
     agentNextSteps: findings.length
@@ -204,7 +225,7 @@ export async function runCheck(recorder: PlaytestRecorder, owner: SessionOwner, 
 // ---------------------------------------------------------------------------
 
 /** The tool's arguments as matrix options; invalid combinations throw invalid_arguments. */
-export function parseDevicesOptions(args: Record<string, unknown>): DeviceMatrixOptions {
+export function parseDevicesOptions(args: Record<string, unknown>, memory: MemoryOptions = NO_MEMORY): DeviceMatrixOptions {
   const devices = Array.isArray(args.devices) ? args.devices.filter((d): d is string => typeof d === "string" && d.trim() !== "").map(d => d.trim()) : null;
   const preset = (typeof args.preset === "string" ? args.preset : "common") as DevicePreset;
   if (!(DEVICE_PRESETS as readonly string[]).includes(preset))
@@ -216,7 +237,7 @@ export function parseDevicesOptions(args: Record<string, unknown>): DeviceMatrix
     throw new ExploreError("invalid_arguments", "explore options are used only with screens: \"explore\".");
   const minTouch = num(args.min_touch_dp, DEFAULT_MIN_TOUCH_DP);
   const placeholderPattern = typeof args.placeholder_pattern === "string" ? (args.placeholder_pattern || null) : DEFAULT_PLACEHOLDER_PATTERN;
-  const explore = parseExploreOptions((args.explore && typeof args.explore === "object" ? args.explore : {}) as Record<string, unknown>);
+  const explore = parseExploreOptions((args.explore && typeof args.explore === "object" ? args.explore : {}) as Record<string, unknown>, memory);
   // The crawl's detectors follow the matrix's own settings unless its options set them.
   const exploreArgs = (args.explore ?? {}) as Record<string, unknown>;
   if (exploreArgs.placeholder_pattern === undefined) explore.placeholderPattern = placeholderPattern;
@@ -232,6 +253,7 @@ export function parseDevicesOptions(args: Record<string, unknown>): DeviceMatrix
     minTouchDp: minTouch > 0 ? minTouch : null,
     capture: args.capture !== false,
     settleTimeoutMs: Math.min(Math.max(num(args.settle_timeout_ms, 10_000), 1_000), 20_000),
+    ...(memory !== NO_MEMORY ? { memory } : {}),
   };
 }
 
@@ -241,6 +263,7 @@ export interface DevicesJobInput {
   recorder: PlaytestRecorder;
   owner: SessionOwner;
   session: string;
+  profile?: ProfileApplied;
 }
 
 /** One device-matrix run as a `jobs` operation (registered per call, like the crawl). */
@@ -255,6 +278,7 @@ export function devicesOperation(input: DevicesJobInput): JobOperation {
         check: exploreRecorder(input.recorder, input.owner, "check", PLAYTEST_DEVICES_TOOL),
         explore: exploreRecorder(input.recorder, input.owner),
         onCrawl: (result, device, orientation) => {
+          if (input.profile) result.profile = input.profile;
           const findings = (Array.isArray(result.findings) ? result.findings : []).map(f => ({ ...(f as object), device, orientation }));
           const counts = result.finding_counts as { bug: number; suspicious: number };
           if (input.recorder.note(input.owner, { k: "explore", ...result, findings, device, orientation })) {
@@ -275,6 +299,7 @@ export function devicesOperation(input: DevicesJobInput): JobOperation {
       let result: Record<string, unknown>;
       try {
         result = await matrix.run();
+        if (input.profile) result.profile = input.profile;
       } catch (error) {
         if (error instanceof ExploreError) return { state: "failed", error: { code: error.code, message: error.message } };
         return { state: "failed", error: { code: "devices_failed", message: error instanceof Error ? error.message : String(error) } };

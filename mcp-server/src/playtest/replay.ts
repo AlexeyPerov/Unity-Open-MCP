@@ -25,6 +25,7 @@ import {
 import { collectLogs, restartGame, type ExploreRecorder, type RecordedStep, type ToolCaller } from "./explore.js";
 import { fillVars, usesSecret, type Scenario, type ScenarioStep, type ScenarioTarget, type ScreenExpectation, type StepKind, type VisualSettings } from "./scenario.js";
 import type { RgbaImage } from "./png.js";
+import type { KnownFindings } from "./profile.js";
 import { compareImages, describeRegion, diffImage, masksFor, nodesInRegion, visualKey } from "./visual.js";
 
 export interface ReplayOptions {
@@ -46,6 +47,8 @@ export interface ReplayOptions {
   maxMinutes: number;
   /** Compare every step as a picture with its visual baseline (null = off). */
   visual: VisualSettings | null;
+  /** Findings the project profile accepts: never a new finding. */
+  known?: KnownFindings | null;
 }
 
 export const REPLAY_DEFAULTS = { retries: 1, settle_ms: 250, max_settle_ms: 4_000, max_minutes: 20, capture: "failures" as const };
@@ -551,7 +554,7 @@ export class Replayer {
     if (expect.findings && outcome.reason !== "screen_changed") {
       const before = new Set(expect.findings);
       const now = new Set(keys);
-      const fresh = findings.filter(f => !before.has(baselineKey(f)));
+      const fresh = findings.filter(f => !before.has(baselineKey(f)) && !this.options.known?.match(f));
       const seen = new Set<string>();
       const freshUnique = fresh.filter(f => { const k = baselineKey(f); if (seen.has(k)) return false; seen.add(k); return true; });
       const fixed = expect.findings.filter(k => !now.has(k));

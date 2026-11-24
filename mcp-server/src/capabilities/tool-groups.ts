@@ -393,7 +393,11 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "model — targets by path and label, the expected screen after each step, console errors and new " +
       "findings; pass / fail per step, drift for tolerated changes, retries for flakiness, record:true " +
       "for the baseline, and optional visual baselines (each screen's composed frame per device, " +
-      "compared in the server with masks and changed regions). ui_snapshot " +
+      "compared in the server with masks and changed regions). playtest_memory (server-local): the " +
+      "project's playtest memory in Playtests/ — NOTES.md (boot, screen map, dangers, known issues; " +
+      "session start returns it) and profile.json (deny-list, devices, detector thresholds, back " +
+      "labels, console noise, accepted findings) that the crawler, the device matrix, the session " +
+      "check and the replay apply on their own. ui_snapshot " +
       "compiles when com.unity.ugui is present; the compiled subset is reconciled from GET /tools.",
     defaultEnabled: false,
   },
@@ -1069,6 +1073,8 @@ assign("playtest", [
   "unity_open_mcp_playtest_devices",
   // Scenario replay: server-local scenario files + a job over the same tools.
   "unity_open_mcp_playtest_replay",
+  // Project playtest memory: server-local files in the project (notes + profile).
+  "unity_open_mcp_playtest_memory",
 ]);
 
 // ---------------------------------------------------------------------------

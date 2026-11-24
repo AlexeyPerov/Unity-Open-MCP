@@ -29,6 +29,7 @@ import {
 } from "./playtest/detectors.js";
 import { Explorer, type ExploreOptions, type ExploreRecorder } from "./playtest/explore.js";
 import { parseExploreOptions } from "./playtest/explore-job.js";
+import { memoryOptions, type PlaytestProfile } from "./playtest/profile.js";
 
 const body = (result: CallToolResult) => JSON.parse((result.content.find(c => c.type === "text") as { text: string }).text);
 const text = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value) }] });
@@ -377,6 +378,26 @@ test("explore: play mode ending mid-crawl stops it; edit mode at start refuses",
   assert.equal(parseExploreOptions({ min_touch_dp: 0 }).minTouchDp, null);
 });
 
+test("explore: the project profile — known findings listed, not counted; ignored console noise; extra back labels go last", async () => {
+  const profile: PlaytestProfile = {
+    known: [{ kind: "dead_button", path: "Settings/HelpButton", reason: "opens the browser outside the game" }],
+    ignore_errors: ["^NullReferenceException: boom"],
+    back_labels: ["Sound"],
+  };
+  const game = new FakeGame(GAME);
+  const explorer = new Explorer(parseExploreOptions({ settle_ms: 50, max_settle_ms: 200 }, memoryOptions(profile)),
+    { call: (t, a) => game.call(t, a), recorder: recorder(), signal: new AbortController().signal, sleep: async () => {} });
+  const result = await explorer.run() as Record<string, any>;
+  assert.equal(result.stop_reason, "explored", JSON.stringify(result.notes));
+  const kinds = result.findings.map((f: any) => `${f.kind}:${f.label ?? f.path ?? ""}`);
+  assert.ok(!kinds.some((k: string) => k.startsWith("dead_button:Help")), kinds.join("\n"));
+  assert.ok(!kinds.some((k: string) => k.startsWith("console_error")), "the profile's console noise is no finding");
+  assert.deepEqual(result.finding_counts, { bug: 1, suspicious: 1 }, "overflow + the dead end only");
+  assert.deepEqual(result.known.map((k: any) => [k.kind, k.path, k.reason]), [["dead_button", "Canvas/Settings/HelpButton", "opens the browser outside the game"]]);
+  // "Sound" leaves the screen for this project: tried after the other Settings controls.
+  assert.ok(game.clicks.indexOf("Settings:Sound") > game.clicks.indexOf("Settings:Help"), game.clicks.join(" "));
+});
+
 // ---------------------------------------------------------------------------
 // Catalog
 // ---------------------------------------------------------------------------
@@ -432,7 +453,7 @@ function routerHarness(t: { after(fn: () => void): void }) {
   const router = new ToolRouter(live, { isBatchTool: () => false } as unknown as BatchSpawn, project, stream as unknown as BridgeEventStream, new ToolSessionState());
   router.usePlaytestRecorder(new PlaytestRecorder({ root: join(root, "sessions"), projectPath: project, pid: 4242, isAlive: () => false }));
   t.after(() => router.closeJobs());
-  return { game, router };
+  return { game, router, project };
 }
 
 const ME = { agent: "agent-me" };
@@ -498,4 +519,60 @@ test("router: explore needs an isolated session and play mode, runs as a job, re
   assert.ok(log.filter(e => e.k === "call" && e.kind === "explore").length >= 15);
   assert.ok(log.some(e => e.k === "call" && e.kind === "check"));
   assert.ok(existsSync(join(ended.folder, "report", "frames")));
+});
+
+test("router: the project profile reaches the crawl and the check; known findings go to the report; an invalid profile refuses", async t => {
+  const { game, router, project } = routerHarness(t);
+  mkdirSync(join(project, "Playtests"), { recursive: true });
+  const profile: PlaytestProfile = {
+    format: "unity-open-mcp.playtest-profile/1",
+    explore: { restart: "command", restart_command: "project.demo.playtest.boot", settle_ms: 50, max_settle_ms: 200, deny: ["^Daily$"] },
+    detectors: { min_touch_dp: 48 },
+    known: [
+      { kind: "dead_button", path: "Settings/HelpButton", reason: "opens the browser" },
+      { kind: "text_overflow", text: "Mega pack", reason: "the shop art is being redone" },
+    ],
+  };
+  writeFileSync(join(project, "Playtests", "profile.json"), JSON.stringify(profile));
+  writeFileSync(join(project, "Playtests", "NOTES.md"), "# Playtest notes\n\n## Boot\n\n- 2026-11-20 — boot with project.demo.playtest.boot\n");
+
+  const started = body(await router.route("unity_open_mcp_playtest_session", { action: "start", name: "Explore", snapshot: true }, ME));
+  assert.match(started.memory.notes.text, /boot with project\.demo\.playtest\.boot/);
+  assert.ok(started.memory.profile.summary.some((l: string) => l.startsWith("explore: restart")), JSON.stringify(started.memory));
+  assert.ok(started.agentNextSteps[0].startsWith("Read memory first"));
+
+  const answer = body(await router.route(PLAYTEST_EXPLORE_TOOL, {}, ME));
+  assert.equal(answer.status, "running", JSON.stringify(answer));
+  for (const applied of ["explore.restart", "explore.restart_command", "explore.deny (1)", "detectors.min_touch_dp", "known (2)"])
+    assert.ok(answer.profile.applied.includes(applied), `${applied}: ${answer.profile.applied}`);
+  const job = await waitJob(router, answer.job_id);
+  assert.equal(job.state, "succeeded", JSON.stringify(job.error));
+  assert.ok(!game.clicks.includes("Menu:Daily"), "the profile's deny pattern");
+  assert.ok(game.calls.some(c => c.tool === "unity_open_mcp_project_commands"), "restarted by the profile's command");
+  assert.equal(game.calls.find(c => c.tool === "unity_open_mcp_ui_snapshot" && c.args.page_size === 200)!.args.min_touch_size, 96, "48 dp at 320 dpi");
+  assert.deepEqual(job.result.known.map((k: any) => k.kind).sort(), ["dead_button", "text_overflow"]);
+  assert.deepEqual(job.result.finding_counts, { bug: 1, suspicious: 1 });
+  assert.ok(job.result.agentNextSteps.some((s: string) => s.includes("playtest_memory")));
+
+  // The session check takes the profile's detectors and known list too.
+  game.screen = "Shop";
+  const check = body(await router.route("unity_open_mcp_playtest_session", { action: "check", label: "Shop" }, ME));
+  assert.deepEqual(check.findings, []);
+  assert.deepEqual(check.known.map((k: any) => k.kind), ["text_overflow"]);
+  assert.equal(check.min_touch_px, 96);
+
+  const ended = body(await router.route("unity_open_mcp_playtest_session", { action: "end" }, ME));
+  assert.ok(ended.agentNextSteps.some((s: string) => s.includes("playtest_memory note")));
+  const report = readFileSync(ended.report, "utf8");
+  for (const phrase of ["Project profile `Playtests/profile.json`", "Known findings (accepted in the profile, not counted): 2", "the shop art is being redone", "· known 2"])
+    assert.ok(report.includes(phrase), phrase);
+
+  // A broken profile: the crawl and the check refuse rather than run without its deny-list.
+  writeFileSync(join(project, "Playtests", "profile.json"), JSON.stringify({ explore: { deny: ["("] } }));
+  assert.equal(body(await router.route("unity_open_mcp_playtest_session", { action: "start", name: "Broken", snapshot: true }, ME)).memory.profile.problems.length, 1);
+  const refused = body(await router.route(PLAYTEST_EXPLORE_TOOL, {}, ME));
+  assert.equal(refused.error.code, "invalid_profile");
+  assert.match(refused.error.message, /not a valid regular expression/);
+  assert.equal(body(await router.route("unity_open_mcp_playtest_session", { action: "check" }, ME)).error.code, "invalid_profile");
+  await router.route("unity_open_mcp_playtest_session", { action: "end" }, ME);
 });

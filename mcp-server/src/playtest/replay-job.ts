@@ -10,6 +10,7 @@ import { basename, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { JobOperation } from "../jobs/job-manager.js";
 import { DEFAULT_MIN_TOUCH_DP, DEFAULT_PLACEHOLDER_PATTERN } from "./detectors.js";
+import { NO_MEMORY, type MemoryOptions } from "./profile.js";
 import { exploreRecorder } from "./explore-job.js";
 import { type ToolCaller } from "./explore.js";
 import { exportScenario } from "./export.js";
@@ -113,7 +114,7 @@ export interface PreparedReplay {
 }
 
 /** Reads the scenario and the call's options; refuses before anything is tapped (invalid scenario, missing vars). */
-export function prepareReplay(projectPath: string, args: Record<string, unknown>): PreparedReplay {
+export function prepareReplay(projectPath: string, args: Record<string, unknown>, memory: MemoryOptions = NO_MEMORY): PreparedReplay {
   if (typeof args.scenario !== "string") throw new ScenarioError("invalid_arguments", "run needs scenario (a name in Playtests/Scenarios or a .json path); list them with {\"action\":\"list\"}.");
   const file = resolveScenarioPath(projectPath, args.scenario);
   const { scenario, problems } = readScenarioFile(file);
@@ -130,6 +131,8 @@ export function prepareReplay(projectPath: string, args: Record<string, unknown>
     try { ignoreErrors.push(new RegExp(pattern)); }
     catch (error) { throw new ScenarioError("invalid_arguments", `ignore_errors '${pattern}' is not a valid regular expression: ${error instanceof Error ? error.message : String(error)}`); }
   }
+  // The project profile's console noise counts for every scenario.
+  ignoreErrors.push(...memory.ignoreErrors);
   if (args.record === true && args.strict === true) throw new ScenarioError("invalid_arguments", "record and strict exclude each other: a record run accepts the changes it sees.");
   // visual: the scenario's settings.visual, turned on (with defaults when it has none) or off by the call.
   const visual: VisualSettings | null = args.visual === false ? null
@@ -152,6 +155,7 @@ export function prepareReplay(projectPath: string, args: Record<string, unknown>
     sameScreen: num(args.same_screen, scenario.settings.same_screen),
     maxMinutes: Math.min(num(args.max_minutes, REPLAY_DEFAULTS.max_minutes), REPLAY_LIMITS.max_minutes),
     visual,
+    known: memory.known,
   };
   return { file, scenario, options };
 }
@@ -164,6 +168,8 @@ export interface ReplayJobInput extends PreparedReplay {
   session: string;
   /** Subscribe to the bridge event stream (console errors between calls); returns the unsubscribe. */
   subscribe?: (feed: ConsoleErrorFeed) => () => void;
+  /** What the project profile supplied (detectors, console noise, accepted findings). */
+  profile?: { file: string; applied: string[] };
 }
 
 const MARK_VERDICT: Record<string, "ok" | "bug" | "suspicious"> = {
@@ -198,6 +204,7 @@ export function replayOperation(input: ReplayJobInput): JobOperation {
         unsubscribe?.();
       }
       const { result, recorded, frames } = outcome;
+      if (input.profile) result.profile = input.profile;
       const verdict = String(result.verdict);
       let written: Record<string, unknown> | null = null;
       if (recorded) {

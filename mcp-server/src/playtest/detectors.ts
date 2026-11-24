@@ -189,10 +189,10 @@ export function denyReason(node: SnapshotNode, policy: ActionPolicy): string | n
   return null;
 }
 
-/** Whether this control likely leaves the screen (tried last). */
-export function isBackLike(node: SnapshotNode): boolean {
+/** Whether this control likely leaves the screen (tried last); `extra`: lowercased project labels (the profile's back_labels). */
+export function isBackLike(node: SnapshotNode, extra?: ReadonlySet<string>): boolean {
   const label = String(node.text ?? "").trim();
-  if (label && BACK_LABEL.test(label)) return true;
+  if (label && (BACK_LABEL.test(label) || extra?.has(label.toLowerCase()))) return true;
   const name = node.path.split("/").pop() ?? "";
   return !label && BACK_NAME.test(name);
 }

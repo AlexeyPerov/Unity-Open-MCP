@@ -361,6 +361,17 @@ export const RECOMMENDED_TOOL_CHAINS: RecommendedToolChain[] = [
     ],
   },
   {
+    name: "playtest-project-memory",
+    task: "Let the next playtest session start from what this one learned: notes, the screen map, the deny-list and the findings that are not bugs, applied by the playtest tools on their own.",
+    steps: [
+      "unity_open_mcp_playtest_session (action start) — memory: the project's notes and profile summary; read them before playing",
+      "after a crawl: unity_open_mcp_playtest_memory (action map) — the Screen map section of Playtests/NOTES.md",
+      "unity_open_mcp_playtest_memory (action note, section Boot | Dangerous controls | Known issues | Flaky spots, text)",
+      "unity_open_mcp_playtest_memory (action add, profile {explore {deny [...]}, back_labels [...], known [{kind, path, reason}]}) — playtest_explore / devices / check / replay apply it from now on",
+      "commit Playtests/NOTES.md and Playtests/profile.json with the code",
+    ],
+  },
+  {
     name: "device-layout-check",
     task: "Check a screen's layout on a phone (notch / safe area) or at a fixed resolution, with frames a human can compare.",
     steps: [

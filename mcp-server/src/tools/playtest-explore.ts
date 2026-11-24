@@ -27,7 +27,9 @@ export const playtestExplore = makeTool(
     "during a tap are console_error findings (severity bug or suspicious). NEVER TAPPED: labels on the default " +
     "deny-list (buy, purchase, pay, subscribe, delete, remove, reset, log out, rate, share, restore, quit, exit, watch " +
     "ad…) and price-like labels; `deny` adds regexes (label or path), `allow` exempts exact labels / paths, " +
-    "default_deny:false drops the built-in list. REQUIRES your open playtest_session (no_open_session otherwise), " +
+    "default_deny:false drops the built-in list. PROJECT PROFILE: Playtests/profile.json (playtest_memory) fills the " +
+    "arguments you leave out (its deny / allow add to yours) and adds back labels, ignored console noise and known " +
+    "findings (result known[], not counted). REQUIRES your open playtest_session (no_open_session otherwise), " +
     "isolated by its player_state snapshot (start {snapshot:true}) or the project's playtest.begin command — else " +
     "not_isolated unless allow_unsandboxed:true — and play mode (play_mode_required). Each tap is recorded into the " +
     "session (with its console errors and the new screen's frame); the crawl adds one mark (verdict from its findings) " +

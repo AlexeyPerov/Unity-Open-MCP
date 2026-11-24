@@ -23,6 +23,7 @@ import {
   screenSignature, screenTitle, similarity, sortFindings, truncatedDiagnostics,
   type ActionPolicy, type Finding, type SnapshotNode,
 } from "./detectors.js";
+import { knownEntry, type KnownMatch, type MemoryOptions } from "./profile.js";
 
 export type ToolCaller = (tool: string, args: Record<string, unknown>) => Promise<CallToolResult>;
 
@@ -59,6 +60,8 @@ export interface ExploreOptions {
   /** Type fillText into each visible text field once (inputsim_text, end_edit). */
   fillInputs: boolean;
   fillText: string;
+  /** The project profile's accepted findings, console noise and extra back labels (Playtests/profile.json). */
+  memory?: MemoryOptions;
 }
 
 export const EXPLORE_DEFAULTS = {
@@ -151,6 +154,8 @@ export class Explorer {
   private readonly screens: Screen[] = [];
   private readonly edges: Edge[] = [];
   private readonly findings = new FindingSet();
+  /** Findings the project profile accepts (listed, not counted). */
+  private readonly known = new FindingSet();
   private readonly denied = new Map<string, { screen: string; label: string; path: string; reason: string }>();
   private readonly navFailures: Array<{ from: string; action: string; expected: string; reached: string; step: number }> = [];
   private readonly notes: string[] = [];
@@ -324,7 +329,8 @@ export class Explorer {
     const { screen: to, created, findings, frame } = await this.identify(after, step.seq, logs);
     const outcome = to === from ? "same_screen" : created ? "new_screen" : "known_screen";
     const stepFindings = [...findings];
-    const consoleErrors = errorLines(logs);
+    const ignored = this.options.memory?.ignoreErrors ?? [];
+    const consoleErrors = errorLines(logs).filter(line => !ignored.some(r => r.test(line)));
     for (const message of consoleErrors)
       stepFindings.push(...this.addFindings([{ kind: "console_error", severity: "bug", screen: from.id, label: clip(message, 160), step: this.steps,
         detail: `logged while ${typing ? "typing into" : "tapping"} '${action.label}' on ${from.id}` }]));
@@ -437,7 +443,7 @@ export class Explorer {
         this.denied.set(`${screen.id}|${key}`, { screen: screen.id, label: controlLabel(node), path: node.path, reason });
         continue;
       }
-      screen.actions.set(key, { key, label: controlLabel(node), path: node.path, role: node.role, back: node.role !== "input" && isBackLike(node), tried: false, misses: 0 });
+      screen.actions.set(key, { key, label: controlLabel(node), path: node.path, role: node.role, back: node.role !== "input" && isBackLike(node, this.options.memory?.backLabels), tried: false, misses: 0 });
     }
   }
 
@@ -507,7 +513,11 @@ export class Explorer {
   }
 
   private addFindings(findings: Finding[]): Finding[] {
-    return this.findings.addAll(findings);
+    const known = this.options.memory?.known;
+    if (!known) return this.findings.addAll(findings);
+    const { kept, known: accepted } = known.split(findings);
+    for (const f of accepted) this.known.add(f);
+    return this.findings.addAll(kept);
   }
 
   private progress(): void {
@@ -537,6 +547,7 @@ export class Explorer {
       finding_counts: counts,
       findings: findings.slice(0, 100),
       ...(findings.length > 100 ? { findings_truncated: findings.length - 100 } : {}),
+      ...(this.known.size ? { known: this.known.all.slice(0, 50).map(f => knownEntry(f as Finding & KnownMatch)) } : {}),
       screens: this.screens.map(s => ({
         id: s.id, title: s.title, labels: s.labels, visits: s.visits, first_step: s.firstStep,
         actions: s.actions.size, tried: [...s.actions.values()].filter(a => a.tried && a.outcome !== "not_tappable").length, denied: s.denied,
