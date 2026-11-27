@@ -40,13 +40,13 @@ Use `unity-open-mcp --help` or
 Examples:
 
 ```bash
-npx -y unity-open-mcp@1.6.0 wait-for-ready \
+npx -y unity-open-mcp@1.7.0 wait-for-ready \
   --project /absolute/path/to/MyGame
 
-npx -y unity-open-mcp@1.6.0 status \
+npx -y unity-open-mcp@1.7.0 status \
   --project /absolute/path/to/MyGame --json
 
-npx -y unity-open-mcp@1.6.0 run-tool unity_open_mcp_capabilities \
+npx -y unity-open-mcp@1.7.0 run-tool unity_open_mcp_capabilities \
   --project /absolute/path/to/MyGame --json \
   --arg include_planned=false
 ```
@@ -70,9 +70,9 @@ the process); so do the play-mode operations (`playtest_wait`,
 `capture_series`, `inputsim_gesture`), however long or slow they run.
 
 ```bash
-npx -y unity-open-mcp@1.6.0 run-tool unity_open_mcp_assets_refresh \
+npx -y unity-open-mcp@1.7.0 run-tool unity_open_mcp_assets_refresh \
   --project /absolute/path/to/MyGame --json --arg whole_project=true
-npx -y unity-open-mcp@1.6.0 wait-for-ready \
+npx -y unity-open-mcp@1.7.0 wait-for-ready \
   --project /absolute/path/to/MyGame --json --after-generation 42
 ```
 

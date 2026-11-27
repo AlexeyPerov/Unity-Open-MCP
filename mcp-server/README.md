@@ -51,7 +51,7 @@ other clients that start servers in the workspace root:
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@1.6.0", "--project-from-cwd", "--unity-subpath", "Client"]
+      "args": ["-y", "unity-open-mcp@1.7.0", "--project-from-cwd", "--unity-subpath", "Client"]
     }
   }
 }

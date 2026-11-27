@@ -46,7 +46,7 @@ Pick a preset to pre-fill the rest of the wizard, or choose **Custom / skip** to
 
 | Preset | Best for | Pre-fills |
 |---|---|---|
-| **Regular user (npm)** *(recommended)* | Developers who want the published npm package, no monorepo checkout | `npx -y unity-open-mcp@1.6.0`; bridge + verify from published sources; domain deps off; skill on |
+| **Regular user (npm)** *(recommended)* | Developers who want the published npm package, no monorepo checkout | `npx -y unity-open-mcp@1.7.0`; bridge + verify from published sources; domain deps off; skill on |
 | **Contributor (local checkout)** | Monorepo contributors hacking on bridge / verify / MCP server | Local checkout + `file:` packages from the clone; domain deps off; skill on. Build `mcp-server/` first (see [Development setup](development-setup.md)) |
 | **Custom / skip** | Anyone who wants the wizard's built-in defaults | No pre-fills — identical to the manual flow |
 
@@ -76,7 +76,7 @@ A single **Re-check** button re-runs project detection and the Node probe. Detec
 
 Choose how the `unity-open-mcp` server is launched. The default (`npx`) needs no configuration here and the wizard auto-skips this step on the Recommended path — you only land here via the progress strip or the **Custom / skip** / **Contributor** preset.
 
-- **npx (published npm)** *(default)* — runs `unity-open-mcp` from npm, pinned to the same release as the Unity packages (`npx -y unity-open-mcp@1.6.0`). No repo clone needed.
+- **npx (published npm)** *(default)* — runs `unity-open-mcp` from npm, pinned to the same release as the Unity packages (`npx -y unity-open-mcp@1.7.0`). No repo clone needed.
 - **Global install** — launches the bare `unity-open-mcp` binary (assumes `npm i -g unity-open-mcp`). Stable path for CI images.
 - **Local checkout** — points at a cloned `unity-open-mcp` monorepo. Packages and skill copy use the toolkit root.
 - **Custom entrypoint (advanced)** — a specific `mcp-server/dist/index.js` path for builds outside the toolkit root.
