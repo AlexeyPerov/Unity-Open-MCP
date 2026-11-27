@@ -1057,7 +1057,7 @@ namespace UnityOpenMcpBridge
         }
 
         internal static string SceneCall(string tool, string scenePath, string extraArgs) =>
-            tool + " {\"asset_path\":\"" + scenePath + "\",\"paths_hint\":[\"" + scenePath + "\"]" + (extraArgs ?? "") + "}";
+            tool + " {\"asset_path\":" + EscapeString(scenePath) + ",\"paths_hint\":[" + EscapeString(scenePath) + "]" + (extraArgs ?? "") + "}";
 
         // /ping response body — live bridge status snapshot.
         internal static string BuildPingJson()

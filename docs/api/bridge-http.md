@@ -37,8 +37,8 @@ clients don't accumulate subscriber state.
   transition): `state` (`idle`, `compiling`, `reloading`, `entering_playmode`,
   `playing`, `exiting_playmode`), `isPlaying`, `isCompiling`, `heartbeatAt`, and
   (wire contract 8) a `compile` block — `generation`, `running`, `completed`,
-  `failed`, `errorCount`, `pending` (a compile requested and not started yet)
-  and `requestedAt`. It stays on disk across a domain reload, so it is what the
+  `failed`, `errorCount`, `pending` (a compile requested within the last 60 s
+  and not started yet) and `requestedAt`. It stays on disk across a domain reload, so it is what the
   MCP server reads while the listener is down. Since the heartbeat is written
   from the main thread it also stops during every reload; a frozen heartbeat
   alone does not mean the bridge is dead (see

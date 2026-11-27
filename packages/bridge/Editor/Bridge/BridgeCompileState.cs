@@ -247,8 +247,26 @@ namespace UnityOpenMcpBridge
 
         internal static int Generation => SessionState.GetInt(Prefix + "generation", 0);
 
-        /// <summary>A compile was requested and has not started since.</summary>
-        internal static bool Pending => SessionState.GetInt(RequestedKey, -1) >= 0;
+        // A request Unity has not started within this long is not pending any
+        // more: Unity drops a request that turns out to need no compile, and
+        // the record would otherwise report a compile due (compileDue, the
+        // lock's and /compile-state's `pending`) until the next real compile.
+        // Same window as the server-side wait's grace (PENDING_COMPILE_GRACE_MS).
+        internal const double PendingGraceSeconds = 60.0;
+
+        /// <summary>A compile was requested within <see cref="PendingGraceSeconds"/> and has not started since.</summary>
+        internal static bool Pending
+        {
+            get
+            {
+                if (SessionState.GetInt(RequestedKey, -1) < 0) return false;
+                var at = SessionState.GetString(RequestedAtKey, "");
+                if (!DateTime.TryParse(at, System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.RoundtripKind, out var requestedAt))
+                    return true;
+                return (DateTime.UtcNow - requestedAt.ToUniversalTime()).TotalSeconds < PendingGraceSeconds;
+            }
+        }
 
         // Test seam: restore the handshake record a test changed (main thread).
         internal static void RestoreRequestForTest(int requestedAtGeneration, string requestedAtUtc)

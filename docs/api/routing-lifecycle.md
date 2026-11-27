@@ -321,7 +321,8 @@ never reads `null`), one `/ping` probe (`transition`) and, once settled,
 - **The compile handshake.** Unity starts a requested compile on a later update,
   and `isCompiling` can read false in the gap. A call that leaves a compile
   requested records it (`pending` in the lock and `/compile-state`, cleared when
-  the next compile starts); its envelope's `compile.generationAtStart` lets the
+  the next compile starts, and no longer reported 60 s after the request — Unity
+  drops a request that needs no compile); its envelope's `compile.generationAtStart` lets the
   caller require a compile after it (`after_generation`). The wait holds while
   a compile is pending (up to 60 s from the request).
 - **Calls that arrive mid-transition wait.** While the lock shows a compile,

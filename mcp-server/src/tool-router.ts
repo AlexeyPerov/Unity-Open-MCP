@@ -824,7 +824,6 @@ function resendAfterReload(result: CallToolResult): boolean {
   return body.error?.code === "editor_reloading" && body.dispatched === false;
 }
 
-/** /compile-state (or read_compile_errors' live summary) as a wait reading; null when it is not one. */
 /**
  * A recompile_scripts answer whose response the compile's domain reload closed
  * (`triggered_reload`) carries no `mutation`, so what the call imported first
@@ -852,6 +851,7 @@ async function withReadBackScriptImport(
   }
 }
 
+/** /compile-state (or read_compile_errors' live summary) as a wait reading; null when it is not one. */
 function compileReading(body: Record<string, unknown> | null): CompileReading | null {
   if (!body || typeof body.generation !== "number" || typeof body.status !== "string") return null;
   return {
@@ -915,8 +915,13 @@ const sleepMs = (ms: number) => new Promise<void>(resolve => setTimeout(resolve,
 import { readReloadWaitMs } from "./retry-policy.js";
 export { readReloadWaitMs, DEFAULT_RELOAD_WAIT_MS } from "./retry-policy.js";
 
-/** Named-tool route: the call's live client, its arguments, and its request identity. */
-type RouteHandler = (live: LiveClient, args: Record<string, unknown>, identity: RequestIdentity) => Promise<CallToolResult>;
+/**
+ * Named-tool route: the call's live client, its arguments, its request
+ * identity, and the end of the call's wait budget (set when the router already
+ * waited for the Editor before dispatch; a handler that calls the bridge passes
+ * it on so the client's waits draw from the same budget instead of a new one).
+ */
+type RouteHandler = (live: LiveClient, args: Record<string, unknown>, identity: RequestIdentity, waitDeadline?: number) => Promise<CallToolResult>;
 
 export class ToolRouter implements Router {
   private jobManager?: JobManager;
@@ -1012,7 +1017,7 @@ export class ToolRouter implements Router {
    * `status: "running"` with the job id, the progress so far and an estimate.
    * Only the bridge ends an operation that stopped moving (stalled).
    */
-  private async routePlaymodeOperation(name: string, args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity): Promise<CallToolResult> {
+  private async routePlaymodeOperation(name: string, args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity, waitDeadline?: number): Promise<CallToolResult> {
     const spec = PLAYMODE_ROUTES[name];
     const startedAt = Date.now();
     const estimateMs = playmodeEstimateMs(name, args);
@@ -1030,7 +1035,7 @@ export class ToolRouter implements Router {
         agentNextSteps: [`Call unity_open_mcp_jobs {"action":"wait","job_id":"${body.job_id}","timeout_ms":30000} until the state is terminal; the result holds ${spec.resultHint}.`] }, "local");
     }
     const operationId = typeof args.operation_id === "string" ? args.operation_id : randomUUID();
-    const start = await live.route(name, { ...args, operation_id: operationId });
+    const start = await live.route(name, { ...args, operation_id: operationId }, undefined, { waitDeadline });
     const started = toolOutput(start);
     if (start.isError || started.error || !started.operation) return injectRouteMeta(start, { route: "live" });
     // Inline up to the host-safe limit; past it (or once the rate says so) the job takes over.
@@ -1176,9 +1181,9 @@ export class ToolRouter implements Router {
       // Gestures, waits and capture series run on the bridge's play-mode
       // scheduler: start, then poll the operation to its terminal result here
       // (long ones become a job).
-      ["unity_open_mcp_inputsim_gesture", (l, a, id) => this.routePlaymodeOperation("unity_open_mcp_inputsim_gesture", a, l, id)],
-      ["unity_open_mcp_playtest_wait", (l, a, id) => this.routePlaymodeOperation("unity_open_mcp_playtest_wait", a, l, id)],
-      ["unity_senses_capture_series", (l, a, id) => this.routePlaymodeOperation("unity_senses_capture_series", a, l, id)],
+      ["unity_open_mcp_inputsim_gesture", (l, a, id, wd) => this.routePlaymodeOperation("unity_open_mcp_inputsim_gesture", a, l, id, wd)],
+      ["unity_open_mcp_playtest_wait", (l, a, id, wd) => this.routePlaymodeOperation("unity_open_mcp_playtest_wait", a, l, id, wd)],
+      ["unity_senses_capture_series", (l, a, id, wd) => this.routePlaymodeOperation("unity_senses_capture_series", a, l, id, wd)],
       // Game view / Simulator changes settle over play-mode frames: poll the
       // bridge's settle watch here so set_* returns once the game sees the size.
       ["unity_open_mcp_game_view", (l, a) => this.routeGameView(a, l)],
@@ -1188,8 +1193,8 @@ export class ToolRouter implements Router {
       [WAIT_TOOL, (l, a, id) => this.routeEditorStatus(a, l, id)],
       // Compile-type calls: the compile they started is the answer, so the
       // route waits for it (inline, then as a job) and reports its result.
-      ["unity_open_mcp_recompile_scripts", (l, a, id) => this.routeCompileTool("unity_open_mcp_recompile_scripts", a, l, id)],
-      ["unity_open_mcp_assets_refresh", (l, a, id) => this.routeCompileTool("unity_open_mcp_assets_refresh", a, l, id)],
+      ["unity_open_mcp_recompile_scripts", (l, a, id, wd) => this.routeCompileTool("unity_open_mcp_recompile_scripts", a, l, id, wd)],
+      ["unity_open_mcp_assets_refresh", (l, a, id, wd) => this.routeCompileTool("unity_open_mcp_assets_refresh", a, l, id, wd)],
       // M31 Plan 3 — Editor fd-exhaustion operator surfaces. restart_editor
       // is the reactive kill half (acts AFTER the Editor is hung);
       // resource_pressure is the proactive prediction half (samples fd usage
@@ -1836,7 +1841,7 @@ export class ToolRouter implements Router {
     // header comment.
     const handler = this.getRouteHandlers().get(toolName);
     if (handler) {
-      return handler(live, args, identity);
+      return handler(live, args, identity, waitDeadline);
     }
 
     // Compact drill-down reads: offline-first for text-serialized assets, fall
@@ -3525,9 +3530,9 @@ export class ToolRouter implements Router {
    * wait — and the outcome is folded into the answer. A call that left no
    * compile, or was refused, is returned unchanged.
    */
-  private async routeCompileTool(toolName: string, args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity): Promise<CallToolResult> {
+  private async routeCompileTool(toolName: string, args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity, waitDeadline?: number): Promise<CallToolResult> {
     const startedAt = Date.now();
-    const result = injectRouteMeta(await live.route(toolName, args), { route: "live" });
+    const result = injectRouteMeta(await live.route(toolName, args, undefined, { waitDeadline }), { route: "live" });
     let body = toolResultBody(result);
     const due = compileToAwait(toolName, body, result.isError === true);
     if (!due) return result;

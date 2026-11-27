@@ -509,10 +509,11 @@ namespace UnityOpenMcpBridge
                               "in edit mode the changed scene is reloaded in place.");
                 if (plan.PrefabStage != null)
                 {
+                    var hint = BridgeJson.EscapeString(plan.PrefabStage);
                     steps.Add("Keep the prefab stage's edits and overwrite the change on disk: unity_open_mcp_prefab_save " +
-                              "{\"paths_hint\":[\"" + plan.PrefabStage + "\"]}, then retry.");
-                    steps.Add("Or take the version on disk: unity_open_mcp_prefab_close {\"save\":false,\"paths_hint\":[\"" +
-                              plan.PrefabStage + "\"]}, then retry.");
+                              "{\"paths_hint\":[" + hint + "]}, then retry.");
+                    steps.Add("Or take the version on disk: unity_open_mcp_prefab_close {\"save\":false,\"paths_hint\":[" +
+                              hint + "]}, then retry.");
                 }
             }
             if (steps.Count == 0)
