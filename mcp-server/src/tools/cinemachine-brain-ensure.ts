@@ -13,7 +13,7 @@ export const cinemachineBrainEnsure = makeTool(
   {
     required: ["paths_hint"],
         properties: {
-          instance_id: { type: "integer", description: "Camera GameObject instance id." },
+          instance_id: { type: ["string", "integer"], description: "Camera GameObject instance id." },
           path: { type: "string", description: "Camera hierarchy path." },
           name: { type: "string", description: "Camera name (last-resort resolver)." },
           paths_hint: { ...PATHS_HINT_TYPE, description: "Mutation scope — the host scene path." },

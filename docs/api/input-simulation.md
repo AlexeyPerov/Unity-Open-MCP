@@ -241,7 +241,19 @@ absorbs a tap meant for the button underneath. The response reports `routing`,
 `backend`, `skipped`, `topHit` (before injection), `targetHit`, `blockedBy`,
 `interactable`, `hasHandler`, `inputModule` (the active module's type),
 `injected` (phases), `framesAdvanced`, and `notes` — for example when the module
-reads the Input System but only legacy touches were injected. Supported actions:
+reads the Input System but only legacy touches were injected.
+
+A click (`click`, `double_click`) is checked, not inferred from the
+pre-injection raycast: `clickHandler` is the object that should receive it,
+`pressedObject` what the module pressed after the press frame (a
+`PointerInputModule` such as `StandaloneInputModule`), and `clicksObserved` the
+`onClick` calls of a uGUI `Button` handler during the injected frames.
+`clickDelivered` is `true` / `false` when one of them decides it and `null` when
+none can (no Button handler, a module whose press record is not readable). On
+`false` the answer adds `eventSystem` (`current`, `scene`, `enabled`,
+`isFocused`, `module`, `moduleEnabled`, `activeEventSystems`) and a note to retry
+with `routing: "dispatch"`; a module raycast that hit something other than the
+pre-injection `topHit` is named in `notes` too. Supported actions:
 `click`, `double_click`, `press`, `release`, `drag`, left button only. A bare
 screen point over empty space is valid (the module decides). `backend` applies to
 `raycast_real` only.

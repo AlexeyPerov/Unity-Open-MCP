@@ -16,8 +16,7 @@ namespace UnityOpenMcpBridge
     internal static class BridgeCompileState
     {
         private const string Prefix = "UnityOpenMcp.Compile.";
-        private static readonly StringBuilder Errors = new StringBuilder();
-        private static int _errorCount;
+        private static readonly List<Diagnostic> Errors = new List<Diagnostic>();
 
         // A tool call answered with the gate envelope that sends this header as
         // "1" gets BuildHeader() back under the same name, snapshotted on the
@@ -282,6 +281,25 @@ namespace UnityOpenMcpBridge
             catch { /* the handshake is advisory; a dispatch never fails on it */ }
         }
 
+        // What the last recompile_scripts imported before it requested its
+        // compile (ScriptImportSync), keyed by the generation the call started
+        // at. A successful compile ends in a domain reload that usually closes
+        // the call's response before it is written; /compile-state publishes
+        // this record so the server can still report the import with the
+        // compile it waited for. SessionState: it survives that reload.
+        private const string ScriptImportKey = Prefix + "lastScriptImport";
+
+        /// <summary>Record a recompile_scripts call's import (main thread).</summary>
+        internal static void NoteScriptImport(int generationAtStart, string scriptImportJson)
+        {
+            try
+            {
+                SessionState.SetString(ScriptImportKey,
+                    "{\"generationAtStart\":" + generationAtStart + ",\"scriptImport\":" + scriptImportJson + "}");
+            }
+            catch { /* advisory: the call's own response carries it when it is written */ }
+        }
+
         // The compile part of the instance lock (main thread: SessionState).
         // Readable while the bridge is down, so a status built from the lock
         // during a reload still knows the last generation and whether a compile
@@ -316,32 +334,96 @@ namespace UnityOpenMcpBridge
             SessionState.SetString(Prefix + "inputs", Sources(force: true) ?? "");
             SessionState.SetString(Prefix + "before", AssemblyMtime().ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             Errors.Clear();
-            _errorCount = 0;
         }
 
         private static void AssemblyFinished(string path, CompilerMessage[] messages)
         {
             foreach (var error in messages.Where(m => m.type == CompilerMessageType.Error))
             {
-                if (Errors.Length > 0) Errors.Append(',');
-                _errorCount++;
-                Errors.Append("{\"file\":").Append(BridgeJson.EscapeString(error.file))
-                    .Append(",\"line\":").Append(error.line)
-                    .Append(",\"column\":").Append(error.column)
-                    .Append(",\"code\":").Append(BridgeJson.EscapeString(System.Text.RegularExpressions.Regex.Match(error.message ?? "", @"\bCS\d+\b").Value))
-                    .Append(",\"message\":").Append(BridgeJson.EscapeString(error.message)).Append('}');
+                Errors.Add(new Diagnostic
+                {
+                    File = error.file ?? "",
+                    Line = error.line,
+                    Column = error.column,
+                    Code = System.Text.RegularExpressions.Regex.Match(error.message ?? "", @"\bCS\d+\b").Value,
+                    Message = error.message ?? "",
+                });
             }
         }
 
         private static void Finished(object context)
         {
-            SessionState.SetString(Prefix + "errors", "[" + Errors + "]");
-            SessionState.SetInt(Prefix + "errorCount", _errorCount);
-            SessionState.SetBool(Prefix + "failed", Errors.Length > 0);
+            var errors = Dedupe(Errors);
+            var json = new StringBuilder();
+            foreach (var error in errors)
+            {
+                if (json.Length > 0) json.Append(',');
+                json.Append("{\"file\":").Append(BridgeJson.EscapeString(error.File))
+                    .Append(",\"line\":").Append(error.Line)
+                    .Append(",\"column\":").Append(error.Column)
+                    .Append(",\"code\":").Append(BridgeJson.EscapeString(error.Code))
+                    .Append(",\"message\":").Append(BridgeJson.EscapeString(error.Message)).Append('}');
+            }
+            SessionState.SetString(Prefix + "errors", "[" + json + "]");
+            SessionState.SetInt(Prefix + "errorCount", errors.Count);
+            SessionState.SetBool(Prefix + "failed", errors.Count > 0);
             SessionState.SetBool(Prefix + "completed", true);
             SessionState.SetBool(RunningKey, false);
             SessionState.SetString(Prefix + "after", AssemblyMtime().ToString("R", System.Globalization.CultureInfo.InvariantCulture));
         }
+
+        internal sealed class Diagnostic
+        {
+            internal string File;
+            internal int Line;
+            internal int Column;
+            internal string Code;
+            internal string Message;
+        }
+
+        // A compiler command-line fragment: a quoted argument (-r:"Library/…,
+        // /additionalfile:"…) or a Bee build-artifact path.
+        private static readonly System.Text.RegularExpressions.Regex CommandLineFragment =
+            new System.Text.RegularExpressions.Regex("\"|^[-/][A-Za-z]+:|Library/Bee/");
+
+        /// <summary>
+        /// One record per diagnostic. When compiler invocations interleave their
+        /// output, Unity can parse a diagnostic a second time with the start of a
+        /// command line glued before its path or a quoted argument after its
+        /// message. That copy has the same line, column and code, a path ending
+        /// with the clean path and a message containing the clean message:
+        /// it is dropped and the clean record kept. Pure.
+        /// </summary>
+        internal static List<Diagnostic> Dedupe(IEnumerable<Diagnostic> diagnostics)
+        {
+            var kept = new List<Diagnostic>();
+            foreach (var d in diagnostics)
+            {
+                var twin = kept.FindIndex(k => SameDiagnostic(k, d));
+                if (twin < 0) kept.Add(d);
+                else if (Cleanliness(d) > Cleanliness(kept[twin])) kept[twin] = d;
+            }
+            return kept;
+        }
+
+        private static bool SameDiagnostic(Diagnostic a, Diagnostic b)
+        {
+            if (a.Line != b.Line || a.Column != b.Column || a.Code != b.Code) return false;
+            if (a.File.Length == 0 || b.File.Length == 0) return a.File == b.File && a.Message == b.Message;
+            if (!CommandLineFragment.IsMatch(a.File + a.Message) && !CommandLineFragment.IsMatch(b.File + b.Message))
+                return a.File == b.File && a.Message == b.Message;
+            var files = a.File.EndsWith(b.File, StringComparison.Ordinal) || b.File.EndsWith(a.File, StringComparison.Ordinal);
+            // CompilerMessage.message is the whole diagnostic line, so a fragment
+            // glued before the path is a prefix of the message and one glued
+            // after it a suffix: the clean message lies inside the garbled one.
+            var messages = a.Message.IndexOf(b.Message, StringComparison.Ordinal) >= 0
+                || b.Message.IndexOf(a.Message, StringComparison.Ordinal) >= 0;
+            return files && messages;
+        }
+
+        private static double Cleanliness(Diagnostic d)
+            => (CommandLineFragment.IsMatch(d.File) ? 0 : 2) + (CommandLineFragment.IsMatch(d.Message) ? 0 : 1)
+               - (d.File.Length + d.Message.Length) / 1e6;
 
         internal static string BuildJson() => Build(summary: false);
 
@@ -376,10 +458,17 @@ namespace UnityOpenMcpBridge
                 : failed ? "compile_failed"
                 : known && !matches ? "assembly_stale"
                 : matches ? "no_errors_found" : "indeterminate";
+            // Why it is indeterminate: no compile has completed in this Editor
+            // session (it started on assemblies it did not build, and waiting
+            // never changes that: only a compile does), or the current source
+            // fingerprint is not known yet (a background pass after a reload).
+            var indeterminateReason = status != "indeterminate" ? null
+                : !completed ? "no_compile_this_session" : "fingerprint_pending";
             // Same identity the instance lock and /ping publish, so the server's
             // projectPath comparison cannot drift on cwd casing or symlink form.
             var projectPath = BridgeSession.ProjectPath ?? Path.GetFullPath(".");
             return "{\"status\":" + BridgeJson.EscapeString(status)
+                + (indeterminateReason != null ? ",\"indeterminateReason\":" + BridgeJson.EscapeString(indeterminateReason) : "")
                 + ",\"projectPath\":" + BridgeJson.EscapeString(projectPath)
                 + ",\"generation\":" + SessionState.GetInt(Prefix + "generation", 0)
                 + ",\"sourceMatches\":" + (matches ? "true" : "false")
@@ -388,7 +477,13 @@ namespace UnityOpenMcpBridge
                 + ",\"afterAssemblyMtimeMs\":" + SessionState.GetString(Prefix + "after", "0")
                 + (summary
                     ? ",\"errorCount\":" + SessionState.GetInt(Prefix + "errorCount", 0)
-                    : ",\"errors\":" + SessionState.GetString(Prefix + "errors", "[]")) + "}";
+                    : ",\"errors\":" + SessionState.GetString(Prefix + "errors", "[]") + LastScriptImportMember()) + "}";
+        }
+
+        private static string LastScriptImportMember()
+        {
+            var record = SessionState.GetString(ScriptImportKey, "");
+            return record.Length > 0 ? ",\"lastScriptImport\":" + record : "";
         }
     }
 }

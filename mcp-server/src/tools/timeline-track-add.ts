@@ -14,7 +14,7 @@ export const timelineTrackAdd = makeTool(
     required: ["track_type", "paths_hint"],
         properties: {
           asset_path: { type: "string", description: "TimelineAsset path ('Assets/.../*.playable')." },
-          instance_id: { type: "integer", description: "TimelineAsset instance id (fallback when asset_path omitted)." },
+          instance_id: { type: ["string", "integer"], description: "TimelineAsset instance id (fallback when asset_path omitted)." },
           track_type: {
             type: "string",
             enum: ["Animation", "Activation", "Audio", "Signal", "Control", "Group", "Playable"],

@@ -16,7 +16,7 @@ export const timelineModify = makeTool(
     required: ["fields_json", "paths_hint"],
         properties: {
           asset_path: { type: "string", description: "TimelineAsset path." },
-          instance_id: { type: "integer", description: "TimelineAsset instance id." },
+          instance_id: { type: ["string", "integer"], description: "TimelineAsset instance id." },
           track_index: {
             type: "integer",
             default: -1,

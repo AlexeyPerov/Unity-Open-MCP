@@ -221,7 +221,7 @@ namespace UnityOpenMcpBridge.Extensions.TerrainExt
             "refused — write in tiles via repeated calls instead. Mutating: " +
             "runs the gate path; paths_hint is the host scene path.")]
         public static string TerrainSetHeights(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             int x_offset = 0,
@@ -315,7 +315,7 @@ namespace UnityOpenMcpBridge.Extensions.TerrainExt
             "refused — write in tiles. Mutating: runs the gate path; paths_hint " +
             "is the scene path (+ the layer asset path when a new layer is created).")]
         public static string TerrainPaintLayer(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             int layer_index = 0,
@@ -487,7 +487,7 @@ namespace UnityOpenMcpBridge.Extensions.TerrainExt
             "from prototype_prefab_path (a .prefab asset). Mutating: runs the " +
             "gate path; paths_hint is the host scene path.")]
         public static string TerrainPlaceTrees(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             int tree_prototype_index = 0,
@@ -610,17 +610,17 @@ namespace UnityOpenMcpBridge.Extensions.TerrainExt
             "Idempotent — re-setting the same neighbors reports set:true. " +
             "Mutating: runs the gate path; paths_hint is the host scene path.")]
         public static string TerrainSetNeighbors(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string top_path = null,
-            int top_instance_id = 0,
+            long top_instance_id = 0,
             string bottom_path = null,
-            int bottom_instance_id = 0,
+            long bottom_instance_id = 0,
             string left_path = null,
-            int left_instance_id = 0,
+            long left_instance_id = 0,
             string right_path = null,
-            int right_instance_id = 0,
+            long right_instance_id = 0,
             string[] paths_hint = null)
         {
             if (paths_hint == null || paths_hint.Length == 0)
@@ -657,7 +657,7 @@ namespace UnityOpenMcpBridge.Extensions.TerrainExt
         // Resolve one neighbor side. Returns null on success (neighbor is set,
         // possibly to null for a clear); returns a non-null error envelope
         // string when resolution failed (the caller returns it directly).
-        private static string ResolveNeighborSide(UnityEngine.Terrain host, int instanceId, string sidePath, string side, out UnityEngine.Terrain neighbor)
+        private static string ResolveNeighborSide(UnityEngine.Terrain host, long instanceId, string sidePath, string side, out UnityEngine.Terrain neighbor)
         {
             neighbor = null;
             // No hint for this side → leave it null (clear).

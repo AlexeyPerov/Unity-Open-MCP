@@ -52,7 +52,7 @@ export const selectionSet = makeTool(
             items: {
               type: "object",
               properties: {
-                instance_id: { type: "integer", default: 0 },
+                instance_id: { type: ["string", "integer"], default: 0 },
                 path: { type: "string" },
                 name: { type: "string" },
                 asset_path: { type: "string" },

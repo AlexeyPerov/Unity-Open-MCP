@@ -346,7 +346,14 @@ never reads `null`), one `/ping` probe (`transition`) and, once settled,
   with the wait keyed to that generation — `recompile_scripts` and
   `assets_refresh` run that wait themselves and answer with the compile
   result); any other call gets
-  `editor_reloading` — verify a mutation's effect before repeating it. An empty
+  `editor_reloading` — verify a mutation's effect before repeating it. A
+  create-type call (`scene_create`, `prefab_create`, `material_create`,
+  `scriptableobject_create`, `spriteatlas_create`, `timeline_create`, …) is
+  judged by its target on disk instead: a file that was absent before the call
+  and is there after it answers `status: "ok"`, `committed: true`, `created`,
+  `reloadClosedResponse: true` (do not repeat the create; the tool's own result
+  fields are missing); a file still absent keeps the error with `notCreated`
+  and a step that says it is safe to call again once the Editor settles. An empty
   body while the lock or `/ping` shows a transition maps to `editor_reloading`
   with `dispatched: null`; only an unparsable body from a settled Editor stays
   `bridge_response_unparsable`.

@@ -47,7 +47,9 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         }
 
         // Runs the steps; returns the dispatched phase names and the frames advanced.
-        internal static List<string> Run(RouteDecision route, int finger, IList<Step> steps, out int framesAdvanced)
+        // `afterStep` (optional) runs after each step's frames, with the step index.
+        internal static List<string> Run(RouteDecision route, int finger, IList<Step> steps, out int framesAdvanced,
+            System.Action<int> afterStep = null)
         {
             bool legacy = route.Uses(InputRouting.LegacyTouch);
             bool inputSystem = route.Uses(InputRouting.InputSystem) && InputBackends.InputSystem != null;
@@ -59,8 +61,9 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             try
             {
                 if (inputSystem) InputBackends.InputSystem.UpdateNow();
-                foreach (var step in steps)
+                for (int s = 0; s < steps.Count; s++)
                 {
+                    var step = steps[s];
                     point = step.Point;
                     if (step.Phase == DeviceTouchPhase.Began) open = true;
                     if (legacy) EditorInputAdapter.SimulateTouch(finger, step.Point, step.Phase);
@@ -71,6 +74,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                     if (inputSystem) InputBackends.InputSystem.StepFrames(frames);
                     else for (int i = 0; i < frames; i++) EditorApplication.Step();
                     framesAdvanced += frames;
+                    afterStep?.Invoke(s);
                 }
                 if (inputSystem) InputBackends.InputSystem.UpdateNow();
             }

@@ -28,24 +28,37 @@ is shared with the Texture import family (`unity_open_mcp_texture_*`); see the
 Texture extension skill for the import half of the 2D art pipeline.
 
 Mutating tools accept the standard `paths_hint` and run the full gate path
-(`editor_settle` lifecycle — the `.spriteatlas` asset is written and
-reimported); read-only tools (`spriteatlas_get`, `spriteatlas_list`) are
+(`editor_settle` lifecycle — the atlas asset is written and imported); read-only tools (`spriteatlas_get`, `spriteatlas_list`) are
 gate-free.
 
 ## Authoring model
 
-A `.spriteatlas` file stores a `SpriteAtlasAsset` (the authoring object); the
-runtime `SpriteAtlas` is the packed artifact produced from it. These tools
-author via `SpriteAtlasAsset.Load` / `Save` and mutate packables via `Add` /
-`Remove`. Packables are `Object` references (Sprite / Texture /
-`DefaultAsset` folder); they are resolved by `Assets/`-rooted path and
-reported back by path + type so you can round-trip without instance ids.
+The path's extension picks the format, and each is authored the way Unity
+imports it:
+
+- **`.spriteatlasv2`** (Sprite Atlas V2) — the file holds the authoring
+  `SpriteAtlasAsset`; `SpriteAtlasImporter` keeps `include_in_build` and the
+  packing / texture / platform settings.
+- **`.spriteatlas`** (Sprite Atlas V1) — the file holds a `SpriteAtlas`; the
+  packables and settings live on it.
+
+Both import as a `SpriteAtlas`. Unity packs the format the project's Sprite
+Packer Mode (Edit > Project Settings > Editor) uses: Sprite Atlas V2 modes pack
+`.spriteatlasv2`, V1 modes `.spriteatlas`. `spriteatlas_create` /
+`spriteatlas_get` report `format` and `packerMode`, and a `warning` when the
+file is not the format the mode packs — create the atlas again with the
+extension it names. A `.spriteatlas` holding a `SpriteAtlasAsset` (written by
+an older bridge) is refused `not_a_sprite_atlas`: delete it and recreate it.
+Packables are `Object` references (Sprite / Texture / `DefaultAsset` folder);
+they are resolved by `Assets/`-rooted path and reported back by path + type so
+you can round-trip without instance ids.
 
 ## Canonical workflow: build an atlas
 
 1. **Create** — `unity_open_mcp_spriteatlas_create` with
-   `asset_path: "Assets/Atlases/UI.spriteatlas"` (intermediate folders are
-   created). `include_in_build` defaults to true.
+   `asset_path: "Assets/Atlases/UI.spriteatlasv2"` (`.spriteatlas` for a
+   Sprite Atlas V1 project; intermediate folders are created, an existing asset
+   is refused `asset_exists`). `include_in_build` defaults to true.
 2. **Add packables** — `unity_open_mcp_spriteatlas_add_packable` with
    `packable_paths: ["Assets/Sprites/Icons", "Assets/Textures/Icon.png"]`.
    Folders add every sprite inside; individual textures add themselves.
@@ -85,19 +98,15 @@ Unknown fields are reported in `unknownFields` and do not abort the patch.
 `texture.maxTextureSize` is not settable here (no setter on the settings
 struct; controlled via platform settings).
 
-> **Persistence note:** in this Unity version the packing and texture settings
-> are applied to the in-memory `SpriteAtlasAsset` (they take effect for the
-> next pack) but are **not** written to the `.spriteatlas` file's serialized
-> form — Unity manages them via the internal Sprite Atlas packing pipeline,
-> not the public `Save` path. `include_in_build` likewise does not round-trip
-> through the serialized file. The settings are session-scoped; for
-> permanent settings, use the Unity Editor's Sprite Atlas panel.
+The settings are saved with the atlas — a `.spriteatlasv2` on its
+`SpriteAtlasImporter`, a `.spriteatlas` on the `SpriteAtlas` in the file — and
+take effect at the next pack; `spriteatlas_get` reads them back.
 
 ## Listing atlases
 
-`unity_open_mcp_spriteatlas_list` (gate-free) lists every `.spriteatlas`
-under a folder (omit `folder` to search the whole project). Each entry
-reports `path` + `name`. Cap 200; `truncated` reports the overflow.
+`unity_open_mcp_spriteatlas_list` (gate-free) lists every `.spriteatlasv2` and
+`.spriteatlas` under a folder (omit `folder` to search the whole project). Each
+entry reports `path`, `name` and `format` (`v2` / `v1`). Cap 200; `truncated` reports the overflow.
 
 ## Layered with Texture import
 
@@ -113,7 +122,7 @@ use `texture_set_import` to mark a texture as a Sprite (`sprite_mode:
 1. `texture_set_import` on each icon PNG with
    `settings_json: '{"sprite_mode":"Single","sprite_pixels_per_unit":100}'`
    (switches `textureType` to Sprite).
-2. `spriteatlas_create` at `Assets/Atlases/UIIcons.spriteatlas`.
+2. `spriteatlas_create` at `Assets/Atlases/UIIcons.spriteatlasv2`.
 3. `spriteatlas_add_packable` with `packable_paths: ["Assets/Sprites/UI"]`
    (the folder).
 4. `spriteatlas_modify` with
@@ -146,4 +155,4 @@ use `texture_set_import` to mark a texture as a Sprite (`sprite_mode:
 | `spriteatlas_list` | no | none | Cap 200 (read-only). |
 
 Every mutating tool requires a non-empty `paths_hint` scoped to the
-`.spriteatlas` asset path — the gate has no whole-project fallback.
+atlas asset path — the gate has no whole-project fallback.

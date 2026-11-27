@@ -175,6 +175,17 @@ started yet), `entering_playmode`, `exiting_playmode`, or `null` when settled. A
 non-compiling bridge is not settled while play mode is changing. While the
 session initializes after a reload `/ping` answers HTTP 503.
 
+`/ping` adds `playRequest` (wire contract 17) while the last `editor_set_state` play request is
+pending (`status: "requested"`) or was cancelled (`status: "cancelled"`,
+`reason`, `requestedAt`, `cancelledAt`, `pendingDelayCalls`,
+`delayCallTargets`); it is absent once play mode was entered.
+
+`/compile-state` adds `indeterminateReason` to an `indeterminate` status
+(`no_compile_this_session` / `fingerprint_pending`) and, after a
+`recompile_scripts` call, `lastScriptImport: {generationAtStart, scriptImport}` —
+what that call imported before requesting its compile, kept across the domain
+reload that usually closes the call's response.
+
 The response body carries `bridgeVersion` (the package semver) **and**
 `wireContract` (an integer bumped for every observable change to the
 request/response contract — accepted parameter keys, error codes, envelope

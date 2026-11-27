@@ -79,7 +79,7 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             "an existing Canvas reports added:false. Mutating: runs the gate path; " +
             "paths_hint is the host / new-root scene path.")]
         public static string CanvasAdd(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string render_mode = "ScreenSpaceOverlay",
@@ -222,7 +222,7 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             "the gate path; paths_hint is the parent scene path.")]
         public static string ElementAdd(
             string parent_path = null,
-            int parent_instance_id = 0,
+            long parent_instance_id = 0,
             string parent_name = null,
             string element_type = null,
             string element_name = null,
@@ -335,7 +335,7 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             "added:false. Mutating: runs the gate path; paths_hint is the parent " +
             "scene path.")]
         public static string LayoutGroupAdd(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string layout_type = null,
@@ -478,7 +478,7 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             "inferred from the current value). Mutating: runs the gate path; paths_hint " +
             "is the host scene path.")]
         public static string ElementModify(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string component_type = null,

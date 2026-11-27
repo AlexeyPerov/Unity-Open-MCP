@@ -3,7 +3,7 @@
 // Seven typed tools covering the SpriteAtlas authoring surface:
 //
 //   spriteatlas_create         — create a new SpriteAtlas asset at
-//                                Assets/.../*.spriteatlas.
+//                                Assets/.../*.spriteatlasv2 or *.spriteatlas.
 //   spriteatlas_get            — read packables + packing/texture/platform
 //                                settings (read-only).
 //   spriteatlas_add_packable   — add sprites/textures/folders to a SpriteAtlas.
@@ -11,7 +11,7 @@
 //   spriteatlas_modify         — patch packing/texture/include-in-build
 //                                settings (structured patch; unknown fields
 //                                reported, not fatal).
-//   spriteatlas_delete         — delete the .spriteatlas asset.
+//   spriteatlas_delete         — delete the atlas asset.
 //   spriteatlas_list           — list SpriteAtlas assets (read-only,
 //                                offline-routeable in principle).
 //
@@ -23,12 +23,19 @@
 // activates it via unity_open_mcp_manage_tools (group visibility is a session
 // concern, independent of compile-gating).
 //
-// The .spriteatlas file stores a SpriteAtlasAsset (the authoring object); the
-// runtime SpriteAtlas is a packed artifact. We author via
-// SpriteAtlasAsset.Load / Save and mutate packables via Add / Remove. Packables
-// are Object references (Sprite / Texture / DefaultAsset folder); we resolve
-// them by Assets/-rooted path and report them back by path + type so agents
-// can round-trip without instance ids.
+// Two file formats, chosen by the extension, each authored the way Unity
+// imports it:
+//   - .spriteatlasv2 (Sprite Atlas V2): the file holds the authoring
+//     SpriteAtlasAsset (SpriteAtlasAsset.Load / Save, packables via Add /
+//     Remove); SpriteAtlasImporter imports it and owns include-in-build and
+//     the packing / texture / platform settings.
+//   - .spriteatlas (Sprite Atlas V1): the file holds a SpriteAtlas, authored
+//     through SpriteAtlasExtensions (packables and settings on the object).
+// Which one Unity packs depends on Editor Settings > Sprite Packer Mode; the
+// answers report the mode and warn when the file's format is not the one it
+// packs. Packables are Object references (Sprite / Texture / DefaultAsset
+// folder); we resolve them by Assets/-rooted path and report them back by path
+// + type so agents can round-trip without instance ids.
 //
 // Naming: `unity_open_mcp_spriteatlas_<action>` (snake_case domain prefix).
 using System.Collections.Generic;
@@ -40,11 +47,9 @@ using UnityEngine;
 using UnityOpenMcpBridge;
 using U2D = UnityEditor.U2D;
 
-// SpriteAtlasAsset's settings getters/setters (SetIncludeInBuild,
-// GetPackingSettings, GetTextureSettings, GetPlatformSettings, ...) are
-// deprecated in Unity 6 in favor of SpriteAtlasImporter. The importer path is
-// preferred; the Asset methods survive only as a fallback for older Unity and
-// emit CS0618 there. Suppress that warning for the fallback call sites.
+// Some SpriteAtlasAsset / SpriteAtlasExtensions members are marked obsolete on
+// newer Unity in favor of SpriteAtlasImporter; the V2 settings go through the
+// importer, and the V1 format has no other API.
 #pragma warning disable CS0618
 namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
 {
@@ -55,12 +60,16 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
     [BridgeToolType]
     public static class SpriteAtlasTools
     {
+        internal const string V2Extension = ".spriteatlasv2";
+        internal const string V1Extension = ".spriteatlas";
+
         // =====================================================================
         // create
         // =====================================================================
 
-        // Create a new SpriteAtlas asset at Assets/.../*.spriteatlas. Creates
-        // intermediate folders. include_in_build defaults to true.
+        // Create a new SpriteAtlas asset. The extension picks the format
+        // (.spriteatlasv2 → V2, .spriteatlas → V1). Creates intermediate
+        // folders. include_in_build defaults to true.
         [BridgeTool("unity_open_mcp_spriteatlas_create",
             Title = "SpriteAtlas: Create",
             IsMutating = true,
@@ -68,10 +77,14 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             IdempotentHint = false,
             Lifecycle = LifecyclePolicy.EditorSettle, Group = "sprite2d")]
         [System.ComponentModel.Description(
-            "Create a new SpriteAtlas asset at an Assets/-rooted .spriteatlas " +
-            "path. Intermediate folders are created if missing. include_in_build " +
-            "defaults to true (the atlas ships with the player build). Mutating: " +
-            "runs the full gate path; paths_hint is the new asset path.")]
+            "Create a new SpriteAtlas asset at an Assets/-rooted path. The " +
+            "extension picks the format: .spriteatlasv2 (Sprite Atlas V2, " +
+            "imported by SpriteAtlasImporter) or .spriteatlas (Sprite Atlas V1). " +
+            "Use the one your Sprite Packer Mode packs (V2 modes: .spriteatlasv2); " +
+            "the answer reports packerMode and a warning on a mismatch. " +
+            "Intermediate folders are created if missing. include_in_build " +
+            "defaults to true. Mutating: runs the full gate path; paths_hint is " +
+            "the new asset path.")]
         public static string Create(
             string asset_path,
             bool include_in_build = true,
@@ -80,53 +93,63 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             if (paths_hint == null || paths_hint.Length == 0)
                 return SpriteAtlasJson.Error("paths_hint_required",
                     "spriteatlas_create is mutating; pass a non-empty paths_hint " +
-                    "scoped to the new .spriteatlas asset path.");
+                    "scoped to the new atlas asset path.");
 
             var normalized = NormalizeAtlasPath(asset_path);
             if (normalized.Error != null) return normalized.Error;
+            if (AssetDatabase.GetMainAssetTypeAtPath(normalized.Path) != null
+                || System.IO.File.Exists(normalized.Path))
+                return SpriteAtlasJson.Error("asset_exists",
+                    $"An asset already exists at '{normalized.Path}'.");
 
-            // Ensure parent folders exist.
             EnsureFolderFor(normalized.Path);
+            var name = System.IO.Path.GetFileNameWithoutExtension(normalized.Path);
 
-            // Create via the SpriteAtlasAsset authoring API: new instance →
-            // Internal_Create (binds the native backing) → Save to disk. The
-            // constructor binds it itself on Unity 6 (a second Internal_Create
-            // logs an engine assertion), so bind only an unbound instance.
-            var asset = new U2D.SpriteAtlasAsset();
-            if (asset == null)
+            if (normalized.V2)
             {
-                var internalCreate = typeof(U2D.SpriteAtlasAsset).GetMethod(
-                    "Internal_Create",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (internalCreate == null)
-                    return SpriteAtlasJson.Error("api_unavailable",
-                        "SpriteAtlasAsset.Internal_Create is unavailable on this Unity version.");
-                internalCreate.Invoke(null, new object[] { asset });
+                // The SpriteAtlasAsset constructor binds the native object on
+                // Unity 6; an older one needs Internal_Create.
+                var asset = new U2D.SpriteAtlasAsset();
+                if (asset == null)
+                {
+                    var internalCreate = typeof(U2D.SpriteAtlasAsset).GetMethod(
+                        "Internal_Create",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                    if (internalCreate == null)
+                        return SpriteAtlasJson.Error("api_unavailable",
+                            "SpriteAtlasAsset.Internal_Create is unavailable on this Unity version.");
+                    internalCreate.Invoke(null, new object[] { asset });
+                }
+                asset.name = name;
+                U2D.SpriteAtlasAsset.Save(asset, normalized.Path);
+                // Import just the new file (a project-wide refresh would also
+                // run any pending script compile and reload inside this call).
+                AssetDatabase.ImportAsset(normalized.Path, ImportAssetOptions.ForceSynchronousImport);
+                var importer = AssetImporter.GetAtPath(normalized.Path) as U2D.SpriteAtlasImporter;
+                if (importer == null)
+                    return SpriteAtlasJson.Error("import_failed",
+                        $"'{normalized.Path}' was written, but no SpriteAtlasImporter imported it.");
+                if (importer.includeInBuild != include_in_build)
+                {
+                    importer.includeInBuild = include_in_build;
+                    importer.SaveAndReimport();
+                }
+            }
+            else
+            {
+                var atlas = new UnityEngine.U2D.SpriteAtlas { name = name };
+                U2D.SpriteAtlasExtensions.SetIncludeInBuild(atlas, include_in_build);
+                AssetDatabase.CreateAsset(atlas, normalized.Path);
+                AssetDatabase.SaveAssetIfDirty(atlas);
             }
 
-            asset.name = System.IO.Path.GetFileNameWithoutExtension(normalized.Path);
-
-            U2D.SpriteAtlasAsset.Save(asset, normalized.Path);
-            AssetDatabase.SaveAssets();
-            OpenSceneDiskSync.RefreshAfterEdit(ImportAssetOptions.ForceSynchronousImport);
-
-            // include_in_build moved from SpriteAtlasAsset to SpriteAtlasImporter
-            // (the Asset method is deprecated). Apply after save so the importer
-            // exists for the asset path.
-            var importer = UnityEditor.AssetImporter.GetAtPath(normalized.Path) as UnityEditor.U2D.SpriteAtlasImporter;
-            if (importer != null)
-            {
-                importer.includeInBuild = include_in_build;
-                importer.SaveAndReimport();
-            }
-
-            // No instanceId: the file holds the authoring SpriteAtlasAsset, and
-            // the runtime SpriteAtlas does not exist until the atlas is packed,
-            // so no id would name the atlas. Every atlas tool takes the path.
-            var sb = new StringBuilder(160);
+            // No instanceId: every atlas tool takes the path.
+            var sb = new StringBuilder(200);
             sb.Append("\"path\":").Append(SpriteAtlasJson.Esc(normalized.Path));
-            sb.Append(",\"name\":").Append(SpriteAtlasJson.Esc(asset.name));
+            sb.Append(",\"name\":").Append(SpriteAtlasJson.Esc(name));
+            sb.Append(",\"format\":").Append(SpriteAtlasJson.Esc(normalized.V2 ? "v2" : "v1"));
             sb.Append(",\"includeInBuild\":").Append(include_in_build ? "true" : "false");
+            AppendPackerMode(sb, normalized.Path, normalized.V2);
             return SpriteAtlasJson.Ok(sb.ToString());
         }
 
@@ -142,18 +165,19 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             Gate = GateMode.Off,
             Lifecycle = LifecyclePolicy.None, Group = "sprite2d")]
         [System.ComponentModel.Description(
-            "Read-only: SpriteAtlas snapshot — packables (asset paths + type), " +
-            "include-in-build, is-variant, packing settings (blockOffset / " +
-            "padding / enableRotation / enableTightPacking / enableAlphaDilation), " +
-            "texture settings (maxTextureSize / anisoLevel / filterMode / " +
-            "generateMipMaps / readable / sRGB), and the default platform " +
-            "settings (maxTextureSize / format / textureCompression). Gate-free.")]
+            "Read-only: SpriteAtlas snapshot — format (v2 / v1), packables " +
+            "(asset paths + type), include-in-build, is-variant, packing settings " +
+            "(blockOffset / padding / enableRotation / enableTightPacking / " +
+            "enableAlphaDilation), texture settings (maxTextureSize / anisoLevel / " +
+            "filterMode / generateMipMaps / readable / sRGB), and the default " +
+            "platform settings (maxTextureSize / format / textureCompression). " +
+            "Gate-free.")]
         public static string Get(string asset_path)
         {
-            var asset = LoadAtlasAsset(asset_path);
-            if (asset.Error != null) return asset.Error;
+            var atlas = LoadAtlas(asset_path);
+            if (atlas.Error != null) return atlas.Error;
             var sb = new StringBuilder(512);
-            BuildAtlasState(asset.Asset, asset.Path, sb);
+            BuildAtlasState(atlas, sb);
             return SpriteAtlasJson.Ok(sb.ToString());
         }
 
@@ -176,7 +200,7 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             "SpriteAtlas by Assets/-rooted path. Each path resolves to its main " +
             "asset Object. Per-path errors are accumulated — a single bad path " +
             "does not abort the batch. Mutating: runs the full gate path; " +
-            "paths_hint is the .spriteatlas asset path.")]
+            "paths_hint is the atlas asset path.")]
         public static string AddPackable(
             string asset_path,
             string[] packable_paths,
@@ -189,8 +213,8 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
                 return SpriteAtlasJson.Error("missing_parameter",
                     "'packable_paths' (Assets/-rooted array) is required.");
 
-            var asset = LoadAtlasAsset(asset_path);
-            if (asset.Error != null) return asset.Error;
+            var atlas = LoadAtlas(asset_path);
+            if (atlas.Error != null) return atlas.Error;
 
             var added = new StringBuilder(256);
             var errors = new StringBuilder(256);
@@ -226,15 +250,22 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
 
             if (toAdd.Count > 0)
             {
-                asset.Asset.Add(toAdd.ToArray());
-                U2D.SpriteAtlasAsset.Save(asset.Asset, asset.Path);
-                AssetDatabase.SaveAssets();
+                if (atlas.V2)
+                {
+                    atlas.Authoring.Add(toAdd.ToArray());
+                    SaveAuthoring(atlas);
+                }
+                else
+                {
+                    U2D.SpriteAtlasExtensions.Add(atlas.Legacy, toAdd.ToArray());
+                    SaveLegacy(atlas);
+                }
             }
 
             var sb = new StringBuilder(320);
             sb.Append("\"added\":").Append(added);
             sb.Append(",\"errors\":").Append(errors);
-            sb.Append(",\"packableCount:after\":").Append(CountPackables(asset.Asset));
+            sb.Append(",\"packableCount:after\":").Append(GetPackables(atlas).Count);
             return SpriteAtlasJson.Ok(sb.ToString());
         }
 
@@ -253,7 +284,7 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             "Remove packables from a SpriteAtlas by Assets/-rooted path. Each " +
             "path resolves to its main asset Object and is removed if present in " +
             "the packables list. Per-path errors are accumulated. Mutating: runs " +
-            "the full gate path; paths_hint is the .spriteatlas asset path.")]
+            "the full gate path; paths_hint is the atlas asset path.")]
         public static string RemovePackable(
             string asset_path,
             string[] packable_paths,
@@ -266,10 +297,10 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
                 return SpriteAtlasJson.Error("missing_parameter",
                     "'packable_paths' (Assets/-rooted array) is required.");
 
-            var asset = LoadAtlasAsset(asset_path);
-            if (asset.Error != null) return asset.Error;
+            var atlas = LoadAtlas(asset_path);
+            if (atlas.Error != null) return atlas.Error;
 
-            var current = GetPackables(asset.Asset);
+            var current = GetPackables(atlas);
             var removed = new StringBuilder(256);
             var errors = new StringBuilder(256);
             removed.Append('[');
@@ -307,15 +338,22 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
 
             if (toRemove.Count > 0)
             {
-                asset.Asset.Remove(toRemove.ToArray());
-                U2D.SpriteAtlasAsset.Save(asset.Asset, asset.Path);
-                AssetDatabase.SaveAssets();
+                if (atlas.V2)
+                {
+                    atlas.Authoring.Remove(toRemove.ToArray());
+                    SaveAuthoring(atlas);
+                }
+                else
+                {
+                    U2D.SpriteAtlasExtensions.Remove(atlas.Legacy, toRemove.ToArray());
+                    SaveLegacy(atlas);
+                }
             }
 
             var sb = new StringBuilder(320);
             sb.Append("\"removed\":").Append(removed);
             sb.Append(",\"errors\":").Append(errors);
-            sb.Append(",\"packableCount:after\":").Append(CountPackables(asset.Asset));
+            sb.Append(",\"packableCount:after\":").Append(GetPackables(atlas).Count);
             return SpriteAtlasJson.Ok(sb.ToString());
         }
 
@@ -338,13 +376,10 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             "generateMipMaps / readable / sRGB). settings_json is a JSON object " +
             "with three optional sub-objects: " +
             "{include_in_build, packing:{...}, texture:{...}}. Unknown fields " +
-            "are reported in `unknownFields`, not fatal. NOTE: in this Unity " +
-            "version the packing/texture settings are applied to the in-memory " +
-            "SpriteAtlasAsset (they take effect for the next pack) but are NOT " +
-            "written to the .spriteatlas file's serialized form — Unity manages " +
-            "them via the internal Sprite Atlas packing pipeline, not the public " +
-            "Save path. Mutating: runs the full gate path; paths_hint is the " +
-            ".spriteatlas asset path.")]
+            "are reported in `unknownFields`, not fatal. The settings are saved " +
+            "with the atlas (a V2 atlas: its SpriteAtlasImporter; a V1 atlas: " +
+            "the SpriteAtlas object) and take effect at the next pack. " +
+            "Mutating: runs the full gate path; paths_hint is the atlas asset path.")]
         public static string Modify(
             string asset_path,
             string settings_json = null,
@@ -358,14 +393,8 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
                     "'settings_json' is required (e.g. " +
                     "{\"include_in_build\":false,\"packing\":{\"padding\":4}}).");
 
-            var asset = LoadAtlasAsset(asset_path);
-            if (asset.Error != null) return asset.Error;
-
-            // SpriteAtlasAsset's settings getters/setters are deprecated in
-            // favor of SpriteAtlasImporter (Unity 6). Resolve the importer once;
-            // fall back to the Asset methods when the importer is unavailable
-            // (older Unity).
-            var importer = UnityEditor.AssetImporter.GetAtPath(asset.Path) as UnityEditor.U2D.SpriteAtlasImporter;
+            var atlas = LoadAtlas(asset_path);
+            if (atlas.Error != null) return atlas.Error;
 
             var applied = new StringBuilder(256);
             var unknown = new StringBuilder(256);
@@ -380,8 +409,8 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             {
                 if (TryParseBool(includeRaw, out var b))
                 {
-                    if (importer != null) importer.includeInBuild = b;
-                    else asset.Asset.SetIncludeInBuild(b);
+                    if (atlas.V2) atlas.Importer.includeInBuild = b;
+                    else U2D.SpriteAtlasExtensions.SetIncludeInBuild(atlas.Legacy, b);
                     if (!firstApplied) applied.Append(',');
                     firstApplied = false;
                     applied.Append("{\"field\":\"include_in_build\",\"value\":").Append(b ? "true" : "false").Append('}');
@@ -398,9 +427,9 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             var packingJson = ExtractObject(settings_json, "packing");
             if (!string.IsNullOrEmpty(packingJson))
             {
-                var packing = importer != null
-                    ? importer.packingSettings
-                    : asset.Asset.GetPackingSettings();
+                var packing = atlas.V2
+                    ? atlas.Importer.packingSettings
+                    : U2D.SpriteAtlasExtensions.GetPackingSettings(atlas.Legacy);
                 var (packingOutcomes, packingBoxed) = PatchStruct(packingJson, packing, new Dictionary<string, string>
                 {
                     { "blockOffset", "int" },
@@ -412,28 +441,12 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
                 // Unbox the (possibly mutated) struct back from the boxed copy
                 // PatchStruct reflected into. Without this, the original `packing`
                 // value-type variable keeps its pre-patch values.
-                packing = (UnityEditor.U2D.SpriteAtlasPackingSettings)packingBoxed;
-                foreach (var entry in packingOutcomes)
-                {
-                    if (entry.Ok)
-                    {
-                        if (!firstApplied) applied.Append(',');
-                        firstApplied = false;
-                        applied.Append("{\"field\":").Append(SpriteAtlasJson.Esc("packing." + entry.Field));
-                        applied.Append(",\"value\":").Append(entry.RawValue).Append('}');
-                    }
-                    else
-                    {
-                        if (!firstUnknown) unknown.Append(',');
-                        firstUnknown = false;
-                        unknown.Append("{\"field\":").Append(SpriteAtlasJson.Esc("packing." + entry.Field));
-                        unknown.Append(",\"reason\":").Append(SpriteAtlasJson.Esc(entry.Reason)).Append('}');
-                    }
-                }
+                packing = (U2D.SpriteAtlasPackingSettings)packingBoxed;
+                AppendOutcomes(packingOutcomes, "packing.", applied, ref firstApplied, unknown, ref firstUnknown);
                 if (HasAnyPackingEntry(packingJson))
                 {
-                    if (importer != null) importer.packingSettings = packing;
-                    else asset.Asset.SetPackingSettings(packing);
+                    if (atlas.V2) atlas.Importer.packingSettings = packing;
+                    else U2D.SpriteAtlasExtensions.SetPackingSettings(atlas.Legacy, packing);
                 }
             }
 
@@ -441,9 +454,9 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             var textureJson = ExtractObject(settings_json, "texture");
             if (!string.IsNullOrEmpty(textureJson))
             {
-                var texture = importer != null
-                    ? importer.textureSettings
-                    : asset.Asset.GetTextureSettings();
+                var texture = atlas.V2
+                    ? atlas.Importer.textureSettings
+                    : U2D.SpriteAtlasExtensions.GetTextureSettings(atlas.Legacy);
                 var (textureOutcomes, textureBoxed) = PatchStruct(textureJson, texture, new Dictionary<string, string>
                 {
                     // maxTextureSize is intentionally absent — it has no C#
@@ -456,46 +469,22 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
                     { "readable", "bool" },
                     { "sRGB", "bool" },
                 });
-                texture = (UnityEditor.U2D.SpriteAtlasTextureSettings)textureBoxed;
-                foreach (var entry in textureOutcomes)
-                {
-                    if (entry.Ok)
-                    {
-                        if (!firstApplied) applied.Append(',');
-                        firstApplied = false;
-                        applied.Append("{\"field\":").Append(SpriteAtlasJson.Esc("texture." + entry.Field));
-                        applied.Append(",\"value\":").Append(entry.RawValue).Append('}');
-                    }
-                    else
-                    {
-                        if (!firstUnknown) unknown.Append(',');
-                        firstUnknown = false;
-                        unknown.Append("{\"field\":").Append(SpriteAtlasJson.Esc("texture." + entry.Field));
-                        unknown.Append(",\"reason\":").Append(SpriteAtlasJson.Esc(entry.Reason)).Append('}');
-                    }
-                }
+                texture = (U2D.SpriteAtlasTextureSettings)textureBoxed;
+                AppendOutcomes(textureOutcomes, "texture.", applied, ref firstApplied, unknown, ref firstUnknown);
                 if (HasAnyTextureEntry(textureJson))
                 {
-                    if (importer != null) importer.textureSettings = texture;
-                    else asset.Asset.SetTextureSettings(texture);
+                    if (atlas.V2) atlas.Importer.textureSettings = texture;
+                    else U2D.SpriteAtlasExtensions.SetTextureSettings(atlas.Legacy, texture);
                 }
             }
 
             applied.Append(']');
             unknown.Append(']');
 
-            // When the importer path was used, SaveAndReimport persists the
-            // settings changes (importer mutations are not written by
-            // SpriteAtlasAsset.Save). Fall back to the Asset save otherwise.
-            if (importer != null)
-            {
-                importer.SaveAndReimport();
-            }
-            else
-            {
-                U2D.SpriteAtlasAsset.Save(asset.Asset, asset.Path);
-                AssetDatabase.SaveAssets();
-            }
+            // A V2 atlas keeps its settings on the importer; a V1 atlas on the
+            // SpriteAtlas object in the file.
+            if (atlas.V2) atlas.Importer.SaveAndReimport();
+            else SaveLegacy(atlas);
 
             var sb = new StringBuilder(360);
             sb.Append("\"applied\":").Append(applied);
@@ -503,12 +492,34 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             return SpriteAtlasJson.Ok(sb.ToString());
         }
 
+        private static void AppendOutcomes(List<PatchOutcome> outcomes, string prefix,
+            StringBuilder applied, ref bool firstApplied, StringBuilder unknown, ref bool firstUnknown)
+        {
+            foreach (var entry in outcomes)
+            {
+                if (entry.Ok)
+                {
+                    if (!firstApplied) applied.Append(',');
+                    firstApplied = false;
+                    applied.Append("{\"field\":").Append(SpriteAtlasJson.Esc(prefix + entry.Field));
+                    applied.Append(",\"value\":").Append(entry.RawValue).Append('}');
+                }
+                else
+                {
+                    if (!firstUnknown) unknown.Append(',');
+                    firstUnknown = false;
+                    unknown.Append("{\"field\":").Append(SpriteAtlasJson.Esc(prefix + entry.Field));
+                    unknown.Append(",\"reason\":").Append(SpriteAtlasJson.Esc(entry.Reason)).Append('}');
+                }
+            }
+        }
+
         // =====================================================================
         // delete
         // =====================================================================
 
-        // Delete the .spriteatlas asset. Refuses if the path does not point at
-        // a SpriteAtlas.
+        // Delete the atlas asset. Refuses if the path does not point at a
+        // SpriteAtlas.
         [BridgeTool("unity_open_mcp_spriteatlas_delete",
             Title = "SpriteAtlas: Delete",
             IsMutating = true,
@@ -516,10 +527,10 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             DestructiveHint = true,
             Lifecycle = LifecyclePolicy.EditorSettle, Group = "sprite2d")]
         [System.ComponentModel.Description(
-            "Delete a SpriteAtlas asset (.spriteatlas). Refuses when the path " +
-            "does not point at a SpriteAtlas. Mutating (destructive): runs the " +
-            "full gate path; paths_hint is the asset path. There is no undo " +
-            "across a Unity restart.")]
+            "Delete a SpriteAtlas asset (.spriteatlasv2 / .spriteatlas). Refuses " +
+            "when the path does not point at a SpriteAtlas. Mutating " +
+            "(destructive): runs the full gate path; paths_hint is the asset " +
+            "path. There is no undo across a Unity restart.")]
         public static string Delete(
             string asset_path,
             string[] paths_hint = null)
@@ -528,11 +539,17 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
                 return SpriteAtlasJson.Error("paths_hint_required",
                     "spriteatlas_delete is mutating; pass a non-empty paths_hint.");
 
-            // Resolve the atlas the way every other tool here does: a
-            // .spriteatlas that has not been packed yet has no SpriteAtlas
-            // main object to load, only its SpriteAtlasAsset.
-            var normalized = LoadAtlasAsset(asset_path);
+            // Any atlas file, including a .spriteatlas that holds a
+            // SpriteAtlasAsset (neither format, so LoadAtlas refuses it).
+            var normalized = NormalizeAtlasPath(asset_path);
             if (normalized.Error != null) return normalized.Error;
+            var mainType = AssetDatabase.GetMainAssetTypeAtPath(normalized.Path);
+            if (mainType == null)
+                return SpriteAtlasJson.Error("asset_not_found",
+                    $"SpriteAtlas not found at '{normalized.Path}'.");
+            if (mainType != typeof(UnityEngine.U2D.SpriteAtlas) && mainType != typeof(U2D.SpriteAtlasAsset))
+                return SpriteAtlasJson.Error("not_a_sprite_atlas",
+                    $"'{normalized.Path}' is a {mainType.Name}, not a SpriteAtlas.");
 
             if (!AssetDatabase.DeleteAsset(normalized.Path))
                 return SpriteAtlasJson.Error("delete_failed",
@@ -557,22 +574,21 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             Gate = GateMode.Off,
             Lifecycle = LifecyclePolicy.None, Group = "sprite2d")]
         [System.ComponentModel.Description(
-            "Read-only: list SpriteAtlas (.spriteatlas) asset paths under a " +
-            "folder (omit folder to search the whole project). Each entry " +
-            "reports path + name. Cap 200; truncated count reported. Gate-free.")]
+            "Read-only: list SpriteAtlas asset paths (.spriteatlasv2 and " +
+            ".spriteatlas) under a folder (omit folder to search the whole " +
+            "project). Each entry reports path + name + format (v2 / v1). Cap " +
+            "200; truncated count reported. Gate-free.")]
         public static string List(string folder = null)
         {
             var searchFolder = string.IsNullOrWhiteSpace(folder) ? "Assets" : folder.Trim();
-            // Match the file extension, not the imported type: a .spriteatlas
-            // holding the authoring SpriteAtlasAsset (what spriteatlas_create
-            // writes) is not a `t:SpriteAtlas` unless a SpriteAtlasImporter
-            // imports it, yet every atlas tool accepts it.
+            // Match the file extensions: both formats import as SpriteAtlas.
             var paths = new List<string>();
             foreach (var guid in AssetDatabase.FindAssets(string.Empty, new[] { searchFolder }))
             {
                 var candidate = AssetDatabase.GUIDToAssetPath(guid);
-                if (candidate.EndsWith(".spriteatlas", System.StringComparison.OrdinalIgnoreCase) &&
-                    !paths.Contains(candidate))
+                if ((candidate.EndsWith(V2Extension, System.StringComparison.OrdinalIgnoreCase)
+                        || candidate.EndsWith(V1Extension, System.StringComparison.OrdinalIgnoreCase))
+                    && !paths.Contains(candidate))
                     paths.Add(candidate);
             }
             paths.Sort(System.StringComparer.Ordinal);
@@ -580,7 +596,7 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             int truncated = paths.Count > max ? paths.Count - max : 0;
             int emit = System.Math.Min(paths.Count, max);
 
-            var sb = new StringBuilder(emit * 80 + 32);
+            var sb = new StringBuilder(emit * 96 + 32);
             sb.Append("\"folder\":").Append(SpriteAtlasJson.Esc(searchFolder));
             sb.Append(",\"count\":").Append(emit);
             sb.Append(",\"truncated\":").Append(truncated);
@@ -591,42 +607,83 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
                 var path = paths[i];
                 var name = System.IO.Path.GetFileNameWithoutExtension(path);
                 sb.Append("{\"path\":").Append(SpriteAtlasJson.Esc(path));
-                sb.Append(",\"name\":").Append(SpriteAtlasJson.Esc(name)).Append('}');
+                sb.Append(",\"name\":").Append(SpriteAtlasJson.Esc(name));
+                sb.Append(",\"format\":").Append(SpriteAtlasJson.Esc(
+                    path.EndsWith(V2Extension, System.StringComparison.OrdinalIgnoreCase) ? "v2" : "v1")).Append('}');
             }
             sb.Append(']');
             return SpriteAtlasJson.Ok(sb.ToString());
         }
 
         // =====================================================================
-        // Helpers — asset load
+        // Helpers — atlas load / save
         // =====================================================================
 
-        struct AtlasAssetResult
+        // One atlas in either format: V2 (authoring SpriteAtlasAsset + its
+        // importer) or V1 (the SpriteAtlas object in the file).
+        sealed class Atlas
         {
-            public U2D.SpriteAtlasAsset Asset;
             public string Path;
+            public bool V2;
+            public U2D.SpriteAtlasAsset Authoring;
+            public U2D.SpriteAtlasImporter Importer;
+            public UnityEngine.U2D.SpriteAtlas Legacy;
             public string Error;
         }
 
-        private static AtlasAssetResult LoadAtlasAsset(string assetPath)
+        private static Atlas LoadAtlas(string assetPath)
         {
             var normalized = NormalizeAtlasPath(assetPath);
-            if (normalized.Error != null)
-                return new AtlasAssetResult { Error = normalized.Error };
-
-            var asset = U2D.SpriteAtlasAsset.Load(normalized.Path);
-            if (asset == null)
-                return new AtlasAssetResult
+            if (normalized.Error != null) return new Atlas { Error = normalized.Error };
+            var path = normalized.Path;
+            if (AssetDatabase.GetMainAssetTypeAtPath(path) == null)
+                return new Atlas
                 {
                     Error = SpriteAtlasJson.Error("asset_not_found",
-                        $"SpriteAtlas not found at '{normalized.Path}'. Has the asset finished importing?")
+                        $"SpriteAtlas not found at '{path}'. Has the asset finished importing?")
                 };
-            return new AtlasAssetResult { Asset = asset, Path = normalized.Path };
+
+            if (normalized.V2)
+            {
+                var authoring = U2D.SpriteAtlasAsset.Load(path);
+                var importer = AssetImporter.GetAtPath(path) as U2D.SpriteAtlasImporter;
+                if (authoring == null || importer == null)
+                    return new Atlas
+                    {
+                        Error = SpriteAtlasJson.Error("not_a_sprite_atlas",
+                            $"'{path}' is not a Sprite Atlas V2 asset imported by SpriteAtlasImporter.")
+                    };
+                return new Atlas { Path = path, V2 = true, Authoring = authoring, Importer = importer };
+            }
+
+            var legacy = AssetDatabase.LoadAssetAtPath<UnityEngine.U2D.SpriteAtlas>(path);
+            if (legacy == null)
+                return new Atlas
+                {
+                    Error = SpriteAtlasJson.Error("not_a_sprite_atlas",
+                        $"'{path}' holds no SpriteAtlas (main asset: {AssetDatabase.GetMainAssetTypeAtPath(path)?.Name}). " +
+                        "A .spriteatlas written as a SpriteAtlasAsset is neither format: delete it " +
+                        "(spriteatlas_delete) and create the atlas again (.spriteatlasv2 for Sprite Atlas V2).")
+                };
+            return new Atlas { Path = path, V2 = false, Legacy = legacy };
+        }
+
+        private static void SaveAuthoring(Atlas atlas)
+        {
+            U2D.SpriteAtlasAsset.Save(atlas.Authoring, atlas.Path);
+            AssetDatabase.ImportAsset(atlas.Path, ImportAssetOptions.ForceSynchronousImport);
+        }
+
+        private static void SaveLegacy(Atlas atlas)
+        {
+            EditorUtility.SetDirty(atlas.Legacy);
+            AssetDatabase.SaveAssetIfDirty(atlas.Legacy);
         }
 
         struct PathResult
         {
             public string Path;
+            public bool V2;
             public string Error;
         }
 
@@ -639,10 +696,39 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             if (!normalized.StartsWith("Assets/"))
                 return new PathResult { Error = SpriteAtlasJson.Error("invalid_asset_path",
                     $"asset_path must start with 'Assets/': '{normalized}'.") };
-            if (!normalized.EndsWith(".spriteatlas", System.StringComparison.OrdinalIgnoreCase))
-                return new PathResult { Error = SpriteAtlasJson.Error("invalid_asset_path",
-                    "asset_path must end with '.spriteatlas'.") };
-            return new PathResult { Path = normalized };
+            if (normalized.EndsWith(V2Extension, System.StringComparison.OrdinalIgnoreCase))
+                return new PathResult { Path = normalized, V2 = true };
+            if (normalized.EndsWith(V1Extension, System.StringComparison.OrdinalIgnoreCase))
+                return new PathResult { Path = normalized, V2 = false };
+            return new PathResult { Error = SpriteAtlasJson.Error("invalid_asset_path",
+                "asset_path must end with '.spriteatlasv2' (Sprite Atlas V2) or '.spriteatlas' (V1).") };
+        }
+
+        // Sprite Packer Mode values (EditorSettings.spritePackerMode): 0
+        // Disabled, 1/2 the retired legacy packer, 3/4 Sprite Atlas V1, 5/6
+        // Sprite Atlas V2. Compared as ints so no obsolete member is named.
+        internal static bool IsV2Mode(int mode) => mode >= 5;
+        internal static bool IsV1Mode(int mode) => mode == 3 || mode == 4;
+
+        // packerMode + a warning when the atlas's format is not the one the
+        // mode packs (null when it is, or when nothing is packed at all).
+        public static string FormatWarning(int mode, bool v2, string path)
+        {
+            if (IsV2Mode(mode) && !v2)
+                return "Sprite Atlas V2 is enabled (Sprite Packer Mode), and it packs .spriteatlasv2 atlases, not this " +
+                       ".spriteatlas. Create '" + path + "v2' instead.";
+            if (IsV1Mode(mode) && v2)
+                return "Sprite Packer Mode is a Sprite Atlas V1 mode, which does not pack this .spriteatlasv2. Switch " +
+                       "Edit > Project Settings > Editor > Sprite Packer Mode to Sprite Atlas V2, or use a .spriteatlas.";
+            return null;
+        }
+
+        private static void AppendPackerMode(StringBuilder sb, string path, bool v2)
+        {
+            var mode = EditorSettings.spritePackerMode;
+            sb.Append(",\"packerMode\":").Append(SpriteAtlasJson.Esc(mode.ToString()));
+            var warning = FormatWarning((int)mode, v2, path);
+            if (warning != null) sb.Append(",\"warning\":").Append(SpriteAtlasJson.Esc(warning));
         }
 
         // =====================================================================
@@ -656,57 +742,56 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             public string TypeName;
         }
 
-        // Packables are stored on the SpriteAtlasAsset under the
-        // m_ImporterData.packables serialized array. Enumerate via
-        // SerializedObject so we get the stable field name + ObjectReference.
-        private static List<PackableEntry> GetPackables(U2D.SpriteAtlasAsset asset)
+        // V2: the SpriteAtlasAsset's m_ImporterData.packables serialized array
+        // (no public getter). V1: SpriteAtlasExtensions.GetPackables.
+        private static List<PackableEntry> GetPackables(Atlas atlas)
         {
             var result = new List<PackableEntry>();
+            void Add(Object obj)
+            {
+                if (obj == null) return;
+                result.Add(new PackableEntry
+                {
+                    Object = obj,
+                    Path = AssetDatabase.GetAssetPath(obj),
+                    TypeName = obj.GetType().Name,
+                });
+            }
+            if (!atlas.V2)
+            {
+                foreach (var obj in U2D.SpriteAtlasExtensions.GetPackables(atlas.Legacy)) Add(obj);
+                return result;
+            }
             // SerializedObject is IDisposable — scope it with `using` so the
             // native SerializedFile handle is freed after the enumeration.
-            using (var so = new SerializedObject(asset))
+            using (var so = new SerializedObject(atlas.Authoring))
             {
                 var arr = so.FindProperty("m_ImporterData.packables.Array");
                 if (arr == null) return result;
                 int size = arr.arraySize;
                 for (int i = 0; i < size; i++)
-                {
-                    var elem = arr.GetArrayElementAtIndex(i);
-                    var obj = elem.objectReferenceValue;
-                    if (obj == null) continue;
-                    result.Add(new PackableEntry
-                    {
-                        Object = obj,
-                        Path = AssetDatabase.GetAssetPath(obj),
-                        TypeName = obj.GetType().Name,
-                    });
-                }
+                    Add(arr.GetArrayElementAtIndex(i).objectReferenceValue);
             }
             return result;
         }
-
-        private static int CountPackables(U2D.SpriteAtlasAsset asset)
-            => GetPackables(asset).Count;
 
         // =====================================================================
         // Helpers — state serialization
         // =====================================================================
 
-        private static void BuildAtlasState(U2D.SpriteAtlasAsset asset, string path, StringBuilder sb)
+        private static void BuildAtlasState(Atlas atlas, StringBuilder sb)
         {
-            // SpriteAtlasAsset's settings getters are deprecated in favor of
-            // SpriteAtlasImporter (Unity 6). Resolve the importer; fall back to
-            // the Asset methods on older Unity where the importer is absent.
-            var importer = UnityEditor.AssetImporter.GetAtPath(path) as UnityEditor.U2D.SpriteAtlasImporter;
-
-            sb.Append("\"path\":").Append(SpriteAtlasJson.Esc(path));
-            sb.Append(",\"name\":").Append(SpriteAtlasJson.Esc(asset.name));
-            sb.Append(",\"isVariant\":").Append(asset.isVariant ? "true" : "false");
+            var v2 = atlas.V2;
+            sb.Append("\"path\":").Append(SpriteAtlasJson.Esc(atlas.Path));
+            sb.Append(",\"name\":").Append(SpriteAtlasJson.Esc(v2 ? atlas.Authoring.name : atlas.Legacy.name));
+            sb.Append(",\"format\":").Append(SpriteAtlasJson.Esc(v2 ? "v2" : "v1"));
+            AppendPackerMode(sb, atlas.Path, v2);
+            sb.Append(",\"isVariant\":").Append((v2 ? atlas.Authoring.isVariant : atlas.Legacy.isVariant) ? "true" : "false");
             sb.Append(",\"includeInBuild\":").Append(
-                (importer != null ? importer.includeInBuild : asset.IsIncludeInBuild()) ? "true" : "false");
+                (v2 ? atlas.Importer.includeInBuild : U2D.SpriteAtlasExtensions.IsIncludeInBuild(atlas.Legacy)) ? "true" : "false");
 
             // Packables
-            var packables = GetPackables(asset);
+            var packables = GetPackables(atlas);
             sb.Append(",\"packables\":[");
             for (int i = 0; i < packables.Count; i++)
             {
@@ -718,7 +803,7 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             sb.Append(",\"packableCount\":").Append(packables.Count);
 
             // Packing
-            var ps = importer != null ? importer.packingSettings : asset.GetPackingSettings();
+            var ps = v2 ? atlas.Importer.packingSettings : U2D.SpriteAtlasExtensions.GetPackingSettings(atlas.Legacy);
             sb.Append(",\"packing\":{");
             sb.Append("\"blockOffset\":").Append(ps.blockOffset).Append(',');
             sb.Append("\"padding\":").Append(ps.padding).Append(',');
@@ -728,7 +813,7 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             sb.Append('}');
 
             // Texture
-            var ts = importer != null ? importer.textureSettings : asset.GetTextureSettings();
+            var ts = v2 ? atlas.Importer.textureSettings : U2D.SpriteAtlasExtensions.GetTextureSettings(atlas.Legacy);
             sb.Append(",\"texture\":{");
             sb.Append("\"maxTextureSize\":").Append(ts.maxTextureSize).Append(',');
             sb.Append("\"anisoLevel\":").Append(ts.anisoLevel).Append(',');
@@ -739,7 +824,9 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
             sb.Append('}');
 
             // Default platform settings
-            var pls = importer != null ? importer.GetPlatformSettings("") : asset.GetPlatformSettings("");
+            var pls = v2
+                ? atlas.Importer.GetPlatformSettings("DefaultTexturePlatform")
+                : U2D.SpriteAtlasExtensions.GetPlatformSettings(atlas.Legacy, "DefaultTexturePlatform");
             sb.Append(",\"platformDefault\":{");
             sb.Append("\"overridden\":").Append(pls.overridden ? "true" : "false").Append(',');
             sb.Append("\"maxTextureSize\":").Append(pls.maxTextureSize).Append(',');

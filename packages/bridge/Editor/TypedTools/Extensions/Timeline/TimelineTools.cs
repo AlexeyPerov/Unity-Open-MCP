@@ -59,7 +59,7 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
         public static string Create(
             string asset_path = null,
             string frame_rate = null,
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string[] paths_hint = null)
@@ -126,7 +126,7 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
             "Mutating: runs the gate path; paths_hint is the timeline asset path.")]
         public static string TrackAdd(
             string asset_path = null,
-            int instance_id = 0,
+            long instance_id = 0,
             string track_type = null,
             string track_name = null,
             int parent_track_index = -1,
@@ -208,7 +208,7 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
             "the timeline asset path.")]
         public static string ClipAdd(
             string asset_path = null,
-            int instance_id = 0,
+            long instance_id = 0,
             int track_index = -1,
             string track_name = null,
             string clip_type = null,
@@ -296,11 +296,11 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
             "runs the gate path; paths_hint is the host scene path + the asset " +
             "path. Requires com.unity.timeline.")]
         public static string DirectorBind(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string asset_path = null,
-            int asset_instance_id = 0,
+            long asset_instance_id = 0,
             bool autoplay = false,
             string[] paths_hint = null)
         {
@@ -367,7 +367,7 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
             "path; paths_hint is the timeline asset path.")]
         public static string Modify(
             string asset_path = null,
-            int instance_id = 0,
+            long instance_id = 0,
             int track_index = -1,
             int clip_index = -1,
             string fields_json = null,
@@ -458,7 +458,7 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
             return tracks is List<TrackAsset> already ? already : new List<TrackAsset>(tracks);
         }
 
-        private static TimelineAsset ResolveTimeline(string assetPath, int instanceId)
+        private static TimelineAsset ResolveTimeline(string assetPath, long instanceId)
         {
             if (!string.IsNullOrEmpty(assetPath))
                 return AssetDatabase.LoadAssetAtPath<TimelineAsset>(assetPath);

@@ -21,7 +21,11 @@
 // Naming: tool ids follow `unity_open_mcp_vfx_<action>` (snake_case domain
 // prefix).
 #if UNITY_OPEN_MCP_EXT_VFX
+using System.Runtime.CompilerServices;
 using System.Text;
+
+// The domain tests read the open graph windows (VFXApi.OpenWindows).
+[assembly: InternalsVisibleTo("com.alexeyperov.unity-open-mcp-bridge.VFX.Editor.Tests")]
 
 namespace UnityOpenMcpBridge.Extensions.VFXExt
 {

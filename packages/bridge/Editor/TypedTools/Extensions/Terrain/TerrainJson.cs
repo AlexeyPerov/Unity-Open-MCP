@@ -77,7 +77,7 @@ namespace UnityOpenMcpBridge.Extensions.TerrainExt
         // prefab stage, scene_path / paths_hint narrowing, refused instance ids
         // (ambiguous_path and friends: see TypedTargets.RefusalJson); a
         // one-segment path also matches a nested GameObject of that name.
-        public static GameObject Resolve(int instanceId, string path, string name)
+        public static GameObject Resolve(long instanceId, string path, string name)
             => UnityOpenMcpBridge.TypedTools.TypedTargets.ResolveLenient(instanceId, path, name);
 
         public static GameObject FindByPath(string path)
@@ -89,7 +89,7 @@ namespace UnityOpenMcpBridge.Extensions.TerrainExt
         // Resolve a Terrain component from a host GameObject. Returns null when
         // the host has no Terrain (the caller surfaces a component_not_found
         // envelope). Terrain is the only component this domain reads/writes.
-        public static UnityEngine.Terrain ResolveTerrain(int instanceId, string path, string name)
+        public static UnityEngine.Terrain ResolveTerrain(long instanceId, string path, string name)
         {
             var host = Resolve(instanceId, path, name);
             return host != null ? host.GetComponent<UnityEngine.Terrain>() : null;

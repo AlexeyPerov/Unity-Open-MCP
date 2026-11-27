@@ -13,7 +13,7 @@ export const cinemachineSetBody = makeTool(
   {
     required: ["paths_hint", "body_name"],
         properties: {
-          instance_id: { type: "integer", description: "CinemachineCamera host GameObject instance id." },
+          instance_id: { type: ["string", "integer"], description: "CinemachineCamera host GameObject instance id." },
           path: { type: "string", description: "Host hierarchy path." },
           name: { type: "string", description: "Host name (last-resort resolver)." },
           body_name: {

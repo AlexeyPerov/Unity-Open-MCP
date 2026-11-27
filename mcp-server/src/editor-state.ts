@@ -27,7 +27,7 @@ import {
   type InstanceLock,
   type LockCompile,
 } from "./instance-discovery.js";
-import type { PingProbe } from "./live-client.js";
+import type { PingProbe, PlayRequestInfo } from "./live-client.js";
 import { bridgeCompileFailedBody, readBridgeLossEvidence, type BridgeLossEvidence } from "./bridge-loss.js";
 
 export const WAIT_TOOL = "unity_open_mcp_editor_status";
@@ -123,6 +123,8 @@ export interface EditorView {
   stalledMs: number | null;
   /** Why the bridge is down for good — present only on `dead_bridge`. */
   bridgeLoss?: BridgeLossEvidence;
+  /** The bridge's last play-mode request when it is pending or was cancelled (from /ping). */
+  playRequest?: PlayRequestInfo;
 }
 
 /**
@@ -156,6 +158,7 @@ export function viewEditor(s: EditorSignals, pendingTestRun = false): EditorView
     compile,
     heartbeatAt: lock?.heartbeatAt ?? null,
     stalledMs: stale && lock && Number.isFinite(heartbeatAgeMs(lock, s.at)) ? Math.round(heartbeatAgeMs(lock, s.at)) : null,
+    ...(body?.playRequest && typeof body.playRequest === "object" ? { playRequest: body.playRequest } : {}),
   };
   const view = (phase: EditorPhase, t: EditorTransition | null = transition): EditorView => ({ ...base, phase, transition: t });
 
@@ -188,6 +191,7 @@ export function statusFields(v: EditorView): Record<string, unknown> {
     // The heartbeat stopped this long ago: a long reload, a busy main thread,
     // or (with `evidence`) a bridge that is not coming back.
     ...(v.stalledMs !== null ? { heartbeatStalledMs: v.stalledMs } : {}),
+    ...(v.playRequest ? { playRequest: v.playRequest } : {}),
   };
 }
 
@@ -220,6 +224,15 @@ export const WAIT_INLINE_LIMIT_MS = 40_000;
 export const WAIT_DEFAULT_TIMEOUT_MS = 120_000;
 export const WAIT_MAX_TIMEOUT_MS = 600_000;
 
+/** `indeterminateReason` of an Editor that has not compiled since it started. */
+export const NO_COMPILE_THIS_SESSION = "no_compile_this_session";
+
+/** The step for {@link NO_COMPILE_THIS_SESSION}: waiting never certifies it, a compile does. */
+export const NO_COMPILE_THIS_SESSION_STEP =
+  "No compile has run since this Editor started, so nothing has checked the loaded assemblies against the sources " +
+  "and waiting will not change that. Call unity_open_mcp_recompile_scripts {} for a verified compile state " +
+  "(it compiles and answers with the status and error count).";
+
 /** One /compile-state reading (or read_compile_errors' summary of it). */
 export interface CompileReading {
   status: string;
@@ -228,6 +241,13 @@ export interface CompileReading {
   sourceMatches?: boolean;
   pending?: boolean;
   errorSource?: string;
+  /**
+   * Why an `indeterminate` reading is indeterminate: `no_compile_this_session`
+   * (no compile completed since the Editor started — only a compile changes
+   * that, never a wait) or `fingerprint_pending` (the source fingerprint is
+   * recomputed in the background after a reload).
+   */
+  indeterminateReason?: string;
   headline?: string;
   /** The first few diagnostics of a failed compile (file, line, code, message). */
   errors?: Array<Record<string, unknown>>;
@@ -379,7 +399,8 @@ export async function waitForEditor(req: WaitRequest, deps: WaitDeps): Promise<W
         } else if (reading.status === "assembly_stale" || (reading.status === "compile_failed" && reading.sourceMatches === false)) {
           staleSince ??= t;
           if (t - staleSince < STALE_SOURCES_GRACE_MS) hold = "sources_changed";
-        } else if (reading.status === "indeterminate") {
+        } else if (reading.status === "indeterminate" && reading.indeterminateReason !== NO_COMPILE_THIS_SESSION) {
+          // Waiting resolves a cold fingerprint, never a session without a compile.
           indeterminateSince ??= t;
           if (t - indeterminateSince < INDETERMINATE_GRACE_MS) hold = "compile_state_warming";
         }
@@ -390,6 +411,8 @@ export async function waitForEditor(req: WaitRequest, deps: WaitDeps): Promise<W
         if (!hold) {
           const modeOk = req.until === "idle" || (req.until === "playing") === (view.isPlaying === true);
           if (modeOk) modeSince = null;
+          // Play mode was requested and cancelled: it will not arrive by waiting.
+          else if (req.until === "playing" && view.playRequest?.status === "cancelled") return finish("not_reached");
           else {
             modeSince ??= t;
             if (t - modeSince >= MODE_GRACE_MS) return finish("not_reached");
@@ -410,6 +433,47 @@ export async function waitForEditor(req: WaitRequest, deps: WaitDeps): Promise<W
   }
 }
 
+/**
+ * `play_cancelled`: play mode was requested and the Editor stopped changing
+ * play mode without entering it. A project playModeStateChanged handler that
+ * set isPlaying = false is the usual cause; with EditorApplication.delayCall
+ * callbacks pending (an unfocused Editor does not run them), it may be waiting
+ * for one of them to run before it lets Play through.
+ */
+export function playCancelled(p: PlayRequestInfo, compileFailed: boolean): { error: { code: string; message: string } & Record<string, unknown>; steps: string[] } {
+  const pending = typeof p.pendingDelayCalls === "number" ? p.pendingDelayCalls : 0;
+  const targets = Array.isArray(p.delayCallTargets) ? p.delayCallTargets : [];
+  const compileErrors = p.reason === "compile_errors" || compileFailed;
+  const message = compileErrors
+    ? "Play mode was requested but not entered: scripts have compile errors, and Unity does not enter play mode with them."
+    : p.reason === "cancelled_in_transition"
+      ? "Play mode was requested and cancelled during the transition: a playModeStateChanged handler set isPlaying = false." +
+        (pending > 0
+          ? ` ${pending} EditorApplication.delayCall callback(s) are pending and have not run (an unfocused Editor does not run them)` +
+            (targets.length ? `: ${targets.join(", ")}` : "") + "; a handler can be waiting for one of them."
+          : "")
+      : "Play mode was requested but never started.";
+  const steps = compileErrors
+    ? ["Call unity_open_mcp_read_compile_errors, fix the errors, recompile, then request play mode again."]
+    : pending > 0
+      ? [
+        "Check the Console (unity_open_mcp_read_console) for the handler's message.",
+        "To run the pending callbacks first, call unity_open_mcp_editor_set_state {\"state\":\"play\",\"flush_delay_calls\":true} " +
+          "(it runs project code the Editor would run on its own when focused), then wait again; or focus the Unity window.",
+      ]
+      : ["Check the Console (unity_open_mcp_read_console) for why the project cancelled it, then call unity_open_mcp_editor_set_state {\"state\":\"play\"} again."];
+  return {
+    error: {
+      code: "play_cancelled",
+      message,
+      reason: compileErrors ? "compile_errors" : p.reason ?? null,
+      pendingDelayCalls: pending,
+      ...(targets.length ? { delayCallTargets: targets } : {}),
+    },
+    steps,
+  };
+}
+
 /** The tool-facing body of a finished wait (inline or as a job result). */
 export function describeWait(req: WaitRequest, outcome: WaitOutcome): { body: Record<string, unknown>; isError: boolean } {
   const v = outcome.view;
@@ -420,6 +484,7 @@ export function describeWait(req: WaitRequest, outcome: WaitOutcome): { body: Re
     status: c?.status ?? null,
     errorCount: c?.errorCount ?? v?.compile?.errorCount ?? null,
     ...(c?.errorSource ? { errorSource: c.errorSource } : {}),
+    ...(c?.indeterminateReason ? { indeterminateReason: c.indeterminateReason } : {}),
     ...(outcome.compileRan !== null ? { ranAfterGeneration: outcome.compileRan } : {}),
     ...(outcome.compileDueNotStarted ? { dueButNotStarted: true } : {}),
   };
@@ -443,6 +508,8 @@ export function describeWait(req: WaitRequest, outcome: WaitOutcome): { body: Re
     steps.push(`The compile failed with ${c.errorCount} error(s). Call unity_open_mcp_read_compile_errors for the diagnostics, fix them, then refresh and wait again.`);
   } else if (c?.status === "assembly_stale") {
     steps.push(`Script sources on disk are newer than the last compile and no compile started. Run unity_open_mcp_assets_refresh (or recompile_scripts), then ${waitCall("idle", generation)}.`);
+  } else if (c?.status === "indeterminate" && c.indeterminateReason === NO_COMPILE_THIS_SESSION) {
+    steps.push(NO_COMPILE_THIS_SESSION_STEP);
   }
   if (outcome.compileDueNotStarted)
     steps.push(`A compile was requested but did not start within ${PENDING_COMPILE_GRACE_MS / 1000} s; Unity may have found nothing to compile. Check unity_open_mcp_read_compile_errors before relying on new code.`);
@@ -453,7 +520,14 @@ export function describeWait(req: WaitRequest, outcome: WaitOutcome): { body: Re
 
   let error: { code: string; message: string };
   switch (outcome.reason) {
-    case "not_reached":
+    case "not_reached": {
+      const cancelled = req.until === "playing" && v?.playRequest?.status === "cancelled" ? v.playRequest : null;
+      if (cancelled) {
+        const play = playCancelled(cancelled, c?.status === "compile_failed");
+        error = play.error;
+        steps.push(...play.steps);
+        break;
+      }
       error = {
         code: "wait_not_reached",
         message: `The Editor settled in ${mode ?? "another"} mode, not '${req.until}'.` +
@@ -463,6 +537,7 @@ export function describeWait(req: WaitRequest, outcome: WaitOutcome): { body: Re
         ? "Check the compile result and the Console (unity_open_mcp_read_console), then call unity_open_mcp_editor_set_state {\"state\":\"play\"} again."
         : "Call unity_open_mcp_editor_set_state with the state you need, then wait again.");
       break;
+    }
     case "dead_bridge": {
       // Only reached with Editor.log evidence (viewEditor): a stopped heartbeat
       // alone keeps the wait going as a transition.

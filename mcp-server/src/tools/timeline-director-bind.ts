@@ -13,11 +13,11 @@ export const timelineDirectorBind = makeTool(
   {
     required: ["paths_hint"],
         properties: {
-          instance_id: { type: "integer", description: "PlayableDirector host GameObject instance id." },
+          instance_id: { type: ["string", "integer"], description: "PlayableDirector host GameObject instance id." },
           path: { type: "string", description: "Host hierarchy path." },
           name: { type: "string", description: "Host name (last-resort resolver)." },
           asset_path: { type: "string", description: "TimelineAsset path ('Assets/.../*.playable')." },
-          asset_instance_id: { type: "integer", description: "TimelineAsset instance id (fallback when asset_path omitted)." },
+          asset_instance_id: { type: ["string", "integer"], description: "TimelineAsset instance id (fallback when asset_path omitted)." },
           autoplay: {
             type: "boolean",
             default: false,

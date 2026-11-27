@@ -5054,10 +5054,15 @@
     }
   },
   "unity_open_mcp_editor_set_state": {
-    "description": "Set the Unity Editor play / pause / stop state. Complements unity_open_mcp_editor_status (the read side). play = enter play mode (EditorApplication.EnterPlaymode); pause = pause the current play session (idempotent — a retry after a timeout no longer resumes the game); stop = exit play mode. Entering play mode is disruptive — when a loaded scene has unsaved changes, Unity's native save modal can interrupt the flow, so the bridge preflights and refuses with code `scene_dirty`; pass ignore_scene_dirty: true to accept the risk. Writes no assets, so the call is gate-free. play / stop only REQUEST the change: Unity switches on a later update (with a domain reload unless Enter Play Mode Options skip it), so the response reports `transition` and the next step is unity_open_mcp_editor_status {\"wait_until\":\"playing\"} (or \"edit\" after stop), which returns once the mode is reached — do not poll. Prefer this over raw execute_csharp EditorApplication.isPlaying = true — schema-validated, undo-safe, and the dirty-scene refusal is surfaced as a structured error instead of a hanging save dialog.",
+    "description": "Set the Unity Editor play / pause / stop state. Complements unity_open_mcp_editor_status (the read side). play = enter play mode (EditorApplication.EnterPlaymode); pause = pause the current play session (idempotent — a retry after a timeout no longer resumes the game); stop = exit play mode. Entering play mode is disruptive — when a loaded scene has unsaved changes, Unity's native save modal can interrupt the flow, so the bridge preflights and refuses with code `scene_dirty`; pass ignore_scene_dirty: true to accept the risk. Writes no assets, so the call is gate-free. play / stop only REQUEST the change: Unity switches on a later update (with a domain reload unless Enter Play Mode Options skip it), so the response reports `transition` and the next step is unity_open_mcp_editor_status {\"wait_until\":\"playing\"} (or \"edit\" after stop), which returns once the mode is reached — do not poll; when the project cancels the request, that wait answers play_cancelled with the reason. Prefer this over raw execute_csharp EditorApplication.isPlaying = true — schema-validated, undo-safe, and the dirty-scene refusal is surfaced as a structured error instead of a hanging save dialog.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "flush_delay_calls": {
+          "default": false,
+          "description": "state 'play' only: first run the pending EditorApplication.delayCall callbacks once, as the Editor's own update would (an unfocused Editor can leave them unrun). Use it when the editor_status wait answered play_cancelled with pendingDelayCalls > 0 — a project play hook can cancel every Play until its deferred work runs. Runs project code; default false.",
+          "type": "boolean"
+        },
         "force": {
           "default": false,
           "description": "When true, skip the idempotent 'already in target state' check. For 'pause' this is also the toggle path: force: true unpauses when already paused. Default false.",
@@ -12375,12 +12380,22 @@
     }
   },
   "unity_open_mcp_vfx_open": {
-    "description": "Open a VisualEffectGraph (.vfx) asset in the VFX Graph editor window and return a structured summary (context count, block count, exposed property count, property names). Read-only window bring-up — Gate is Off, no paths_hint. The summary reads off the public runtime VisualEffectAsset type and the serialized file format, so it is stable across package versions. Requires com.unity.visualeffectgraph.",
+    "description": "Open a VisualEffectGraph (.vfx) asset in the VFX Graph editor window (or focus the window already showing it) and return a structured summary (context count, block count, exposed property count, property names) plus window {action, open, title}. window: open (default) | none (summary only, no window) | close (close the graph's window). Writes no asset — Gate is Off, no paths_hint. Refuses editor_window_unavailable in batch mode (use window none) and graph_has_unsaved_changes when closing a window whose graph has unsaved edits. The summary reads off the public runtime VisualEffectAsset type and the serialized file format, so it is stable across package versions. Requires com.unity.visualeffectgraph.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "asset_path": {
           "description": "VisualEffectGraph asset path ('Assets/.../*.vfx'). Highest and only resolver.",
+          "type": "string"
+        },
+        "window": {
+          "default": "open",
+          "description": "open (default): open the graph in its VFX Graph window, or focus the window showing it. none: the summary only. close: close the graph's window (refused while it has unsaved edits).",
+          "enum": [
+            "open",
+            "none",
+            "close"
+          ],
           "type": "string"
         }
       },
@@ -12458,12 +12473,12 @@
     }
   },
   "unity_open_mcp_spriteatlas_create": {
-    "description": "Create a new SpriteAtlas asset at an Assets/-rooted .spriteatlas path. Intermediate folders are created if missing. include_in_build defaults to true (the atlas ships with the player build). Mutating: runs the full gate path (editor_settle lifecycle — the .spriteatlas asset is written + reimported); paths_hint is the new asset path. Built-in 2D module (no package dependency); the sprite2d group is hidden until manage_tools activates it.",
+    "description": "Create a new SpriteAtlas asset at an Assets/-rooted path. The extension picks the format: .spriteatlasv2 (Sprite Atlas V2, imported by SpriteAtlasImporter) or .spriteatlas (Sprite Atlas V1). Use the one your Sprite Packer Mode packs (Sprite Atlas V2 modes: .spriteatlasv2); the answer reports format, packerMode and a warning on a mismatch. Intermediate folders are created if missing; an existing asset is refused (asset_exists). include_in_build defaults to true (the atlas ships with the player build). Mutating: runs the full gate path (editor_settle lifecycle — only the new file is imported); paths_hint is the new asset path. Built-in 2D module (no package dependency); the sprite2d group is hidden until manage_tools activates it.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "asset_path": {
-          "description": "Destination asset path. Must start with 'Assets/' and end with '.spriteatlas'. Intermediate folders are created if missing.",
+          "description": "Destination asset path. Must start with 'Assets/' and end with '.spriteatlasv2' (Sprite Atlas V2) or '.spriteatlas' (V1). Intermediate folders are created if missing.",
           "type": "string"
         },
         "gate": {
@@ -12480,7 +12495,7 @@
           "type": "boolean"
         },
         "paths_hint": {
-          "description": "Mutation scope — the new .spriteatlas asset path.",
+          "description": "Mutation scope — the new atlas asset path.",
           "items": {
             "type": "string"
           },
@@ -12500,7 +12515,7 @@
       "additionalProperties": false,
       "properties": {
         "asset_path": {
-          "description": "Assets/-rooted .spriteatlas asset path.",
+          "description": "Assets/-rooted atlas asset path (.spriteatlasv2 or .spriteatlas).",
           "type": "string"
         }
       },
@@ -12511,12 +12526,12 @@
     }
   },
   "unity_open_mcp_spriteatlas_add_packable": {
-    "description": "Add packables (sprites / textures / DefaultAsset folders) to a SpriteAtlas by Assets/-rooted path. Each path resolves to its main asset Object. Per-path errors are accumulated — a single bad path does not abort the batch. Idempotent re-adds are tolerated by Unity. Mutating: runs the full gate path (editor_settle); paths_hint is the .spriteatlas asset path. Built-in 2D module; the sprite2d group is hidden until manage_tools activates it.",
+    "description": "Add packables (sprites / textures / DefaultAsset folders) to a SpriteAtlas by Assets/-rooted path. Each path resolves to its main asset Object. Per-path errors are accumulated — a single bad path does not abort the batch. Idempotent re-adds are tolerated by Unity. Mutating: runs the full gate path (editor_settle); paths_hint is the atlas asset path. Built-in 2D module; the sprite2d group is hidden until manage_tools activates it.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "asset_path": {
-          "description": "Assets/-rooted .spriteatlas asset path.",
+          "description": "Assets/-rooted atlas asset path (.spriteatlasv2 or .spriteatlas).",
           "type": "string"
         },
         "gate": {
@@ -12535,7 +12550,7 @@
           "type": "array"
         },
         "paths_hint": {
-          "description": "Mutation scope — the .spriteatlas asset path.",
+          "description": "Mutation scope — the atlas asset path.",
           "items": {
             "type": "string"
           },
@@ -12551,12 +12566,12 @@
     }
   },
   "unity_open_mcp_spriteatlas_remove_packable": {
-    "description": "Remove packables from a SpriteAtlas by Assets/-rooted path. Each path resolves against the current packables list and is removed if present. Per-path errors are accumulated (a path that is not a packable of this atlas is reported, not fatal). Mutating: runs the full gate path (editor_settle); paths_hint is the .spriteatlas asset path. Built-in 2D module; the sprite2d group is hidden until manage_tools activates it.",
+    "description": "Remove packables from a SpriteAtlas by Assets/-rooted path. Each path resolves against the current packables list and is removed if present. Per-path errors are accumulated (a path that is not a packable of this atlas is reported, not fatal). Mutating: runs the full gate path (editor_settle); paths_hint is the atlas asset path. Built-in 2D module; the sprite2d group is hidden until manage_tools activates it.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "asset_path": {
-          "description": "Assets/-rooted .spriteatlas asset path.",
+          "description": "Assets/-rooted atlas asset path (.spriteatlasv2 or .spriteatlas).",
           "type": "string"
         },
         "gate": {
@@ -12575,7 +12590,7 @@
           "type": "array"
         },
         "paths_hint": {
-          "description": "Mutation scope — the .spriteatlas asset path.",
+          "description": "Mutation scope — the atlas asset path.",
           "items": {
             "type": "string"
           },
@@ -12591,12 +12606,12 @@
     }
   },
   "unity_open_mcp_spriteatlas_modify": {
-    "description": "Mutating: patch SpriteAtlas settings — include_in_build (bool), packing (blockOffset / padding / enableRotation / enableTightPacking / enableAlphaDilation), and texture (anisoLevel / filterMode / generateMipMaps / readable / sRGB). settings_json is a JSON object with three optional sub-objects: {include_in_build, packing:{...}, texture:{...}}. Unknown fields are reported in `unknownFields`, not fatal. NOTE: packing and texture settings are applied to the in-memory asset (take effect for the next pack) but are NOT written to the .spriteatlas file in this Unity version — Unity manages them via the internal packing pipeline. Mutating: runs the full gate path (editor_settle); paths_hint is the .spriteatlas asset path. Built-in 2D module; the sprite2d group is hidden until manage_tools activates it.",
+    "description": "Mutating: patch SpriteAtlas settings — include_in_build (bool), packing (blockOffset / padding / enableRotation / enableTightPacking / enableAlphaDilation), and texture (anisoLevel / filterMode / generateMipMaps / readable / sRGB). settings_json is a JSON object with three optional sub-objects: {include_in_build, packing:{...}, texture:{...}}. Unknown fields are reported in `unknownFields`, not fatal. The settings are saved with the atlas (a .spriteatlasv2: its SpriteAtlasImporter; a .spriteatlas: the SpriteAtlas in the file) and take effect at the next pack. Mutating: runs the full gate path (editor_settle); paths_hint is the atlas asset path. Built-in 2D module; the sprite2d group is hidden until manage_tools activates it.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "asset_path": {
-          "description": "Assets/-rooted .spriteatlas asset path.",
+          "description": "Assets/-rooted atlas asset path (.spriteatlasv2 or .spriteatlas).",
           "type": "string"
         },
         "gate": {
@@ -12608,14 +12623,14 @@
           ]
         },
         "paths_hint": {
-          "description": "Mutation scope — the .spriteatlas asset path.",
+          "description": "Mutation scope — the atlas asset path.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
         "settings_json": {
-          "description": "JSON object string. e.g. \"{\"include_in_build\":false,\"packing\":{\"padding\":4,\"enableRotation\":true},\"texture\":{\"anisoLevel\":1,\"filterMode\":\"Bilinear\"}}\". Top-level keys: include_in_build (bool). Sub-objects: packing {blockOffset(int), padding(int), enableRotation(bool), enableTightPacking(bool), enableAlphaDilation(bool)}, texture {anisoLevel(int), filterMode(Point|Bilinear|Trilinear), generateMipMaps(bool), readable(bool), sRGB(bool)}. NOTE: packing and texture settings are applied to the in-memory asset (take effect for the next pack) but are NOT written to the .spriteatlas file in this Unity version — Unity manages them via the internal packing pipeline. texture.maxTextureSize is not settable here (no setter on the settings struct; controlled via platform settings).",
+          "description": "JSON object string. e.g. \"{\"include_in_build\":false,\"packing\":{\"padding\":4,\"enableRotation\":true},\"texture\":{\"anisoLevel\":1,\"filterMode\":\"Bilinear\"}}\". Top-level keys: include_in_build (bool). Sub-objects: packing {blockOffset(int), padding(int), enableRotation(bool), enableTightPacking(bool), enableAlphaDilation(bool)}, texture {anisoLevel(int), filterMode(Point|Bilinear|Trilinear), generateMipMaps(bool), readable(bool), sRGB(bool)}. texture.maxTextureSize is not settable here (no setter on the settings struct; controlled via platform settings).",
           "type": "string"
         }
       },
@@ -12628,12 +12643,12 @@
     }
   },
   "unity_open_mcp_spriteatlas_delete": {
-    "description": "Delete a SpriteAtlas asset (.spriteatlas). Refuses when the path does not point at a SpriteAtlas. Mutating (destructive): runs the full gate path (editor_settle); paths_hint is the asset path. There is no undo across a Unity restart. Built-in 2D module; the sprite2d group is hidden until manage_tools activates it.",
+    "description": "Delete a SpriteAtlas asset (.spriteatlasv2 / .spriteatlas). Refuses when the path does not point at a SpriteAtlas. Mutating (destructive): runs the full gate path (editor_settle); paths_hint is the asset path. There is no undo across a Unity restart. Built-in 2D module; the sprite2d group is hidden until manage_tools activates it.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "asset_path": {
-          "description": "Assets/-rooted .spriteatlas asset path.",
+          "description": "Assets/-rooted atlas asset path (.spriteatlasv2 or .spriteatlas).",
           "type": "string"
         },
         "gate": {
@@ -12660,7 +12675,7 @@
     }
   },
   "unity_open_mcp_spriteatlas_list": {
-    "description": "Read-only: list SpriteAtlas (.spriteatlas) asset paths under a folder (omit folder to search the whole project). Each entry reports path + name. Cap 200; truncated count reported. Gate-free.",
+    "description": "Read-only: list SpriteAtlas asset paths (.spriteatlasv2 and .spriteatlas) under a folder (omit folder to search the whole project). Each entry reports path + name + format (v2 / v1). Cap 200; truncated count reported. Gate-free.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

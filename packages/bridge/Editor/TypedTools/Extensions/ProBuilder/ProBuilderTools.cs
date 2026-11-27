@@ -168,7 +168,7 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
             "valid face indices or to pick a semantic direction for extrude / " +
             "delete_faces / set_face_material.")]
         public static string GetMeshInfo(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null)
         {
@@ -234,7 +234,7 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
             "'VertexNormal'. Mutating: runs the gate path; paths_hint is the host " +
             "scene path.")]
         public static string Extrude(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             int[] face_indices = null,
@@ -317,7 +317,7 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
             "'Forward' / 'Back'); exactly one is required. Refuses to delete every " +
             "face. Mutating: runs the gate path; paths_hint is the host scene path.")]
         public static string DeleteFaces(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             int[] face_indices = null,
@@ -397,7 +397,7 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
             "exactly one is required. Mutating: runs the gate path; paths_hint is " +
             "the host scene path.")]
         public static string SetFaceMaterial(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string material_path = null,

@@ -10,14 +10,14 @@ export const spriteatlasRemovePackable = makeTool(
     "resolves against the current packables list and is removed if present. " +
     "Per-path errors are accumulated (a path that is not a packable of this " +
     "atlas is reported, not fatal). Mutating: runs the full gate path " +
-    "(editor_settle); paths_hint is the .spriteatlas asset path. Built-in 2D " +
+    "(editor_settle); paths_hint is the atlas asset path. Built-in 2D " +
     "module; the sprite2d group is hidden until manage_tools activates it.",
   {
     required: ["asset_path", "packable_paths", "paths_hint"],
         properties: {
           asset_path: {
             type: "string",
-            description: "Assets/-rooted .spriteatlas asset path.",
+            description: "Assets/-rooted atlas asset path (.spriteatlasv2 or .spriteatlas).",
           },
           packable_paths: {
             type: "array",
@@ -26,7 +26,7 @@ export const spriteatlasRemovePackable = makeTool(
               "Assets/-rooted paths of the packables to remove. Each must match " +
               "a current packable of this atlas (matched by asset path).",
           },
-          paths_hint: { ...PATHS_HINT_TYPE, description: "Mutation scope — the .spriteatlas asset path." },
+          paths_hint: { ...PATHS_HINT_TYPE, description: "Mutation scope — the atlas asset path." },
           gate: { ...GATE_PROP },
         },
   },

@@ -120,11 +120,21 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             bool focused = GameViewWindows.EnsureGameViewFocusForInputSystem(route);
             List<string> injected;
             int frames;
-            try { injected = TouchSequence.Run(route, 0, steps, out frames); }
+            // A click is checked, not inferred from the pre-injection raycast
+            // (ClickDelivery): the module's press record after the first press
+            // frame, and a Button handler's onClick.
+            bool isClick = action == "click" || action == "double_click";
+            using var delivery = isClick ? ClickDelivery.Watch(topHit ?? resolved) : null;
+            try
+            {
+                injected = TouchSequence.Run(route, 0, steps, out frames,
+                    delivery == null ? (System.Action<int>)null : index => { if (index == 0) delivery.ReadPress(0); });
+            }
             catch (System.Exception ex)
             {
                 return InputSimulationJson.Error("injection_failed", "Touch injection failed: " + ex.Message);
             }
+            bool? delivered = delivery?.Delivered;
 
             var module = EventSystem.current != null && EventSystem.current.currentInputModule != null
                 ? EventSystem.current.currentInputModule.GetType().Name : null;
@@ -136,6 +146,13 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 notes.Add("The EventSystem reads legacy Input (StandaloneInputModule) but no legacy touch was injected; uGUI will not see this press.");
             if (route.Uses(InputRouting.LegacyTouch) && !route.Environment.SimulateMouseWithTouches)
                 notes.Add("Input.simulateMouseWithTouches is false: legacy mouse readers do not see the touch (touch readers and StandaloneInputModule touch processing still do).");
+            if (delivery != null && delivery.PressRead && delivery.ModuleHit != topHit)
+                notes.Add("The input module's own raycast hit " + (delivery.ModuleHit == null ? "nothing" : PointerTargets.BuildPath(delivery.ModuleHit)) +
+                          ", not the pre-injection top hit " + (topHit == null ? "(nothing)" : PointerTargets.BuildPath(topHit)) +
+                          ": what is on top changed, or the module raycasts differently.");
+            if (delivered == false)
+                notes.Add("The injected touch did not click " + (delivery.ClickHandler == null ? "anything" : PointerTargets.BuildPath(delivery.ClickHandler)) +
+                          " although the pre-injection raycast reached it. Check eventSystem below; retry with routing: dispatch, which calls the handler directly.");
 
             var sb = new StringBuilder(512);
             sb.Append("\"routing\":\"raycast_real\"");
@@ -155,6 +172,15 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             sb.Append(",\"hasHandler\":").Append(resolved != null && PointerTargets.HasAnyPointerHandler(resolved) ? "true" : "false");
             sb.Append(",\"inputModule\":").Append(module == null ? "null" : InputSimulationJson.Esc(module));
             sb.Append(",\"focusedGameView\":").Append(focused ? "true" : "false");
+            if (delivery != null)
+            {
+                sb.Append(",\"clickDelivered\":").Append(delivered == null ? "null" : delivered.Value ? "true" : "false");
+                sb.Append(",\"clickHandler\":").Append(delivery.ClickHandler == null ? "null" : InputSimulationJson.Esc(PointerTargets.BuildPath(delivery.ClickHandler)));
+                if (delivery.HasButtonWitness) sb.Append(",\"clicksObserved\":").Append(delivery.Clicks);
+                if (delivery.PressRead)
+                    sb.Append(",\"pressedObject\":").Append(delivery.Pressed == null ? "null" : InputSimulationJson.Esc(PointerTargets.BuildPath(delivery.Pressed)));
+                if (delivered == false) sb.Append(",\"eventSystem\":").Append(ClickDelivery.EventSystemJson());
+            }
             sb.Append(",\"framesAdvanced\":").Append(frames);
             sb.Append(",\"injected\":[");
             for (int i = 0; i < injected.Count; i++)

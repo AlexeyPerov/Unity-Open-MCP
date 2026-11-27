@@ -55,10 +55,15 @@ Graph's. This pack's tools split cleanly along that boundary:
    `Assets/`. Optional `filter` substring + `max_results` cap. Returns each
    asset's path, name, and file size.
 
-2. **Open + inspect** — `unity_open_mcp_vfx_open` brings up the VFX Graph
-   editor window for a `.vfx` and returns a structured summary: context count,
-   block count, exposed property count, and property names. Read-only, no
-   `paths_hint`.
+2. **Open + inspect** — `unity_open_mcp_vfx_open` opens the `.vfx` in the
+   VFX Graph window (or focuses the window already showing it) and returns a
+   structured summary: context count, block count, exposed property count,
+   property names, and `window` (`action` opened / focused / closed / not_open
+   / none, `open`, `title`). Pass `window: "none"` for the summary alone (also
+   the only choice in batch mode — `open` refuses `editor_window_unavailable`
+   there) and `window: "close"` to close the graph's window (refused with
+   `graph_has_unsaved_changes` while the graph is dirty: the VFX window drops
+   unsaved edits without asking). Writes no asset, no `paths_hint`.
 
 3. **Patch a block** (when the window is open) — `unity_open_mcp_vfx_block_edit`
    patches a single property on a block. `block_selector` is a type-name

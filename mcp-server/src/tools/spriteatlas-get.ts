@@ -16,7 +16,7 @@ export const spriteatlasGet = makeTool(
         properties: {
           asset_path: {
             type: "string",
-            description: "Assets/-rooted .spriteatlas asset path.",
+            description: "Assets/-rooted atlas asset path (.spriteatlasv2 or .spriteatlas).",
           },
         },
   },

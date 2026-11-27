@@ -41,8 +41,14 @@ namespace UnityOpenMcpBridge.Extensions.VFXExt
         //   runtime  → Unity.VisualEffectGraph.Runtime (VisualEffectAsset lives here)
         //   editor   → Unity.VisualEffectGraph.Editor (graph model lives here)
         private static readonly Assembly EditorAssembly = LoadEditorAssembly();
-        private static readonly Type GraphEditorWindowType =
-            ResolveEditor("UnityEditor.VFX.VFXGraphEditorWindow");
+        // The VFX Graph editor window (internal to the package).
+        private static readonly Type ViewWindowType =
+            ResolveEditor("UnityEditor.VFX.UI.VFXViewWindow");
+
+        private const BindingFlags AnyInstance =
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        private const BindingFlags AnyStatic =
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
         private static readonly Type VfxGraphType =
             ResolveEditor("UnityEditor.VFX.VFXGraph");
 
@@ -138,30 +144,131 @@ namespace UnityOpenMcpBridge.Extensions.VFXExt
         }
 
         // =====================================================================
-        // open — bring up the VFX Graph editor window (best-effort)
+        // open — the VFX Graph editor window
         // =====================================================================
 
-        // Bring up the VFX Graph editor window for the asset. Best-effort;
-        // failures are non-fatal (the summary is still returned). The window
-        // type is UnityEditor.VFX.VFXGraphEditorWindow; resolved by reflection
-        // so the tool tracks the installed package version.
-        public static void TryOpenInEditor(string assetPath)
+        // The VFX Graph windows showing the graph at `assetPath`.
+        public static List<EditorWindow> OpenWindows(string assetPath)
         {
+            var windows = new List<EditorWindow>();
+            if (ViewWindowType == null || string.IsNullOrEmpty(assetPath)) return windows;
+            IEnumerable all = null;
+            try { all = ViewWindowType.GetMethod("GetAllWindows", AnyStatic, null, Type.EmptyTypes, null)?.Invoke(null, null) as IEnumerable; }
+            catch { /* fall back to the loaded windows */ }
+            all ??= Resources.FindObjectsOfTypeAll(ViewWindowType);
+            var displayed = ViewWindowType.GetProperty("displayedResource", AnyInstance);
+            foreach (var o in all)
+            {
+                var w = o as EditorWindow;
+                if (w == null || displayed == null) continue;
+                object resource;
+                try { resource = displayed.GetValue(w); }
+                catch { continue; }
+                if (ResourcePath(resource) == assetPath) windows.Add(w);
+            }
+            return windows;
+        }
+
+        // The .vfx path of a window's VisualEffectResource (null when none).
+        private static string ResourcePath(object resource)
+        {
+            if (resource == null) return null;
+            if (resource is Object unityObject && unityObject != null)
+            {
+                var path = AssetDatabase.GetAssetPath(unityObject);
+                if (!string.IsNullOrEmpty(path)) return path;
+            }
+            var asset = resource.GetType().GetProperty("asset", AnyInstance)?.GetValue(resource) as Object;
+            return asset != null ? AssetDatabase.GetAssetPath(asset) : null;
+        }
+
+        // Open the graph in its VFX Graph window, or focus the window that
+        // already shows it — what double-clicking the asset does
+        // (AssetDatabase.OpenAsset runs the package's OnOpenAsset handler).
+        // There are no Editor windows in batch mode, so it refuses there.
+        public static bool TryOpenWindow(string assetPath, out bool reused, out EditorWindow window,
+            out string error, out string message)
+        {
+            reused = false;
+            window = null;
+            error = null;
+            message = null;
+            if (Application.isBatchMode)
+            {
+                error = "editor_window_unavailable";
+                message = "The Editor runs in batch mode and has no windows.";
+                return false;
+            }
+            if (ViewWindowType == null)
+            {
+                error = "vfx_api_unavailable";
+                message = "The installed com.unity.visualeffectgraph has no VFXViewWindow.";
+                return false;
+            }
+            var before = OpenWindows(assetPath);
+            reused = before.Count > 0;
             try
             {
-                var asset = AssetDatabase.LoadAssetAtPath<Object>(assetPath);
-                if (asset != null)
+                AssetDatabase.OpenAsset(AssetDatabase.LoadMainAssetAtPath(assetPath));
+            }
+            catch (Exception e)
+            {
+                foreach (var w in OpenWindows(assetPath))
+                    if (!before.Contains(w)) w.Close();
+                error = "window_open_failed";
+                message = (e is TargetInvocationException t && t.InnerException != null ? t.InnerException : e).Message;
+                return false;
+            }
+            var after = OpenWindows(assetPath);
+            if (after.Count == 0)
+            {
+                error = "window_open_failed";
+                message = "AssetDatabase.OpenAsset returned, but no VFX Graph window shows the graph.";
+                return false;
+            }
+            window = after.Find(w => !before.Contains(w)) ?? after[0];
+            window.Focus();
+            return true;
+        }
+
+        // Close the graph's windows. The VFX window does not ask about unsaved
+        // edits when it closes (they would be lost), so a window whose graph is
+        // dirty is refused instead.
+        public static bool TryCloseWindows(string assetPath, out int closed, out string error)
+        {
+            closed = 0;
+            error = null;
+            var windows = OpenWindows(assetPath);
+            foreach (var w in windows)
+            {
+                if (HasUnsavedChanges(w))
                 {
-                    // Selection + ping is the most stable cross-version bring-up;
-                    // the VFX Graph editor follows the current selection.
-                    Selection.activeObject = asset;
-                    EditorGUIUtility.PingObject(asset);
+                    error = "graph_has_unsaved_changes";
+                    return false;
                 }
             }
-            catch
+            foreach (var w in windows)
             {
-                // Best-effort window bring-up; never fail the tool on this.
+                w.Close();
+                closed++;
             }
+            return true;
+        }
+
+        // The window's graph is dirty (the window marks its title with '*').
+        private static bool HasUnsavedChanges(EditorWindow window)
+        {
+            if (window.hasUnsavedChanges) return true;
+            try
+            {
+                var view = window.GetType().GetProperty("graphView", AnyInstance)?.GetValue(window);
+                var controller = view?.GetType().GetProperty("controller", AnyInstance)?.GetValue(view);
+                if (controller?.GetType().GetProperty("graph", AnyInstance)?.GetValue(controller) is Object graph && graph != null)
+                    return EditorUtility.IsDirty(graph);
+            }
+            catch { /* fall back to the title */ }
+            var title = window.titleContent?.text;
+            return title != null && title.EndsWith("*", StringComparison.Ordinal);
         }
 
         // =====================================================================
@@ -196,10 +303,10 @@ namespace UnityOpenMcpBridge.Extensions.VFXExt
                 if (asset != null)
                 {
                     var info = ReadAssetInfo(asset);
-                    if (info != null)
+                    if (info.HasValue)
                     {
-                        propertyCount = info.PropertyCount;
-                        propertiesJson = info.PropertiesJson;
+                        propertyCount = info.Value.PropertyCount;
+                        propertiesJson = info.Value.PropertiesJson;
                     }
                 }
             }

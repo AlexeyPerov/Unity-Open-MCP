@@ -15,7 +15,7 @@ export const timelineClipAdd = makeTool(
     required: ["paths_hint"],
         properties: {
           asset_path: { type: "string", description: "TimelineAsset path." },
-          instance_id: { type: "integer", description: "TimelineAsset instance id." },
+          instance_id: { type: ["string", "integer"], description: "TimelineAsset instance id." },
           track_index: { type: "integer", default: -1, description: "Track index (-1 to use track_name)." },
           track_name: { type: "string", description: "Track display name (first match wins)." },
           clip_type: {

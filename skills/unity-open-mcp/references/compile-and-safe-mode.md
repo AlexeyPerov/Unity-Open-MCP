@@ -19,7 +19,9 @@ assembly, or citing a file/line that no longer exists are `historicalLogErrors`
 
 **Recompiling.** After writing, adding or deleting C# on disk, activate
 `typed-editor` and call `recompile_scripts {}` (`paths_hint` is optional). It
-imports scripts Unity has not seen yet (`mutation.output.scriptImport`),
+imports scripts Unity has not seen yet and `.asmdef` / `.asmref` files edited on
+disk (`mutation.output.scriptImport`, kept even when the reload closes the
+bridge's response),
 compiles, waits through the domain reload, and answers with the compile:
 `status: "compiled"` + `compile.generation`, or `status: "compile_failed"` —
 a failed call (`isError`, `mutation.error.code: "compile_failed"`) carrying the
@@ -124,7 +126,7 @@ For `bridge_compile_failed` / `bridge_offline`: call `**unity_open_mcp_read_comp
 
 **Stale-assembly guard.** The response carries `staleAssembly: true` when at least one `Assets/**/*.cs` source is newer than the newest `Library/ScriptAssemblies/*.dll` — the running assembly predates the latest source (Unity's incremental compiler no-op'd a recompile), so a clean log says nothing about the current code until the assembly is rebuilt. This runs even on a clean log, and when it coincides with errors the **headline itself** carries the may-predate caveat (the error block can come from an earlier compile — do not act on it as fact). Recovery: call `**unity_open_mcp_recompile_scripts`** — it imports new scripts, recompiles deterministically and answers with the compile result (status, generation, error count, first errors). Prefer it over `assets_refresh` / `execute_csharp` when you need a guaranteed recompile of edited C#.
 
-**`status: "indeterminate"`.** An offline read with no current errors (including one from the ROTATED `Editor-prev.log`, `logSource: prev_log_*`), or a live Editor that did not report a determinate compile state, is `indeterminate`, **not** `no_errors_found` — nothing backs it with a compile generation. Follow its `agentNextSteps` (the `editor_status` wait with a live Editor; open the project or `compile_check` without one); the raw log verdict is preserved in `logVerdict`.
+**`status: "indeterminate"`.** An offline read with no current errors (including one from the ROTATED `Editor-prev.log`, `logSource: prev_log_*`), or a live Editor that did not report a determinate compile state, is `indeterminate`, **not** `no_errors_found` — nothing backs it with a compile generation. Follow its `agentNextSteps` (the `editor_status` wait with a live Editor; open the project or `compile_check` without one); the raw log verdict is preserved in `logVerdict`. An Editor that has compiled nothing since it started answers `indeterminateReason: "no_compile_this_session"`: waiting never resolves it — call `recompile_scripts {}` instead.
 
 **Stale-domain guard (`_staleDomain`).** `execute_csharp` / `invoke_method` responses carry `_staleDomain: { hint, newerSources, dllMtimeMs }` (additive, on a successful non-error body) when an `Assets/**/*.cs` source is newer than the newest built DLL — the snippet ran against the **pre-edit** assembly, so its results reflect code that has not been loaded. This is the runtime-facing twin of the `staleAssembly` read guard: same mtime check, attached to the two tools where a stale domain silently produces wrong answers. The signal is promoted to a top-level `staleAssembly: true` + `warning` on the same body so it cannot be skimmed past next to a `mutation.success: true`. Treat any such result as suspect: call `**unity_open_mcp_recompile_scripts`**, then re-invoke. The signal is cached short-TTL and refreshed on dead-bridge/compile-settle, so it tracks a genuine reload without re-scanning on every call.
 

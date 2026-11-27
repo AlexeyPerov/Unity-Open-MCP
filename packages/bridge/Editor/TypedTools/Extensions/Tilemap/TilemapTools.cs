@@ -152,7 +152,7 @@ namespace UnityOpenMcpBridge.Extensions.TilemapExt
             "the gate path; paths_hint is the host scene path. Requires " +
             "com.unity.2d.tilemap.")]
         public static string SetTile(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string tile_asset_path = null,
@@ -215,7 +215,7 @@ namespace UnityOpenMcpBridge.Extensions.TilemapExt
             "tile_asset_path. Mutating: runs the gate path; paths_hint is the " +
             "host scene path. Requires com.unity.2d.tilemap.")]
         public static string BoxFill(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string tile_asset_path = null,

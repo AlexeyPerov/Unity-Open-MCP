@@ -97,9 +97,24 @@ namespace UnityOpenMcpBridge.Tests
         public void ScriptImportSync_Detect_InSyncProjectPlansNothing()
         {
             var paths = new[] { "Assets/A.cs", "Assets/B.cs" };
-            var plan = ScriptImportSync.Detect(paths, _ => true, paths, _ => true, _ => true);
+            var plan = ScriptImportSync.Detect(paths, _ => true, paths, _ => true, _ => true, _ => false);
             Assert.IsEmpty(plan.NewPaths);
+            Assert.IsEmpty(plan.ModifiedPaths);
             Assert.IsEmpty(plan.DeletedPaths);
+        }
+
+        [Test]
+        public void ScriptImportSync_Detect_ReimportsOnlyEditedAssemblyDefinitions()
+        {
+            var onDisk = new[] { "Assets/Game.asmdef", "Assets/Tests/Tests.asmdef", "Assets/Uses.asmref", "Assets/Edited.cs", "Assets/New.asmdef" };
+            var known = new HashSet<string> { "Assets/Game.asmdef", "Assets/Tests/Tests.asmdef", "Assets/Uses.asmref", "Assets/Edited.cs" };
+            // Every file reads as changed: only known assembly definitions are
+            // re-imported (an edited .cs compiles from disk; a new file is new).
+            var plan = ScriptImportSync.Detect(onDisk, known.Contains, onDisk, _ => true, _ => true,
+                path => path != "Assets/Game.asmdef");
+
+            CollectionAssert.AreEqual(new[] { "Assets/Tests/Tests.asmdef", "Assets/Uses.asmref" }, plan.ModifiedPaths);
+            CollectionAssert.AreEqual(new[] { "Assets/New.asmdef" }, plan.NewPaths);
         }
 
         [Test]
@@ -132,6 +147,7 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("\"action\":\"imported\"", json);
             StringAssert.Contains("\"newScripts\":[\"Assets/New.cs\"]", json);
             StringAssert.Contains("\"newCount\":1", json);
+            StringAssert.Contains("\"modifiedCount\":0", json);
             StringAssert.Contains("\"deletedCount\":0", json);
         }
     }

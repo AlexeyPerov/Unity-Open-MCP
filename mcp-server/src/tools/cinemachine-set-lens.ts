@@ -11,7 +11,7 @@ export const cinemachineSetLens = makeTool(
   {
     required: ["paths_hint"],
         properties: {
-          instance_id: { type: "integer", description: "CinemachineCamera host GameObject instance id." },
+          instance_id: { type: ["string", "integer"], description: "CinemachineCamera host GameObject instance id." },
           path: { type: "string", description: "Host hierarchy path." },
           name: { type: "string", description: "Host name (last-resort resolver)." },
           field_of_view: {

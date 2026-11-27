@@ -10,7 +10,7 @@ export const spriteatlasAddPackable = makeTool(
     "SpriteAtlas by Assets/-rooted path. Each path resolves to its main asset " +
     "Object. Per-path errors are accumulated — a single bad path does not " +
     "abort the batch. Idempotent re-adds are tolerated by Unity. Mutating: " +
-    "runs the full gate path (editor_settle); paths_hint is the .spriteatlas " +
+    "runs the full gate path (editor_settle); paths_hint is the atlas " +
     "asset path. Built-in 2D module; the sprite2d group is hidden until " +
     "manage_tools activates it.",
   {
@@ -18,7 +18,7 @@ export const spriteatlasAddPackable = makeTool(
         properties: {
           asset_path: {
             type: "string",
-            description: "Assets/-rooted .spriteatlas asset path.",
+            description: "Assets/-rooted atlas asset path (.spriteatlasv2 or .spriteatlas).",
           },
           packable_paths: {
             type: "array",
@@ -27,7 +27,7 @@ export const spriteatlasAddPackable = makeTool(
               "Assets/-rooted paths of the sprites / textures / folders to add " +
               "as packables. Each resolves to its main asset Object.",
           },
-          paths_hint: { ...PATHS_HINT_TYPE, description: "Mutation scope — the .spriteatlas asset path." },
+          paths_hint: { ...PATHS_HINT_TYPE, description: "Mutation scope — the atlas asset path." },
           gate: { ...GATE_PROP },
         },
   },

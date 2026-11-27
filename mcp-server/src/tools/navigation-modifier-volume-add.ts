@@ -12,7 +12,7 @@ export const navigationModifierVolumeAdd = makeTool(
   {
     required: ["paths_hint"],
         properties: {
-          instance_id: { type: "integer", default: 0, description: "Host GameObject instance ID." },
+          instance_id: { type: ["string", "integer"], default: 0, description: "Host GameObject instance ID." },
           path: { type: "string", description: "Host hierarchy path \"Root/Child\"." },
           name: { type: "string", description: "Host GameObject name (first match)." },
           area: {

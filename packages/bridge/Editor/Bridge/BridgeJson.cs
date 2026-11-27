@@ -1080,6 +1080,9 @@ namespace UnityOpenMcpBridge
             // exiting_playmode) or null: a client must not treat a reachable,
             // non-compiling bridge as settled while play mode is changing.
             sb.Append("\"transition\":").Append(EscapeString(BridgeSession.Transition));
+            // What became of the last play-mode request (PlayRequestTracker):
+            // absent unless one is pending or was cancelled.
+            sb.Append(PlayRequestTracker.PingMember());
             sb.Append('}');
             return sb.ToString();
         }

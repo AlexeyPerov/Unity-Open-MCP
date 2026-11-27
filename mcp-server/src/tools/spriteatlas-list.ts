@@ -6,9 +6,10 @@ import { makeTool } from "./schema-fragments.js";
 // in principle.
 export const spriteatlasList = makeTool(
   "unity_open_mcp_spriteatlas_list",
-  "Read-only: list SpriteAtlas (.spriteatlas) asset paths under a folder " +
-    "(omit folder to search the whole project). Each entry reports path + " +
-    "name. Cap 200; truncated count reported. Gate-free.",
+  "Read-only: list SpriteAtlas asset paths (.spriteatlasv2 and .spriteatlas) " +
+    "under a folder (omit folder to search the whole project). Each entry " +
+    "reports path + name + format (v2 / v1). Cap 200; truncated count " +
+    "reported. Gate-free.",
   {
     properties: {
           folder: {

@@ -163,7 +163,19 @@ namespace UnityOpenMcpBridge
         //       mode; a call that edited a scene there carries
         //       `playModeOnly: true` (the edit lasts until play mode exits).
         //       scene_save in play mode is refused with edit_mode_required.
-        public const int WireContract = 16;
+        //  17 — /ping carries `playRequest` (the last editor_set_state play
+        //       request: requested / cancelled with reason and the pending
+        //       EditorApplication.delayCall callbacks); editor_set_state takes
+        //       `flush_delay_calls`. /compile-state adds `indeterminateReason`
+        //       and `lastScriptImport`; recompile_scripts re-imports edited
+        //       .asmdef / .asmref files (`modifiedAssemblyDefinitions`) and
+        //       pipeline errors are de-duplicated. raycast_real clicks report
+        //       clickDelivered / clickHandler / pressedObject; vfx_open takes
+        //       `window`; spriteatlas_* author .spriteatlasv2 and .spriteatlas;
+        //       domain list/get tools answer the host as `instanceId` and the
+        //       component as `componentInstanceId`, and every domain
+        //       instance id parameter is 8 bytes wide.
+        public const int WireContract = 17;
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
         // EditorApplication.isPlayingOrWillChangePlaymode as last refreshed.

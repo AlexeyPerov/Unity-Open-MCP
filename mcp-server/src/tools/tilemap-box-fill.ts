@@ -12,7 +12,7 @@ export const tilemapBoxFill = makeTool(
   {
     required: ["tile_asset_path", "paths_hint"],
         properties: {
-          instance_id: { type: "integer", description: "Tilemap host GameObject instance id." },
+          instance_id: { type: ["string", "integer"], description: "Tilemap host GameObject instance id." },
           path: { type: "string", description: "Host hierarchy path." },
           name: { type: "string", description: "Host name (last-resort resolver)." },
           tile_asset_path: { type: "string", description: "Asset path to a TileBase (.asset)." },

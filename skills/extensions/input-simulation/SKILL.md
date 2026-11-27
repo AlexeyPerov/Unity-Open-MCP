@@ -73,7 +73,7 @@ actually reads — **callback vs polling matters** for `key`/`touch`:
 | `Keyboard.current[K].wasPressedThisFrame` (polling) | `inputsim_key` with `advance_frames ≥ 1` | **polling — needs frame advance** |
 | `Touchscreen.current` / per-frame `primaryTouch.delta` (polling) | `inputsim_touch` with `advance_frames ≥ 1` | **polling — needs frame advance** |
 | Legacy `Input.GetTouch` / `Input.touchCount` / `Input.GetMouseButton` / `Input.mousePosition` (polling) | `inputsim_touch` (taps, swipes) or `inputsim_gesture` (holds, drags over real frames) | legacy backend always advances ≥ 1 frame between phases |
-| "Does a real tap at this point reach the button?" (`StandaloneInputModule`, covers, modals) | `inputsim_pointer` with `routing: "raycast_real"` | input module decides; read `topHit` / `targetHit` |
+| "Does a real tap at this point reach the button?" (`StandaloneInputModule`, covers, modals) | `inputsim_pointer` with `routing: "raycast_real"` | input module decides; read `clickDelivered` (`false`: the tap never became a click — check `eventSystem`, retry with `routing: "dispatch"`), then `topHit` / `targetHit` |
 | Legacy `UnityEngine.Input.GetKeyDown`, legacy hover without a press | **not covered** — use `invoke_method` / `execute_csharp`, or `inputsim_pointer3d` for `OnMouseDown` physics gameplay |
 
 **Why polling needs `advance_frames`:** a synchronous tool call processes down+up

@@ -28,6 +28,7 @@ test("extractStructuredCompilerErrors parses file/line/code/message from a diagn
     raw: SAMPLE_LINE,
     file: "Assets/Foo/Bar.cs",
     line: 75,
+    column: 27,
     code: "CS1061",
     message:
       "'SceneSetup' does not contain a definition for 'isDirty'",
@@ -112,4 +113,28 @@ test("extractCompilerErrors dedupes repeated lines", () => {
   const out = `${line}\n${line}\n${line}`;
   const errors = extractCompilerErrors(out);
   assert.equal(errors.length, 1);
+});
+
+test("extractStructuredCompilerErrors folds a diagnostic glued to an interleaved compiler command line", () => {
+  const clean = "/Users/dev/proj/packages/bridge/Tests/CinemachineToolsTests.cs(12,5): error CS0246: The type or namespace name 'CinemachineCamera' could not be found";
+  const gluedPath = "-r:\"Library/Bee/artifacts/200b0aE.dag/UnityEngin" + clean;
+  const gluedMessage = "Assets/A.cs(3,9): error CS0103: The name 'x' does not exist" +
+    "…Editor.Tests.UnityAdditionalFile.txt\"e:\"Library/Bee/artifacts/200b0aE.dag/Nav.Editor.Tests.UnityAdditionalFile.txt\"";
+  const out = [gluedPath, clean, gluedMessage, "Assets/A.cs(3,9): error CS0103: The name 'x' does not exist"].join("\n");
+
+  const errors = extractStructuredCompilerErrors(out);
+  assert.equal(errors.length, 2, JSON.stringify(errors, null, 1));
+  assert.equal(errors[0].file, "/Users/dev/proj/packages/bridge/Tests/CinemachineToolsTests.cs");
+  assert.equal(errors[0].column, 5);
+  assert.equal(errors[1].file, "Assets/A.cs");
+  assert.equal(errors[1].message, "The name 'x' does not exist");
+});
+
+test("extractStructuredCompilerErrors keeps distinct diagnostics on one line", () => {
+  const out = [
+    "Assets/A.cs(3,9): error CS0103: The name 'x' does not exist",
+    "Assets/A.cs(3,20): error CS0103: The name 'y' does not exist",
+    "Assets/Sub/A.cs(3,9): error CS0103: The name 'x' does not exist",
+  ].join("\n");
+  assert.equal(extractStructuredCompilerErrors(out).length, 3);
 });

@@ -38,6 +38,9 @@ namespace UnityOpenMcpBridge.MetaTools
             // first, or the compile cannot see them (ScriptImportSync).
             var scriptImport = ScriptImportSync.Run();
             if (scriptImport.Action == "refused") return scriptImport.Refresh.Refusal();
+            // Published through /compile-state too: the compile's domain reload
+            // usually closes this call's response before it is written.
+            BridgeCompileState.NoteScriptImport(generationAtStart, scriptImport.ToJson());
 
             // Request a script compilation. Wrapped because
             // CompilationPipeline.RequestScriptCompilation throws if a compile

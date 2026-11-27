@@ -442,7 +442,10 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             var sb = new StringBuilder(140);
             sb.Append($"\"{pipelineSlot.ToLower()}\":{{");
             sb.Append("\"component\":").Append(CinemachineJson.Esc(componentType.Name)).Append(',');
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(current));
+            // instanceId is the host GameObject (what the domain's tools take);
+            // the stage component's own id is componentInstanceId.
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(current));
             sb.Append('}');
             return CinemachineJson.Ok(sb.ToString());
         }
@@ -558,7 +561,8 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
                 if (!first) sb.Append(',');
                 first = false;
                 sb.Append('{');
-                sb.Append("\"instanceId\":").Append(InstanceId.ToJson(mb)).Append(',');
+                sb.Append("\"instanceId\":").Append(InstanceId.ToJson(mb.gameObject)).Append(',');
+                sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(mb)).Append(',');
                 sb.Append("\"path\":").Append(CinemachineJson.Esc(CinemachineTargets.BuildPath(mb.gameObject))).Append(',');
                 sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(mb.gameObject)).Append(',');
                 sb.Append("\"priority\":").Append(GetPriorityValue(mb)).Append(',');

@@ -143,6 +143,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
             bool force = JsonBody.GetBool(body, "force", false);
             bool ignoreDirty = JsonBody.GetBool(body, "ignore_scene_dirty", false);
+            bool flushDelayCalls = JsonBody.GetBool(body, "flush_delay_calls", false);
 
             // Idempotent guards (unless force). Pause is also idempotent: a
             // retry after a timeout must not RESUME the game while the response
@@ -189,11 +190,36 @@ namespace UnityOpenMcpBridge.TypedTools
                     return SceneDirtyGuard.Fail(guard);
             }
 
+            // flush_delay_calls: run the EditorApplication.delayCall callbacks
+            // Unity has not run (an unfocused Editor can starve them) before
+            // requesting play: a project play hook that deferred its work there
+            // cancels every Play until it runs. Project code — opt-in only.
+            string flushNote = null;
+            if (state == EditorStateTarget.Play && flushDelayCalls)
+            {
+                var flushed = PlayRequestTracker.FlushDelayCalls(out var flushError);
+                if (flushed < 0)
+                    return ToolDispatchResult.Fail("api_unavailable",
+                        "flush_delay_calls: this Unity has no EditorApplication.Internal_CallDelayFunctions; play mode was not requested.");
+                if (flushError != null)
+                    return ToolDispatchResult.Fail("delay_call_failed",
+                        $"flush_delay_calls ran {flushed} pending EditorApplication.delayCall callback(s) and one threw: {flushError}. Play mode was not requested.");
+                flushNote = $"Ran {flushed} pending EditorApplication.delayCall callback(s) before requesting play mode.";
+                // A flushed callback may itself have entered play mode.
+                if (EditorApplication.isPlayingOrWillChangePlaymode && !EditorApplication.isPlaying)
+                {
+                    PlayRequestTracker.NoteRequested();
+                    BridgeSession.RefreshVolatileState();
+                    return ToolDispatchResult.Ok(BuildStateEnvelope("play", flushNote + " One of them requested play mode."));
+                }
+            }
+
             try
             {
                 switch (state)
                 {
                     case EditorStateTarget.Play:
+                        PlayRequestTracker.NoteRequested();
                         EditorApplication.isPlaying = true;
                         break;
                     case EditorStateTarget.Pause:
@@ -221,7 +247,7 @@ namespace UnityOpenMcpBridge.TypedTools
             var action = state == EditorStateTarget.Play ? "play"
                 : state == EditorStateTarget.Pause ? "pause"
                 : "stop";
-            return ToolDispatchResult.Ok(BuildStateEnvelope(action, null));
+            return ToolDispatchResult.Ok(BuildStateEnvelope(action, flushNote));
         }
 
         // =========================== Selection ============================

@@ -66,7 +66,7 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
             "3D min/max distance. Idempotent — re-using an existing AudioSource reports " +
             "added:false. Mutating: runs the gate path; paths_hint is the host scene path.")]
         public static string AudioSourceAdd(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string clip_path = null,
@@ -138,7 +138,7 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
             "path; paths_hint is the host scene path (and the mixer asset path when " +
             "mixer_group_path is set).")]
         public static string AudioSourceModify(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string clip_path = null,
@@ -419,7 +419,8 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
                 if (i > 0) sb.Append(',');
                 var l = listeners[i];
                 sb.Append('{');
-                sb.Append("\"instanceId\":").Append(InstanceId.ToJson(l)).Append(',');
+                sb.Append("\"instanceId\":").Append(InstanceId.ToJson(l.gameObject)).Append(',');
+                sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(l)).Append(',');
                 sb.Append("\"name\":").Append(AudioJson.Esc(l.gameObject.name)).Append(',');
                 sb.Append("\"path\":").Append(AudioJson.Esc(AudioTargets.BuildPath(l.gameObject))).Append(',');
                 sb.Append("\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(l.gameObject)).Append(',');

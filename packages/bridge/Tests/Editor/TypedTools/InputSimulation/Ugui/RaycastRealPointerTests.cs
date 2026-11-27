@@ -33,6 +33,40 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             StringAssert.Contains("\"play_mode_required\"", json);
         }
 
+        // The click witness: a Button handler's onClick, found from the hit
+        // graphic the way the input module finds it, counted only while watched.
+        [Test]
+        public void ClickDelivery_WatchesTheButtonThatHandlesTheHit()
+        {
+            var root = new UnityEngine.GameObject("__MCPTest_ClickDelivery", typeof(UnityEngine.RectTransform), typeof(UnityEngine.UI.Button));
+            var label = new UnityEngine.GameObject("Label", typeof(UnityEngine.RectTransform));
+            label.transform.SetParent(root.transform, false);
+            var plain = new UnityEngine.GameObject("__MCPTest_ClickDelivery_Plain");
+            try
+            {
+                var button = root.GetComponent<UnityEngine.UI.Button>();
+                var delivery = ClickDelivery.Watch(label);
+                Assert.AreSame(root, delivery.ClickHandler);
+                Assert.IsTrue(delivery.HasButtonWitness);
+                Assert.AreEqual(false, delivery.Delivered, "no click yet");
+                button.onClick.Invoke();
+                Assert.AreEqual(true, delivery.Delivered);
+                Assert.AreEqual(1, delivery.Clicks);
+                delivery.Dispose();
+                button.onClick.Invoke();
+                Assert.AreEqual(1, delivery.Clicks, "the listener is removed on Dispose");
+
+                using var none = ClickDelivery.Watch(plain);
+                Assert.IsNull(none.ClickHandler);
+                Assert.IsNull(none.Delivered, "nothing to witness: unknown, not false");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+                UnityEngine.Object.DestroyImmediate(plain);
+            }
+        }
+
         [Test]
         public void UiHitProbeRegistered()
         {

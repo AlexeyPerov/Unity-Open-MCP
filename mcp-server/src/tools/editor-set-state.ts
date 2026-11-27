@@ -27,7 +27,8 @@ export const editorSetState = makeTool(
     "update (with a domain reload unless Enter Play Mode Options skip it), so the " +
     "response reports `transition` and the next step is unity_open_mcp_editor_status " +
     "{\"wait_until\":\"playing\"} (or \"edit\" after stop), which returns once the mode " +
-    "is reached — do not poll. Prefer this " +
+    "is reached — do not poll; when the project cancels the request, that wait answers " +
+    "play_cancelled with the reason. Prefer this " +
     "over raw execute_csharp EditorApplication.isPlaying = true — schema-" +
     "validated, undo-safe, and the dirty-scene refusal is surfaced as a " +
     "structured error instead of a hanging save dialog.",
@@ -53,6 +54,15 @@ export const editorSetState = makeTool(
               "When true, skip the idempotent 'already in target state' check. " +
               "For 'pause' this is also the toggle path: force: true unpauses " +
               "when already paused. Default false.",
+          },
+          flush_delay_calls: {
+            type: "boolean",
+            default: false,
+            description:
+              "state 'play' only: first run the pending EditorApplication.delayCall callbacks once, " +
+              "as the Editor's own update would (an unfocused Editor can leave them unrun). Use it when " +
+              "the editor_status wait answered play_cancelled with pendingDelayCalls > 0 — a project play " +
+              "hook can cancel every Play until its deferred work runs. Runs project code; default false.",
           },
           ignore_scene_dirty: { ...IGNORE_SCENE_DIRTY_BASE, description: "Opt out of the active-scene dirty guard. When false (default), the " + "call is refused with code `scene_dirty` if any loaded scene has " + "unsaved changes — entering play mode would otherwise trigger " + "Unity's native save modal. Set true to proceed and accept the risk." },
         },

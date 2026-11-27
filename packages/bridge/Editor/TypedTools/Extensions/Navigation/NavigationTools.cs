@@ -60,7 +60,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             "Mutating: runs the gate path; paths_hint is the scene path " +
             "that contains the host.")]
         public static string SurfaceAdd(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string agent_type = "Humanoid",
@@ -117,7 +117,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             "('All' | 'Volume'), and optional bake extent (x,y,z). Mutating: " +
             "runs the gate path; paths_hint is the host's scene path.")]
         public static string SetBakeSettings(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string agent_type = null,
@@ -164,7 +164,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             "gate path; paths_hint is the host scene path. EditorSettle waits " +
             "for asset refresh before returning.")]
         public static string SurfaceBake(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string[] paths_hint = null)
@@ -217,7 +217,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             "for baking. Mutating: runs the gate path; paths_hint is the " +
             "host scene path.")]
         public static string ModifierAdd(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string area = "Walkable",
@@ -270,7 +270,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             "(default 'Walkable'). Mutating: runs the gate path; paths_hint " +
             "is the host scene path.")]
         public static string ModifierVolumeAdd(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string area = "Walkable",
@@ -327,7 +327,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             "or any traversal the surface bake cannot infer. Mutating: runs " +
             "the gate path; paths_hint is the host scene path.")]
         public static string LinkAdd(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string start_pos = "0,0,0",
@@ -393,7 +393,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             "is in Play Mode). Mutating: runs the gate path; paths_hint is " +
             "the host scene path.")]
         public static string AgentAdd(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             float radius = 0.5f,
@@ -457,7 +457,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             "move. Returns pathPending + pathStatus (Valid / Partial / Invalid). " +
             "Mutating: runs the gate path; paths_hint is the host scene path.")]
         public static string AgentSetDestination(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string destination = null,
@@ -559,7 +559,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             "NavMeshModifierVolume) with their serialized fields. Read-only, " +
             "gate-free. Address the host by instance_id > path > name.")]
         public static string Get(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null)
         {
@@ -676,7 +676,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             "inferred from the current value). Mutating: runs the gate path; " +
             "paths_hint is the host scene path.")]
         public static string Modify(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string component_type = null,
@@ -1040,7 +1040,8 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
                 var c = all[i];
                 sb.Append('{');
                 sb.Append("\"name\":").Append(NavigationJson.Esc(c.gameObject.name)).Append(',');
-                sb.Append("\"instanceId\":").Append(InstanceId.ToJson(c)).Append(',');
+                sb.Append("\"instanceId\":").Append(InstanceId.ToJson(c.gameObject)).Append(',');
+                sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(c)).Append(',');
                 sb.Append("\"path\":").Append(NavigationJson.Esc(BuildPath(c.gameObject)));
                 sb.Append(",\"container\":").Append(UnityOpenMcpBridge.TypedTools.TypedTargets.ContainerJson(c.gameObject));
                 if (extra != null)

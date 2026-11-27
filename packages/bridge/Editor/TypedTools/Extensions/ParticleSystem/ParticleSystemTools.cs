@@ -67,7 +67,7 @@ namespace UnityOpenMcpBridge.Extensions.ParticlesExt
             "Read-only, gate-free. Use this to discover valid module + field names " +
             "for particle_system_modify.")]
         public static string Get(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             bool include_main = true,
@@ -155,7 +155,7 @@ namespace UnityOpenMcpBridge.Extensions.ParticlesExt
             "field names. Mutating: runs the gate path; paths_hint is the host " +
             "scene path.")]
         public static string Modify(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string module = null,
@@ -284,7 +284,7 @@ namespace UnityOpenMcpBridge.Extensions.ParticlesExt
         // Resolve helpers
         // =====================================================================
 
-        private static ParticleSystem ResolvePs(int instanceId, string path, string name, out string errorEnvelope)
+        private static ParticleSystem ResolvePs(long instanceId, string path, string name, out string errorEnvelope)
         {
             errorEnvelope = null;
             // The shared resolver: loaded scenes and the open prefab stage,

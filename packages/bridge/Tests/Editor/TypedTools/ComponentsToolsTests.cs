@@ -621,7 +621,8 @@ namespace UnityOpenMcpBridge.Tests
             var go = new GameObject("__MCPTest_Comp_Modify_EnumRange");
             var rb = go.AddComponent<Rigidbody>();
             // Rigidbody.interpolation is an enum (RigidbodyInterpolation):
-            // None=0, Interpolate=1, Extrapolate=2. Set a known-good value first.
+            // None=0, Interpolate=1, Extrapolate=2, serialized as m_Interpolate.
+            // Set a known-good value first.
             rb.interpolation = RigidbodyInterpolation.Interpolate;
             try
             {
@@ -629,9 +630,10 @@ namespace UnityOpenMcpBridge.Tests
                 var result = ComponentsTools.Modify(
                     "{\"instance_id\":" + InstanceId.Of(go) +
                     ",\"type_name\":\"UnityEngine.Rigidbody\"," +
-                    "\"fields\":[{\"path\":\"m_Interpolation\",\"value\":42}]}");
+                    "\"fields\":[{\"path\":\"m_Interpolate\",\"value\":42}]}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 StringAssert.Contains("\"errors\":", result.Output);
+                StringAssert.Contains("out of range", result.Output);
                 // The invalid index must NOT have mutated the field.
                 Assert.AreEqual(RigidbodyInterpolation.Interpolate, rb.interpolation,
                     "Out-of-range enum index must not mutate the field.");
@@ -654,7 +656,7 @@ namespace UnityOpenMcpBridge.Tests
                 var result = ComponentsTools.Modify(
                     "{\"instance_id\":" + InstanceId.Of(go) +
                     ",\"type_name\":\"UnityEngine.Rigidbody\"," +
-                    "\"fields\":[{\"path\":\"m_Interpolation\",\"value\":2}]}");
+                    "\"fields\":[{\"path\":\"m_Interpolate\",\"value\":2}]}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 Assert.AreEqual(RigidbodyInterpolation.Extrapolate, rb.interpolation);
             }

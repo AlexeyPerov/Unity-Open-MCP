@@ -12,12 +12,12 @@ export const cinemachineSetTargets = makeTool(
   {
     required: ["paths_hint"],
         properties: {
-          instance_id: { type: "integer", description: "CinemachineCamera host GameObject instance id." },
+          instance_id: { type: ["string", "integer"], description: "CinemachineCamera host GameObject instance id." },
           path: { type: "string", description: "Host hierarchy path (used when instance_id is 0)." },
           name: { type: "string", description: "Host name (last-resort resolver)." },
-          follow_instance_id: { type: "integer", description: "Follow target GameObject instance id." },
+          follow_instance_id: { type: ["string", "integer"], description: "Follow target GameObject instance id." },
           follow_path: { type: "string", description: "Follow target hierarchy path." },
-          look_at_instance_id: { type: "integer", description: "Look At target GameObject instance id." },
+          look_at_instance_id: { type: ["string", "integer"], description: "Look At target GameObject instance id." },
           look_at_path: { type: "string", description: "Look At target hierarchy path." },
           paths_hint: { ...PATHS_HINT_TYPE, description: "Mutation scope — the host scene path." },
           gate: { ...GATE_PROP },

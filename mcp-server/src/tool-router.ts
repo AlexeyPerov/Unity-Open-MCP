@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 import { testRunOperation, projectCommandOperation, playmodeOperation, pollPlaymodeOperation, playmodeResult, toolOutput, toolResultBody, PLAYMODE_OPERATION_TOOLS, playmodeEstimateMs, playmodeFailure, playmodeTailMs, playmodeShouldHandOver, PlaymodeProgress, PLAYMODE_STILL_MS, type PlaymodeEstimate, editorWaitOperation } from "./jobs/adapters.js";
 import {
   WAIT_TOOL, WAIT_DEFAULT_TIMEOUT_MS, WAIT_INLINE_LIMIT_MS, WAIT_MAX_TIMEOUT_MS, PENDING_COMPILE_GRACE_MS,
+  NO_COMPILE_THIS_SESSION, NO_COMPILE_THIS_SESSION_STEP,
   readEditorSignals, viewEditor, statusFields, retryAfterMsFor, waitForEditor, describeWait, reloadingRefusal, waitCall, isTransitionState,
   type CompileReading, type WaitDeps, type WaitRequest, type WaitUntil, type EditorView,
 } from "./editor-state.js";
 import { bridgeCompileFailedBody, readBridgeLossEvidence, type BridgeLossEvidence } from "./bridge-loss.js";
+import { createdAssetPaths, existingPaths, withCreatedCheck } from "./created-asset-check.js";
 import { COMPILE_RESULT_FIRST_ERRORS, compileToAwait, foldCompileResult, foldCompileJob } from "./compile-result.js";
 import { lifecycleForCall } from "./capabilities/lifecycle.js";
 import { PLAYMODE_ROUTES, PLAYMODE_INLINE_GRACE_MS } from "./playmode-routes.js";
@@ -823,6 +825,33 @@ function resendAfterReload(result: CallToolResult): boolean {
 }
 
 /** /compile-state (or read_compile_errors' live summary) as a wait reading; null when it is not one. */
+/**
+ * A recompile_scripts answer whose response the compile's domain reload closed
+ * (`triggered_reload`) carries no `mutation`, so what the call imported first
+ * (`scriptImport`) was lost with it. The bridge also publishes that import in
+ * /compile-state (`lastScriptImport`, keyed by the generation the call started
+ * at): put it back as `mutation.output.scriptImport`, where a written response
+ * has it. Unchanged when the record is missing or belongs to another call.
+ */
+async function withReadBackScriptImport(
+  toolName: string,
+  body: Record<string, any>,
+  request: WaitRequest,
+  live: LiveClient,
+): Promise<Record<string, any>> {
+  if (toolName !== "unity_open_mcp_recompile_scripts" || body.status !== "triggered_reload" || body.mutation) return body;
+  if (request.afterGeneration === undefined || typeof live.readCompileState !== "function") return body;
+  try {
+    const state = await live.readCompileState();
+    const last = state?.lastScriptImport as Record<string, unknown> | undefined;
+    if (!last || typeof last !== "object" || last.generationAtStart !== request.afterGeneration) return body;
+    if (!last.scriptImport || typeof last.scriptImport !== "object") return body;
+    return { ...body, mutation: { success: true, output: { scriptImport: last.scriptImport, readBackAfterReload: true } } };
+  } catch {
+    return body;
+  }
+}
+
 function compileReading(body: Record<string, unknown> | null): CompileReading | null {
   if (!body || typeof body.generation !== "number" || typeof body.status !== "string") return null;
   return {
@@ -832,6 +861,7 @@ function compileReading(body: Record<string, unknown> | null): CompileReading | 
     ...(typeof body.sourceMatches === "boolean" ? { sourceMatches: body.sourceMatches } : {}),
     ...(typeof body.pending === "boolean" ? { pending: body.pending } : {}),
     ...(typeof body.errorSource === "string" ? { errorSource: body.errorSource } : {}),
+    ...(typeof body.indeterminateReason === "string" ? { indeterminateReason: body.indeterminateReason } : {}),
     ...(typeof body.headline === "string" ? { headline: body.headline } : {}),
     ...(Array.isArray(body.errors) && body.errors.length > 0
       ? { errors: (body.errors as unknown[]).filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null).slice(0, COMPILE_RESULT_FIRST_ERRORS) }
@@ -1702,7 +1732,13 @@ export class ToolRouter implements Router {
   }
 
   private async routeValidated(live: LiveClient, toolName: string, args: Record<string, unknown>, notes: string[], identity: RequestIdentity): Promise<CallToolResult> {
-    const result = await this.routeUnchecked(live, toolName, args, identity);
+    // A create-type call cut off by a reload is judged by its target on disk
+    // (created-asset-check.ts): note which targets existed before it ran.
+    const created = this.projectPath ? createdAssetPaths(toolName, args) : [];
+    const before = created.length ? existingPaths(this.projectPath!, created) : new Set<string>();
+    let result = await this.routeUnchecked(live, toolName, args, identity);
+    if (created.length && result.isError)
+      result = withCreatedCheck(result, toolResultBody(result), toolName, created, before, existingPaths(this.projectPath!, created), withResultBody);
     if (notes.length) result.content.push({ type: "text", text: JSON.stringify({ deprecations: [...new Set(notes)] }) });
     if (toolName === "unity_open_mcp_execute_csharp") attachTypedToolHints(result, typedToolHints(args.code));
     return result;
@@ -2443,11 +2479,13 @@ export class ToolRouter implements Router {
     const canRead = typeof live.readCompileState === "function";
     let compile = canRead ? await live.readCompileState() : null;
     if (compile && compile.status !== "indeterminate") return { compile, view: null };
+    // A session without a compile stays indeterminate until one runs: no retry.
+    const settledForGood = () => compile?.indeterminateReason === NO_COMPILE_THIS_SESSION;
     if (!this.projectPath) return { compile, view: null };
     const look = async () => viewEditor(await readEditorSignals(this.projectPath, live, 1_000, this.globalLogPathOverride), hasRecentPendingTestRun());
     let view = await look();
     const deadline = Date.now() + this.compileStateRetryMs;
-    while (canRead && view.phase === "settled" && Date.now() < deadline) {
+    while (canRead && view.phase === "settled" && !settledForGood() && Date.now() < deadline) {
       await sleepMs(Math.min(500, Math.max(0, deadline - Date.now())));
       compile = (await live.readCompileState()) ?? compile;
       if (compile && compile.status !== "indeterminate") return { compile, view: null };
@@ -2478,11 +2516,15 @@ export class ToolRouter implements Router {
     const pending = !running && (lock.pending || compile?.pending === true);
     const failed = !running && !pending && lock.completed && lock.failed;
     const status = running || pending ? "currently_compiling" : failed ? "compile_failed" : "indeterminate";
+    // Settled, never compiled since the Editor started: only a compile helps.
+    const noCompileYet = status === "indeterminate" && view.phase === "settled"
+      && compile?.indeterminateReason === NO_COMPILE_THIS_SESSION;
     const errors = failed ? classified.current : [];
     const health = summarizeProjectHealth(tail.content, this.projectPath, errors);
     const why = view.phase === "transition" ? `the Editor is ${(view.transition ?? "reloading").replace(/_/g, " ")}`
       : view.phase === "wedged" ? "its main thread is blocked (a modal dialog or a long synchronous import)"
       : view.phase === "unreachable" ? "its bridge listener is not answering"
+      : noCompileYet ? "no compile has run since it started, so nothing has checked the assemblies it loaded against the sources"
       : compile ? "its source fingerprint is still being computed after a reload"
       : "its main thread did not answer the compile-state probe in time";
     const wait = waitCall("idle", pending ? generation : null);
@@ -2493,15 +2535,20 @@ export class ToolRouter implements Router {
         ? `A compile was requested and has not started yet (last generation ${generation}). Wait for it with ${wait}: it returns once that compile ran, with its status and error count.`
         : failed
           ? `The live Editor's last compile (generation ${generation}) failed with ${lock.errorCount} error(s); its compile state was read from the instance lock because ${why}, so the errors are the ${errors.length} current diagnostic(s) in Editor.log. Fix them and recompile.`
+          : noCompileYet
+            ? `Compile state indeterminate: ${why}. Waiting will not change this — run ${toolHintReference("unity_open_mcp_recompile_scripts")} for a verified compile state. This is NOT a verified clean compile.`
           : `Compile state indeterminate: the live Editor holds the project but ${why}. Its last compile (generation ${generation}) ${lastCompile}, but whether the sources changed since is unverified — this is NOT a verified clean compile. Wait with ${waitCall("idle")} (it reports the compile status and error count), then re-read.`;
     const steps = view.phase === "wedged"
       ? ["The Editor's main thread is blocked — usually a modal dialog an operator must close in the Unity UI. Check unity_open_mcp_bridge_status, then re-read."]
       : failed
         ? [`Fix the errors, then recompile (${toolHintReference("unity_open_mcp_recompile_scripts")}); it waits for the compile and reports the result.`]
-        : [`Wait with ${wait}, then re-read if you need the diagnostics.`];
+        : noCompileYet
+          ? [NO_COMPILE_THIS_SESSION_STEP]
+          : [`Wait with ${wait}, then re-read if you need the diagnostics.`];
     return sourceResult({
       status,
       determinacy: status === "indeterminate" ? "indeterminate" : "current",
+      ...(noCompileYet ? { indeterminateReason: NO_COMPILE_THIS_SESSION } : {}),
       compileSource: "instance_lock",
       generation,
       pending,
@@ -3481,7 +3528,7 @@ export class ToolRouter implements Router {
   private async routeCompileTool(toolName: string, args: Record<string, unknown>, live: LiveClient, identity: RequestIdentity): Promise<CallToolResult> {
     const startedAt = Date.now();
     const result = injectRouteMeta(await live.route(toolName, args), { route: "live" });
-    const body = toolResultBody(result);
+    let body = toolResultBody(result);
     const due = compileToAwait(toolName, body, result.isError === true);
     if (!due) return result;
     const request: WaitRequest = {
@@ -3498,9 +3545,11 @@ export class ToolRouter implements Router {
       const started = await this.routeJobs({ action: "start", tool_or_command: WAIT_TOOL,
         args: { wait_until: "idle", ...(request.afterGeneration !== undefined ? { after_generation: request.afterGeneration } : {}), timeout_ms: remaining } }, identity);
       const job = toolResultBody(started);
+      body = await withReadBackScriptImport(toolName, body, request, live);
       if (!started.isError && typeof job.job_id === "string")
         return { ...withResultBody(result, foldCompileJob(body, request, outcome, job as { job_id: string }, remaining)), isError: false };
     }
+    body = await withReadBackScriptImport(toolName, body, request, live);
     const folded = foldCompileResult(toolName, body, request, outcome);
     return { ...withResultBody(result, folded.body), isError: folded.isError };
   }

@@ -34,6 +34,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.Extensions.VFXExt;
 using Object = UnityEngine.Object;
 
 namespace UnityOpenMcpBridge.Tests.Extensions.VFXExt
@@ -191,6 +192,62 @@ namespace UnityOpenMcpBridge.Tests.Extensions.VFXExt
                 "unity_open_mcp_vfx_open",
                 "{\"asset_path\":\"Assets/DoesNotExist.vfx\"}");
             AssertEnvelope(result, "asset_not_found");
+        }
+
+        [Test]
+        public void Dispatch_Open_InvalidWindow_ReturnsError()
+        {
+            var result = BridgeToolRegistry.TryDispatch(
+                "unity_open_mcp_vfx_open",
+                "{\"asset_path\":\"Assets/Some.vfx\",\"window\":\"maximize\"}");
+            AssertEnvelope(result, "invalid_parameter");
+        }
+
+        // vfx_open brings up the package's own VFX Graph window, finds it again
+        // (focus, not a second window) and closes it; window: none only reads.
+        [Test]
+        public void Open_WindowNoneOpenClose_RoundTrip()
+        {
+            const string path = "Assets/__MCPTest_VfxOpen.vfx";
+            var create = System.Type.GetType("UnityEditor.VisualEffectAssetEditorUtility, Unity.VisualEffectGraph.Editor")
+                ?.GetMethod("CreateNewAsset", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            if (create == null) Assert.Ignore("This VFX Graph has no VisualEffectAssetEditorUtility.CreateNewAsset.");
+            create.Invoke(null, new object[] { path });
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            try
+            {
+                var none = BridgeToolRegistry.TryDispatch("unity_open_mcp_vfx_open",
+                    "{\"asset_path\":\"" + path + "\",\"window\":\"none\"}");
+                Assert.IsTrue(none.Success, none.ErrorMessage ?? none.Output);
+                StringAssert.Contains("\"window\":{\"action\":\"none\",\"open\":false}", none.Output);
+
+                if (Application.isBatchMode)
+                {
+                    var refused = BridgeToolRegistry.TryDispatch("unity_open_mcp_vfx_open", "{\"asset_path\":\"" + path + "\"}");
+                    AssertEnvelope(refused, "editor_window_unavailable");
+                    return;
+                }
+
+                var open = BridgeToolRegistry.TryDispatch("unity_open_mcp_vfx_open", "{\"asset_path\":\"" + path + "\"}");
+                Assert.IsTrue(open.Success, open.ErrorMessage ?? open.Output);
+                StringAssert.Contains("\"action\":\"opened\",\"open\":true", open.Output);
+                Assert.AreEqual(1, VFXApi.OpenWindows(path).Count);
+
+                var again = BridgeToolRegistry.TryDispatch("unity_open_mcp_vfx_open", "{\"asset_path\":\"" + path + "\"}");
+                StringAssert.Contains("\"action\":\"focused\"", again.Output);
+                Assert.AreEqual(1, VFXApi.OpenWindows(path).Count, "the open window is reused");
+
+                var close = BridgeToolRegistry.TryDispatch("unity_open_mcp_vfx_open",
+                    "{\"asset_path\":\"" + path + "\",\"window\":\"close\"}");
+                Assert.IsTrue(close.Success, close.ErrorMessage ?? close.Output);
+                StringAssert.Contains("\"action\":\"closed\",\"open\":false,\"closed\":1", close.Output);
+                Assert.AreEqual(0, VFXApi.OpenWindows(path).Count);
+            }
+            finally
+            {
+                foreach (var w in VFXApi.OpenWindows(path)) w.Close();
+                AssetDatabase.DeleteAsset(path);
+            }
         }
 
         // -----------------------------------------------------------------

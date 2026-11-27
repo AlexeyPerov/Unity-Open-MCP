@@ -15,10 +15,15 @@ namespace UnityOpenMcpBridge.MetaTools
     // disk: an edited file is picked up, but a NEW file is in no assembly until
     // it is imported (every use of its types fails with CS0103 / CS0246), and a
     // DELETED file is still listed (the compile fails on the missing file).
+    // An EDITED .asmdef / .asmref is not picked up either: the compile reads
+    // the definition from its imported artifact, not from disk, so references,
+    // defines and constraints edited on disk would compile as before.
     // recompile_scripts brings them in before it requests the compile: new
     // files are imported in place (the topmost folder Unity does not know,
-    // recursively, or the file itself), and a deletion takes one
-    // AssetDatabase.Refresh — there is no scoped import of a file that is gone.
+    // recursively, or the file itself), an edited assembly definition is
+    // re-imported (its text on disk differs from the imported one), and a
+    // deletion takes one AssetDatabase.Refresh — there is no scoped import of a
+    // file that is gone (the refresh also brings in every edit).
     // Either can run asset postprocessors and requests a compile itself, which
     // is the compile recompile_scripts asks for anyway; nothing reloads before
     // the call returns. The refresh goes through OpenSceneDiskSync: an open
@@ -33,6 +38,7 @@ namespace UnityOpenMcpBridge.MetaTools
         internal sealed class Plan
         {
             internal readonly List<string> NewPaths = new List<string>();
+            internal readonly List<string> ModifiedPaths = new List<string>();
             internal readonly List<string> DeletedPaths = new List<string>();
         }
 
@@ -51,6 +57,8 @@ namespace UnityOpenMcpBridge.MetaTools
                 sb.Append("{\"action\":").Append(BridgeJson.EscapeString(Action));
                 AppendList(sb, "newScripts", Plan.NewPaths);
                 sb.Append(",\"newCount\":").Append(Plan.NewPaths.Count);
+                AppendList(sb, "modifiedAssemblyDefinitions", Plan.ModifiedPaths);
+                sb.Append(",\"modifiedCount\":").Append(Plan.ModifiedPaths.Count);
                 AppendList(sb, "deletedScripts", Plan.DeletedPaths);
                 sb.Append(",\"deletedCount\":").Append(Plan.DeletedPaths.Count);
                 if (Refresh != null && Refresh.Ran) sb.Append(',').Append(Refresh.MembersJson());
@@ -89,7 +97,8 @@ namespace UnityOpenMcpBridge.MetaTools
                     path => AssetDatabase.GetMainAssetTypeAtPath(path) != null,
                     CompiledInputs(),
                     path => Owned(path, roots),
-                    path => File.Exists(ToDisk(path, roots)));
+                    path => File.Exists(ToDisk(path, roots)),
+                    path => ImportedTextDiffers(path, roots));
                 if (outcome.Plan.DeletedPaths.Count > 0)
                 {
                     // An open scene that changed on disk is reloaded around the
@@ -98,7 +107,7 @@ namespace UnityOpenMcpBridge.MetaTools
                     outcome.Refresh = OpenSceneDiskSync.Run(() => AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport));
                     outcome.Action = outcome.Refresh.Ran ? "refreshed" : "refused";
                 }
-                else if (outcome.Plan.NewPaths.Count > 0)
+                else if (outcome.Plan.NewPaths.Count > 0 || outcome.Plan.ModifiedPaths.Count > 0)
                 {
                     foreach (var target in ImportTargets(outcome.Plan.NewPaths, AssetDatabase.IsValidFolder))
                     {
@@ -106,6 +115,8 @@ namespace UnityOpenMcpBridge.MetaTools
                             ? ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ImportRecursive
                             : ImportAssetOptions.ForceSynchronousImport);
                     }
+                    foreach (var path in outcome.Plan.ModifiedPaths)
+                        AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
                     outcome.Action = "imported";
                 }
             }
@@ -118,24 +129,50 @@ namespace UnityOpenMcpBridge.MetaTools
         }
 
         /// <summary>
-        /// Pure: the on-disk scripts the AssetDatabase does not know, and the
-        /// compiled inputs (sources, asmdefs) under a mutable root that are gone.
+        /// Pure: the on-disk scripts the AssetDatabase does not know, the known
+        /// assembly definitions (.asmdef / .asmref) whose disk text differs from
+        /// the imported one, and the compiled inputs (sources, asmdefs) under a
+        /// mutable root that are gone.
         /// </summary>
         internal static Plan Detect(
             IEnumerable<string> onDisk,
             Func<string, bool> known,
             IEnumerable<string> compiledInputs,
             Func<string, bool> owned,
-            Func<string, bool> exists)
+            Func<string, bool> exists,
+            Func<string, bool> changedOnDisk = null)
         {
             var plan = new Plan();
             foreach (var path in onDisk.Distinct(StringComparer.Ordinal))
+            {
                 if (!known(path)) plan.NewPaths.Add(path);
+                else if (changedOnDisk != null && IsAssemblyDefinition(path) && changedOnDisk(path)) plan.ModifiedPaths.Add(path);
+            }
             foreach (var path in compiledInputs.Distinct(StringComparer.Ordinal))
                 if (owned(path) && !exists(path)) plan.DeletedPaths.Add(path);
             plan.NewPaths.Sort(StringComparer.Ordinal);
+            plan.ModifiedPaths.Sort(StringComparer.Ordinal);
             plan.DeletedPaths.Sort(StringComparer.Ordinal);
             return plan;
+        }
+
+        internal static bool IsAssemblyDefinition(string path) =>
+            path.EndsWith(".asmdef", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".asmref", StringComparison.OrdinalIgnoreCase);
+
+        // An imported assembly definition is a TextAsset holding the file text
+        // it was imported from; a different text on disk is an edit Unity has
+        // not imported. A BOM is not a difference. Unreadable: not reported.
+        private static bool ImportedTextDiffers(string assetPath, List<Root> roots)
+        {
+            try
+            {
+                var imported = AssetDatabase.LoadAssetAtPath<UnityEngine.TextAsset>(assetPath);
+                if (imported == null) return false;
+                var disk = File.ReadAllText(ToDisk(assetPath, roots));
+                return !string.Equals(imported.text.TrimStart('\uFEFF'), disk.TrimStart('\uFEFF'), StringComparison.Ordinal);
+            }
+            catch { return false; }
         }
 
         /// <summary>

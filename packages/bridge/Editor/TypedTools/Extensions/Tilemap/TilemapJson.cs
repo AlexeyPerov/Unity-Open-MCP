@@ -78,7 +78,7 @@ namespace UnityOpenMcpBridge.Extensions.TilemapExt
         // prefab stage, scene_path / paths_hint narrowing, refused instance ids
         // (ambiguous_path and friends: see TypedTargets.RefusalJson); a
         // one-segment path also matches a nested GameObject of that name.
-        public static GameObject Resolve(int instanceId, string path, string name)
+        public static GameObject Resolve(long instanceId, string path, string name)
             => UnityOpenMcpBridge.TypedTools.TypedTargets.ResolveLenient(instanceId, path, name);
 
         public static GameObject FindByPath(string path)

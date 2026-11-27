@@ -104,15 +104,25 @@ namespace UnityOpenMcpBridge.Extensions.VFXExt
             Lifecycle = LifecyclePolicy.None, Group = "vfx")]
         [System.ComponentModel.Description(
             "Open a VisualEffectGraph (.vfx) asset in the VFX Graph editor " +
-            "window and return a structured summary (context count, block " +
-            "count, exposed property count, property names). Read-only window " +
-            "bring-up — Gate is Off. Address the graph by asset_path " +
-            "('Assets/.../*.vfx'). Requires com.unity.visualeffectgraph.")]
-        public static string Open(string asset_path = null)
+            "window (or focus the window already showing it) and return a " +
+            "structured summary (context count, block count, exposed property " +
+            "count, property names) plus window {action, open, title}. window: " +
+            "open (default) | none (summary only, no window) | close (close the " +
+            "graph's window). Writes no asset — Gate is Off. Refuses " +
+            "editor_window_unavailable in batch mode (use window none) and " +
+            "graph_has_unsaved_changes when closing a window whose graph has " +
+            "unsaved edits. Address the graph by asset_path ('Assets/.../*.vfx'). " +
+            "Requires com.unity.visualeffectgraph.")]
+        public static string Open(string asset_path = null, string window = "open")
         {
             if (string.IsNullOrEmpty(asset_path))
                 return VFXJson.Error("missing_parameter",
                     "'asset_path' is required ('Assets/.../*.vfx').");
+
+            var mode = string.IsNullOrEmpty(window) ? "open" : window.Trim().ToLowerInvariant();
+            if (mode != "open" && mode != "none" && mode != "close")
+                return VFXJson.Error("invalid_parameter",
+                    $"'window' must be open, none or close — got '{window}'.");
 
             var asset = AssetDatabase.LoadAssetAtPath<Object>(asset_path);
             if (asset == null)
@@ -123,10 +133,35 @@ namespace UnityOpenMcpBridge.Extensions.VFXExt
                 return VFXJson.Error("invalid_parameter",
                     "'asset_path' must end with '.vfx'.");
 
-            // Bring up the VFX Graph editor window for the asset. Reflection
-            // over UnityEditor.VFX (the window type name is stable). Failure to
-            // open the window is non-fatal — the summary is still returned.
-            VFXApi.TryOpenInEditor(asset_path);
+            string windowJson;
+            if (mode == "open")
+            {
+                if (!VFXApi.TryOpenWindow(asset_path, out var reused, out var opened,
+                        out var openError, out var openMessage))
+                {
+                    var hint = openError == "editor_window_unavailable"
+                        ? " Pass window: \"none\" for the summary without a window."
+                        : "";
+                    return VFXJson.Error(openError,
+                        $"Could not open '{asset_path}' in a VFX Graph window: {openMessage}{hint}");
+                }
+                windowJson = "{\"action\":" + VFXJson.Esc(reused ? "focused" : "opened") +
+                             ",\"open\":true,\"title\":" + VFXJson.Esc(opened.titleContent?.text ?? "") + "}";
+            }
+            else if (mode == "close")
+            {
+                if (!VFXApi.TryCloseWindows(asset_path, out var closed, out var closeError))
+                    return VFXJson.Error(closeError,
+                        $"The VFX Graph window of '{asset_path}' has unsaved changes; closing it would " +
+                        "lose them. Save or discard them in the window first.");
+                windowJson = "{\"action\":" + VFXJson.Esc(closed > 0 ? "closed" : "not_open") +
+                             ",\"open\":false,\"closed\":" + closed + "}";
+            }
+            else
+            {
+                var showing = VFXApi.OpenWindows(asset_path).Count > 0;
+                windowJson = "{\"action\":\"none\",\"open\":" + (showing ? "true" : "false") + "}";
+            }
 
             // Structured summary: context/block counts + exposed properties,
             // read off the public runtime VisualEffectAsset / serialized file.
@@ -138,6 +173,7 @@ namespace UnityOpenMcpBridge.Extensions.VFXExt
             var sb = new StringBuilder(256);
             sb.Append("\"vfxGraph\":{");
             sb.Append("\"assetPath\":").Append(VFXJson.Esc(asset_path)).Append(',');
+            sb.Append("\"window\":").Append(windowJson).Append(',');
             sb.Append("\"contextCount\":").Append(contextCount).Append(',');
             sb.Append("\"blockCount\":").Append(blockCount).Append(',');
             sb.Append("\"propertyCount\":").Append(propertyCount).Append(',');

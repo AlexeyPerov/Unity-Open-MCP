@@ -70,7 +70,7 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
             "added:false. Mutating: runs the gate path; paths_hint is the host " +
             "scene path.")]
         public static string LightAdd(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string light_type = "Directional",
@@ -126,7 +126,7 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
             "unchanged. Mutating: runs the gate path; paths_hint is the host " +
             "scene path.")]
         public static string LightSet(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string light_type = null,
@@ -198,7 +198,7 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
             "accept a name or an int index. Mutating: runs the gate path; " +
             "paths_hint is the host scene path.")]
         public static string LightModify(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string fields_json = null,
@@ -283,7 +283,7 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
             "gate path; paths_hint includes the probe scene path and (for " +
             "custom mode) the output cubemap asset path.")]
         public static string ReflectionProbeBake(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string bake_mode = "realtime",
@@ -404,7 +404,7 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
             "(if any). Read-only, gate-free. Address the host by instance_id > " +
             "path > name.")]
         public static string ReflectionProbeGet(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null)
         {
@@ -419,7 +419,8 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
 
             var sb = new StringBuilder(320);
             sb.Append("\"probe\":{");
-            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(probe)).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
+            sb.Append("\"componentInstanceId\":").Append(InstanceId.ToJson(probe)).Append(',');
             sb.Append("\"mode\":").Append(LightingJson.Esc(probe.mode.ToString())).Append(',');
             sb.Append("\"resolution\":").Append(probe.resolution).Append(',');
             sb.Append("\"hdr\":").Append(probe.hdr ? "true" : "false").Append(',');

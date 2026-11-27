@@ -201,6 +201,20 @@ export interface PingResponse {
   isPlaying: boolean;
   /** compiling / reloading (a requested reload not started yet, wire contract 9) / entering_playmode / exiting_playmode, or null when settled (wire contract 8). */
   transition?: string | null;
+  /** What became of the last play-mode request editor_set_state made; absent when none is pending or cancelled. */
+  playRequest?: PlayRequestInfo;
+}
+
+/** The bridge's play-request record (PlayRequestTracker). */
+export interface PlayRequestInfo {
+  status: "requested" | "cancelled";
+  /** cancelled only: compile_errors | cancelled_in_transition | not_started */
+  reason?: string;
+  requestedAt?: string;
+  cancelledAt?: string;
+  /** EditorApplication.delayCall callbacks still pending when it was cancelled. */
+  pendingDelayCalls?: number;
+  delayCallTargets?: string[];
 }
 
 interface HttpErrorBody {

@@ -16,6 +16,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Sprite2dExt
     {
         private const string TestFolder = "Assets/__MCPTest_Sprite2D__";
         private const string AtlasPath = TestFolder + "/TestAtlas.spriteatlas";
+        private const string AtlasPathV2 = TestFolder + "/TestAtlas.spriteatlasv2";
         private const string SpritePath = TestFolder + "/TestSprite.png";
         private const string TexturePath = TestFolder + "/TestTexture.png";
 
@@ -122,6 +123,24 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Sprite2dExt
         }
 
         [Test]
+        public void SpriteAtlas_FormatWarning_NamesTheFormatTheModePacks()
+        {
+            Assert.IsNull(SpriteAtlasTools.FormatWarning(0, false, AtlasPath), "Disabled packs neither");
+            Assert.IsNull(SpriteAtlasTools.FormatWarning(5, true, AtlasPathV2));
+            Assert.IsNull(SpriteAtlasTools.FormatWarning(3, false, AtlasPath));
+            StringAssert.Contains(AtlasPath + "v2", SpriteAtlasTools.FormatWarning(5, false, AtlasPath));
+            StringAssert.Contains("Sprite Atlas V1", SpriteAtlasTools.FormatWarning(4, true, AtlasPathV2));
+        }
+
+        [Test]
+        public void SpriteAtlas_Create_RefusesAnotherExtensionOrAnExistingAsset()
+        {
+            AssertJsonError(SpriteAtlasTools.Create(TestFolder + "/A.asset", paths_hint: new[] { TestFolder }), "invalid_asset_path");
+            AssertJsonOk(SpriteAtlasTools.Create(AtlasPathV2, paths_hint: new[] { AtlasPathV2 }));
+            AssertJsonError(SpriteAtlasTools.Create(AtlasPathV2, paths_hint: new[] { AtlasPathV2 }), "asset_exists");
+        }
+
+        [Test]
         public void Dispatch_TextureSetImport_MissingPathsHint_ReturnsError()
         {
             var result = BridgeToolRegistry.TryDispatch(
@@ -132,8 +151,9 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Sprite2dExt
 
         // ----------------------- SpriteAtlas round-trip -------------------
 
-        [Test]
-        public void SpriteAtlas_CreateAddModifyGetDelete_RoundTrips()
+        [TestCase(AtlasPath, "v1")]
+        [TestCase(AtlasPathV2, "v2")]
+        public void SpriteAtlas_CreateAddModifyGetDelete_RoundTrips(string AtlasPath, string format)
         {
             CreateSpriteAsset(SpritePath);
 
@@ -141,6 +161,12 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Sprite2dExt
                 AtlasPath, include_in_build: true, paths_hint: new[] { AtlasPath });
             AssertJsonOk(createOut);
             StringAssert.Contains("\"path\":\"" + AtlasPath + "\"", createOut);
+            StringAssert.Contains("\"format\":\"" + format + "\"", createOut);
+            StringAssert.Contains("\"packerMode\":", createOut);
+            // Both formats import as a SpriteAtlas (V2 through SpriteAtlasImporter).
+            Assert.AreEqual(typeof(UnityEngine.U2D.SpriteAtlas), AssetDatabase.GetMainAssetTypeAtPath(AtlasPath));
+            if (format == "v2")
+                Assert.IsInstanceOf<UnityEditor.U2D.SpriteAtlasImporter>(AssetImporter.GetAtPath(AtlasPath));
 
             var addOut = SpriteAtlasTools.AddPackable(
                 AtlasPath,
@@ -180,14 +206,11 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Sprite2dExt
             StringAssert.Contains("\"deleted\":true", deleteOut);
         }
 
-        // Fails while spriteatlas_create writes an authoring SpriteAtlasAsset
-        // into a .spriteatlas file that no SpriteAtlasImporter imports (sprite
-        // packer mode Disabled / V1): the deprecated SpriteAtlasAsset setters
-        // the modify falls back to are no-ops on Unity 6, so include_in_build
-        // and packing never change. Tracked as an open bug with
-        // spriteatlas_create.
-        [Test]
-        public void SpriteAtlas_Modify_PersistsSettings()
+        // The settings are written where each format keeps them (the V2
+        // importer, the V1 SpriteAtlas) and read back from there.
+        [TestCase(AtlasPath)]
+        [TestCase(AtlasPathV2)]
+        public void SpriteAtlas_Modify_PersistsSettings(string AtlasPath)
         {
             AssertJsonOk(SpriteAtlasTools.Create(
                 AtlasPath, include_in_build: true, paths_hint: new[] { AtlasPath }));
@@ -248,6 +271,12 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Sprite2dExt
             StringAssert.Contains("\"status\":\"ok\"", json);
             Assert.IsFalse(json.Contains("\"error\":"),
                 "Expected ok envelope but got error: " + json);
+        }
+
+        private static void AssertJsonError(string json, string code)
+        {
+            Assert.IsNotNull(json);
+            StringAssert.Contains("\"code\":\"" + code + "\"", json);
         }
 
         private static void AssertErrorEnvelope(ToolDispatchResult result, string expectedCode)

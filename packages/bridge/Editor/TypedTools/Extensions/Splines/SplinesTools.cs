@@ -162,7 +162,7 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
             "new knot index. Mutating: runs the gate path; paths_hint is the " +
             "host's scene path.")]
         public static string AddKnot(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             int spline_index = 0,
@@ -235,7 +235,7 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
             "('x,y,z'); omitted fields keep the current knot's value. Mutating: " +
             "runs the gate path; paths_hint is the host's scene path.")]
         public static string SetKnot(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             int spline_index = 0,
@@ -313,7 +313,7 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
             "Continuous / BrokenMirrored also accepted). Mutating: runs the " +
             "gate path; paths_hint is the host's scene path.")]
         public static string SetTangentMode(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             int spline_index = 0,
@@ -391,7 +391,7 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
             "Read-only, gate-free. Address the host by instance_id > path > name. " +
             "Use this to sample positions for object placement along a path.")]
         public static string Evaluate(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             int spline_index = 0,
@@ -452,7 +452,7 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
             "Address the host by instance_id > path > name. Use this to inspect " +
             "a spline before mutating, or to discover valid knot indices.")]
         public static string GetKnots(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             int spline_index = 0)
@@ -516,7 +516,7 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
             "from the current value). Mutating: runs the gate path; paths_hint " +
             "is the host's scene path.")]
         public static string Modify(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string fields_json = null,

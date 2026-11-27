@@ -820,7 +820,15 @@ start their own compile and never flip a clean generation to `assembly_stale` on
 their own.
 Right after a domain reload the bridge recomputes that fingerprint in the
 background; until the pass completes it reports `indeterminate` — never
-`assembly_stale`. A live `currently_compiling` or `pending` answer names the
+`assembly_stale` — with `indeterminateReason: "fingerprint_pending"`. An Editor
+that has compiled nothing since it started (it loaded assemblies an earlier
+session built) has no generation to certify: `indeterminateReason:
+"no_compile_this_session"`. Waiting never changes that, so neither this read nor
+the `editor_status` wait holds for it; the answer's step is
+`recompile_scripts {}`, which compiles and answers with the verified state.
+A diagnostic that two interleaved compiler outputs logged a second time, with a
+fragment of a compiler command line glued to its path or message, is listed once
+(the clean copy), in `errors`, `errorCount` and `historicalLogErrors` alike. A live `currently_compiling` or `pending` answer names the
 `editor_status` wait (with `after_generation`) in its headline and
 `agentNextSteps`.
 Old log errors and issues remain separately in `historicalLogErrors` and
@@ -982,8 +990,16 @@ assembly stale after `assets_refresh` / `execute_csharp`.
    packages) are brought in first: new files with a scoped import (the topmost
    folder Unity does not know, recursively, or the file), a deletion with one
    `AssetDatabase.Refresh`. Without this a new type is in no assembly and every
-   use of it fails with CS0103 / CS0246. `mutation.output.scriptImport` reports
-   `action` (`none` / `imported` / `refreshed`) and the paths. The refresh a
+   use of it fails with CS0103 / CS0246. An `.asmdef` / `.asmref` edited on
+   disk is re-imported too (its text differs from the imported one): the
+   compile reads an assembly definition from its import, so an edit Unity has
+   not imported would compile with the old references, defines and
+   constraints. `mutation.output.scriptImport` reports `action` (`none` /
+   `imported` / `refreshed`) and the paths (`newScripts`,
+   `modifiedAssemblyDefinitions`, `deletedScripts` with their counts). When the
+   compile's domain reload closes the bridge's response, the server reads the
+   import back from `/compile-state` and puts it in the same place
+   (`readBackAfterReload: true`). The refresh a
    deletion needs treats open scenes that changed on disk like
    [`assets_refresh`](#refreshes-and-open-scenes-changed-on-disk): a clean one is
    reloaded in place (`scriptImport.reloadedScenes`), and otherwise the call
@@ -1296,9 +1312,15 @@ bridge edits in place ([below](#editing-a-prefab-asset-in-place-in_prefab)).
   `componentInstanceId` — pass that as `component_instance_id` to
   `component_get` / `component_modify`, or as an object-reference value. An
   asset creator's `instanceId` is the asset's (`object_get_data`, object
-  references, the asset's own tools where they take `instance_id`).
-  `spriteatlas_create` returns none: the runtime atlas exists only once packed,
-  so address the atlas by `path`.
+  references, the asset's own tools where they take `instance_id`). The
+  domain read tools that list components on hosts (`cinemachine_camera_list`,
+  `navigation_list`, `audio_listener_get`, `reflection_probe_get`) and the
+  Cinemachine pipeline setters (`cinemachine_set_body` / `_set_noise`) answer
+  the same way: `instanceId` is the host GameObject, `componentInstanceId` the
+  component (`navigation_get` nests its `components[]` under the host, each with
+  its own id). Every domain `*instance_id` parameter takes the full 8-byte
+  EntityId of Unity 6000.5+ as a string or a number.
+  `spriteatlas_create` returns none: every atlas tool takes the `path`.
 - **New roots.** `gameobject_create`, `prefab_instantiate`, `ui_canvas_add` and
   the domain creators (`probuilder_create_shape`, `cinemachine_create_camera`,
   `splines_container_create`, `tilemap_create`) put a GameObject created without
@@ -1431,9 +1453,16 @@ domain reload it waits for.
   compile requested but not started publishes `pending` in the lock and
   `/compile-state` until that compile starts (given up after 60 s:
   `compile.dueButNotStarted`).
-- A mode that does not come (play mode refused because scripts do not compile)
-  ends with `wait_not_reached` once the Editor has been settled in the other
-  mode for a few seconds; a dead bridge ends with `bridge_compile_failed`
+- A play-mode request the Editor cancelled ends the `playing` wait at once with
+  `play_cancelled`: `reason` (`compile_errors`, `cancelled_in_transition` — a
+  project `playModeStateChanged` handler set `isPlaying = false` — or
+  `not_started`), `pendingDelayCalls` and `delayCallTargets` (the
+  `EditorApplication.delayCall` callbacks still pending, which an unfocused
+  Editor does not run; a handler can be waiting for one of them). With pending
+  callbacks the next step is `editor_set_state {"state":"play","flush_delay_calls":true}`.
+  `editor_status` without a wait reports the same record as `playRequest`.
+- A mode that does not come for another reason ends with `wait_not_reached`
+  once the Editor has been settled in the other mode for a few seconds; a dead bridge ends with `bridge_compile_failed`
   (only with `Editor.log` evidence: Safe Mode, or a reload that finished
   without the bridge — a long reload is waited through, and a wait that runs
   out of budget on one says so in `wait_timeout`).
@@ -1451,6 +1480,20 @@ this wait themselves and answer with the compile result (see
 answer carries the `job_id` of the wait that continues. Inside
 `batch_execute` a `wait_until` step is refused
 (`batch_step_requires_server_poll`).
+
+### `unity_open_mcp_editor_set_state`
+
+`play` / `stop` only request the change and answer with `transition` and the
+`editor_status` wait to make. The bridge records the play request until play
+mode is entered or the Editor stops changing play mode without entering it; the
+`wait_until: "playing"` wait then answers `play_cancelled` (see
+[`editor_status`](#unity_open_mcp_editor_status)). `flush_delay_calls: true`
+(play only, default false) first runs the pending `EditorApplication.delayCall`
+callbacks once, as the Editor's own update would — use it when
+`play_cancelled` reports `pendingDelayCalls`: a project play hook that deferred
+its work to `delayCall` cancels every Play until that work runs. It runs project
+code; a callback that throws refuses the call (`delay_call_failed`) before play
+is requested, and one that enters play mode itself is reported in `note`.
 
 ### `unity_open_mcp_dependencies`
 
@@ -1537,6 +1580,33 @@ call) and `title`. `window: "none"` reads the summary without touching windows;
 - The window stays open after the call. Close it (`window: "close"`) before
   deleting or moving the graph: Shader Graph asks what to do in a modal dialog
   when an open graph's file disappears.
+
+### `vfx_open`
+
+Opens the graph in the VFX Graph window — what double-clicking the `.vfx` does —
+or focuses the window already showing it, and returns the summary (context,
+block and exposed-property counts, property names) plus `window`: `action`
+(`opened` / `focused` / `closed` / `not_open` / `none`), `open` and `title`.
+`window: "none"` reads the summary without touching windows; `"close"` closes
+the graph's window. Writes no asset (gate off). Batch mode has no windows:
+`window: "open"` refuses `editor_window_unavailable` (use `"none"`). The VFX
+window does not ask about unsaved edits when it closes, so `close` refuses
+`graph_has_unsaved_changes` while the graph is dirty.
+
+### SpriteAtlas formats
+
+`spriteatlas_*` author both Sprite Atlas formats, chosen by the path's
+extension: `.spriteatlasv2` (Sprite Atlas V2 — the file holds the authoring
+`SpriteAtlasAsset`; `SpriteAtlasImporter` keeps include-in-build and the
+packing / texture / platform settings) and `.spriteatlas` (V1 — the file holds a
+`SpriteAtlas`, packables and settings on it). Both import as a `SpriteAtlas`.
+Which one Unity packs depends on Editor Settings > Sprite Packer Mode:
+`spriteatlas_create` and `spriteatlas_get` report `format` and `packerMode`, and a
+`warning` when the file's format is not the one the mode packs (a `.spriteatlas`
+under Sprite Atlas V2, a `.spriteatlasv2` under a V1 mode). Create imports only
+the new file. A `.spriteatlas` that holds a `SpriteAtlasAsset` (written by an
+older bridge) is neither format and is refused `not_a_sprite_atlas`: delete it
+and create the atlas again.
 
 ### Unity Hub control
 

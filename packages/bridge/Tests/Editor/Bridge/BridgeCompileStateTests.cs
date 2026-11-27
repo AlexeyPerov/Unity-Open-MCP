@@ -59,6 +59,38 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.DoesNotContain("\"errors\"", summary);
         }
 
+        // Interleaved compiler output can make Unity parse one diagnostic twice,
+        // once with a command-line fragment glued to its path or message: the
+        // error list and its count hold the clean record once.
+        [Test]
+        public void Dedupe_FoldsDiagnosticsGluedToACommandLineFragment()
+        {
+            BridgeCompileState.Diagnostic D(string file, int line, int column, string code, string message)
+                => new BridgeCompileState.Diagnostic { File = file, Line = line, Column = column, Code = code, Message = message };
+            const string clean = "/Users/dev/proj/packages/bridge/Tests/CinemachineToolsTests.cs";
+            const string missing = "The type or namespace name 'CinemachineCamera' could not be found";
+            // Unity's CompilerMessage.message is the full line, path included.
+            var line = clean + "(12,5): error CS0246: " + missing;
+            const string glued = "-r:\"Library/Bee/artifacts/200b0aE.dag/UnityEngin";
+            var kept = BridgeCompileState.Dedupe(new[]
+            {
+                D(glued + clean, 12, 5, "CS0246", glued + line),
+                D(clean, 12, 5, "CS0246", line),
+                D("Assets/A.cs", 3, 9, "CS0103", "The name 'x' does not exist" +
+                    "…Tests.UnityAdditionalFile.txt\"e:\"Library/Bee/artifacts/200b0aE.dag/Nav.UnityAdditionalFile.txt\""),
+                D("Assets/A.cs", 3, 9, "CS0103", "The name 'x' does not exist"),
+                D("Assets/A.cs", 3, 9, "CS0103", "The name 'x' does not exist"),
+                D("Assets/A.cs", 3, 20, "CS0103", "The name 'y' does not exist"),
+                D("Assets/Sub/A.cs", 3, 9, "CS0103", "The name 'x' does not exist"),
+            });
+
+            Assert.AreEqual(4, kept.Count);
+            Assert.AreEqual(clean, kept[0].File);
+            Assert.AreEqual("The name 'x' does not exist", kept[1].Message);
+            Assert.AreEqual(20, kept[2].Column);
+            Assert.AreEqual("Assets/Sub/A.cs", kept[3].File);
+        }
+
         [Test]
         public void SourceFingerprint_TracksContentAndMembership_NotTouchTime()
         {

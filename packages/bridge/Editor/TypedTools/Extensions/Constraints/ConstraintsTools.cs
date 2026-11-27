@@ -71,12 +71,12 @@ namespace UnityOpenMcpBridge.Extensions.ConstraintsExt
             "applied). Mutating: runs the gate path; paths_hint is the host scene " +
             "path.")]
         public static string ConstraintAdd(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string constraint_type = null,
             string source_path = null,
-            int source_instance_id = 0,
+            long source_instance_id = 0,
             string source_name = null,
             float weight = 1f,
             bool constraint_active = true,
@@ -218,7 +218,7 @@ namespace UnityOpenMcpBridge.Extensions.ConstraintsExt
             "reports added:false (configuration still applied). Mutating: runs the " +
             "gate path; paths_hint is the host scene path.")]
         public static string LodGroupConfigure(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             string fade_mode = null,
@@ -345,7 +345,7 @@ namespace UnityOpenMcpBridge.Extensions.ConstraintsExt
             "host must already carry a LODGroup (use lod_group_configure first). " +
             "Mutating: runs the gate path; paths_hint is the host scene path.")]
         public static string LodAddLevel(
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             int index = 0,

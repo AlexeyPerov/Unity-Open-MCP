@@ -4,12 +4,12 @@ SpriteAtlas typed tools (`unity_open_mcp_spriteatlas_*`), embedded inside the
 bridge. Seven tools cover the SpriteAtlas authoring surface — the 2D art
 pipeline's atlas-packing layer:
 
-- `spriteatlas_create` — create a new SpriteAtlas asset (`Assets/.../*.spriteatlas`).
+- `spriteatlas_create` — create a new SpriteAtlas asset (`Assets/.../*.spriteatlasv2` or `*.spriteatlas`).
 - `spriteatlas_get` — read packables + packing/texture/platform settings (read-only).
 - `spriteatlas_add_packable` — add sprites/textures/folders by asset path.
 - `spriteatlas_remove_packable` — remove a packable by asset path.
 - `spriteatlas_modify` — patch `include_in_build` + packing + texture settings.
-- `spriteatlas_delete` — delete the `.spriteatlas` asset.
+- `spriteatlas_delete` — delete the atlas asset.
 - `spriteatlas_list` — list SpriteAtlas assets under a folder (read-only).
 
 Added in M20 Plan 9 / T20.9.1 to cover the 2D art-pipeline parity gap. The
@@ -30,10 +30,13 @@ owning sub-asmdef only references the bridge Editor asmdef.
 
 ## Authoring model
 
-A `.spriteatlas` file stores a `SpriteAtlasAsset` (the authoring object); the
-runtime `SpriteAtlas` is the packed artifact produced from it. These tools
-author via `SpriteAtlasAsset.Load` / `Save` and mutate packables via
-`Add` / `Remove`. Packables are `Object` references (Sprite / Texture /
+The path's extension picks the format. A `.spriteatlasv2` (Sprite Atlas V2)
+holds the authoring `SpriteAtlasAsset` (`SpriteAtlasAsset.Load` / `Save`,
+packables via `Add` / `Remove`); its `SpriteAtlasImporter` keeps include-in-build
+and the packing / texture / platform settings. A `.spriteatlas` (V1) holds a
+`SpriteAtlas`, authored through `SpriteAtlasExtensions`. Both import as a
+`SpriteAtlas`; the answers report the Sprite Packer Mode and warn when the
+file's format is not the one it packs. Packables are `Object` references (Sprite / Texture /
 `DefaultAsset` folder); they are resolved by `Assets/`-rooted path and
 reported back by path + type so agents can round-trip without instance ids.
 
