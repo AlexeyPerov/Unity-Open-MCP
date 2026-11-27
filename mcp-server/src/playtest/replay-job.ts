@@ -54,7 +54,7 @@ export function exportAction(recorder: PlaytestRecorder, owner: SessionOwner, pr
   return {
     status: "ok", action: "export", scenario: name, file, path: displayPath(projectPath, file), session: record.id,
     ...(record.open ? { session_open: true } : {}),
-    source: args.source, steps: scenario.steps.length, start: { restart: scenario.start.restart, ...(scenario.start.command ? { command: scenario.start.command } : {}) },
+    source: args.source, steps: scenario.steps.length, start: { restart: scenario.start.restart, ...(scenario.start.command ? { command: scenario.start.command } : {}), ...(scenario.start.wait ? { wait: scenario.start.wait } : {}) },
     unbaselined, ...(vars.length ? { vars } : {}), stats,
     ...(warnings.length ? { warnings } : {}),
     preview: scenario.steps.slice(0, 15).map((s, i) => `${i + 1}. ${s.label ?? defaultLabel(s)}`),

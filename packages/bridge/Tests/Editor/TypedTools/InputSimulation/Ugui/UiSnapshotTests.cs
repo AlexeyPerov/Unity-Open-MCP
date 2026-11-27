@@ -436,6 +436,16 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             StringAssert.Contains(canvasName + "/Tiny", opted);
             StringAssert.Contains("\"dpi\":", opted);
 
+            // A slider with no handle (a progress bar) is no touch target; a draggable one is.
+            var bar = Rect("ProgressBar", canvasGo.transform, 300, 300, 10, 10).gameObject.AddComponent<Slider>();
+            Assert.IsNull(bar.handleRect);
+            var knob = Rect("Knob", canvasGo.transform, 320, 300, 10, 10).gameObject.AddComponent<Slider>();
+            knob.handleRect = Rect("Handle", knob.transform, 0, 0, 5, 5);
+            var sliders = UiSnapshotTools.Snapshot(under: canvasName, page_size: 1, min_touch_size: 30f);
+            StringAssert.Contains(canvasName + "/Knob", sliders);
+            StringAssert.DoesNotContain(canvasName + "/ProgressBar\"", sliders);
+            StringAssert.Contains("\"small_touch_targets\":{\"count\":2", sliders);
+
             StringAssert.Contains("\"invalid_arguments\"", UiSnapshotTools.Snapshot(placeholder_pattern: "("));
             StringAssert.Contains("\"invalid_arguments\"", UiSnapshotTools.Snapshot(min_touch_size: 0f));
         }
@@ -485,6 +495,17 @@ namespace UnityOpenMcpBridge.Tests.Extensions.InputSimulation
             Assert.IsNull(UiSnapshotTools.OutsideEdges(new UnityEngine.Rect(10, 10, 50, 50), safe));
             CollectionAssert.AreEqual(new[] { "bottom", "left" },
                 UiSnapshotTools.OutsideEdges(new UnityEngine.Rect(-5, -5, 50, 50), new UnityEngine.Rect(0, 0, 100, 100)));
+            // Within the tolerance (a text box 1 px into the band) is rounding, not content under the notch.
+            var box = new UnityEngine.Rect(0, 0, 100, 100);
+            Assert.IsNull(UiSnapshotTools.OutsideEdges(new UnityEngine.Rect(10, 50, 20, 51), box));
+            CollectionAssert.AreEqual(new[] { "top" }, UiSnapshotTools.OutsideEdges(new UnityEngine.Rect(10, 50, 20, 53), box));
+            var over = UiSnapshotTools.Overshoot(new UnityEngine.Rect(-4, 50, 20, 53), box);
+            Assert.AreEqual(2, over.Count);
+            Assert.AreEqual(("top", 3f), over[0]);
+            Assert.AreEqual(("left", 4f), over[1]);
+            // A full-screen surface (swipe area, dimmer, tap catcher) is not content.
+            Assert.IsTrue(UiSnapshotTools.CoversScreen(new UnityEngine.Rect(0, -50, 100, 200), new UnityEngine.Vector2(100, 100)));
+            Assert.IsFalse(UiSnapshotTools.CoversScreen(new UnityEngine.Rect(0, 0, 100, 80), new UnityEngine.Vector2(100, 100)));
         }
 
         // --- playtest_wait `ui` condition probe (same node model) ---------------

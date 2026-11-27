@@ -47,8 +47,11 @@ export interface ExploreOptions {
   settleMs: number;
   maxSettleMs: number;
   restart: RestartMode;
+  /** restart play_mode: run after re-entering play mode; restart command: the restart itself. */
   restartCommand?: string;
   restartArgs?: Record<string, unknown>;
+  /** playtest_wait arguments ({condition, timeout_ms}) after the restart (e.g. the project's ready predicate). */
+  restartWait?: Record<string, unknown>;
   maxRestarts: number;
   policy: ActionPolicy;
   routing: "dispatch" | "raycast_real";
@@ -367,11 +370,12 @@ export class Explorer {
   private async restart(): Promise<void> {
     this.restarts++;
     const mode = this.options.restart;
-    const step = this.begin(`Restart the game (${mode === "command" ? this.options.restartCommand : "play mode"})`, { purpose: "restart", mode });
+    const how = mode === "command" ? this.options.restartCommand : `play mode${this.options.restartCommand ? ` + ${this.options.restartCommand}` : ""}`;
+    const step = this.begin(`Restart the game (${how})`, { purpose: "restart", mode });
     const logs: unknown[] = [];
     this.restarting = true;
     try {
-      const failure = await restartGame(this.deps.call, mode, this.options.restartCommand, this.options.restartArgs, logs);
+      const failure = await restartGame(this.deps.call, restartPlan(this.options), logs);
       if (failure) {
         step.finish({ step: { purpose: "restart", mode, outcome: "failed", at: failure.at, error: failure.error } }, logs, true);
         throw new Stop("restart_failed", failure.message);
@@ -565,6 +569,7 @@ export class Explorer {
         restart: this.options.restart,
         ...(this.options.restartCommand ? { restart_command: this.options.restartCommand } : {}),
         ...(this.options.restartArgs ? { restart_args: this.options.restartArgs } : {}),
+        ...(this.options.restartWait ? { restart_wait: this.options.restartWait } : {}),
         routing: this.options.routing, same_screen: this.options.sameScreen, fill_text: this.options.fillText,
       },
     };
@@ -585,27 +590,57 @@ export function shownResult(result: Record<string, unknown>): Record<string, unk
  * Bring the game back to its start: a synchronous project command (`command`),
  * or exit and re-enter play mode (`play_mode`). Returns why it failed, or null.
  */
-export async function restartGame(call: ToolCaller, mode: RestartMode, command: string | undefined,
-  commandArgs: Record<string, unknown> | undefined, logs: unknown[]): Promise<{ at: string; error: unknown; message: string } | null> {
-  const steps: Array<[string, Record<string, unknown>]> = mode === "command"
-    ? [["unity_open_mcp_project_commands", { action: "invoke", command_id: command, args: commandArgs ?? {} }]]
-    : [
+export interface RestartPlan {
+  mode: RestartMode;
+  /** play_mode: run after entering play mode (a boot); command: the restart itself. */
+  command?: string;
+  args?: Record<string, unknown>;
+  /** playtest_wait arguments run last ({condition, timeout_ms}; default timeout 30 s). */
+  wait?: Record<string, unknown>;
+}
+
+export function restartPlan(options: Pick<ExploreOptions, "restart" | "restartCommand" | "restartArgs" | "restartWait">): RestartPlan {
+  return {
+    mode: options.restart,
+    ...(options.restartCommand ? { command: options.restartCommand } : {}),
+    ...(options.restartArgs ? { args: options.restartArgs } : {}),
+    ...(options.restartWait ? { wait: options.restartWait } : {}),
+  };
+}
+
+/** A project command that answered {ok:false, code} — the convention for a refusal that is not a tool error. */
+function commandRefusal(out: Record<string, any>): unknown {
+  const result = out?.result;
+  return result && typeof result === "object" && result.ok === false ? result : null;
+}
+
+export async function restartGame(call: ToolCaller, plan: RestartPlan, logs: unknown[]): Promise<{ at: string; error: unknown; message: string } | null> {
+  const steps: Array<[string, Record<string, unknown>]> = [];
+  if (plan.mode === "play_mode")
+    steps.push(
       ["unity_open_mcp_editor_set_state", { state: "stop" }],
       ["unity_open_mcp_editor_status", { wait_until: "edit", timeout_ms: 30_000 }],
       ["unity_open_mcp_editor_set_state", { state: "play" }],
       ["unity_open_mcp_editor_status", { wait_until: "playing", timeout_ms: 40_000 }],
-    ];
+    );
+  if (plan.command) steps.push(["unity_open_mcp_project_commands", { action: "invoke", command_id: plan.command, args: plan.args ?? {} }]);
+  if (plan.wait) steps.push(["unity_open_mcp_playtest_wait", { timeout_ms: 30_000, ...plan.wait }]);
   for (const [tool, args] of steps) {
     const result = await call(tool, args);
     collectLogs(result, logs);
     const out = toolOutput(result);
-    if (result.isError || out.error) {
+    const refused = tool === "unity_open_mcp_project_commands" ? commandRefusal(out) : null;
+    if (result.isError || out.error || refused) {
       const at = `${tool} ${JSON.stringify(args)}`;
+      const error = out.error ?? refused ?? null;
+      const detail = JSON.stringify(error).slice(0, 300);
       return {
-        at, error: out.error ?? null,
-        message: mode === "command"
-          ? `The restart command ${command} failed: ${JSON.stringify(out.error ?? null).slice(0, 300)}`
-          : `Restarting play mode failed at ${at}: ${JSON.stringify(out.error ?? null).slice(0, 300)}`,
+        at, error,
+        message: tool === "unity_open_mcp_project_commands"
+          ? `The restart command ${plan.command} failed: ${detail}`
+          : tool === "unity_open_mcp_playtest_wait"
+            ? `The game was restarted but the wait after it did not hold: ${detail}`
+            : `Restarting play mode failed at ${at}: ${detail}`,
       };
     }
   }

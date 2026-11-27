@@ -78,8 +78,11 @@ export interface ScenarioStep {
 
 export interface ScenarioStart {
   restart: RestartMode;
+  /** play_mode: a project command run after entering play mode (a boot); command: the restart itself. */
   command?: string;
   args?: Record<string, unknown>;
+  /** playtest_wait arguments run after the restart ({condition, timeout_ms}), e.g. the project's ready predicate. */
+  wait?: Record<string, unknown>;
   /** The first screen after the restart. */
   screen?: ScreenExpectation;
   findings?: string[];
@@ -196,10 +199,17 @@ export function parseScenario(value: unknown): { scenario: Scenario | null; prob
   if (!["play_mode", "command", "none"].includes(restart)) problems.push("start.restart must be play_mode, command or none");
   if (restart === "command" && !(typeof startIn.command === "string" && startIn.command.startsWith("project.")))
     problems.push("start.restart command needs start.command (a project.* command id)");
+  if (startIn.command !== undefined && !(typeof startIn.command === "string" && startIn.command.startsWith("project.")))
+    problems.push("start.command must be a project.* command id");
+  if (restart === "none" && (startIn.command !== undefined || startIn.wait !== undefined))
+    problems.push("start.command / start.wait need a restart (play_mode or command)");
+  if (startIn.wait !== undefined && !(isObject(startIn.wait) && isObject(startIn.wait.condition)))
+    problems.push("start.wait must be playtest_wait arguments with a condition ({\"condition\":{…},\"timeout_ms\":…})");
   const start: ScenarioStart = {
     restart,
     ...(typeof startIn.command === "string" ? { command: startIn.command } : {}),
     ...(isObject(startIn.args) ? { args: startIn.args } : {}),
+    ...(isObject(startIn.wait) && isObject(startIn.wait.condition) ? { wait: startIn.wait } : {}),
   };
   const startScreen = parseScreen(startIn.screen, "start", problems);
   if (startScreen) start.screen = startScreen;
@@ -335,6 +345,7 @@ function collectVars(value: unknown, into: Set<string>): void {
 export function usedVars(scenario: Pick<Scenario, "steps" | "start">): string[] {
   const names = new Set<string>();
   collectVars(scenario.start.args, names);
+  collectVars(scenario.start.wait, names);
   for (const step of scenario.steps) { collectVars(step.text, names); collectVars(step.args, names); }
   return [...names];
 }

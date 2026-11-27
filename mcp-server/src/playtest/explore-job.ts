@@ -31,8 +31,13 @@ export function parseExploreOptions(args: Record<string, unknown>, memory: Memor
   const restartCommand = typeof args.restart_command === "string" ? args.restart_command : undefined;
   if (restart === "command" && !restartCommand)
     throw new ExploreError("invalid_arguments", "restart: \"command\" needs restart_command (a synchronous project command such as project.<owner>.playtest.boot).");
-  if (restart !== "command" && (restartCommand || args.restart_args !== undefined))
-    throw new ExploreError("invalid_arguments", "restart_command / restart_args are used only with restart: \"command\".");
+  if (restart === "none" && (restartCommand || args.restart_args !== undefined || args.restart_wait !== undefined))
+    throw new ExploreError("invalid_arguments", "restart_command / restart_args / restart_wait need a restart (play_mode or command), not restart: \"none\".");
+  if (!restartCommand && args.restart_args !== undefined)
+    throw new ExploreError("invalid_arguments", "restart_args are the arguments of restart_command; pass restart_command too.");
+  const restartWait = args.restart_wait;
+  if (restartWait !== undefined && !(restartWait && typeof restartWait === "object" && (restartWait as Record<string, unknown>).condition && typeof (restartWait as Record<string, unknown>).condition === "object"))
+    throw new ExploreError("invalid_arguments", "restart_wait is playtest_wait arguments with a condition, e.g. {\"condition\":{\"project_command\":{\"id\":\"project.<owner>.playtest.is_ready\",\"field\":\"met\"}},\"timeout_ms\":30000}.");
   let policy;
   try { policy = compilePolicy(args.deny, args.allow, args.default_deny !== false); }
   catch (error) { throw new ExploreError("invalid_arguments", error instanceof Error ? error.message : String(error)); }
@@ -48,6 +53,7 @@ export function parseExploreOptions(args: Record<string, unknown>, memory: Memor
     restart,
     ...(restartCommand ? { restartCommand } : {}),
     ...(args.restart_args && typeof args.restart_args === "object" ? { restartArgs: args.restart_args as Record<string, unknown> } : {}),
+    ...(restartWait ? { restartWait: restartWait as Record<string, unknown> } : {}),
     maxRestarts: Math.min(num(args.max_restarts, EXPLORE_DEFAULTS.max_restarts), EXPLORE_LIMITS.max_restarts),
     policy,
     routing: args.routing === "raycast_real" ? "raycast_real" : "dispatch",

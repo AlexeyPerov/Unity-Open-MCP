@@ -27,7 +27,7 @@ import {
   DEFAULT_PLACEHOLDER_PATTERN, FindingSet, compilePolicy, denyReason, findingsFromSnapshot, isBackLike, maskText, minTouchPx,
   screenSignature, screenTitle, similarity, type SnapshotNode,
 } from "./playtest/detectors.js";
-import { Explorer, type ExploreOptions, type ExploreRecorder } from "./playtest/explore.js";
+import { Explorer, restartGame, type ExploreOptions, type ExploreRecorder } from "./playtest/explore.js";
 import { parseExploreOptions } from "./playtest/explore-job.js";
 import { memoryOptions, type PlaytestProfile } from "./playtest/profile.js";
 
@@ -308,6 +308,38 @@ test("explore: walks every screen, skips denied controls, finds dead buttons, de
   assert.equal(full.args.min_touch_size, 88);
 });
 
+test("explore: a play-mode restart runs the boot command and waits for the game to be ready; a refusing command fails it", async () => {
+  const game = new FakeGame(GAME);
+  const ready = { condition: { project_command: { id: "project.demo.playtest.is_ready", field: "met" } }, timeout_ms: 20_000 };
+  const { result } = await crawl(game, { restart_command: "project.demo.playtest.boot", restart_args: { fast: true }, restart_wait: ready });
+  assert.equal(result.stop_reason, "explored", JSON.stringify(result.notes));
+  assert.equal(result.restarts, 1);
+  const order = game.calls.map(c => c.tool === "unity_open_mcp_editor_set_state" ? `state:${c.args.state}` : c.tool.replace("unity_open_mcp_", ""))
+    .filter(t => /^state:|^project_commands|^playtest_wait/.test(t));
+  assert.deepEqual(order, ["state:stop", "state:play", "project_commands", "playtest_wait"]);
+  const boot = game.calls.find(c => c.tool === "unity_open_mcp_project_commands")!;
+  assert.deepEqual(boot.args, { action: "invoke", command_id: "project.demo.playtest.boot", args: { fast: true } });
+  assert.deepEqual(game.calls.find(c => c.tool === "unity_open_mcp_playtest_wait")!.args, ready);
+
+  // A command that answers {ok:false} (the project's refusal) is a failed restart, not a silent one.
+  const refusing = async (tool: string) => tool === "unity_open_mcp_project_commands"
+    ? ok({ result: { ok: false, code: "root_already_loaded" } }) : ok({ status: "ok" });
+  const failure = await restartGame(refusing, { mode: "command", command: "project.x.boot" }, []);
+  assert.match(failure!.message, /restart command project\.x\.boot failed: .*root_already_loaded/);
+  const waitFails = async (tool: string) => tool === "unity_open_mcp_playtest_wait"
+    ? text({ error: { code: "timed_out", message: "t" } }) : ok({ status: "ok" });
+  assert.match((await restartGame(waitFails, { mode: "play_mode", wait: ready }, []))!.message, /wait after it did not hold/);
+});
+
+test("detectors: a screen title skips counters and scores", () => {
+  assert.equal(screenTitle([
+    { path: "C/Top/Coins", role: "text", text: "1 000" }, { path: "C/Win/Level", role: "text", text: "6" },
+    { path: "C/Win/Title", role: "text", text: "Profile" }, { path: "C/Win/Close", role: "button", text: "Close" },
+  ] as SnapshotNode[]), "Profile");
+  assert.equal(screenTitle([{ path: "C/A", role: "text", text: "42" }, { path: "C/B", role: "button", text: "Go on" }] as SnapshotNode[]), "Go on");
+  assert.equal(screenTitle([{ path: "C/A", role: "text", text: "42" }] as SnapshotNode[]), "42", "nothing better");
+});
+
 test("explore: restart none stops at the dead end; budgets and cancel stop early with the result so far", async () => {
   const stuck = await crawl(new FakeGame(GAME), { restart: "none" });
   assert.equal(stuck.result.stop_reason, "no_way_back");
@@ -372,7 +404,10 @@ test("explore: play mode ending mid-crawl stops it; edit mode at start refuses",
   await assert.rejects(crawl(idle), (error: any) => error.code === "play_mode_required");
 
   assert.throws(() => parseExploreOptions({ restart: "command" }), /restart_command/);
-  assert.throws(() => parseExploreOptions({ restart_command: "project.x.boot" }), /only with restart/);
+  assert.equal(parseExploreOptions({ restart_command: "project.x.boot" }).restartCommand, "project.x.boot", "play mode, then the boot");
+  assert.throws(() => parseExploreOptions({ restart: "none", restart_command: "project.x.boot" }), /need a restart/);
+  assert.throws(() => parseExploreOptions({ restart_args: { a: 1 } }), /pass restart_command too/);
+  assert.throws(() => parseExploreOptions({ restart_wait: { ms: 5 } }), /restart_wait is playtest_wait arguments/);
   assert.throws(() => parseExploreOptions({ deny: ["("] }), /not a valid regular expression/);
   assert.equal(parseExploreOptions({ placeholder_pattern: "" }).placeholderPattern, null);
   assert.equal(parseExploreOptions({ min_touch_dp: 0 }).minTouchDp, null);

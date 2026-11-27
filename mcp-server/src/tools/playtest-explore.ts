@@ -19,8 +19,8 @@ export const playtestExplore = makeTool(
     "interactable, unoccluded button / toggle it has not tried on that screen (text fields first — it types fill_text, " +
     "default \"Test\", into each with inputsim_text; leaving controls such as Back / Close / OK last), files each screen it reaches (a screen = its visible controls and texts, numbers masked), walks the " +
     "shortest known path back to a screen with untried controls, and restarts the game when it is stuck (restart: " +
-    "play_mode = exit and re-enter play mode (default); command = a synchronous project command such as " +
-    "project.<owner>.playtest.boot; none = stop). Every new screen is captured once (composed frame) and checked: text " +
+    "play_mode = exit and re-enter play mode (default), then restart_command if given — a boot from the launcher; command = a synchronous project command such as " +
+    "project.<owner>.playtest.boot; none = stop; restart_wait = a playtest_wait run after it, e.g. the project's ready predicate). Every new screen is captured once (composed frame) and checked: text " +
     "overflow, controls / texts outside the safe area, overlapping controls, placeholder-looking text (a default " +
     "localisation-key pattern), touch targets under min_touch_dp (default 44 dp), zero-size controls; a tap that " +
     "changed nothing and logged nothing is a dead_button, a screen with nothing to tap a dead_end, console errors " +
@@ -52,13 +52,17 @@ export const playtestExplore = makeTool(
       max_settle_ms: { type: "integer", minimum: 0, maximum: 20000, description: "Longest wait for a screen to stop changing before it is taken as it is (default 4000)." },
       restart: {
         type: "string", enum: [...EXPLORE_RESTART_MODES],
-        description: "When no known path leads to an untried control: play_mode (default) = exit and re-enter play mode; command = invoke restart_command; none = stop (stop_reason no_way_back).",
+        description: "When no known path leads to an untried control: play_mode (default) = exit and re-enter play mode (then restart_command, if given); command = invoke restart_command; none = stop (stop_reason no_way_back).",
       },
       restart_command: {
         type: "string", pattern: "^project\\.",
-        description: "[restart: command] A synchronous project command that brings the game back to its first real screen (e.g. project.<owner>.playtest.boot).",
+        description: "A synchronous project command: with restart command, the restart itself; with restart play_mode, run after re-entering play mode — a boot that brings the game from its launcher to the first real screen (e.g. project.<owner>.playtest.boot).",
       },
-      restart_args: { type: "object", description: "[restart: command] The command's typed arguments." },
+      restart_args: { type: "object", description: "restart_command's typed arguments." },
+      restart_wait: {
+        type: "object",
+        description: "playtest_wait arguments run after the restart (and restart_command), e.g. {\"condition\":{\"project_command\":{\"id\":\"project.<owner>.playtest.is_ready\",\"field\":\"met\"}},\"timeout_ms\":30000} — the crawl goes on only when it holds.",
+      },
       max_restarts: { type: "integer", minimum: 0, maximum: 10, description: "Restarts allowed (default 3)." },
       deny: {
         type: "array", maxItems: 50, items: { type: "string", minLength: 1, maxLength: 200 },

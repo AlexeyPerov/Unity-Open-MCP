@@ -15,7 +15,7 @@ import {
   findingsFromSnapshot, minTouchPx, sortFindings, truncatedDiagnostics, type Finding,
 } from "./detectors.js";
 import {
-  Explorer, ExploreError, collectLogs, restartGame,
+  Explorer, ExploreError, collectLogs, restartGame, restartPlan,
   type ExploreOptions, type ExploreRecorder, type RecordedStep, type ToolCaller,
 } from "./explore.js";
 import { knownEntry, type MemoryOptions } from "./profile.js";
@@ -335,7 +335,7 @@ export class DeviceMatrix {
       const step = this.deps.check.begin(`Restart the game for ${base.device} (${base.orientation})`, { purpose: "restart", device: base.device });
       if (!step) throw new Stop("session_ended", "The playtest session ended during the run; it stopped with it.");
       const logs: unknown[] = [];
-      const failure = await restartGame(this.deps.call, explore.restart, explore.restartCommand, explore.restartArgs, logs);
+      const failure = await restartGame(this.deps.call, restartPlan(explore), logs);
       step.finish({ step: { purpose: "restart", device: base.device, outcome: failure ? "failed" : "ok", ...(failure ? { error: failure.error } : {}) } }, logs, !!failure);
       if (failure) {
         this.skipped.push({ device: base.device, orientation: base.orientation, reason: "restart_failed", note: failure.message });

@@ -129,8 +129,8 @@ list is `{ count, items (≤ 20), truncated }`; items carry `id`, `path`,
 | `overflow` | always | Text whose content exceeds its rect: TextMeshPro preferred height (wrapping at the text area) or width (no wrapping) above the area, or `isTextOverflowing`; `UI.Text` preferred height above the rect, or preferred width with horizontal overflow. Items add `text`, `source`, `size`, `content`. Best-fit `UI.Text` is not checked |
 | `zero_size_interactables` | always | Controls with a zero-size rect |
 | `placeholder` | only with `placeholder_pattern` | Texts matching the regex (.NET, case-sensitive) — e.g. unresolved localisation keys such as `^[*#{].*[*#}]$`. There is no built-in pattern. The pattern gets 100 ms per text and 2 s per snapshot; past either the call refuses with `regex_timeout` (naming the pattern and the text) |
-| `small_touch_targets` | only with `min_touch_size` | Visible controls whose rect is narrower or shorter than `min_touch_size` screen pixels; reports `dpi` so the caller can convert from dp (`px = dp × dpi / 160`) |
-| `outside_safe_area` | always | Visible controls, and visible texts that are not part of a control's label, whose on-screen part reaches outside the safe area (under a notch, a rounded corner, the home indicator). Items add `role`, `text`, `rect` and `edges` (`top`, `bottom`, `left`, `right`); the list carries `safe_area`. Empty when the safe area is the whole screen — in the plain Game view, so check on a Device Simulator device (`game_view set_device`) |
+| `small_touch_targets` | only with `min_touch_size` | Visible controls whose rect is narrower or shorter than `min_touch_size` screen pixels; reports `dpi` so the caller can convert from dp (`px = dp × dpi / 160`). A slider counts only when the player can drag it (interactable, with an active handle): a progress bar built on `Slider` is not a touch target |
+| `outside_safe_area` | always | Visible controls, and visible texts that are not part of a control's label, whose on-screen part reaches outside the safe area (under a notch, a rounded corner, the home indicator). Items add `role`, `text`, `rect`, `edges` (`top`, `bottom`, `left`, `right`) and `overshoot_px` (how far past each edge); the list carries `safe_area` and `tolerance_px`. A rect reaching 2 px or less past an edge (a text box's padding) is rounding, not a finding; an element covering ≥ 90 % of the screen (a swipe surface, a dimmer, a full-screen tap catcher) is a surface, not content, and is left out. Empty when the safe area is the whole screen — in the plain Game view, so check on a Device Simulator device (`game_view set_device`) |
 | `overlapping_controls` | always | Pairs of visible interactable controls, neither inside the other in the hierarchy, whose visible rects overlap by at least `threshold` (0.25) of the smaller one — short of containing it, which is layering (a button on a full-screen click catcher). In play mode a control covered by something in front of it (a popup's dimmer) is left out. Items name the first control (`id`, `path`, `text`) and the other (`with_id`, `with`, `with_text`), with the `overlap` fraction |
 
 ## `unity_open_mcp_game_view`
@@ -610,7 +610,7 @@ the open project's Player Settings.
 
 | Platform | PlayerPrefs store read | EditorPrefs store | Status |
 |---|---|---|---|
-| macOS | preferences domain `unity.<company>.<product>` (`~/Library/Preferences/unity.<company>.<product>.plist`) through `defaults export` | `com.unity3d.UnityEditor5.x` | verified |
+| macOS | preferences domain `unity.<company>.<product>` (`~/Library/Preferences/unity.<company>.<product>.plist`) through `defaults export`; when that plist does not exist, the one `unity.*.plist` that differs only by `_` in place of non-alphanumeric characters (Unity stores "Dice & Blade" as `Dice _ Blade`); `store` names the domain read, or says no plist exists yet | `com.unity3d.UnityEditor5.x` | verified |
 | Windows | registry `HKCU\Software\Unity\UnityEditor\<company>\<product>`; value names `<key>_h<hash>`, ints `REG_DWORD`, floats an 8-byte double under a `REG_DWORD` tag, strings UTF-8 `REG_BINARY` | `HKCU\Software\Unity Technologies\Unity Editor 5.x` | decoders unit-tested; not yet verified on a Windows Editor |
 | Linux | `~/.config/unity3d/<company>/<product>/prefs` (XML, strings base64) | `~/.local/share/unity3d/prefs` | untested |
 
@@ -765,7 +765,7 @@ yourself while it runs.
 **Requirements.** Your open [`playtest_session`](#unity_open_mcp_playtest_session)
 (`no_open_session`), isolated from the developer's save by its player-state
 snapshot (`start {snapshot:true}`) or a successful call of the project's
-`*.playtest.begin` command (`not_isolated` otherwise, unless `allow_unsandboxed:
+`*.playtest.begin` (or `*.playtest_begin`) command (`not_isolated` otherwise, unless `allow_unsandboxed:
 true` — the crawl taps through the game for real), and play mode
 (`play_mode_required`). `jobs start` of this operation is refused: start it with
 the tool.
@@ -794,9 +794,13 @@ the tool.
 4. **Move on.** When a screen has nothing left to tap, the shortest known path to
    a screen with untried controls is replayed one tap at a time (a hop reaching
    another screen twice gives up the path); with no path the game is restarted
-   (`restart`: `play_mode` — exit and re-enter play mode, the default; `command` —
-   `restart_command`, a synchronous project command such as
-   `project.<owner>.playtest.boot`, with `restart_args`; `none` — stop). A control
+   (`restart`: `play_mode` — exit and re-enter play mode, the default, then
+   `restart_command` when given (a boot from the game's launcher to its first real
+   screen); `command` — `restart_command` alone, a synchronous project command
+   such as `project.<owner>.playtest.boot`, with `restart_args`; `none` — stop).
+   `restart_wait` (playtest_wait arguments, e.g. the project's ready predicate)
+   runs after the restart; a command that answers `{"ok":false}` or a wait that
+   does not hold fails the restart (`restart_failed`). A control
    that is not tappable on two visits (covered, disabled, gone) is given up and
    listed as untried.
 
@@ -817,7 +821,7 @@ list and the price check. Denied controls are listed in the result and the repor
 | `max_screens` | 40 (≤ 200) | Distinct screens before stopping |
 | `same_screen` | 0.8 (0.5–1) | Similarity at which two snapshots are one screen; raise it when distinct screens merge, lower it when one screen splits |
 | `settle_ms` / `max_settle_ms` | 250 / 4000 | Pause between the settle snapshots / longest settle wait |
-| `restart` / `restart_command` / `restart_args` / `max_restarts` | `play_mode` / — / — / 3 (≤ 10) | How to get unstuck (above) |
+| `restart` / `restart_command` / `restart_args` / `restart_wait` / `max_restarts` | `play_mode` / — / — / — / 3 (≤ 10) | How to get unstuck (above) |
 | `deny` / `allow` / `default_deny` | — / — / true | The deny-list (above) |
 | `routing` | `dispatch` | `raycast_real` sends a real touch the project's input module resolves |
 | `placeholder_pattern` | the default below | `""` turns the check off |
@@ -1039,7 +1043,7 @@ edit by hand:
 
 | Field | Meaning |
 |---|---|
-| `start.restart` | How a run (and every retry) starts: `play_mode` (exit and re-enter play mode), `command` (`start.command` + `start.args`, a synchronous project command such as `project.<owner>.playtest.boot`), `none` (the screen shown now; no retries). `start.screen` / `start.findings` are the first screen's baseline |
+| `start.restart` | How a run (and every retry) starts: `play_mode` (exit and re-enter play mode, then `start.command` when given — a boot from the launcher), `command` (`start.command` + `start.args` alone, a synchronous project command such as `project.<owner>.playtest.boot`), `none` (the screen shown now; no retries). `start.wait` (playtest_wait arguments with a `condition`, e.g. the project's ready predicate) runs after it; a command answering `{"ok":false}` or a wait that does not hold fails the start. `start.screen` / `start.findings` are the first screen's baseline |
 | `settings` | `same_screen` (0.5–1, default 0.8), `step_timeout_ms` (500–60000, default 5000), `routing` of taps (`dispatch` or `raycast_real`), `ignore_errors` (regexes on a console message's first line that do not fail a step), `visual` (compare every step as a picture — [Visual baselines](#visual-baselines)) |
 | `vars` | Declared `${name}` variables, filled from the run's `vars`; `secret: true` keeps the value out of the session log |
 | `steps[].do` | `tap` {`target`, `routing`}, `type` {`target`, `text`, `mode` replace / append / clear, `end` end_edit / submit / none, `secret`}, `wait` {`args`: [`playtest_wait`](#unity_open_mcp_playtest_wait) arguments, `timeout_ms` ≤ 40000}, `command` {`command`, `args`: a synchronous project command}, `input` {`tool`, `args`: another inputsim tool's arguments as sent — key, touch, gesture, step, pointer3d, a pointer drag}, `restart` (as `start` says), `check` (only looks) |
@@ -1059,7 +1063,7 @@ with `scenario_exists` unless `overwrite: true`). `source` is required:
 | `source` | Steps | Baseline |
 |---|---|---|
 | `crawl` | One [crawl](#unity_open_mcp_playtest_explore) of the session (`crawl`: 1-based, default the last): its taps, typing and restarts in order. With `to_screen` (`S5`): only the shortest path of exploring taps from the start screen to that screen, each hop preceded by the typing the crawl did on its screen first | The crawl's screens: signature and snapshot findings per screen — a crawl export replays at once |
-| `calls` | The agent's own recorded calls in order: `inputsim_pointer` clicks → `tap` by the path the bridge reported and the label used (`target_text` with an exact match), `inputsim_text` → `type` into the field the bridge reported, `playtest_wait` → `wait` (a timeout over 40 s is cut), project commands → `command`, `playtest_session check` → `check`, other inputsim calls → `input` (an `object_id` with a reported path becomes `target`; one without is kept with a warning). Failed calls, captures, Game view changes and the crawler's / replay's own steps are left out; entering play mode or a boot-like command (`*.boot`) before the first action becomes `start`; the `playtest.begin` / `.end` hooks are left out. Text the session redacted (a password, a PIN, `secret: true`) becomes a secret variable `secret_N` | None: run once with `record: true` |
+| `calls` | The agent's own recorded calls in order: `inputsim_pointer` clicks → `tap` by the path the bridge reported and the label used (`target_text` with an exact match), `inputsim_text` → `type` into the field the bridge reported, `playtest_wait` → `wait` (a timeout over 40 s is cut), project commands → `command`, `playtest_session check` → `check` (a device matrix's per-device checks are left out), other inputsim calls → `input` (an `object_id` with a reported path becomes `target`; one without is kept with a warning). Failed calls, captures, Game view changes and the crawler's / replay's own steps are left out; entering play mode and a boot-like command (`*.boot`, `*.playtest_boot`) before the first action become `start` (play mode + the command; on its own the command is the restart), and the first wait after the boot becomes `start.wait`; the isolation hooks (`playtest.begin` / `.end`, `playtest_begin` / `_end`) are left out. Text the session redacted (a password, a PIN, `secret: true`) becomes a secret variable `secret_N` | None: run once with `record: true` |
 
 The answer names the file (`path`), the step count, `unbaselined`, the variables,
 a preview of the first steps and `warnings`.
@@ -1269,9 +1273,8 @@ written (`invalid_profile` with `problems`). Notes and the profile are capped at
 **Precedence.** The call's own arguments win; then the tool's profile section;
 then `detectors`; then the built-in defaults. `deny`, `allow` and `ignore_errors`
 add up (the scenario's `settings.ignore_errors` too). The profile's
-`restart_command` / `restart_args` apply only when the run restarts by command
-and names no command itself; a call that sets `restart` to another mode takes
-none of them.
+`restart_command` / `restart_args` / `restart_wait` apply unless the call names
+its own `restart_command` or restarts with `none`.
 
 **Invalid profile.** A file that is not JSON, has an unknown key, a value out of
 the tool's range, a bad regular expression, both `devices` and `preset`, or a
@@ -1396,7 +1399,7 @@ log left them.
 one), and writes `report.md`:
 
 - a header: session, project, start / end, device, snapshot, the project isolation
-  hook seen (`*.playtest.begin` / `*.playtest.end` invoked, or started as a job that
+  hook seen (`*.playtest.begin` / `*.playtest.end`, or `*.playtest_begin` / `_end`, invoked, or started as a job that
   did not fail), totals and verdicts;
 - **Findings**: `bug` / `suspicious` steps with notes, the detector findings of
   crawls and checks (bug first), each distinct error with its first occurrence

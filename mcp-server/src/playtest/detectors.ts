@@ -138,8 +138,10 @@ export function screenTitle(nodes: SnapshotNode[]): string {
   nodes.forEach((n, i) => { if (n.occluded_by) lastCovered = i; });
   const ordered = lastCovered >= 0 ? [...nodes.slice(lastCovered + 1), ...nodes.slice(0, lastCovered + 1)] : nodes;
   const visible = ordered.filter(n => n.visible !== false && n.text && n.text.trim());
-  const text = visible.find(n => n.role === "text");
-  const pick = text ?? visible[0];
+  // A counter or a score ("6", "1 0") names no screen: prefer texts with words.
+  const worded = visible.filter(n => /[a-z]{2}/.test(maskText(n.text)));
+  const text = worded.find(n => n.role === "text") ?? visible.find(n => n.role === "text" && !worded.length);
+  const pick = text ?? worded[0] ?? visible[0];
   return pick ? clip(pick.text!.trim(), 60) : "(no text)";
 }
 

@@ -36,7 +36,7 @@ export function isVersionCheckSuppressed(): boolean {
 }
 
 export interface CompatResult {
-  /** true when the pair is considered compatible (patch-only or equal). */
+  /** true when the pair is considered compatible (equal, a patch difference, or after 1.0 a minor one). */
   ok: boolean;
   serverVersion: string;
   bridgeVersion: string;
@@ -109,14 +109,21 @@ export function checkBridgeCompat(
     breakingAxis === "major" ? majorMismatch : majorMismatch || minorMismatch;
 
   if (!incompatible) {
-    // Patch-only difference — compatible, advisory only.
+    // Compatible, advisory only: a patch difference, or (after 1.0) a minor one.
+    const kind = server[0] === bridge[0] && server[1] === bridge[1] ? "patch" : "minor";
+    const bridgeBehind = server[1] > bridge[1] || (server[1] === bridge[1] && server[2] > bridge[2]);
+    const advice = kind === "patch"
+      ? "To silence this, align both releases."
+      : bridgeBehind
+        ? `Tools added after bridge ${bridgeVersion} are not in the Editor yet: update the bridge (and verify) packages to ${serverVersion} (git tag #bridge-v${serverVersion}).`
+        : `The bridge has tools this server does not list: update the server (npm i -g unity-open-mcp@${bridgeVersion}, or the npx pin).`;
     return {
       ok: true,
       serverVersion,
       bridgeVersion,
       message:
         `unity-open-mcp: version drift (server ${serverVersion}, bridge ${bridgeVersion}). ` +
-        `Compatible (patch difference only). To silence this, align both releases.`,
+        `Compatible (${kind} difference). ${advice}`,
     };
   }
 

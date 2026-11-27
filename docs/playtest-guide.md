@@ -37,6 +37,11 @@ bridge discovers them from attributes — no MCP server change:
 | `project.<owner>.playtest.end` | edit or play mode | Drops that save and switches back |
 
 Agents find them with `project_commands(action: "list", query: "playtest")`.
+The tools recognise the underscore spelling too (`playtest_begin`, `playtest_end`,
+`playtest_boot`). A game whose play mode starts on a launcher restarts with
+`restart: "play_mode"` plus its boot command (`restart_command`) and a ready
+predicate (`restart_wait`) — in a crawl, in a device matrix, and as a scenario's
+`start`.
 `begin` / `end` that write only the game's own player data (PlayerPrefs, files
 under `persistentDataPath`) are not project mutations — declare them without
 `IsMutating`, and without `ReadOnlyHint` either.
@@ -174,9 +179,12 @@ the triage.
    unisolated session (`not_isolated`): it taps through the game for real.
 2. **Boot** to the first real screen (play mode, the project's `playtest.boot`).
 3. **Crawl.** `playtest_explore {}` — or with `deny` for project-specific danger
-   (`"deny":["Prestige","Reset progress"]`), and `restart: "command"`,
+   (`"deny":["Prestige","Reset progress"]`), and
    `restart_command: "project.<owner>.playtest.boot"` when the game has a boot
-   command (faster and steadier than re-entering play mode). It returns a
+   command — `restart: "command"` when the boot alone brings the game back
+   (faster and steadier than re-entering play mode); with the default
+   `restart: "play_mode"` it runs after re-entering play mode, for a game that
+   starts on a launcher (add `restart_wait` with the project's ready predicate). It returns a
    `job_id`: `jobs wait` it until terminal; don't touch the game meanwhile.
 4. **Triage.** The result lists `screens` (with a frame each), `findings` (bug
    first), `denied` and `untried` controls and the `stop_reason`. Open the frame

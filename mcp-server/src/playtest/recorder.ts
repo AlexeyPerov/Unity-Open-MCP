@@ -19,6 +19,7 @@
 // adopts a session whose owning process is gone (`resume` / `end` with
 // `session`), and the report lists the call that was in flight when the old
 // process stopped.
+import { BEGIN_HOOK, END_HOOK } from "./hooks.js";
 import { randomBytes } from "node:crypto";
 import { copyFileSync, linkSync, statSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
@@ -342,8 +343,8 @@ export class PlaytestRecorder {
       const last = tool.split(" ").pop() ?? "";
       const id = typeof args.command_id === "string" ? args.command_id
         : typeof args.tool_or_command === "string" ? args.tool_or_command : last.startsWith("project.") ? last : "";
-      if (/(^|\.)playtest\.begin$/.test(id)) hook = id;
-      if (/(^|\.)playtest\.end$/.test(id)) hook = null;
+      if (BEGIN_HOOK.test(id)) hook = id;
+      if (END_HOOK.test(id)) hook = null;
     }
     return { session: session.meta.id, snapshot: session.meta.snapshot?.name ?? null, hook };
   }

@@ -22,8 +22,8 @@ import {
   findingKey, findingsFromSnapshot, isFillable, maskPath, maskText, minTouchPx, screenSignature, screenTitle, similarity,
   type Finding, type SnapshotNode,
 } from "./detectors.js";
-import { collectLogs, restartGame, type ExploreRecorder, type RecordedStep, type ToolCaller } from "./explore.js";
-import { fillVars, usesSecret, type Scenario, type ScenarioStep, type ScenarioTarget, type ScreenExpectation, type StepKind, type VisualSettings } from "./scenario.js";
+import { collectLogs, restartGame, type ExploreRecorder, type RecordedStep, type RestartPlan, type ToolCaller } from "./explore.js";
+import { fillVars, usesSecret, type Scenario, type ScenarioStart, type ScenarioStep, type ScenarioTarget, type ScreenExpectation, type StepKind, type VisualSettings } from "./scenario.js";
 import type { RgbaImage } from "./png.js";
 import type { KnownFindings } from "./profile.js";
 import { compareImages, describeRegion, diffImage, masksFor, nodesInRegion, visualKey } from "./visual.js";
@@ -49,6 +49,16 @@ export interface ReplayOptions {
   visual: VisualSettings | null;
   /** Findings the project profile accepts: never a new finding. */
   known?: KnownFindings | null;
+}
+
+/** How the scenario's start restarts the game: play mode and / or a command, then an optional wait. */
+export function startPlan(start: ScenarioStart, vars: Record<string, string>): RestartPlan {
+  return {
+    mode: start.restart,
+    ...(start.command ? { command: start.command } : {}),
+    ...(start.args ? { args: fillVars(start.args, vars) } : {}),
+    ...(start.wait ? { wait: fillVars(start.wait, vars) } : {}),
+  };
 }
 
 export const REPLAY_DEFAULTS = { retries: 1, settle_ms: 250, max_settle_ms: 4_000, max_minutes: 20, capture: "failures" as const };
@@ -359,7 +369,7 @@ export class Replayer {
     const logs: unknown[] = [];
     const outcome: StepOutcome = { n: 0, do: "start", label, status: "passed", drift: [], duration_ms: 0 };
     if (restart && start.restart !== "none") {
-      const failure = await restartGame(this.deps.call, start.restart, start.command, fillVars(start.args, this.options.vars), logs);
+      const failure = await restartGame(this.deps.call, startPlan(start, this.options.vars), logs);
       if (failure) this.fail(outcome, "restart_failed", failure.message);
     }
     if (outcome.status !== "failed") {
@@ -463,7 +473,7 @@ export class Replayer {
       case "restart": {
         const start = this.scenario.start;
         if (start.restart === "none") { this.fail(outcome, "restart_failed", "the scenario has no way to restart (start.restart none)"); return; }
-        const failure = await restartGame(this.deps.call, start.restart, start.command, fillVars(start.args, vars), logs);
+        const failure = await restartGame(this.deps.call, startPlan(start, vars), logs);
         if (failure) this.fail(outcome, "restart_failed", failure.message);
         return;
       }

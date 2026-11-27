@@ -87,6 +87,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         public string Role;            // button | toggle | slider | input | scroll | text | image | container
         public bool Control;           // button / toggle / slider / input — owns descendant labels
         public bool Interactable;      // controls and scroll views only
+        public bool Draggable = true;  // sliders: a handle a finger can drag (a progress bar has none)
         public UiNode Owner;           // nearest control ancestor for text nodes
         public bool Folded;            // this text is part of Owner's label
         public UiTextInfo? OwnText;    // own text component, when any
@@ -357,6 +358,8 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                 node.Role = RoleOf(selectable);
                 node.Control = true;
                 node.Interactable = PointerTargets.ComputeInteractable(go);
+                if (selectable is Slider slider) node.Draggable = slider.handleRect != null && slider.handleRect.gameObject.activeInHierarchy;
+                else if (selectable is Scrollbar bar) node.Draggable = bar.handleRect != null && bar.handleRect.gameObject.activeInHierarchy;
             }
             else if (go.GetComponent<ScrollRect>() != null)
             {

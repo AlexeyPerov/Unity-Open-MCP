@@ -400,9 +400,11 @@ test("export calls: taps by resolved path + label, typing, waits, commands, chec
   call("unity_open_mcp_playtest_wait", "wait", { condition: { ui: { text_contains: "Welcome" } }, timeout_ms: 90_000 });
   call("unity_open_mcp_inputsim_key", "input", { key: "escape" });
   call("unity_open_mcp_playtest_session check", "check", { label: "Login layout" });
+  call("unity_open_mcp_playtest_devices", "check", { step: "Check on iPhone 13 (portrait)" });
   entries.push({ k: "explore", screens: [] });
   const { scenario: sc, warnings, stats } = exportScenario(entries as any, { device: { view: { mode: "simulator", device: "iPhone 13" } } }, { source: "calls", name: "login", session: "s1" });
-  assert.deepEqual(sc.start, { restart: "command", command: "project.demo.playtest.boot", args: { level: 1 } });
+  // Play mode was entered before the boot: the restart re-enters play mode, then boots.
+  assert.deepEqual(sc.start, { restart: "play_mode", command: "project.demo.playtest.boot", args: { level: 1 } });
   assert.deepEqual(sc.steps.map(s => s.do), ["tap", "tap", "type", "wait", "input", "check"]);
   assert.deepEqual(sc.steps[0].target, { path: "Canvas/Menu/ShopButton", text: "Shop" });
   assert.equal(sc.steps[0].checkpoint, "Shop opens");
@@ -415,6 +417,33 @@ test("export calls: taps by resolved path + label, typing, waits, commands, chec
   assert.equal((sc.source as any).device.device, "iPhone 13");
   for (const w of ["secret_1", "cut to 40000", "record:true"]) assert.ok(warnings.some(x => x.includes(w)), w);
   assert.deepEqual(parseScenario(JSON.parse(JSON.stringify(sc))).problems, [], "an export is a valid scenario");
+});
+
+test("export calls: underscore hook names, the boot and its ready wait go into the start", () => {
+  let seq = 0;
+  const entries: Array<Record<string, unknown>> = [];
+  const call = (tool: string, kind: string, args: Record<string, unknown>, summary: Record<string, unknown> = {}) => {
+    const s = ++seq;
+    entries.push({ k: "call_started", seq: s, tool, kind, args });
+    entries.push({ k: "call", seq: s, tool, kind, status: "ok", summary });
+  };
+  const ready = { condition: { project_command: { id: "project.obelisk.playtest_is_ready", field: "met" } }, timeout_ms: 30_000 };
+  call("unity_open_mcp_editor_set_state", "control", { state: "play" });
+  call("unity_open_mcp_project_commands project.obelisk.playtest_begin", "command", { action: "invoke", command_id: "project.obelisk.playtest_begin", args: {} });
+  call("unity_open_mcp_project_commands project.obelisk.playtest_boot", "command", { action: "invoke", command_id: "project.obelisk.playtest_boot", args: {} });
+  call("unity_open_mcp_playtest_wait", "wait", ready);
+  call("unity_open_mcp_inputsim_pointer", "input", { action: "click", target_text: "Profile" }, { target: "Canvas/Top/Profile" });
+  call("unity_open_mcp_playtest_wait", "wait", { condition: { ms: 500 } });
+  call("unity_open_mcp_project_commands project.obelisk.playtest_end", "command", { action: "invoke", command_id: "project.obelisk.playtest_end", args: {} });
+  const { scenario: sc } = exportScenario(entries as any, {}, { source: "calls", name: "p", session: "s1" });
+  assert.deepEqual(sc.start, { restart: "play_mode", command: "project.obelisk.playtest_boot", wait: ready });
+  assert.deepEqual(sc.steps.map(s => s.do), ["tap", "wait"], "begin / end are isolation hooks, not steps");
+  assert.deepEqual(parseScenario(JSON.parse(JSON.stringify(sc))).problems, []);
+  // The start's shape is checked.
+  const bad = (start: unknown) => parseScenario({ ...JSON.parse(JSON.stringify(sc)), start }).problems.join("; ");
+  assert.match(bad({ restart: "none", command: "project.x.boot" }), /need a restart/);
+  assert.match(bad({ restart: "play_mode", wait: { ms: 5 } }), /start\.wait must be/);
+  assert.match(bad({ restart: "play_mode", command: "boot" }), /project\.\* command id/);
 });
 
 // ---------------------------------------------------------------------------
@@ -549,4 +578,13 @@ test("router: record run writes the baseline into the file; missing vars and inv
   const log = readFileSync(join(ended.folder, "log.jsonl"), "utf8");
   assert.ok(!log.includes("Hero"), "a secret variable never reaches the session log");
   assert.ok(readFileSync(ended.report, "utf8").includes("Baseline written to `Playtests/Scenarios/profile.json`"));
+});
+
+test("hooks: dotted and underscore names of the project's playtest commands", async () => {
+  const { BEGIN_HOOK, END_HOOK, BOOT_COMMAND } = await import("./playtest/hooks.js");
+  for (const id of ["project.demo.playtest.begin", "project.obelisk.playtest_begin"]) assert.ok(BEGIN_HOOK.test(id), id);
+  for (const id of ["project.demo.playtest.end", "project.obelisk.playtest_end"]) assert.ok(END_HOOK.test(id), id);
+  for (const id of ["project.demo.playtest.boot", "project.obelisk.playtest_boot", "project.x.boot"]) assert.ok(BOOT_COMMAND.test(id), id);
+  for (const id of ["project.obelisk.playtest_begin_later", "project.x.reboot", "project.obelisk.playtest_state"])
+    assert.ok(!BEGIN_HOOK.test(id) && !BOOT_COMMAND.test(id), id);
 });

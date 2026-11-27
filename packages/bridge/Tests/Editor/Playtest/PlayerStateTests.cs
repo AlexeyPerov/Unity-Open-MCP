@@ -277,6 +277,13 @@ namespace UnityOpenMcpBridge.Tests.Playtest
         public void Locations_PerPlatform()
         {
             Assert.AreEqual("unity.TestCo.Test Product", PrefsStore.MacPlayerPrefsDomain("TestCo", "Test Product"));
+            // Unity stores "Dice & Blade" as "Dice _ Blade": the one candidate differing only by '_' for a non-alphanumeric.
+            var names = new[] { "unity.Kometa.Games.Dice _ Blade", "unity.kometagames.Proto", "unity.Kometa Games.CM #B1 D" };
+            Assert.AreEqual("unity.Kometa.Games.Dice _ Blade", PrefsStore.MatchMacDomain("unity.Kometa.Games.Dice & Blade", names));
+            Assert.IsNull(PrefsStore.MatchMacDomain("unity.Kometa.Games.Dice & Blades", names), "another length");
+            Assert.IsNull(PrefsStore.MatchMacDomain("unity.kometagames.Prota", names), "a letter never becomes '_'");
+            Assert.AreEqual("unity.A.B_C", PrefsStore.MatchMacDomain("unity.A.B&C", new[] { "unity.A.B_C", "unity.A.BxC" }));
+            Assert.IsNull(PrefsStore.MatchMacDomain("unity.A.B&C!", new[] { "unity.A.B_C!", "unity.A.B&C_" }), "two candidates: ambiguous");
             Assert.AreEqual(@"Software\Unity\UnityEditor\TestCo\Test Product", PrefsStore.WindowsPlayerPrefsKey("TestCo", "Test Product"));
             StringAssert.EndsWith(Path.Combine(".config", "unity3d", "TestCo", "Test Product", "prefs"),
                 PrefsStore.LinuxPlayerPrefsFile("/home/u", "TestCo", "Test Product"));

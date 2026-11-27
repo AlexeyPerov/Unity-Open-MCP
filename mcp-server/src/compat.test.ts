@@ -21,7 +21,7 @@ test("patch-only difference (pre-1.0) → ok, advisory message", () => {
   const r = checkBridgeCompat("0.5.1", "0.5.2");
   assert.equal(r.ok, true);
   assert.match(r.message, /Compatible/);
-  assert.match(r.message, /patch difference only/i);
+  assert.match(r.message, /patch difference/i);
   assert.equal(versionsDiffer("0.5.1", "0.5.2"), true);
 });
 
@@ -42,10 +42,14 @@ test("minor difference (pre-1.0) → NOT ok, bridge newer names server as older"
   assert.match(r.message, /npm i -g unity-open-mcp@0\.6\.0/);
 });
 
-test("post-1.0: same major different minor → ok (major is the breaking axis)", () => {
+test("post-1.0: same major different minor → ok (major is the breaking axis), named as a minor difference", () => {
   const r = checkBridgeCompat("1.2.0", "1.5.0");
   assert.equal(r.ok, true);
-  assert.match(r.message, /Compatible/);
+  assert.match(r.message, /Compatible \(minor difference\)/);
+  assert.doesNotMatch(r.message, /patch/);
+  assert.match(r.message, /update the bridge .*#bridge-v1\.5\.0/);
+  const ahead = checkBridgeCompat("1.7.0", "1.6.0");
+  assert.match(ahead.message, /update the server .*unity-open-mcp@1\.7\.0/);
 });
 
 test("post-1.0: different major → NOT ok", () => {

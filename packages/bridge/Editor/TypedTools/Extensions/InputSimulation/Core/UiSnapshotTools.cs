@@ -275,6 +275,12 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         // on a full-screen click catcher, a badge on a card) — layering, not a clash.
         internal const float ContainedFraction = 0.98f;
         private const float SafeEpsilon = 0.5f;
+        // A rect reaching this far or less past the safe area is rounding (a text
+        // box's padding), not content under the notch.
+        internal const float SafeTolerancePx = 2f;
+        // An element covering this share of the screen is a surface — a swipe area,
+        // a dimmer, a full-screen tap catcher — not content placed under the notch.
+        internal const float FullScreenFraction = 0.9f;
 
         // Stops matching the placeholder pattern at its first timeout
         // (Placeholder.TimedOut); the caller refuses with regex_timeout.
@@ -286,19 +292,25 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
             {
                 if (n.OwnText.HasValue && n.OwnText.Value.Overflowing && !string.IsNullOrEmpty(n.OwnTextDisplay)) d.Overflow.Add(n);
                 if (n.Control && n.Visibility == "zero_size") d.Zero.Add(n);
-                if (!d.SafeAreaIsScreen && OutsideSafeArea(n, safe)) d.OutsideSafe.Add(n);
+                if (!d.SafeAreaIsScreen && OutsideSafeArea(n, safe) && !CoversScreen(n.VisibleRect, screen)) d.OutsideSafe.Add(n);
                 if (d.Placeholder != null && n.OwnText.HasValue && !string.IsNullOrEmpty(n.OwnTextDisplay))
                 {
                     if (d.Placeholder.IsMatch(n.OwnTextDisplay)) d.Placeholders.Add(n);
                     if (d.Placeholder.TimedOut) return d;
                 }
-                if (minTouch.HasValue && n.Control && n.Visible
+                // A slider without a handle (a progress bar) or one the player cannot use is no touch target.
+                if (minTouch.HasValue && n.Control && n.Visible && (n.Role != "slider" || (n.Interactable && n.Draggable))
                     && (n.ScreenRect.width < minTouch.Value || n.ScreenRect.height < minTouch.Value))
                     d.Small.Add(n);
             }
             d.Overlaps.AddRange(Overlaps(nodes, UiOcclusion.Available ? n => UiOcclusion.OccluderPath(n) != null : (System.Func<UiNode, bool>)null));
             return d;
         }
+
+        internal static bool CoversScreen(Rect r, Vector2 screen) =>
+            screen.x > 0 && screen.y > 0
+            && Mathf.Max(0, Mathf.Min(r.xMax, screen.x) - Mathf.Max(r.xMin, 0)) * Mathf.Max(0, Mathf.Min(r.yMax, screen.y) - Mathf.Max(r.yMin, 0))
+               >= FullScreenFraction * screen.x * screen.y;
 
         internal static bool SafeAreaCoversScreen(Rect safe, Vector2 screen) =>
             safe.xMin <= SafeEpsilon && safe.yMin <= SafeEpsilon
@@ -320,11 +332,20 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
         {
             if (r.width <= 0 || r.height <= 0) return null;
             List<string> edges = null;
-            if (r.yMax > safe.yMax + SafeEpsilon) (edges ??= new List<string>()).Add("top");
-            if (r.yMin < safe.yMin - SafeEpsilon) (edges ??= new List<string>()).Add("bottom");
-            if (r.xMin < safe.xMin - SafeEpsilon) (edges ??= new List<string>()).Add("left");
-            if (r.xMax > safe.xMax + SafeEpsilon) (edges ??= new List<string>()).Add("right");
+            foreach (var (edge, px) in Overshoot(r, safe))
+                if (px > SafeTolerancePx) (edges ??= new List<string>()).Add(edge);
             return edges;
+        }
+
+        // How far (px) the rect reaches past each safe-area edge (positive only).
+        internal static List<(string edge, float px)> Overshoot(Rect r, Rect safe)
+        {
+            var list = new List<(string, float)>();
+            if (r.yMax - safe.yMax > SafeEpsilon) list.Add(("top", r.yMax - safe.yMax));
+            if (safe.yMin - r.yMin > SafeEpsilon) list.Add(("bottom", safe.yMin - r.yMin));
+            if (safe.xMin - r.xMin > SafeEpsilon) list.Add(("left", safe.xMin - r.xMin));
+            if (r.xMax - safe.xMax > SafeEpsilon) list.Add(("right", r.xMax - safe.xMax));
+            return list;
         }
 
         // Pairs of visible interactable controls, neither inside the other in the
@@ -397,10 +418,21 @@ namespace UnityOpenMcpBridge.Extensions.InputSimulation
                     b.Append(InputSimulationJson.Esc(edges[i]));
                 }
                 b.Append(']');
+                b.Append(",\"overshoot_px\":{");
+                bool first = true;
+                foreach (var (edge, px) in Overshoot(n.VisibleRect, d.SafeArea))
+                {
+                    if (px <= SafeTolerancePx) continue;
+                    if (!first) b.Append(',');
+                    first = false;
+                    b.Append(InputSimulationJson.Esc(edge)).Append(':').Append(InputSimulationJson.Num(Mathf.Round(px)));
+                }
+                b.Append('}');
             }, b =>
             {
                 b.Append(",\"safe_area\":");
                 AppendRect(b, d.SafeArea);
+                b.Append(",\"tolerance_px\":").Append(InputSimulationJson.Num(SafeTolerancePx));
             });
             sb.Append(",\"overlapping_controls\":");
             AppendOverlapList(sb, d.Overlaps);

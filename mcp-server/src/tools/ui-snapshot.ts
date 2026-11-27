@@ -31,8 +31,8 @@ export const uiSnapshot = makeTool(
     "their control, null keys omitted; balanced = every visible node (images, containers) + sprite/depth; " +
     "full = every active node in any visibility state with every key. Bound it with page_size + cursor " +
     "(pagination.next_cursor). DIAGNOSTICS (first page): overflow (text larger than its rect), " +
-    "zero_size_interactables, outside_safe_area (visible controls / texts reaching outside the safe area, with " +
-    "the edges; empty when the safe area is the whole screen) and overlapping_controls (pairs of visible " +
+    "zero_size_interactables, outside_safe_area (visible controls / texts reaching over 2 px outside the safe area, with " +
+    "the edges and overshoot_px; full-screen surfaces left out; empty when the safe area is the whole screen) and overlapping_controls (pairs of visible " +
     "interactable controls, neither inside the other, overlapping ≥ 25% of the smaller) always; placeholder " +
     "(texts matching placeholder_pattern) and " +
     "small_touch_targets (controls under min_touch_size px, with Screen.dpi) only when passed. " +

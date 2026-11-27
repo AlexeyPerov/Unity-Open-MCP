@@ -116,6 +116,52 @@ namespace UnityOpenMcpBridge.Playtest
         }
 
         internal static string MacPlayerPrefsDomain(string company, string product) => "unity." + company + "." + product;
+
+        // The domain the Editor actually writes. Unity does not always use the
+        // names verbatim: "Dice & Blade" is stored as "unity.<company>.Dice _ Blade".
+        // The exact domain wins when its plist exists; otherwise the one
+        // ~/Library/Preferences/unity.*.plist whose name equals the expected
+        // domain with some non-alphanumeric characters replaced by '_'. Never
+        // an empty read of the wrong domain reported as "no prefs".
+        internal static string ResolveMacPlayerPrefsDomain(string company, string product, out string note)
+        {
+            note = "";
+            var expected = MacPlayerPrefsDomain(company, product);
+            var folder = Path.Combine(HomeDirectory(), "Library", "Preferences");
+            if (File.Exists(Path.Combine(folder, expected + ".plist"))) return expected;
+            string[] files;
+            try { files = Directory.GetFiles(folder, "unity.*.plist"); }
+            catch { files = new string[0]; }
+            var names = new List<string>();
+            foreach (var f in files) names.Add(Path.GetFileNameWithoutExtension(f));
+            var match = MatchMacDomain(expected, names);
+            if (match != null)
+            {
+                note = " (Unity's name for '" + expected + "')";
+                return match;
+            }
+            note = " (no plist yet: the game has not saved PlayerPrefs on this machine)";
+            return expected;
+        }
+
+        // The single candidate equal to `expected` where each differing character
+        // is '_' in the candidate and not a letter or digit in `expected`; null
+        // when none or several match.
+        internal static string MatchMacDomain(string expected, IEnumerable<string> candidates)
+        {
+            string found = null;
+            foreach (var c in candidates)
+            {
+                if (c == null || c.Length != expected.Length || c == expected) continue;
+                bool ok = true;
+                for (int i = 0; i < c.Length && ok; i++)
+                    if (c[i] != expected[i] && !(c[i] == '_' && !char.IsLetterOrDigit(expected[i]))) ok = false;
+                if (!ok) continue;
+                if (found != null) return null;
+                found = c;
+            }
+            return found;
+        }
         internal static string WindowsPlayerPrefsKey(string company, string product) => @"Software\Unity\UnityEditor\" + company + @"\" + product;
         internal static string LinuxPlayerPrefsFile(string home, string company, string product) =>
             Path.Combine(home, ".config", "unity3d", company, product, "prefs");
@@ -145,8 +191,12 @@ namespace UnityOpenMcpBridge.Playtest
                 switch (platform)
                 {
                     case PrefsPlatform.MacOS:
-                        result = ParsePlistXml(RunDefaultsExport(MacPlayerPrefsDomain(company, product)));
-                        break;
+                    {
+                        var domain = ResolveMacPlayerPrefsDomain(company, product, out var note);
+                        result = ParsePlistXml(RunDefaultsExport(domain));
+                        result.Source = "macOS preferences domain '" + domain + "'" + note;
+                        return result;
+                    }
                     case PrefsPlatform.Windows:
                         result = ReadRegistry(WindowsPlayerPrefsKey(company, product));
                         break;

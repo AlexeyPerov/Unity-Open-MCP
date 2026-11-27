@@ -65,7 +65,8 @@ test("profile: sections are checked against the tools' own schemas", () => {
   assert.ok(problems.some(p => p.includes("profile.explore.allow_unsandboxed is unknown")), "isolation stays a per-call decision");
   const semantic = (value: unknown) => validateProfile(value).join("\n");
   assert.match(semantic({ explore: { restart: "command" } }), /needs restart_command/);
-  assert.match(semantic({ explore: { restart: "none", restart_command: "project.x.boot" } }), /only with restart "command"/);
+  assert.match(semantic({ explore: { restart: "none", restart_command: "project.x.boot" } }), /need a restart \(play_mode or command\)/);
+  assert.equal(semantic({ explore: { restart: "play_mode", restart_command: "project.x.boot", restart_wait: { condition: { ms: 100 } } } }), "", "play mode + a boot + a wait");
   assert.match(semantic({ explore: { deny: ["("] } }), /deny\[0\] '\(' is not a valid regular expression/);
   assert.match(semantic({ ignore_errors: ["[a"] }), /ignore_errors\[0\]/);
   assert.match(semantic({ detectors: { placeholder_pattern: "(?<" } }), /placeholder_pattern/);
@@ -76,7 +77,7 @@ test("profile: sections are checked against the tools' own schemas", () => {
   assert.match(semantic([1]), /JSON object/);
 });
 
-test("profile: call arguments win, lists add up, restart settings only where the run restarts by command", () => {
+test("profile: call arguments win, lists add up, restart settings unless the run does not restart or names its own command", () => {
   const profile: PlaytestProfile = {
     explore: { deny: ["Reset"], allow: ["Restore Purchases"], restart: "command", restart_command: "project.demo.playtest.boot", restart_args: { fast: true }, fill_text: "Tester", same_screen: 0.85, placeholder_pattern: "^#" },
     detectors: { min_touch_dp: 48, placeholder_pattern: "^%" },
@@ -93,9 +94,13 @@ test("profile: call arguments win, lists add up, restart settings only where the
   assert.equal(mine.fill_text, "Me");
   assert.equal(mine.min_touch_dp, 0);
   // restart: another mode → none of the profile's restart settings; a command of its own → not the profile's.
+  // restart play_mode keeps the profile's command: it runs after re-entering play mode (a boot); restart none drops it.
   const playMode = exploreArgsWithProfile({ restart: "play_mode" }, profile).args;
-  assert.equal(playMode.restart_command, undefined);
-  assert.equal(playMode.restart_args, undefined);
+  assert.equal(playMode.restart_command, "project.demo.playtest.boot");
+  assert.deepEqual(playMode.restart_args, { fast: true });
+  const none = exploreArgsWithProfile({ restart: "none" }, profile).args;
+  assert.equal(none.restart_command, undefined);
+  assert.equal(none.restart_args, undefined);
   const own = exploreArgsWithProfile({ restart: "command", restart_command: "project.other.boot" }, profile).args;
   assert.equal(own.restart_command, "project.other.boot");
   assert.equal(own.restart_args, undefined);
@@ -244,6 +249,12 @@ test("notes: the screen map of a crawl — taps from the start, denied controls,
     "- **Shop (S5)** — start → 'Shop' → 'Gems'",
     "- **Results** — reached only after a restart",
   ]) assert.ok(lines.includes(line), `${line}\n${lines.join("\n")}`);
+  // A control denied on every screen is listed once, not on every line.
+  const dev = { ...note, screens: note.screens.slice(0, 2), denied: [{ screen: "S1", label: "Dev", path: "D" }, { screen: "S2", label: "Dev", path: "D" }, { screen: "S1", label: "Buy Coins", path: "C/Buy" }] };
+  const hoisted = screenMapLines(dev, { session: "s", crawl: 1, date: "d" }).lines;
+  assert.ok(hoisted.includes("Never tapped on any screen: 'Dev'."), hoisted.join("\n"));
+  assert.ok(hoisted.includes("- **Main Menu** — start; never tapped: 'Buy Coins'"), hoisted.join("\n"));
+  assert.ok(hoisted.includes("- **Settings** — start → 'Settings'"), hoisted.join("\n"));
   assert.throws(() => screenMapLines({ screens: [] }, { session: "s", crawl: 1, date: "d" }), (e: any) => e.code === "nothing_to_map");
 });
 

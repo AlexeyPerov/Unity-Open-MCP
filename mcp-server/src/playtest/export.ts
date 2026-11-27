@@ -17,6 +17,7 @@
 //     screen to that screen (plus the typing done on each screen before it).
 //
 // Pure: entries in, scenario + warnings out; the router reads and writes files.
+import { ISOLATION_HOOK, BOOT_COMMAND } from "./hooks.js";
 import type { Finding } from "./detectors.js";
 import { baselineKey } from "./replay.js";
 import {
@@ -50,8 +51,9 @@ const WAIT = "unity_open_mcp_playtest_wait";
 const COMMANDS = "unity_open_mcp_project_commands";
 const JOBS = "unity_open_mcp_jobs";
 const REDACTED_TEXT = /^\[redacted (\d+) chars\]$/;
-const HOOK = /(^|\.)playtest\.(begin|end)$/;
-const BOOT = /(^|\.)(playtest\.)?boot$/;
+const HOOK = ISOLATION_HOOK;
+const BOOT = BOOT_COMMAND;
+const SESSION_CHECK = "unity_open_mcp_playtest_session";
 const SNAPSHOT_KINDS = new Set(["text_overflow", "outside_safe_area", "overlapping_controls", "placeholder_text", "small_touch_target", "zero_size_control"]);
 
 const isObject = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -143,12 +145,15 @@ function exportCalls(entries: Entry[], meta: Entry, options: ExportOptions): Exp
       continue;
     }
     if (kind === "check") {
+      // Only the agent's own screen checks: a device matrix's per-device checks are not steps of the flow.
+      if (!label.startsWith(SESSION_CHECK)) { stats.skipped_server_steps++; continue; }
       steps.push({ do: "check", label: typeof args.label === "string" ? args.label : "Check the screen" });
     } else if (commandId !== undefined) {
       if (!commandId) { stats.skipped_other++; continue; }
       if (HOOK.test(commandId)) continue;
       if (BOOT.test(commandId) && !acted() && !start) {
-        start = { restart: "command", command: commandId, ...(Object.keys(args).length ? { args } : {}) };
+        // After entering play mode the boot runs inside the restart; on its own it is the restart.
+        start = { restart: playEntered ? "play_mode" : "command", command: commandId, ...(Object.keys(args).length ? { args } : {}) };
         continue;
       }
       if (label.startsWith(JOBS)) warnings.push(`step ${steps.length + 1}: ${commandId} ran as a job; a replay runs commands synchronously and fails on an async one`);
@@ -160,6 +165,8 @@ function exportCalls(entries: Entry[], meta: Entry, options: ExportOptions): Exp
         waitArgs.timeout_ms = SCENARIO_LIMITS.max_wait_ms;
       }
       if (!isObject(waitArgs.condition)) { stats.skipped_other++; continue; }
+      // The first wait after the boot (the project's ready predicate) belongs to the start.
+      if (start?.command && !start.wait && !acted()) { start.wait = waitArgs; continue; }
       steps.push({ do: "wait", args: waitArgs });
     } else if (tool === POINTER && args.action === "click") {
       const path = typeof summary.target === "string" && summary.target ? summary.target : undefined;
@@ -295,8 +302,9 @@ function exportCrawl(entries: Entry[], meta: Entry, options: ExportOptions): Exp
   const startId = observe?.to ?? observe?.from ?? "S1";
   const start: ScenarioStart = {
     restart,
-    ...(restart === "command" && typeof opts.restart_command === "string" ? { command: opts.restart_command } : {}),
-    ...(restart === "command" && isObject(opts.restart_args) ? { args: opts.restart_args } : {}),
+    ...(restart !== "none" && typeof opts.restart_command === "string" ? { command: opts.restart_command } : {}),
+    ...(restart !== "none" && isObject(opts.restart_args) ? { args: opts.restart_args } : {}),
+    ...(restart !== "none" && isObject(opts.restart_wait) ? { wait: opts.restart_wait } : {}),
   };
   const startExpect = expectFor(startId);
   if (startExpect) { start.screen = startExpect.screen; start.findings = startExpect.findings; }

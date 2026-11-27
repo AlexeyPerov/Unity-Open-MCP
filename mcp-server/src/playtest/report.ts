@@ -8,6 +8,7 @@
 // it. Calls that were in flight when an earlier MCP server process stopped are
 // reported as lost; calls of the ending process that had not returned yet, as
 // still running at end.
+import { BEGIN_HOOK, END_HOOK } from "./hooks.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { findingKey, type Finding } from "./detectors.js";
@@ -354,8 +355,8 @@ export function writeReport(input: ReportInput): ReportSummary {
     const id = typeof args?.command_id === "string" ? args.command_id as string
       : typeof args?.tool_or_command === "string" ? args.tool_or_command as string : "";
     const ran = c.status === "ok" || (c.status === "job_started" && !failedJobs.has(c.seq));
-    if (/(^|\.)playtest\.begin$/.test(id) && ran) hooks.begin = id;
-    if (/(^|\.)playtest\.end$/.test(id) && ran) hooks.end = id;
+    if (BEGIN_HOOK.test(id) && ran) hooks.begin = id;
+    if (END_HOOK.test(id) && ran) hooks.end = id;
   }
 
   const md: string[] = [];
