@@ -8,7 +8,7 @@ namespace UnityOpenMcpBridge
     {
         public static string ProjectPath => _projectPath;
         public static string UnityVersion => _unityVersion;
-        public static string BridgeVersion => "1.7.0";
+        public static string BridgeVersion => "1.7.1";
 
         // specs/feedback.md 2026-08-24 — a WIRE-CONTRACT revision that moves
         // independently of the package semver.
